@@ -4,7 +4,10 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-22
+
 ### Added
+- `ripple version` prints the module version the binary was built from.
 - Event-driven updater: polls the Go module index once, finds importing repositories through a
   reverse index, and opens pull requests only there.
 - `.github/ripple.yml` per-repo configuration with strict validation; `ripple config validate`.
@@ -32,3 +35,6 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
 ### Documentation
 - README section "Known limitations and security model"; ROADMAP entries for an OS sandbox,
   durable per-installation queues, scan bounds, webhook body bounds, per-command tokens and delivery dedupe.
+
+[Unreleased]: https://github.com/taumatix/ripple/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/taumatix/ripple/releases/tag/v0.1.0

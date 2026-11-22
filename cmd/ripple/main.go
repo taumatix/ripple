@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"syscall"
 	_ "time/tzdata"
 
@@ -22,6 +23,7 @@ const usage = `usage:
   ripple config validate [FILE]         check a repo file (default .github/ripple.yml)
   ripple config validate --server       check the RIPPLE_* environment
   ripple config example                 print a valid example file
+  ripple version                        print the module version this binary was built from
 `
 
 func main() {
@@ -38,12 +40,23 @@ func run(args []string, out, errw io.Writer, getenv func(string) string) int {
 		return 0
 	case len(args) >= 2 && args[0] == "config" && args[1] == "validate":
 		return validate(args[2:], out, errw, getenv)
+	case len(args) == 1 && args[0] == "version":
+		fmt.Fprintln(out, "ripple", buildVersion())
+		return 0
 	case len(args) == 2 && args[0] == "config" && args[1] == "example":
 		fmt.Fprint(out, config.Example)
 		return 0
 	}
 	fmt.Fprint(errw, usage)
 	return 2
+}
+
+// buildVersion is "(devel)" for a build from a checkout; `go install ...@vX.Y.Z` reports vX.Y.Z.
+func buildVersion() string {
+	if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" {
+		return bi.Main.Version
+	}
+	return "unknown"
 }
 
 func validate(args []string, out, errw io.Writer, getenv func(string) string) int {

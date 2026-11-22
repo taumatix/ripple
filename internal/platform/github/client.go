@@ -18,6 +18,7 @@ import (
 
 	"github.com/taumatix/ripple/internal/model"
 	"github.com/taumatix/ripple/internal/platform"
+	"github.com/taumatix/ripple/internal/sandbox"
 )
 
 // APIVersion is sent as X-GitHub-Api-Version (pinned in UPSTREAM.md).
@@ -43,6 +44,10 @@ type Client struct {
 	// GoCacheDir shares the build cache between checkouts; empty means a private
 	// cache per checkout, which is slower but isolates repositories from each other.
 	GoCacheDir string
+	// Sandbox confines the go command and local git commands run on an untrusted
+	// checkout. Nil means no confinement. Network git commands (clone, fetch, push)
+	// run unconfined: they hold the installation token and execute no repository code.
+	Sandbox sandbox.Backend
 }
 
 var _ platform.Platform = (*Client)(nil)

@@ -109,6 +109,8 @@ The PR is titled `[major] ...`, labelled `major` and `breaking`, and links the r
 build fails, the PR is still opened, as a **draft** carrying the compiler output. Majors are never
 auto-merged unless the repo file says `automerge: major`, and a draft never is. The server needs the
 `go` command installed (the Docker image has it); without it every major PR is a draft saying so.
+Set `RIPPLE_SANDBOX=auto` to confine those commands at the OS level; what that covers and what it does
+not is in [docs/sandbox.md](docs/sandbox.md).
 
 Every Go update, minor and patch included, runs `go mod tidy`, `go build ./...` and `go vet ./...` in each
 module it edits, so the PR carries a correct `go.sum`; a failure opens a draft with the output. In repos with

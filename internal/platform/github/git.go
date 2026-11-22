@@ -16,12 +16,14 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/taumatix/ripple/internal/model"
 	"github.com/taumatix/ripple/internal/platform"
+	"github.com/taumatix/ripple/internal/sandbox"
 )
 
 const (
@@ -57,6 +59,7 @@ func (c *Client) Checkout(ctx context.Context, repo model.Repo) (platform.Worksp
 	w.env = []string{
 		"PATH=" + os.Getenv("PATH"),
 		"HOME=" + dir,
+		"TMPDIR=" + dir, // writable under the sandbox; the macOS git shim caches here
 		"GIT_CONFIG_GLOBAL=/dev/null",
 		"GIT_CONFIG_NOSYSTEM=1",
 		"GIT_TERMINAL_PROMPT=0",
@@ -120,7 +123,7 @@ func (w *workspace) redact(s string) string {
 
 // git runs a local git command: no credentials are in its environment.
 func (w *workspace) git(ctx context.Context, dir string, args ...string) (string, error) {
-	return w.runGit(ctx, dir, w.env, args...)
+	return w.runGit(ctx, dir, w.env, true, args...)
 }
 
 // gitNet runs a git command that talks to the remote (clone, fetch, push). It asks
@@ -141,14 +144,21 @@ func (w *workspace) gitNet(ctx context.Context, dir string, args ...string) (str
 		"GIT_CONFIG_KEY_0=http."+strings.TrimRight(w.c.GitBase, "/")+"/.extraHeader",
 		"GIT_CONFIG_VALUE_0=Authorization: Basic "+basic,
 	)
-	return w.runGit(ctx, dir, env, args...)
+	return w.runGit(ctx, dir, env, false, args...)
 }
 
-func (w *workspace) runGit(ctx context.Context, dir string, env []string, args ...string) (string, error) {
+func (w *workspace) runGit(ctx context.Context, dir string, env []string, confined bool, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, gitTimeout)
 	defer cancel()
 	full := append([]string{"-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "protocol.version=2"}, args...)
-	cmd := exec.CommandContext(ctx, "git", full...)
+	argv := append([]string{gitBinary()}, full...)
+	if confined {
+		var err error
+		if argv, err = w.confine(sandbox.Policy{Workdir: dir, Writable: w.dirOutside(dir)}, argv); err != nil {
+			return "", fmt.Errorf("git %s: %w", args[0], err)
+		}
+	}
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = dir
 	cmd.Env = env
 	cmd.WaitDelay = 5 * time.Second
@@ -312,6 +322,7 @@ func (w *workspace) RunGo(ctx context.Context, dir string, args ...string) (stri
 	env := []string{
 		"PATH=" + os.Getenv("PATH"),
 		"HOME=" + w.dir,
+		"TMPDIR=" + w.dir,
 		"GOPATH=" + filepath.Join(w.dir, "gopath"),
 		"GOCACHE=" + cache,
 		"GOENV=off",
@@ -330,7 +341,31 @@ func (w *workspace) RunGo(ctx context.Context, dir string, args ...string) (stri
 	}
 	ctx, cancel := context.WithTimeout(ctx, goTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, gobin, args...)
+	pol := sandbox.Policy{Workdir: abs, Writable: w.dirOutside(abs)}
+	if cache != "" && !strings.HasPrefix(cache, w.dir+string(filepath.Separator)) {
+		pol.Writable = append(pol.Writable, cache)
+	}
+	if real, err := filepath.EvalSymlinks(gobin); err == nil {
+		pol.ReadOnly = append(pol.ReadOnly, filepath.Dir(filepath.Dir(real)))
+	}
+	if w.sandboxed() {
+		gate, err := sandbox.NewGate(proxy)
+		if err != nil {
+			return "", err
+		}
+		defer gate.Close()
+		pol.LoopbackPorts = []int{gate.Port()}
+		for i, e := range env {
+			if strings.HasPrefix(e, "GOPROXY=") {
+				env[i] = "GOPROXY=" + gate.URL
+			}
+		}
+	}
+	argv, err := w.confine(pol, append([]string{gobin}, args...))
+	if err != nil {
+		return "", fmt.Errorf("go %s: %w", strings.Join(args, " "), err)
+	}
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = abs
 	cmd.Env = env
 	cmd.WaitDelay = 5 * time.Second
@@ -345,6 +380,51 @@ func (w *workspace) RunGo(ctx context.Context, dir string, args ...string) (stri
 		return text, fmt.Errorf("go %s: %w", strings.Join(args, " "), runErr)
 	}
 	return text, nil
+}
+
+// gitBinary names the git to run. On macOS /usr/bin/git is a shim that asks xcrun to
+// locate the real one and writes a cache outside the workspace, which the sandbox
+// refuses; the toolchain's own binary does neither, so it is used when present.
+func gitBinary() string {
+	if runtime.GOOS == "darwin" {
+		d := os.Getenv("DEVELOPER_DIR")
+		if d == "" {
+			d = "/Library/Developer/CommandLineTools"
+		}
+		if real := filepath.Join(d, "usr", "bin", "git"); isExecutable(real) {
+			if p, err := exec.LookPath("git"); err != nil || p == "/usr/bin/git" {
+				return real
+			}
+		}
+	}
+	return "git"
+}
+
+func isExecutable(p string) bool {
+	fi, err := os.Stat(p)
+	return err == nil && fi.Mode().IsRegular() && fi.Mode().Perm()&0o111 != 0
+}
+
+// sandboxed reports whether commands run under a real confinement backend.
+func (w *workspace) sandboxed() bool {
+	return w.c.Sandbox != nil && w.c.Sandbox.Name() != "none"
+}
+
+// confine wraps argv in the configured sandbox; with none configured it is unchanged.
+func (w *workspace) confine(p sandbox.Policy, argv []string) ([]string, error) {
+	if w.c.Sandbox == nil {
+		return argv, nil
+	}
+	return w.c.Sandbox.Wrap(p, argv)
+}
+
+// dirOutside returns the workspace root as an extra writable path when dir is a
+// subdirectory of it, so a command started in the checkout can still write beside it.
+func (w *workspace) dirOutside(dir string) []string {
+	if dir == w.dir {
+		return nil
+	}
+	return []string{w.dir}
 }
 
 func (w *workspace) Reset(ctx context.Context) error {

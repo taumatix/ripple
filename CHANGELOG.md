@@ -5,6 +5,12 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
 ## [Unreleased]
 
 ### Security
+- OS-level sandbox for `go` and local `git` (`RIPPLE_SANDBOX`: `none` (default), `auto`, `seatbelt`, `bwrap`).
+  Under `seatbelt` (macOS) the commands run with every path unreadable and unwritable except the
+  checkout, the build cache and the toolchain, and the only network they can open is a loopback gate
+  to `RIPPLE_GOPROXY` behind a random path prefix. `bwrap` (Linux) is implemented but unverified and cannot
+  confine the network to a proxy, so `go` refuses to run under it. Clone, fetch and push are not
+  confined. See [docs/sandbox.md](docs/sandbox.md).
 - Webhook receiver: requests without a well-formed `X-Hub-Signature-256` are refused before the body is
   read, at most 4 bodies are buffered at once (others get 503 with `Retry-After`), and a declared length
   over the limit gets 413. A repeated `X-GitHub-Delivery` within an hour is acknowledged and dropped, so a

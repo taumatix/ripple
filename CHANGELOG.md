@@ -18,6 +18,8 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
   `webhook.Handler` gains optional `MaxBody`, `MaxInflight`, `DedupeTTL` and `Now` fields; zero values keep safe defaults.
 
 ### Changed
+- After GitHub answers a rate limit, the other repos of that installation are deferred until the time it gave
+  instead of each spending a call to be refused.
 - A repo that lists a Go dependency it never imports now has that requirement dropped by the `go mod tidy`
   that every update runs.
 - The installation token is fetched from the token source for each network git command (clone and push), not once per job, so a job that outlives one token still pushes. The token reaches git only through that process's environment, never argv or the remote URL.
@@ -29,6 +31,11 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
 - A major bump now also rewrites `//go:generate go run <package>` lines and canonical `// import "..."`
   comments, and lists directives that still mention the old path in the PR body. `manager.RewriteGo` returns
   that report; `RewriteGoImports` keeps its signature.
+- Platform seam for hosts other than GitHub: per-host credentials, repo discovery by webhook or by periodic
+  listing, optional auto-merge and a per-host rate-limit signal, with one conformance suite
+  (`internal/platform/platformtest`) every host must pass and a guide in
+  [docs/platform-authoring.md](docs/platform-authoring.md). GitHub behaves as before; its webhook stays at
+  `/webhook` and is also served at `/webhook/github`. `.github/ripple.yml` is read on GitHub only.
 - Every Go update, not only majors, runs `go mod tidy`, build and vet in the modules it edits, so minor and
   patch PRs carry a correct `go.sum`; a failure opens a draft with the output.
 - Multi-module repos: other modules that require the updated dependency or an edited module are tidied and

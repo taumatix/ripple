@@ -119,7 +119,7 @@ func newEnvOpts(t *testing.T, st store.Store, lim rules.Limits, o opts) *env {
 	t.Helper()
 	e := &env{t: t, st: st, gh: testutil.NewGitHub(t), idx: testutil.NewIndex(t), clock: &clock{t: t0}, proxy: testutil.NewGoProxy(t), logs: &syncBuf{}}
 	gh := &github.Client{APIBase: e.gh.APIURL, GitBase: e.gh.GitBase, Tokens: e.gh.Auth, WorkDir: t.TempDir(),
-		GoProxy: e.proxy.URL, GoSumDB: "off", GoCacheDir: goCache(t), Sandbox: o.sandbox,
+		GoProxy: e.proxy.URL, GoSumDB: "off", GoCacheDir: goCache(t), Sandbox: o.sandbox, Now: e.clock.Now,
 		Log: slog.New(slog.NewTextHandler(testWriter{t}, nil))}
 	e.plat = &testutil.CountingPlatform{Inner: gh}
 	eng := &engine.Engine{Store: st, Platform: e.plat, Limits: lim, Now: e.clock.Now, Workers: 2, Log: slog.New(slog.NewTextHandler(io.MultiWriter(testWriter{t}, e.logs), nil))}

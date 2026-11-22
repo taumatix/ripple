@@ -11,6 +11,11 @@ import (
 	"github.com/taumatix/ripple/internal/testutil"
 )
 
+// The platform-facing behaviour (fan-out to exactly the importing repos, push
+// re-scans, the root config file, auto-merge, rate limits) is the conformance
+// suite every host runs: internal/platform/platformtest. These tests cover the
+// engine over GitHub.
+
 func forEach(t *testing.T, fn func(t *testing.T, st store.Store)) { testutil.ForEachStore(t, fn) }
 
 // stubModule publishes versions of a module with one empty package, so ripple's
@@ -42,53 +47,6 @@ func start(t *testing.T, e *env, repos ...string) {
 	t.Helper()
 	e.install(repos...)
 	e.tick()
-}
-
-func TestFanOutOnlyImportingRepos(t *testing.T) {
-	forEach(t, func(t *testing.T, st store.Store) {
-		e := newEnv(t, st, defaultLimits())
-		baseRepos(e)
-		start(t, e, "acme/uses-lib", "acme/also-uses", "acme/unrelated")
-		platBefore := e.plat.Calls("acme/unrelated")
-		before := e.gh.Calls("acme/unrelated")
-
-		e.clock.Advance(time.Minute)
-		e.publish("example.com/lib", "v1.1.0")
-		e.tick()
-
-		for _, r := range []string{"acme/uses-lib", "acme/also-uses"} {
-			prs := e.gh.PRs(r)
-			if len(prs) != 1 {
-				t.Fatalf("%s: want exactly 1 PR, got %d", r, len(prs))
-			}
-			if prs[0].Base != "main" || !strings.HasPrefix(prs[0].Head, "ripple/go/") {
-				t.Errorf("%s: unexpected PR %+v", r, prs[0])
-			}
-			got, ok := e.gh.FileAt(r, prs[0].Head, "go.mod")
-			if !ok || !strings.Contains(got, "example.com/lib v1.1.0\n") {
-				t.Errorf("%s: go.mod on %s lacks literal 'example.com/lib v1.1.0':\n%s", r, prs[0].Head, got)
-			}
-		}
-		if got, _ := e.gh.FileAt("acme/also-uses", e.gh.PRs("acme/also-uses")[0].Head, "go.mod"); !strings.Contains(got, "example.com/other v1.0.0") {
-			t.Errorf("unrelated requirement was touched:\n%s", got)
-		}
-		if n := e.plat.Calls("acme/unrelated") - platBefore; n != 0 {
-			t.Errorf("platform calls for non-importing repo: %d, want 0", n)
-		}
-		if n := e.gh.Calls("acme/unrelated") - before; n != 0 {
-			t.Errorf("GitHub API calls for non-importing repo: %d, want 0", n)
-		}
-		if n := len(e.gh.PRs("acme/unrelated")); n != 0 {
-			t.Errorf("PRs in non-importing repo: %d", n)
-		}
-
-		// Polling again, even with the cursor replaying the inclusive boundary, adds nothing.
-		e.tick()
-		e.tick()
-		if len(e.gh.PRs("acme/uses-lib")) != 1 || len(e.gh.PRs("acme/also-uses")) != 1 {
-			t.Errorf("re-poll created extra PRs")
-		}
-	})
 }
 
 func TestIndexRequestFormat(t *testing.T) {
@@ -328,22 +286,6 @@ func TestInvalidFileMeansNoUpdatesUntilFixed(t *testing.T) {
 	})
 }
 
-func TestPushRescansDependencies(t *testing.T) {
-	forEach(t, func(t *testing.T, st store.Store) {
-		e := newEnv(t, st, defaultLimits())
-		e.gh.AddRepo("acme/p", map[string]string{"go.mod": gomod("example.com/p", "example.com/lib v1.0.0")})
-		start(t, e, "acme/p")
-		e.push("acme/p", map[string]string{"go.mod": gomod("example.com/p", "example.com/lib v1.0.0", "example.com/new v0.1.0")})
-		e.eventually("new dependency indexed", func() bool { return len(e.deps("acme/p")) == 2 })
-		e.clock.Advance(time.Minute)
-		e.publish("example.com/new", "v0.1.1")
-		e.tick()
-		if n := len(e.gh.PRs("acme/p")); n != 1 {
-			t.Fatalf("want 1 PR for the dependency added by push, got %d", n)
-		}
-	})
-}
-
 func TestWebhookAuthentication(t *testing.T) {
 	forEach(t, func(t *testing.T, st store.Store) {
 		e := newEnv(t, st, defaultLimits())
@@ -361,29 +303,6 @@ func TestWebhookAuthentication(t *testing.T) {
 		}
 		if n := e.gh.TotalCalls(); n != 0 {
 			t.Errorf("GitHub was called %d times for unauthenticated deliveries", n)
-		}
-	})
-}
-
-func TestRateLimitDefersThenRetries(t *testing.T) {
-	forEach(t, func(t *testing.T, st store.Store) {
-		e := newEnv(t, st, defaultLimits())
-		e.gh.AddRepo("acme/rl", map[string]string{"go.mod": gomod("example.com/rl", "example.com/lib v1.0.0")})
-		start(t, e, "acme/rl")
-		e.clock.Advance(time.Minute)
-		e.publish("example.com/lib", "v1.0.1")
-		e.gh.RateLimitOnce = true
-		e.tick()
-		if n := len(e.gh.PRs("acme/rl")); n != 0 {
-			t.Fatalf("PR created despite 429")
-		}
-		if j := e.job("acme/rl", "example.com/lib", "v1.0.1"); j.State != model.JobPending {
-			t.Fatalf("after 429 job is %s, want pending", j.State)
-		}
-		e.clock.Advance(time.Hour)
-		e.tick()
-		if n := len(e.gh.PRs("acme/rl")); n != 1 {
-			t.Fatalf("want 1 PR after the retry, got %d", n)
 		}
 	})
 }

@@ -136,7 +136,7 @@ index.golang.org   ──► Watcher ──► reverse index lookup ──► jo
                                                      └──► workers ──► Platform: clone, edit, push, open PR
 ```
 
-Interfaces from day one: `Platform` (GitHub), `Feed` (Go modules), `Manager` (gomod, regex),
+Interfaces from day one: `Platform` (GitHub; adding a host: [docs/platform-authoring.md](docs/platform-authoring.md)), `Feed` (Go modules), `Manager` (gomod, regex),
 `Store` (Postgres, DynamoDB, in-memory). The DynamoDB access patterns are in
 [docs/store-dynamodb.md](docs/store-dynamodb.md).
 

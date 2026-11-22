@@ -3,6 +3,7 @@ package testutil
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/taumatix/ripple/internal/model"
 	"github.com/taumatix/ripple/internal/platform"
@@ -83,7 +84,21 @@ func (c *CountingPlatform) CreatePR(ctx context.Context, r model.Repo, s platfor
 	return c.Inner.CreatePR(ctx, r, s)
 }
 
-func (c *CountingPlatform) EnableAutoMerge(ctx context.Context, r model.Repo, pr platform.PR) error {
+// RequestAutoMerge forwards to Inner, or answers platform.ErrNoAutoMerge (without
+// counting a call) when Inner has no auto-merge.
+func (c *CountingPlatform) RequestAutoMerge(ctx context.Context, r model.Repo, pr platform.PR) error {
+	if _, ok := c.Inner.(platform.AutoMerger); !ok {
+		return platform.ErrNoAutoMerge
+	}
 	c.hit(r.FullName)
-	return c.Inner.EnableAutoMerge(ctx, r, pr)
+	return platform.RequestAutoMerge(ctx, c.Inner, r, pr)
+}
+
+// RateLimitedUntil and ReadsLegacyConfig pass Inner's answers through; they make no call.
+func (c *CountingPlatform) RateLimitedUntil(r model.Repo) time.Time {
+	return platform.RateLimitedUntil(c.Inner, r)
+}
+
+func (c *CountingPlatform) ReadsLegacyConfig(r model.Repo) bool {
+	return platform.ReadsLegacyConfig(c.Inner, r)
 }

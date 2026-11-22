@@ -14,7 +14,9 @@ import (
 	"github.com/taumatix/ripple/internal/config"
 	"github.com/taumatix/ripple/internal/engine"
 	"github.com/taumatix/ripple/internal/feed"
+	"github.com/taumatix/ripple/internal/platform"
 	"github.com/taumatix/ripple/internal/platform/github"
+	"github.com/taumatix/ripple/internal/platform/gitws"
 	"github.com/taumatix/ripple/internal/rules"
 	"github.com/taumatix/ripple/internal/sandbox"
 	"github.com/taumatix/ripple/internal/store"
@@ -43,13 +45,20 @@ func OpenStore(ctx context.Context, s *config.Server) (store.Store, error) {
 	return store.NewMemory(), nil
 }
 
-// New wires the production components from the server configuration.
+// New wires the production components from the server configuration: every
+// registered host that is configured (see RegisterHost), behind one platform.Mux.
 func New(ctx context.Context, s *config.Server, log *slog.Logger) (*App, store.Store, error) {
-	pem, err := os.ReadFile(s.GitHubKeyFile)
+	httpc := &http.Client{Timeout: 30 * time.Second}
+	sb, err := sandbox.Detect(s.Sandbox, nil)
 	if err != nil {
-		return nil, nil, fmt.Errorf("read github key: %w", err)
+		return nil, nil, err
 	}
-	key, err := github.ParsePrivateKey(pem)
+	hosts, err := BuildHosts(ctx, HostDeps{Server: s, Getenv: os.Getenv, HTTP: httpc, Log: log,
+		Git: gitws.Options{WorkDir: s.WorkDir, GoProxy: s.GoProxy, Sandbox: sb}})
+	if err != nil {
+		return nil, nil, err
+	}
+	mux, err := platform.NewMux(github.HostName, hosts...)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -57,21 +66,12 @@ func New(ctx context.Context, s *config.Server, log *slog.Logger) (*App, store.S
 	if err != nil {
 		return nil, nil, err
 	}
-	httpc := &http.Client{Timeout: 30 * time.Second}
-	sb, err := sandbox.Detect(s.Sandbox, nil)
-	if err != nil {
-		return nil, nil, err
-	}
-	gh := &github.Client{
-		APIBase: s.GitHubAPIURL, GitBase: s.GitHubGitURL, HTTP: httpc, Log: log, WorkDir: s.WorkDir, GoProxy: s.GoProxy, Sandbox: sb,
-		Tokens:     &github.AppAuth{AppID: s.GitHubAppID, Key: key, APIBase: s.GitHubAPIURL, HTTP: httpc},
-		AuthorName: "ripple[bot]", AuthorEmail: "ripple@users.noreply.github.com",
-	}
-	eng := &engine.Engine{Store: st, Platform: gh, Log: log, Workers: s.Workers,
+	eng := &engine.Engine{Store: st, Platform: mux, Log: log, Workers: s.Workers,
 		MaxFiles: s.MaxFiles, MaxDependencies: s.MaxDependencies,
 		Limits: rules.Limits{MinimumReleaseAge: s.MinimumReleaseAge, OpenPRLimit: s.OpenPRLimit, AllowAutomerge: s.AllowAutomerge}}
 	return &App{
 		Engine: eng, Log: log, Secret: []byte(s.WebhookSecret), PollEvery: s.FeedInterval,
+		Hosts: hosts, DefaultHost: github.HostName,
 		Queue: &Queue{Workers: s.EventWorkers, PerInstallation: s.EventWorkersPerInstallation,
 			Backlog: s.EventBacklog, InstallationBacklog: s.EventInstallationBacklog},
 		Watcher: &engine.Watcher{Engine: eng, Feed: &feed.GoIndex{BaseURL: s.FeedURL, UserAgent: "ripple (+https://github.com/taumatix/ripple)"}},

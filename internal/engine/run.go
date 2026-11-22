@@ -265,6 +265,15 @@ func (r *runner) plan(jobs []model.Job, deps []model.Dependency) []*prPlan {
 
 func (r *runner) execute(plans []*prPlan) {
 	e := r.e
+	if until := platform.RateLimitedUntil(e.Platform, r.repo); until.After(e.now()) {
+		// The host asked to be left alone; spend no call on this repo until then.
+		for _, p := range plans {
+			for _, it := range p.items {
+				r.deferJob(it.job, until, "rate limited")
+			}
+		}
+		return
+	}
 	open, err := e.Platform.ListOpenPRs(r.ctx, r.repo, BranchPrefix)
 	if err != nil {
 		for _, p := range plans {
@@ -417,7 +426,10 @@ func (r *runner) openPR(p *prPlan) (*platform.PR, error) {
 		auto = auto && it.automerge
 	}
 	if auto {
-		if err := e.Platform.EnableAutoMerge(r.ctx, r.repo, pr); err != nil {
+		switch err := platform.RequestAutoMerge(r.ctx, e.Platform, r.repo, pr); {
+		case errors.Is(err, platform.ErrNoAutoMerge):
+			e.log().Info("host has no auto-merge; pull request left for review", "repo", r.repo.FullName, "pr", pr.URL)
+		case err != nil:
 			e.log().Warn("auto-merge not enabled", "repo", r.repo.FullName, "pr", pr.URL, "err", err)
 		}
 	}

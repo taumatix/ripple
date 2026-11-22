@@ -48,15 +48,6 @@ exactly the importing repos, and zero API calls for the rest). Every platform en
 fetching and vendoring that platform's own documentation (webhook events and signatures, PR API,
 auth model, rate limits); the notes below are what I expect, **unverified** until then.
 
-10. **Platform seam and conformance suite.** Before a second platform: take the GitHub-isms out of the
-   interface (App installation tokens, GraphQL node ids and the auto-merge mutation in `platform.PR`,
-   installation events as the way repos get registered) and replace them with what every host can
-   provide: a credential source per host, repo discovery (webhook, group/project hook, or a periodic
-   listing where a host has no install event), a "request auto-merge or merge when green" capability that
-   may be absent, and a per-platform rate-limit signal. Turn the GitHub e2e tests into one shared
-   suite that each platform's fake server must pass. The per-repo file location is decided: `.ripple.yaml` at the
-   repository root on every host, with `.github/ripple.yml` a deprecated GitHub-only alias (see the
-   removal entry at the end). Keep the file's meaning identical everywhere.
 11. **GitLab** (gitlab.com and self-managed). Merge requests, project/group webhooks, `Private-Token` or
    OAuth, merge-when-pipeline-succeeds. Subgroups and per-project tokens are the awkward part.
 12. **Gitea and Forgejo.** One client with two flavours: Forgejo forked Gitea and their APIs diverge
@@ -78,6 +69,15 @@ auth model, rate limits); the notes below are what I expect, **unverified** unti
 
 Everything else:
 
+- **Periodic re-scan for hosts without push events.** A host discovered by listing (`platform.Lister`)
+  and without push webhooks is scanned when it first appears and never again; re-scan when its default
+  branch head moves, compared at each listing.
+- **Listing state outside a single cursor.** `App.Discover` keeps a host's previous listing as one JSON
+  store cursor, which DynamoDB caps at 400 KB (roughly 10k repo names). Store it per repo before a host
+  with larger installations ships.
+- **Host-level receiver hardening shared, not copied.** `internal/webhook` (signature before body,
+  inflight cap, delivery dedupe) is GitHub-shaped; lift the host-neutral parts into a helper the other
+  receivers wrap, so each new host does not re-implement them.
 19. **`go work vendor` and workspace-only module graphs.** A workspace-level `vendor/` is not refreshed,
    and modules that reach each other only through `go.work` (no `replace`) fail the per-module
    `go mod tidy`, which ignores the workspace, so those PRs open as drafts.

@@ -91,7 +91,8 @@ func RepoConfig(raw []byte) (*config.Repo, error) {
 	return config.Parse(raw)
 }
 
-// Scan checks out the repo, reads .ripple.yaml, or the deprecated .github/ripple.yml (absent means defaults),
+// Scan checks out the repo, reads .ripple.yaml, or on a host that still reads it the
+// deprecated .github/ripple.yml (absent means defaults),
 // extracts every dependency and replaces the repo's rows in the reverse index. An
 // invalid file registers the repo with no dependencies, so nothing is updated until
 // the file is fixed.
@@ -105,7 +106,11 @@ func (e *Engine) Scan(ctx context.Context, repo model.Repo) error {
 	if repo.DefaultBranch == "" {
 		repo.DefaultBranch = ws.DefaultBranch()
 	}
+	legacy := platform.ReadsLegacyConfig(e.Platform, repo)
 	src, err := config.Resolve(func(name string) ([]byte, error) {
+		if name == config.LegacyFileName && !legacy {
+			return nil, fs.ErrNotExist // the alias is GitHub's alone
+		}
 		b, err := ws.ReadFile(name)
 		if errors.Is(err, platform.ErrNotExist) {
 			err = fs.ErrNotExist

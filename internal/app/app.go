@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,6 +19,8 @@ import (
 	"github.com/taumatix/ripple/internal/engine"
 	"github.com/taumatix/ripple/internal/manager"
 	"github.com/taumatix/ripple/internal/model"
+	"github.com/taumatix/ripple/internal/platform"
+	"github.com/taumatix/ripple/internal/platform/github"
 	"github.com/taumatix/ripple/internal/webhook"
 )
 
@@ -31,6 +34,13 @@ type App struct {
 	// Queue holds received events until they are handled; nil means a Queue with
 	// its defaults over Engine.Store. Its Store and Process are filled in when unset.
 	Queue *Queue
+	// Hosts are the registered code hosts. Nil means GitHub alone, its receiver
+	// built from Secret at /webhook (the v0.1 shape). Each host's receiver is served
+	// at /webhook/<name>, the default host's also at /webhook; a host that is a
+	// platform.Lister is discovered by listing on every poll.
+	Hosts []*platform.Host
+	// DefaultHost names the host whose repos are stored unprefixed; empty means github.
+	DefaultHost string
 
 	once sync.Once
 	jobs engine.JobRunner
@@ -54,13 +64,48 @@ func (a *App) init() {
 	})
 }
 
-// maxDeliveryID is the longest X-GitHub-Delivery used as-is in an event id (GitHub sends a 36-character GUID).
+// maxDeliveryID is the longest delivery id used as-is in an event id (GitHub sends a 36-character GUID).
 const maxDeliveryID = 64
 
-// Handle persists a verified event, one queued event per repo, so the HTTP response
+func (a *App) defaultHost() string {
+	if a.DefaultHost != "" {
+		return a.DefaultHost
+	}
+	return github.HostName
+}
+
+// repoName is the stored name of a host's repo; see platform.Mux.
+func (a *App) repoName(host, path string) string {
+	if host == a.defaultHost() {
+		return path
+	}
+	return host + ":" + path
+}
+
+// Handle queues a GitHub receiver's event as the default host's.
+func (a *App) Handle(ctx context.Context, ev webhook.Event) error {
+	return github.Sink{Sink: a}.Handle(ctx, ev)
+}
+
+// HandleEvent queues an event of the default host.
+func (a *App) HandleEvent(ctx context.Context, ev platform.Event) error {
+	return a.enqueue(ctx, a.defaultHost(), ev)
+}
+
+// hostSink is the sink one host's receiver writes to.
+type hostSink struct {
+	a    *App
+	host string
+}
+
+func (h hostSink) HandleEvent(ctx context.Context, ev platform.Event) error {
+	return h.a.enqueue(ctx, h.host, ev)
+}
+
+// enqueue persists a verified event, one queued event per repo, so the HTTP response
 // does not wait on a clone and a restart does not lose it. ErrBacklogFull (the
 // receiver answers 503) when the backlog is at its cap.
-func (a *App) Handle(ctx context.Context, ev webhook.Event) error {
+func (a *App) enqueue(ctx context.Context, host string, ev platform.Event) error {
 	a.init()
 	prefix := ev.Delivery
 	switch {
@@ -73,18 +118,38 @@ func (a *App) Handle(ctx context.Context, ev webhook.Event) error {
 		h := sha256.Sum256([]byte(prefix))
 		prefix = "sha256-" + hex.EncodeToString(h[:])
 	}
+	if host != a.defaultHost() {
+		prefix = host + "/" + prefix
+	}
 	evs := make([]model.Event, 0, len(ev.Repos))
 	for i, repo := range ev.Repos {
-		evs = append(evs, model.Event{ID: fmt.Sprintf("%s/%d", prefix, i), InstallationID: ev.InstallationID,
-			Kind: ev.Kind, Repo: repo, Ref: ev.Ref, Files: ev.Files})
+		if host == a.defaultHost() && strings.Contains(repo, ":") {
+			// Unprefixed names must not look prefixed, or the Mux would route them to another host.
+			a.log().Warn("repository name with a colon from the default host; dropped", "host", host, "repo", repo)
+			continue
+		}
+		evs = append(evs, model.Event{ID: fmt.Sprintf("%s/%d", prefix, i), InstallationID: ev.Scope,
+			Kind: string(ev.Kind), Repo: a.repoName(host, repo), Ref: ev.Ref, Files: ev.Files})
 	}
 	return a.Queue.Add(ctx, evs...)
 }
 
-// Handler serves POST /webhook and GET /healthz.
+// Handler serves POST /webhook, POST /webhook/<host> and GET /healthz.
 func (a *App) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.Handle("/webhook", &webhook.Handler{Secret: a.Secret, Sink: a, Log: a.Log})
+	if a.Hosts == nil {
+		mux.Handle("/webhook", &webhook.Handler{Secret: a.Secret, Sink: a, Log: a.Log})
+	}
+	for _, h := range a.Hosts {
+		if h.Receiver == nil {
+			continue
+		}
+		rh := h.Receiver(hostSink{a: a, host: h.Name})
+		mux.Handle("/webhook/"+h.Name, rh)
+		if h.Name == a.defaultHost() {
+			mux.Handle("/webhook", rh)
+		}
+	}
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	return mux
 }
@@ -126,6 +191,7 @@ func (a *App) Run(ctx context.Context, ln net.Listener) error {
 // Tick runs one feed poll and one pass over due jobs; exported for tests and for
 // operators who drive it from cron.
 func (a *App) Tick(ctx context.Context) {
+	a.Discover(ctx)
 	if n, err := a.Watcher.Poll(ctx); err != nil {
 		a.Log.Error("feed poll", "err", err)
 	} else if n > 0 {
@@ -142,6 +208,7 @@ func (a *App) pollLoop(ctx context.Context) {
 	t := time.NewTicker(a.PollEvery)
 	defer t.Stop()
 	for {
+		a.Discover(ctx)
 		if n, err := a.Watcher.Poll(ctx); err != nil {
 			if ctx.Err() == nil {
 				a.Log.Error("feed poll", "err", err)
@@ -186,7 +253,7 @@ func (a *App) push(ctx context.Context, name string, ev model.Event) error {
 	if cfg, cerr := engine.RepoConfig(repo.Config); cerr != nil {
 		// An invalid file registers no dependencies; only a change to the file can fix it.
 		for _, f := range ev.Files {
-			relevant = relevant || f == config.FileName || f == config.LegacyFileName
+			relevant = relevant || f == config.FileName || (f == config.LegacyFileName && platform.ReadsLegacyConfig(a.Engine.Platform, repo))
 		}
 	} else {
 		ms, err := manager.Build(cfg)

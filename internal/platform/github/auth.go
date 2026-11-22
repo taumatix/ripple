@@ -18,6 +18,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/taumatix/ripple/internal/model"
+	"github.com/taumatix/ripple/internal/platform"
 )
 
 // TokenSource yields an installation access token.
@@ -126,6 +129,18 @@ func (a *AppAuth) Token(ctx context.Context, id int64) (string, error) {
 	}
 	a.cache[id] = cached{out.Token, out.ExpiresAt}
 	return out.Token, nil
+}
+
+// AppCredentials is the platform.Credentials of a TokenSource: the token for the
+// repo's installation, sent to git as x-access-token.
+type AppCredentials struct{ Tokens TokenSource }
+
+func (a AppCredentials) Credential(ctx context.Context, repo model.Repo) (platform.Credential, error) {
+	tok, err := a.Tokens.Token(ctx, repo.InstallationID)
+	if err != nil {
+		return platform.Credential{}, err
+	}
+	return platform.Credential{Username: "x-access-token", Secret: tok}, nil
 }
 
 // StaticToken is a TokenSource for tests and for personal-access-token use.

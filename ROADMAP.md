@@ -21,9 +21,9 @@ auth model, rate limits); the notes below are what I expect, **unverified** unti
    provide: a credential source per host, repo discovery (webhook, group/project hook, or a periodic
    listing where a host has no install event), a "request auto-merge or merge when green" capability that
    may be absent, and a per-platform rate-limit signal. Turn the GitHub e2e tests into one shared
-   suite that each platform's fake server must pass. Also decide where the per-repo file lives on hosts
-   with no `.github/` directory (a root `ripple.yml` read from every host, with `.github/ripple.yml` as a
-   GitHub-only alias), and keep the file's meaning identical everywhere.
+   suite that each platform's fake server must pass. The per-repo file location is decided: `.ripple.yaml` at the
+   repository root on every host, with `.github/ripple.yml` a deprecated GitHub-only alias (see the
+   removal entry at the end). Keep the file's meaning identical everywhere.
 8. **GitLab** (gitlab.com and self-managed). Merge requests, project/group webhooks, `Private-Token` or
    OAuth, merge-when-pipeline-succeeds. Subgroups and per-project tokens are the awkward part.
 9. **Gitea and Forgejo.** One client with two flavours: Forgejo forked Gitea and their APIs diverge
@@ -78,6 +78,9 @@ Everything else:
 30. **Plugin mechanism** for out-of-tree managers, datasources and platforms.
 31. **Presets, org-level defaults and packageRules-like matching.** Later and strictly opt-in: a repo
     file must opt into a preset by name, and none of these may ever change the meaning of a plain
-    per-repo `.github/ripple.yml`. No implicit inheritance, no rule precedence.
+    per-repo `.ripple.yaml`. No implicit inheritance, no rule precedence.
 32. **MIGRATION notes policy.** Rules for config-schema and API changes: additive first, deprecate
     across a minor release, `MIGRATION.md` for any break.
+33. **Remove the `.github/ripple.yml` alias.** Deprecated in the release after v0.1.0 in favour of the
+    root `.ripple.yaml`; remove it no earlier than v0.3.0 (the minor release after next), with a
+    `MIGRATION.md` and a last warning release, per the deprecate-then-remove rule.

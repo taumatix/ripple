@@ -1,4 +1,4 @@
-// Package glob is the one pattern syntax used in ripple.yml: * matches any run of
+// Package glob is the one pattern syntax used in .ripple.yaml: * matches any run of
 // characters (including "/"), everything else is literal.
 package glob
 

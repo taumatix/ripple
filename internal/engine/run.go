@@ -487,7 +487,7 @@ func describe(p *prPlan, items []item) (title, body string) {
 			fmt.Fprintf(&b, "\n**Breaking: major version update.** `%s` moves to `%s`; go.mod and the import paths in the Go files were rewritten. Release notes: %s\n", it.deps[0].Package, it.job.Package, releaseNotes(it.job.Package, it.job.Version))
 		}
 	}
-	b.WriteString("\nOpened by [ripple](https://github.com/taumatix/ripple) when the new version appeared in the module index. Configure it in `.github/ripple.yml`.\n")
+	b.WriteString("\nOpened by [ripple](https://github.com/taumatix/ripple) when the new version appeared in the module index. Configure it in `.ripple.yaml`.\n")
 	if len(items) == 1 && p.group == "" {
 		if items[0].typ == rules.Major {
 			return fmt.Sprintf("[major] Update %s to %s", items[0].job.Package, items[0].job.Version), b.String()

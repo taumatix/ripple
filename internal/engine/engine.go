@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"sync"
 	"time"
@@ -71,7 +72,7 @@ func RepoConfig(raw []byte) (*config.Repo, error) {
 	return config.Parse(raw)
 }
 
-// Scan checks out the repo, reads .github/ripple.yml (absent means defaults),
+// Scan checks out the repo, reads .ripple.yaml, or the deprecated .github/ripple.yml (absent means defaults),
 // extracts every dependency and replaces the repo's rows in the reverse index. An
 // invalid file registers the repo with no dependencies, so nothing is updated until
 // the file is fixed.
@@ -85,12 +86,24 @@ func (e *Engine) Scan(ctx context.Context, repo model.Repo) error {
 	if repo.DefaultBranch == "" {
 		repo.DefaultBranch = ws.DefaultBranch()
 	}
-	raw, err := ws.ReadFile(config.FileName)
-	if err != nil && !errors.Is(err, platform.ErrNotExist) {
+	src, err := config.Resolve(func(name string) ([]byte, error) {
+		b, err := ws.ReadFile(name)
+		if errors.Is(err, platform.ErrNotExist) {
+			err = fs.ErrNotExist
+		}
+		return b, err
+	})
+	if err != nil {
 		return fmt.Errorf("scan %s: %w", repo.FullName, err)
 	}
-	repo.Config = raw
-	cfg, cerr := RepoConfig(raw)
+	if w := src.Warning(); w != "" {
+		e.log().Warn(w, "repo", repo.FullName)
+	}
+	repo.Config = src.Data
+	cfg, cerr := config.ParseNamed(src.Name, src.Data)
+	if src.Name == "" {
+		cfg, cerr = config.Default(), nil
+	}
 	if cerr != nil {
 		e.log().Warn("invalid repo config; no updates until fixed", "repo", repo.FullName, "err", cerr)
 		if err := e.Store.UpsertRepo(ctx, repo); err != nil {

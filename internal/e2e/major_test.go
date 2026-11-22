@@ -288,7 +288,7 @@ func TestMajorBuildFailureOpensDraft(t *testing.T) {
 	forEach(t, func(t *testing.T, st store.Store) {
 		// v61 renamed NewClient: the rewritten code cannot compile.
 		e := majorEnv(t, st, map[string]string{
-			".github/ripple.yml": "updates:\n  - ecosystem: gomod\n    automerge: major\n",
+			".ripple.yaml": "updates:\n  - ecosystem: gomod\n    automerge: major\n",
 		}, "New")
 		start(t, e, "acme/ghclient", "acme/unrelated")
 		e.clock.Advance(time.Minute)
@@ -326,7 +326,7 @@ func TestMajorAutomergeNeedsMajorOptIn(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			forEach(t, func(t *testing.T, st store.Store) {
 				e := majorEnv(t, st, map[string]string{
-					".github/ripple.yml": "updates:\n  - ecosystem: gomod\n    automerge: " + tc.mode + "\n",
+					".ripple.yaml": "updates:\n  - ecosystem: gomod\n    automerge: " + tc.mode + "\n",
 				}, "NewClient")
 				start(t, e, "acme/ghclient")
 				e.clock.Advance(time.Minute)
@@ -344,7 +344,7 @@ func TestMajorAutomergeNeedsMajorOptIn(t *testing.T) {
 func TestMajorIgnoredByRepoFile(t *testing.T) {
 	forEach(t, func(t *testing.T, st store.Store) {
 		e := majorEnv(t, st, map[string]string{
-			".github/ripple.yml": "updates:\n  - ecosystem: gomod\n    ignore:\n      - dependency: github.com/google/*\n        update-types: [major]\n",
+			".ripple.yaml": "updates:\n  - ecosystem: gomod\n    ignore:\n      - dependency: github.com/google/*\n        update-types: [major]\n",
 		}, "NewClient")
 		start(t, e, "acme/ghclient")
 		e.clock.Advance(time.Minute)

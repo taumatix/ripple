@@ -56,6 +56,40 @@ type env struct {
 	proxy *testutil.GoProxy
 	hook  string
 	ticks int
+	logs  *syncBuf
+}
+
+// syncBuf collects the engine's log so tests can assert on what was warned.
+type syncBuf struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *syncBuf) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuf) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
+}
+
+// count returns how many log lines contain every one of subs.
+func (e *env) logLines(subs ...string) int {
+	n := 0
+	for _, l := range strings.Split(e.logs.String(), "\n") {
+		ok := l != ""
+		for _, s := range subs {
+			ok = ok && strings.Contains(l, s)
+		}
+		if ok {
+			n++
+		}
+	}
+	return n
 }
 
 func defaultLimits() rules.Limits {
@@ -64,12 +98,12 @@ func defaultLimits() rules.Limits {
 
 func newEnv(t *testing.T, st store.Store, lim rules.Limits) *env {
 	t.Helper()
-	e := &env{t: t, st: st, gh: testutil.NewGitHub(t), idx: testutil.NewIndex(t), clock: &clock{t: t0}, proxy: testutil.NewGoProxy(t)}
+	e := &env{t: t, st: st, gh: testutil.NewGitHub(t), idx: testutil.NewIndex(t), clock: &clock{t: t0}, proxy: testutil.NewGoProxy(t), logs: &syncBuf{}}
 	gh := &github.Client{APIBase: e.gh.APIURL, GitBase: e.gh.GitBase, Tokens: e.gh.Auth, WorkDir: t.TempDir(),
 		GoProxy: e.proxy.URL, GoSumDB: "off", GoCacheDir: goCache(t),
 		Log: slog.New(slog.NewTextHandler(testWriter{t}, nil))}
 	e.plat = &testutil.CountingPlatform{Inner: gh}
-	eng := &engine.Engine{Store: st, Platform: e.plat, Limits: lim, Now: e.clock.Now, Workers: 2, Log: slog.New(slog.NewTextHandler(testWriter{t}, nil))}
+	eng := &engine.Engine{Store: st, Platform: e.plat, Limits: lim, Now: e.clock.Now, Workers: 2, Log: slog.New(slog.NewTextHandler(io.MultiWriter(testWriter{t}, e.logs), nil))}
 	e.app = &app.App{Engine: eng, Secret: []byte(secret), Log: slog.New(slog.NewTextHandler(testWriter{t}, nil)),
 		Watcher: &engine.Watcher{Engine: eng, Feed: &feed.GoIndex{BaseURL: e.idx.URL}}}
 	ln, err := net.Listen("tcp", "127.0.0.1:0")

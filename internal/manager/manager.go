@@ -51,7 +51,7 @@ func ByName(ms []Manager, name string) (Manager, bool) {
 
 // Relevant reports whether a change to filePath can alter extracted dependencies.
 func Relevant(ms []Manager, filePath string) bool {
-	if filePath == config.FileName {
+	if filePath == config.FileName || filePath == config.LegacyFileName {
 		return true
 	}
 	for _, m := range ms {

@@ -12,7 +12,7 @@ type Repo struct {
 	FullName       string
 	InstallationID int64
 	DefaultBranch  string
-	// Config is the raw .github/ripple.yml, empty when absent.
+	// Config is the raw per-repo config file (.ripple.yaml or its deprecated alias), empty when absent.
 	Config []byte
 }
 

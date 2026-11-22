@@ -126,7 +126,7 @@ func TestBuildAndRelevant(t *testing.T) {
 	if err != nil || len(ms) != 2 {
 		t.Fatalf("%v %v", ms, err)
 	}
-	for p, want := range map[string]bool{"svc/go.mod": true, "svc/a/go.mod": true, "go.mod": false, "Makefile": true, ".github/ripple.yml": true, "ripple.yml": false, "README.md": false} {
+	for p, want := range map[string]bool{"svc/go.mod": true, "svc/a/go.mod": true, "go.mod": false, "Makefile": true, ".ripple.yaml": true, ".github/ripple.yml": true, "ripple.yml": false, "github/ripple.yml": false, "README.md": false} {
 		if Relevant(ms, p) != want {
 			t.Errorf("Relevant(%q) != %v", p, want)
 		}

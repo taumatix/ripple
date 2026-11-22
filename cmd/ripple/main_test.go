@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -24,5 +26,71 @@ func TestUnknownCommandPrintsUsage(t *testing.T) {
 	}
 	if !strings.Contains(errw.String(), "ripple version") {
 		t.Fatalf("usage does not list the version command: %q", errw.String())
+	}
+}
+
+func inDir(t *testing.T, files map[string]string) {
+	t.Helper()
+	dir := t.TempDir()
+	for name, c := range files {
+		full := filepath.Join(dir, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(c), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Chdir(dir)
+}
+
+func validateCmd(t *testing.T, args ...string) (int, string, string) {
+	t.Helper()
+	var out, errw bytes.Buffer
+	code := run(append([]string{"config", "validate"}, args...), &out, &errw, func(string) string { return "" })
+	return code, out.String(), errw.String()
+}
+
+const okFile = "updates:\n  - ecosystem: gomod\n"
+
+func TestValidateDefaultsToRootFile(t *testing.T) {
+	inDir(t, map[string]string{".ripple.yaml": okFile})
+	code, out, errw := validateCmd(t)
+	if code != 0 || out != ".ripple.yaml ok: 1 update entry\n" || errw != "" {
+		t.Fatalf("code=%d out=%q err=%q", code, out, errw)
+	}
+}
+
+func TestValidateFallsBackToDeprecatedAlias(t *testing.T) {
+	inDir(t, map[string]string{".github/ripple.yml": okFile})
+	code, out, errw := validateCmd(t)
+	want := ".github/ripple.yml ok: 1 update entry\nwarning: config file .github/ripple.yml is deprecated; move it to .ripple.yaml (the alias will not be removed before v0.3.0)\n"
+	if code != 0 || out != want || errw != "" {
+		t.Fatalf("code=%d out=%q err=%q", code, out, errw)
+	}
+}
+
+func TestValidateBothFilesNewWins(t *testing.T) {
+	inDir(t, map[string]string{".ripple.yaml": okFile, ".github/ripple.yml": "updates:\n  - ecosystem: gomod\n    bogus: 1\n"})
+	code, out, errw := validateCmd(t)
+	want := ".ripple.yaml ok: 1 update entry\nwarning: both .ripple.yaml and .github/ripple.yml exist; using .ripple.yaml and ignoring .github/ripple.yml, delete it\n"
+	if code != 0 || out != want || errw != "" {
+		t.Fatalf("code=%d out=%q err=%q", code, out, errw)
+	}
+}
+
+func TestValidateNoFile(t *testing.T) {
+	inDir(t, nil)
+	code, out, _ := validateCmd(t)
+	if code != 0 || !strings.HasPrefix(out, ".ripple.yaml does not exist: the defaults apply") {
+		t.Fatalf("code=%d out=%q", code, out)
+	}
+}
+
+func TestValidateExplicitFileIsUsedAsGiven(t *testing.T) {
+	inDir(t, map[string]string{"x.yaml": okFile, ".ripple.yaml": "bogus: 1\n"})
+	code, out, _ := validateCmd(t, "x.yaml")
+	if code != 0 || out != "x.yaml ok: 1 update entry\n" {
+		t.Fatalf("code=%d out=%q", code, out)
 	}
 }

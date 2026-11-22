@@ -20,7 +20,7 @@ import (
 
 const usage = `usage:
   ripple serve                          run the service (configured by RIPPLE_* environment variables)
-  ripple config validate [FILE]         check a repo file (default .github/ripple.yml)
+  ripple config validate [FILE]         check a repo file (default .ripple.yaml)
   ripple config validate --server       check the RIPPLE_* environment
   ripple config example                 print a valid example file
   ripple version                        print the module version this binary was built from
@@ -72,20 +72,31 @@ func validate(args []string, out, errw io.Writer, getenv func(string) string) in
 		fmt.Fprint(errw, usage)
 		return 2
 	}
-	file := config.FileName
+	var src config.Source
 	if len(args) == 1 {
-		file = args[0]
+		data, err := os.ReadFile(args[0])
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			fmt.Fprintln(errw, err)
+			return 1
+		}
+		if errors.Is(err, os.ErrNotExist) {
+			fmt.Fprintf(out, "%s does not exist: the defaults apply (Go module updates for the whole repository)\n", args[0])
+			return 0
+		}
+		src = config.Source{Name: args[0], Data: data}
+	} else {
+		var err error
+		if src, err = config.Resolve(os.ReadFile); err != nil {
+			fmt.Fprintln(errw, err)
+			return 1
+		}
+		if !src.Exists() {
+			fmt.Fprintf(out, "%s does not exist: the defaults apply (Go module updates for the whole repository)\n", config.FileName)
+			return 0
+		}
 	}
-	data, err := os.ReadFile(file)
-	if errors.Is(err, os.ErrNotExist) {
-		fmt.Fprintf(out, "%s does not exist: the defaults apply (Go module updates for the whole repository)\n", file)
-		return 0
-	}
-	if err != nil {
-		fmt.Fprintln(errw, err)
-		return 1
-	}
-	c, err := config.Parse(data)
+	file := src.Name
+	c, err := config.ParseNamed(file, src.Data)
 	if err != nil {
 		fmt.Fprintf(errw, "%v\n\nA valid file looks like this:\n\n%s", err, config.Example)
 		return 1
@@ -95,6 +106,9 @@ func validate(args []string, out, errw io.Writer, getenv func(string) string) in
 		fmt.Fprintln(out, "y")
 	} else {
 		fmt.Fprintln(out, "ies")
+	}
+	if w := src.Warning(); w != "" {
+		fmt.Fprintln(out, "warning: "+w)
 	}
 	return 0
 }

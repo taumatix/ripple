@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"io/fs"
 	"strings"
 	"testing"
 	"time"
@@ -137,7 +138,67 @@ func TestUpdateForDeepestDirectory(t *testing.T) {
 
 func TestErrorFormat(t *testing.T) {
 	_, err := Parse([]byte("updates:\n  - ecosystem: gomod\n    nope: 1\n"))
-	if !strings.Contains(err.Error(), "line 3:") || !strings.Contains(err.Error(), ".github/ripple.yml") {
+	if !strings.Contains(err.Error(), "line 3:") || !strings.Contains(err.Error(), ".ripple.yaml") {
+		t.Fatal(err)
+	}
+}
+
+func TestFileNames(t *testing.T) {
+	if FileName != ".ripple.yaml" || LegacyFileName != ".github/ripple.yml" {
+		t.Fatalf("FileName=%q LegacyFileName=%q", FileName, LegacyFileName)
+	}
+}
+
+func readerOf(files map[string]string) func(string) ([]byte, error) {
+	return func(name string) ([]byte, error) {
+		if c, ok := files[name]; ok {
+			return []byte(c), nil
+		}
+		return nil, fs.ErrNotExist
+	}
+}
+
+func TestResolve(t *testing.T) {
+	for _, tc := range []struct {
+		name                   string
+		files                  map[string]string
+		file, data             string
+		legacy, shadowed, none bool
+	}{
+		{"none", nil, "", "", false, false, true},
+		{"new only", map[string]string{".ripple.yaml": "N"}, ".ripple.yaml", "N", false, false, false},
+		{"old only", map[string]string{".github/ripple.yml": "O"}, ".github/ripple.yml", "O", true, false, false},
+		{"both: new wins", map[string]string{".ripple.yaml": "N", ".github/ripple.yml": "O"}, ".ripple.yaml", "N", false, true, false},
+		{"empty new file still wins", map[string]string{".ripple.yaml": "", ".github/ripple.yml": "O"}, ".ripple.yaml", "", false, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, err := Resolve(readerOf(tc.files))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if s.Name != tc.file || string(s.Data) != tc.data || s.Legacy != tc.legacy || s.Shadowed != tc.shadowed || s.Exists() == tc.none {
+				t.Fatalf("%+v", s)
+			}
+		})
+	}
+}
+
+func TestWarningText(t *testing.T) {
+	if got, want := LegacyWarning, "config file .github/ripple.yml is deprecated; move it to .ripple.yaml (the alias will not be removed before v0.3.0)"; got != want {
+		t.Errorf("LegacyWarning = %q", got)
+	}
+	if got, want := ShadowedWarning, "both .ripple.yaml and .github/ripple.yml exist; using .ripple.yaml and ignoring .github/ripple.yml, delete it"; got != want {
+		t.Errorf("ShadowedWarning = %q", got)
+	}
+}
+
+func TestParseNamedReportsTheFile(t *testing.T) {
+	_, err := ParseNamed(".github/ripple.yml", []byte("updates:\n  - ecosystem: gomod\n    nope: 1\n"))
+	if err == nil || !strings.HasPrefix(err.Error(), "invalid .github/ripple.yml:") {
+		t.Fatal(err)
+	}
+	_, err = Parse([]byte("updates:\n  - ecosystem: gomod\n    nope: 1\n"))
+	if err == nil || !strings.HasPrefix(err.Error(), "invalid .ripple.yaml:") {
 		t.Fatal(err)
 	}
 }

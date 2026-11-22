@@ -121,12 +121,12 @@ func TestRepoFileCooldownTightensServerDefault(t *testing.T) {
 		lim.MinimumReleaseAge = time.Hour
 		e := newEnv(t, st, lim)
 		e.gh.AddRepo("acme/slow", map[string]string{
-			"go.mod":             gomod("example.com/slow", "example.com/lib v1.0.0"),
-			".github/ripple.yml": "updates:\n  - ecosystem: gomod\n    cooldown: 5d\n",
+			"go.mod":       gomod("example.com/slow", "example.com/lib v1.0.0"),
+			".ripple.yaml": "updates:\n  - ecosystem: gomod\n    cooldown: 5d\n",
 		})
 		e.gh.AddRepo("acme/greedy", map[string]string{
-			"go.mod":             gomod("example.com/greedy", "example.com/lib v1.0.0"),
-			".github/ripple.yml": "updates:\n  - ecosystem: gomod\n    cooldown: 1m\n",
+			"go.mod":       gomod("example.com/greedy", "example.com/lib v1.0.0"),
+			".ripple.yaml": "updates:\n  - ecosystem: gomod\n    cooldown: 1m\n",
 		})
 		start(t, e, "acme/slow", "acme/greedy")
 		e.clock.Advance(time.Minute)
@@ -161,7 +161,7 @@ func TestRepoFileIgnoreGroupsAutomerge(t *testing.T) {
 			"go.mod": gomod("example.com/cfg",
 				"github.com/aws/a v1.0.0", "github.com/aws/b v1.0.0", "github.com/legacy/x v1.0.0",
 				"example.com/lib v1.0.0", "example.com/big v1.0.0"),
-			".github/ripple.yml": `updates:
+			".ripple.yaml": `updates:
   - ecosystem: gomod
     ignore:
       - dependency: github.com/legacy/*
@@ -228,8 +228,8 @@ func TestAutomergeNeedsServerPermission(t *testing.T) {
 		lim.AllowAutomerge = false
 		e := newEnv(t, st, lim)
 		e.gh.AddRepo("acme/am", map[string]string{
-			"go.mod":             gomod("example.com/am", "example.com/lib v1.0.0"),
-			".github/ripple.yml": "updates:\n  - ecosystem: gomod\n    automerge: minor\n",
+			"go.mod":       gomod("example.com/am", "example.com/lib v1.0.0"),
+			".ripple.yaml": "updates:\n  - ecosystem: gomod\n    automerge: minor\n",
 		})
 		start(t, e, "acme/am")
 		e.clock.Advance(time.Minute)
@@ -249,9 +249,9 @@ func TestOpenPRLimitTightenedNotWidened(t *testing.T) {
 		e := newEnv(t, st, lim)
 		mods := []string{"example.com/a v1.0.0", "example.com/b v1.0.0", "example.com/c v1.0.0"}
 		e.gh.AddRepo("acme/server-limit", map[string]string{"go.mod": gomod("example.com/s", mods...),
-			".github/ripple.yml": "open-pull-requests-limit: 10\nupdates:\n  - ecosystem: gomod\n"})
+			".ripple.yaml": "open-pull-requests-limit: 10\nupdates:\n  - ecosystem: gomod\n"})
 		e.gh.AddRepo("acme/tight", map[string]string{"go.mod": gomod("example.com/t", mods...),
-			".github/ripple.yml": "open-pull-requests-limit: 1\nupdates:\n  - ecosystem: gomod\n"})
+			".ripple.yaml": "open-pull-requests-limit: 1\nupdates:\n  - ecosystem: gomod\n"})
 		start(t, e, "acme/server-limit", "acme/tight")
 		e.clock.Advance(time.Minute)
 		for _, p := range []string{"a", "b", "c"} {
@@ -288,7 +288,7 @@ func TestInvalidFileMeansNoUpdatesUntilFixed(t *testing.T) {
 	forEach(t, func(t *testing.T, st store.Store) {
 		e := newEnv(t, st, defaultLimits())
 		e.gh.AddRepo("acme/bad", map[string]string{"go.mod": gomod("example.com/b", "example.com/lib v1.0.0"),
-			".github/ripple.yml": "updates:\n  - ecosystem: gomod\n    cooldwn: 3d\n"})
+			".ripple.yaml": "updates:\n  - ecosystem: gomod\n    cooldwn: 3d\n"})
 		start(t, e, "acme/bad")
 		if d := e.deps("acme/bad"); len(d) != 0 {
 			t.Fatalf("invalid config registered dependencies: %v", d)
@@ -299,7 +299,7 @@ func TestInvalidFileMeansNoUpdatesUntilFixed(t *testing.T) {
 		if n := len(e.gh.PRs("acme/bad")); n != 0 {
 			t.Fatalf("PR opened for repo with invalid config")
 		}
-		e.push("acme/bad", map[string]string{".github/ripple.yml": "updates:\n  - ecosystem: gomod\n"})
+		e.push("acme/bad", map[string]string{".ripple.yaml": "updates:\n  - ecosystem: gomod\n"})
 		e.eventually("deps registered after fix", func() bool { return len(e.deps("acme/bad")) == 1 })
 	})
 }

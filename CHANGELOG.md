@@ -4,6 +4,17 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
 
 ## [Unreleased]
 
+## [Unreleased]
+
+### Added
+- `.ripple.yaml` (repository root, the same on every host) is the per-repo configuration file;
+  `ripple config validate` checks it by default.
+
+### Deprecated
+- `.github/ripple.yml`, the path v0.1.0 read, is a deprecated alias for `.ripple.yaml` with identical
+  meaning. When both exist `.ripple.yaml` wins, the alias is ignored, and a warning is logged and shown
+  by `ripple config validate`. Removal no earlier than v0.3.0.
+
 ## [0.1.0] - 2026-11-22
 
 ### Added

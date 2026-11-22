@@ -1,4 +1,4 @@
-// Package config parses and validates .github/ripple.yml and the server settings.
+// Package config parses and validates the per-repo .ripple.yaml and the server settings.
 //
 // Simplicity is a design goal: the per-repo schema is a short Dependabot-style
 // updates: list with no rule precedence, presets or inheritance, and a repo file
@@ -8,6 +8,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"path"
 	"regexp"
 	"sort"
@@ -19,10 +20,14 @@ import (
 )
 
 const (
-	// FileName is where a repo keeps its (optional) configuration.
-	FileName      = ".github/ripple.yml"
-	maxRegexBytes = 4096
-	maxCooldown   = 365 * 24 * time.Hour
+	// FileName is where a repo keeps its (optional) configuration: the repository
+	// root, the same on every host.
+	FileName = ".ripple.yaml"
+	// LegacyFileName is the path v0.1.0 read. It is a deprecated alias with the same
+	// meaning, removed no earlier than v0.3.0, and ignored when FileName exists.
+	LegacyFileName = ".github/ripple.yml"
+	maxRegexBytes  = 4096
+	maxCooldown    = 365 * 24 * time.Hour
 )
 
 var (
@@ -104,7 +109,7 @@ type Update struct {
 	Package  string   `yaml:"package"`
 }
 
-// Repo is the content of .github/ripple.yml.
+// Repo is the content of .ripple.yaml.
 type Repo struct {
 	Version     int      `yaml:"version"`
 	OpenPRLimit int      `yaml:"open-pull-requests-limit"`
@@ -296,10 +301,13 @@ func levenshtein(a, b string) int {
 }
 
 // Parse decodes and strictly validates a repo file. Empty input yields Default().
-func Parse(data []byte) (*Repo, error) {
+func Parse(data []byte) (*Repo, error) { return ParseNamed(FileName, data) }
+
+// ParseNamed is Parse with errors that name the file the bytes came from.
+func ParseNamed(file string, data []byte) (*Repo, error) {
 	var doc yaml.Node
 	if err := yaml.Unmarshal(data, &doc); err != nil {
-		return nil, &ValidationError{File: FileName, Problems: []Problem{{Msg: strings.TrimPrefix(err.Error(), "yaml: ")}}}
+		return nil, &ValidationError{File: file, Problems: []Problem{{Msg: strings.TrimPrefix(err.Error(), "yaml: ")}}}
 	}
 	if doc.Kind == 0 {
 		return Default(), nil
@@ -342,7 +350,7 @@ func Parse(data []byte) (*Repo, error) {
 	}
 	if len(c.problems) > 0 {
 		sort.SliceStable(c.problems, func(i, j int) bool { return c.problems[i].Line < c.problems[j].Line })
-		return nil, &ValidationError{File: FileName, Problems: c.problems}
+		return nil, &ValidationError{File: file, Problems: c.problems}
 	}
 	if r.Version == 0 {
 		r.Version = 1
@@ -509,4 +517,57 @@ func CompileRegex(s string) (*regexp.Regexp, error) {
 		return nil, fmt.Errorf("invalid regular expression (Go RE2 syntax): %v", err)
 	}
 	return re, nil
+}
+
+// Warnings for the two situations a repo can be in besides "only .ripple.yaml".
+const (
+	LegacyWarning   = "config file " + LegacyFileName + " is deprecated; move it to " + FileName + " (the alias will not be removed before v0.3.0)"
+	ShadowedWarning = "both " + FileName + " and " + LegacyFileName + " exist; using " + FileName + " and ignoring " + LegacyFileName + ", delete it"
+)
+
+// Source is the config file a repo resolved to.
+type Source struct {
+	Name     string // FileName or LegacyFileName; empty when the repo has neither
+	Data     []byte
+	Legacy   bool // the deprecated alias is the file in use
+	Shadowed bool // both exist; the alias was ignored
+}
+
+// Exists reports whether the repo has a config file at all.
+func (s Source) Exists() bool { return s.Name != "" }
+
+// Warning is the log or validate message for the repo's state, or "".
+func (s Source) Warning() string {
+	switch {
+	case s.Shadowed:
+		return ShadowedWarning
+	case s.Legacy:
+		return LegacyWarning
+	}
+	return ""
+}
+
+// Resolve picks the config file: FileName wins, LegacyFileName is the fallback. read
+// returns an error satisfying errors.Is(err, fs.ErrNotExist) for an absent file; any
+// other error is returned. An empty file that exists still counts as present.
+func Resolve(read func(name string) ([]byte, error)) (Source, error) {
+	data, err := read(FileName)
+	switch {
+	case err == nil:
+		_, lerr := read(LegacyFileName)
+		if lerr != nil && !errors.Is(lerr, fs.ErrNotExist) {
+			return Source{}, lerr
+		}
+		return Source{Name: FileName, Data: data, Shadowed: lerr == nil}, nil
+	case !errors.Is(err, fs.ErrNotExist):
+		return Source{}, err
+	}
+	data, err = read(LegacyFileName)
+	switch {
+	case err == nil:
+		return Source{Name: LegacyFileName, Data: data, Legacy: true}, nil
+	case errors.Is(err, fs.ErrNotExist):
+		return Source{}, nil
+	}
+	return Source{}, err
 }

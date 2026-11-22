@@ -157,7 +157,7 @@ func (a *App) push(ctx context.Context, name string, ev webhook.Event) error {
 	if cfg, cerr := engine.RepoConfig(repo.Config); cerr != nil {
 		// An invalid file registers no dependencies; only a change to the file can fix it.
 		for _, f := range ev.Files {
-			relevant = relevant || f == config.FileName
+			relevant = relevant || f == config.FileName || f == config.LegacyFileName
 		}
 	} else {
 		ms, err := manager.Build(cfg)

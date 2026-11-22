@@ -33,7 +33,7 @@ server's uid. `RIPPLE_SANDBOX` confines those commands. The default is `none`, s
 
 Seatbelt is exercised for real: `internal/sandbox` runs commands under it and checks that a file outside
 the workspace cannot be read or written and that only the named loopback port connects, and
-`internal/e2e` drives a webhook-to-PR dependency update with `go` and `git` confined. Both skip off macOS.
+`internal/e2e` drives a webhook-to-PR dependency update with `go` and `git` confined. Both live in `_darwin_test.go` files, so they do not run on Linux CI.
 Bwrap is covered only by argv unit tests; it has never run.
 
 macOS notes: `/usr/bin/git` is an `xcrun` shim that writes a cache outside the workspace, so ripple runs the

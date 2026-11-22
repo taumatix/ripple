@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"testing"
 )
@@ -13,9 +12,6 @@ import (
 // runSeatbelt executes argv under the real seatbelt backend and returns its error.
 func runSeatbelt(t *testing.T, p Policy, argv ...string) error {
 	t.Helper()
-	if runtime.GOOS != "darwin" {
-		t.Skip("seatbelt is macOS only")
-	}
 	bin, err := exec.LookPath("sandbox-exec")
 	if err != nil {
 		t.Skip("sandbox-exec not available")

@@ -11,7 +11,8 @@ import (
 
 // TestDependencyUpdateUnderOSSandbox drives the whole webhook-to-PR path with go and
 // local git confined by the platform's real backend. It needs one that can confine
-// the network to a proxy port (seatbelt); bwrap cannot, so Linux skips.
+// the network to a proxy port (seatbelt); bwrap cannot, so this file is macOS only
+// (the CI service-backed check forbids skipped tests, so it is not skipped at run time).
 func TestDependencyUpdateUnderOSSandbox(t *testing.T) {
 	sb, err := sandbox.Detect("seatbelt", nil)
 	if err != nil {

@@ -35,6 +35,12 @@ type Server struct {
 	// MaxFiles and MaxDependencies cap one repo scan; a repo over either is skipped.
 	MaxFiles        int
 	MaxDependencies int
+	// Event queue: workers overall and per installation, and the persisted backlog
+	// overall and per installation (past either cap the receiver answers 503).
+	EventWorkers                int
+	EventWorkersPerInstallation int
+	EventBacklog                int
+	EventInstallationBacklog    int
 }
 
 // Default scan caps (RIPPLE_MAX_FILES, RIPPLE_MAX_DEPENDENCIES).
@@ -64,6 +70,10 @@ RIPPLE_WORKERS                default 4
 RIPPLE_MAX_FILES              default 100000; a repo with more files is skipped with a warning
 RIPPLE_MAX_DEPENDENCIES       default 5000; a repo with more dependencies is skipped with a warning
 RIPPLE_WORK_DIR               checkout directory (default: OS temp dir)
+RIPPLE_EVENT_WORKERS          webhook events handled at once (default 4)
+RIPPLE_EVENT_WORKERS_PER_INSTALLATION  of which one installation may use (default 2)
+RIPPLE_EVENT_BACKLOG          events stored and waiting before the receiver answers 503 (default 10000)
+RIPPLE_EVENT_INSTALLATION_BACKLOG  the same cap for one installation (default 1000)
 `
 
 func isLoopback(u *url.URL) bool {
@@ -131,6 +141,11 @@ func LoadServer(getenv func(string) string) (*Server, error) {
 		WorkDir:           getenv("RIPPLE_WORK_DIR"),
 		MaxFiles:          num("RIPPLE_MAX_FILES", DefaultMaxFiles, 1),
 		MaxDependencies:   num("RIPPLE_MAX_DEPENDENCIES", DefaultMaxDependencies, 1),
+
+		EventWorkers:                num("RIPPLE_EVENT_WORKERS", 4, 1),
+		EventWorkersPerInstallation: num("RIPPLE_EVENT_WORKERS_PER_INSTALLATION", 2, 1),
+		EventBacklog:                num("RIPPLE_EVENT_BACKLOG", 10_000, 1),
+		EventInstallationBacklog:    num("RIPPLE_EVENT_INSTALLATION_BACKLOG", 1_000, 1),
 	}
 	if v := getenv("RIPPLE_ALLOW_AUTOMERGE"); v != "" {
 		b, err := strconv.ParseBool(v)

@@ -26,6 +26,12 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
   verified; a `vendor/` directory is refreshed with `go mod vendor`; a `go.work` has its replaces follow a
   major bump and is checked with `go work sync`, build and vet. `go.work` entries that point outside the
   repository are refused like an escaping `replace`.
+- Webhook events are persisted in the store (all three backends; Postgres migration `002_events.sql`) before
+  the receiver answers 202, and a restart resumes them. Installations share `RIPPLE_EVENT_WORKERS` (default 4)
+  fairly, each capped at `RIPPLE_EVENT_WORKERS_PER_INSTALLATION` (default 2), and one repo's events run in
+  order; the backlog is capped by `RIPPLE_EVENT_BACKLOG` (10000) and `RIPPLE_EVENT_INSTALLATION_BACKLOG` (1000),
+  past which the receiver answers 503. Due jobs run on their own loop, so a slow major-bump verify no longer
+  delays the feed poll.
 - `RIPPLE_MAX_FILES` (default 100000) and `RIPPLE_MAX_DEPENDENCIES` (default 5000) cap one repo scan; a repo
   over a cap is skipped with a logged warning and no updates until it is under it
   ([docs/bounds.md](docs/bounds.md)).

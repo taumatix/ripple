@@ -33,6 +33,15 @@ type Store interface {
 	// ListDueJobs returns pending jobs with NotBefore <= now, oldest first.
 	ListDueJobs(ctx context.Context, now time.Time, limit int) ([]model.Job, error)
 
+	// EnqueueEvent persists a received event unless its ID exists; reports whether inserted.
+	EnqueueEvent(ctx context.Context, e model.Event) (bool, error)
+	// ListEvents returns every queued event, lowest Seq first (ties by ID).
+	ListEvents(ctx context.Context) ([]model.Event, error)
+	// UpdateEvent stores Attempts and NotBefore for an existing event.
+	UpdateEvent(ctx context.Context, e model.Event) error
+	// DeleteEvent removes a handled event; an absent ID is not an error.
+	DeleteEvent(ctx context.Context, id string) error
+
 	GetCursor(ctx context.Context, name string) (string, error)
 	SetCursor(ctx context.Context, name, value string) error
 

@@ -26,11 +26,18 @@ Ordered by how much each entry limits real deployments. The top is next.
    the Docker image is built and run only in CI. Make `make test-services` start both services itself (Docker, or Apple `container`
    on the agent host), fail rather than skip under an opt-in `RIPPLE_REQUIRE_SERVICES=1`, and add a CI step
    that runs the built image against a fake GitHub with a signed push event and expects exactly one PR.
-5. **Per-installation workers and a durable event queue.** Webhook events are handled one at a time behind a queue of 1024, then the receiver answers 503; GitHub does not redeliver, so those events are lost (one noisy installation starves the rest). Also, the poll loop's `RunDue` waits on slow major verifies and stalls the global feed poll: run jobs off the poll path.
 6. **Scan without a full checkout.** The clone filter saves nothing while the scan checks out HEAD
    ([docs/bounds.md](docs/bounds.md)): a huge-blob repo still downloads every blob at HEAD. Clone `--no-checkout`
    (or sparse) and read only the paths the managers match, so a repo's size stops mattering to a scan.
-9. **Close the residual webhook gaps.** A request with a well-formed but forged signature still buffers its body (up to `MaxBody`, at most `MaxInflight` at once) before the HMAC fails, and a slow sender can hold those slots until the server read timeout, so genuine deliveries get 503 meanwhile: spool to a temp file or hash while reading with a per-read deadline. The delivery id is an unsigned header and the table is in memory: persist it in the Store and key on the body signature too.
+7. **Run more than one replica.** The event queue and the job runner assume one process per store: two
+   replicas would both load the same queued events and both pick the same due jobs. Claim work with a lease
+   (Postgres `FOR UPDATE SKIP LOCKED` with an owner and expiry; DynamoDB a conditional owner/lease write), so
+   replicas share the queue and a crashed one's work is retaken when its lease lapses.
+8. **Dead letters and fairer due-job listing.** An event that fails 3 times is logged and deleted; keep it in
+   a failed state an operator can list and requeue instead. Due jobs are listed 1000 at a time, oldest first,
+   and a repo whose run is in flight is skipped, so a repo with more than 1000 due jobs can hold back every
+   other repo's until it finishes: list per repo, or exclude repos in flight from the query.
+9. **Close the residual webhook gaps.** A request with a well-formed but forged signature still buffers its body (up to `MaxBody`, at most `MaxInflight` at once) before the HMAC fails, and a slow sender can hold those slots until the server read timeout, so genuine deliveries get 503 meanwhile: spool to a temp file or hash while reading with a per-read deadline. The delivery id is an unsigned header and the table is in memory: persist it in the Store and key on the body signature too (queued events already key on it, so a redelivery of a still-queued delivery is not queued twice; once handled, only the in-memory table remembers it).
 
 Platforms (code hosts). The goal is the whole list Renovate supports, each behind the one `Platform`
 interface, each with the same end-to-end test (a push or release event leads to exactly one PR in

@@ -17,6 +17,7 @@ type Memory struct {
 	releases map[string]model.Release
 	jobs     map[string]model.Job
 	cursors  map[string]string
+	events   map[string]model.Event
 }
 
 func NewMemory() *Memory {

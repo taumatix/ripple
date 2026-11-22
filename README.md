@@ -153,8 +153,14 @@ workspace directory is writable, the root filesystem is read-only, and egress is
 GitHub, the module index and the Go proxy. Do not mount credentials other than the App key's
 secret store, and do not run it on a host with access to a private network.
 
-Other limits: webhook events are processed one at a time and are lost, not replayed, when the
-server is overloaded or down. The webhook receiver refuses unsigned requests before reading the body,
+Webhook events are stored before the receiver answers 202 and deleted once handled, so a restart resumes
+the queue. Installations take turns for `RIPPLE_EVENT_WORKERS` (default 4) workers, each using at most
+`RIPPLE_EVENT_WORKERS_PER_INSTALLATION` (default 2), and one repo's events run in order, one at a time. The
+stored backlog is capped at `RIPPLE_EVENT_BACKLOG` (default 10000) events overall and
+`RIPPLE_EVENT_INSTALLATION_BACKLOG` (default 1000) per installation, one event per repo named in a delivery;
+past a cap the receiver answers 503 and stores nothing, and GitHub does not redeliver by itself, so that
+delivery is lost unless redelivered from the App's Recent Deliveries page. A failing event is retried
+3 times with backoff, then logged and dropped. The webhook receiver refuses unsigned requests before reading the body,
 buffers at most 4 bodies at once, and drops a repeated `X-GitHub-Delivery` for an hour (in memory, per
 process; the id is an unsigned header, so this stops redelivery and naive replays, not a rewritten header). See
 [ROADMAP.md](ROADMAP.md) for the planned fixes.

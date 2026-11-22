@@ -209,6 +209,61 @@ func Run(t *testing.T, mk func(t *testing.T) store.Store) {
 		}
 	})
 
+	t.Run("events", func(t *testing.T) {
+		s := mk(t)
+		at := time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC)
+		push := model.Event{ID: "d1/0", Seq: 20, InstallationID: 7, Kind: "push", Repo: "acme/web", Ref: "refs/heads/main", Files: []string{"go.mod", "a/go.mod"}}
+		added := model.Event{ID: "d0/0", Seq: 10, InstallationID: 8, Kind: "repos_added", Repo: "acme/api"}
+		later := model.Event{ID: "d2/0", Seq: 30, InstallationID: 7, Kind: "repos_removed", Repo: "acme/web"}
+		if evs, err := s.ListEvents(ctx); err != nil || len(evs) != 0 {
+			t.Fatalf("empty store: %v err=%v", evs, err)
+		}
+		for _, ev := range []model.Event{push, later, added} {
+			if ok, err := s.EnqueueEvent(ctx, ev); err != nil || !ok {
+				t.Fatalf("enqueue %s: ok=%v err=%v", ev.ID, ok, err)
+			}
+		}
+		dup := push
+		dup.Repo = "acme/other"
+		if ok, err := s.EnqueueEvent(ctx, dup); err != nil || ok {
+			t.Fatalf("duplicate id: ok=%v err=%v", ok, err)
+		}
+		evs, err := s.ListEvents(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := []model.Event{added, push, later}; !reflect.DeepEqual(evs, want) {
+			t.Fatalf("list, oldest first:\n got %+v\nwant %+v", evs, want)
+		}
+		push.Attempts, push.NotBefore = 2, at
+		if err := s.UpdateEvent(ctx, push); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.DeleteEvent(ctx, added.ID); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.DeleteEvent(ctx, "absent"); err != nil {
+			t.Fatalf("deleting an absent event: %v", err)
+		}
+		evs, _ = s.ListEvents(ctx)
+		if want := []model.Event{push, later}; !reflect.DeepEqual(evs, want) {
+			t.Fatalf("after update and delete:\n got %+v\nwant %+v", evs, want)
+		}
+	})
+
+	t.Run("many events", func(t *testing.T) {
+		s := mk(t)
+		for i := 0; i < 130; i++ {
+			if _, err := s.EnqueueEvent(ctx, model.Event{ID: fmt.Sprintf("e%03d", i), Seq: int64(1000 - i), InstallationID: 1, Kind: "push", Repo: "acme/web"}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		evs, err := s.ListEvents(ctx)
+		if err != nil || len(evs) != 130 || evs[0].ID != "e129" || evs[129].ID != "e000" {
+			t.Fatalf("len=%d err=%v", len(evs), err)
+		}
+	})
+
 	t.Run("cursors", func(t *testing.T) {
 		s := mk(t)
 		if v, err := s.GetCursor(ctx, "feed:go"); err != nil || v != "" {

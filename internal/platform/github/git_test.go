@@ -316,3 +316,38 @@ func shim(t *testing.T, tool string) string {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	return log
 }
+
+// The clone asks for blobs over 1m to be left out. With --depth 1 the checkout
+// itself needs every blob at HEAD, so a large file at HEAD is fetched on demand
+// and still readable by git; the filter only spares blobs that are not at HEAD
+// (history, which a shallow clone does not fetch anyway). Measured in
+// docs/bounds.md; this test pins that the on-demand fetch works.
+func TestCloneIsPartialAndLargeHeadBlobStillCheckedOut(t *testing.T) {
+	gh := testutil.NewGitHub(t)
+	big := strings.Repeat("0123456789abcdef", 2<<16) // 2 MiB
+	gh.AddRepo("acme/r", map[string]string{"go.mod": "module x\n", "big.bin": big})
+	wd := t.TempDir()
+	c := &github.Client{APIBase: gh.APIURL, GitBase: gh.GitBase, Tokens: gh.Auth, WorkDir: wd}
+	ws, err := c.Checkout(context.Background(), model.Repo{FullName: "acme/r", InstallationID: 1, DefaultBranch: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ws.Close()
+	var cfgs []string
+	_ = filepath.WalkDir(wd, func(p string, d os.DirEntry, err error) error {
+		if err == nil && !d.IsDir() && d.Name() == "config" && filepath.Base(filepath.Dir(p)) == ".git" {
+			cfgs = append(cfgs, p)
+		}
+		return nil
+	})
+	if len(cfgs) != 1 {
+		t.Fatalf("want one .git/config under %s, got %v", wd, cfgs)
+	}
+	b, _ := os.ReadFile(cfgs[0])
+	if !strings.Contains(string(b), "partialclonefilter = blob:limit=1048576") {
+		t.Errorf("clone is not a partial clone:\n%s", b)
+	}
+	if fi, err := os.Stat(filepath.Join(filepath.Dir(cfgs[0]), "..", "big.bin")); err != nil || fi.Size() != int64(len(big)) {
+		t.Errorf("large HEAD blob not checked out: %v", err)
+	}
+}

@@ -63,6 +63,7 @@ func New(ctx context.Context, s *config.Server, log *slog.Logger) (*App, store.S
 		AuthorName: "ripple[bot]", AuthorEmail: "ripple@users.noreply.github.com",
 	}
 	eng := &engine.Engine{Store: st, Platform: gh, Log: log, Workers: s.Workers,
+		MaxFiles: s.MaxFiles, MaxDependencies: s.MaxDependencies,
 		Limits: rules.Limits{MinimumReleaseAge: s.MinimumReleaseAge, OpenPRLimit: s.OpenPRLimit, AllowAutomerge: s.AllowAutomerge}}
 	return &App{
 		Engine: eng, Log: log, Secret: []byte(s.WebhookSecret), PollEvery: s.FeedInterval,

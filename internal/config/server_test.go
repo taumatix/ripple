@@ -31,6 +31,24 @@ func TestServerDefaults(t *testing.T) {
 	}
 }
 
+func TestServerScanCaps(t *testing.T) {
+	s, err := LoadServer(env(base))
+	if err != nil || s.MaxFiles != DefaultMaxFiles || s.MaxDependencies != DefaultMaxDependencies {
+		t.Fatalf("defaults: %+v, %v", s, err)
+	}
+	s, err = LoadServer(env(with("RIPPLE_MAX_FILES", "10", "RIPPLE_MAX_DEPENDENCIES", "3")))
+	if err != nil || s.MaxFiles != 10 || s.MaxDependencies != 3 {
+		t.Fatalf("set: %+v, %v", s, err)
+	}
+	for _, k := range []string{"RIPPLE_MAX_FILES", "RIPPLE_MAX_DEPENDENCIES"} {
+		for _, v := range []string{"0", "-1", "lots"} {
+			if _, err := LoadServer(env(with(k, v))); err == nil {
+				t.Errorf("%s=%s accepted", k, v)
+			}
+		}
+	}
+}
+
 func TestServerRejects(t *testing.T) {
 	cases := map[string]map[string]string{
 		"missing":          {},

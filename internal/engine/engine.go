@@ -19,6 +19,18 @@ import (
 	"github.com/taumatix/ripple/internal/store"
 )
 
+// Default scan caps, large enough for a big monorepo and small enough that one
+// repo cannot exhaust memory or time.
+const (
+	DefaultMaxFiles        = config.DefaultMaxFiles
+	DefaultMaxDependencies = config.DefaultMaxDependencies
+)
+
+var (
+	errScanCap = errors.New("file cap exceeded")
+	errDepCap  = errors.New("dependency cap exceeded")
+)
+
 // BranchPrefix marks every branch ripple owns.
 const BranchPrefix = "ripple/"
 
@@ -31,6 +43,13 @@ type Engine struct {
 	Now func() time.Time
 	// Workers bounds how many repos RunDue processes at once.
 	Workers int
+	// MaxFiles and MaxDependencies bound one repo scan; zero means DefaultMaxFiles
+	// and DefaultMaxDependencies. A repo over either cap is registered with no
+	// dependencies and a logged warning rather than scanned partially.
+	MaxFiles, MaxDependencies int
+
+	// parseConfig is a test seam counting repo-file parses; nil means RepoConfig.
+	parseConfig func([]byte) (*config.Repo, error)
 
 	mu    sync.Mutex
 	locks map[string]*sync.Mutex
@@ -115,9 +134,20 @@ func (e *Engine) Scan(ctx context.Context, repo model.Repo) error {
 	if err != nil {
 		return fmt.Errorf("scan %s: %w", repo.FullName, err)
 	}
+	maxFiles, maxDeps := e.MaxFiles, e.MaxDependencies
+	if maxFiles <= 0 {
+		maxFiles = DefaultMaxFiles
+	}
+	if maxDeps <= 0 {
+		maxDeps = DefaultMaxDependencies
+	}
 	var deps []model.Dependency
 	seen := map[string]bool{}
+	files := 0
 	err = ws.Walk(func(p string) error {
+		if files++; files > maxFiles {
+			return errScanCap
+		}
 		for _, m := range ms {
 			if !m.Matches(p) || seen[p+"|"+m.Name()] {
 				continue
@@ -136,11 +166,25 @@ func (e *Engine) Scan(ctx context.Context, repo model.Repo) error {
 			for _, d := range found {
 				d.Repo = repo.FullName
 				deps = append(deps, d)
+				if len(deps) > maxDeps {
+					return errDepCap
+				}
 			}
 		}
 		return nil
 	})
-	if err != nil {
+	switch {
+	case errors.Is(err, errScanCap), errors.Is(err, errDepCap):
+		what, limit := "file", maxFiles
+		if errors.Is(err, errDepCap) {
+			what, limit = "dependency", maxDeps
+		}
+		e.log().Warn(fmt.Sprintf("repo exceeds the %s cap; no updates until it is under it", what), "repo", repo.FullName, "cap", limit)
+		if err := e.Store.UpsertRepo(ctx, repo); err != nil {
+			return err
+		}
+		return e.Store.ReplaceDependencies(ctx, repo.FullName, nil)
+	case err != nil:
 		return fmt.Errorf("scan %s: %w", repo.FullName, err)
 	}
 	if err := e.Store.UpsertRepo(ctx, repo); err != nil {

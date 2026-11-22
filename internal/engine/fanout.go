@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/taumatix/ripple/internal/config"
 	"github.com/taumatix/ripple/internal/model"
 	"github.com/taumatix/ripple/internal/rules"
 )
@@ -20,6 +21,7 @@ func (e *Engine) FanOut(ctx context.Context, rel model.Release) (int, error) {
 	}
 	n := 0
 	done := map[string]bool{}
+	repos := map[string]*repoState{}
 	for _, d := range deps {
 		if done[d.Repo] {
 			continue
@@ -28,14 +30,14 @@ func (e *Engine) FanOut(ctx context.Context, rel model.Release) (int, error) {
 		if !ok {
 			continue
 		}
-		repo, found, err := e.Store.GetRepo(ctx, d.Repo)
+		rs, err := e.repoState(ctx, repos, d.Repo)
 		if err != nil {
 			return n, err
 		}
-		if !found {
+		if !rs.found {
 			continue
 		}
-		dec, ok := e.decide(repo, d, typ, rel.Time)
+		dec, ok := e.decide(rs, d, typ, rel.Time)
 		if !ok || !dec.Enabled {
 			continue
 		}
@@ -55,14 +57,41 @@ func (e *Engine) FanOut(ctx context.Context, rel model.Release) (int, error) {
 	return n, nil
 }
 
+// repoState is what FanOut needs to know about one repo, loaded once per release
+// however many dependency rows the repo has: the stored repo and its parsed file.
+type repoState struct {
+	found  bool
+	cfg    *config.Repo
+	cfgErr error
+}
+
+func (e *Engine) repoState(ctx context.Context, cache map[string]*repoState, name string) (*repoState, error) {
+	if rs, ok := cache[name]; ok {
+		return rs, nil
+	}
+	repo, found, err := e.Store.GetRepo(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	rs := &repoState{found: found}
+	if found {
+		parse := e.parseConfig
+		if parse == nil {
+			parse = RepoConfig
+		}
+		rs.cfg, rs.cfgErr = parse(repo.Config)
+	}
+	cache[name] = rs
+	return rs, nil
+}
+
 // decide evaluates the repo's update entry for one dependency. ok is false when the
 // repo file is invalid or no entry covers the dependency.
-func (e *Engine) decide(repo model.Repo, d model.Dependency, typ rules.UpdateType, released time.Time) (rules.Decision, bool) {
-	cfg, err := RepoConfig(repo.Config)
-	if err != nil {
+func (e *Engine) decide(rs *repoState, d model.Dependency, typ rules.UpdateType, released time.Time) (rules.Decision, bool) {
+	if rs.cfgErr != nil {
 		return rules.Decision{}, false
 	}
-	u, ok := cfg.UpdateFor(d.Manager, d.File)
+	u, ok := rs.cfg.UpdateFor(d.Manager, d.File)
 	if !ok {
 		return rules.Decision{}, false
 	}

@@ -18,7 +18,7 @@ dependency. ripple inverts that:
   not at the next scheduled run.
 
 **Simplicity is a design goal.** Renovate's power comes from layered presets, `packageRules` and
-precedence. ripple deliberately has none of that in v0.1: one small file per repo, no inherited
+precedence. ripple deliberately has none of that in v0.1: one small file (`.ripple.yaml`) per repo, no inherited
 defaults, no rule ordering. A file means what it says and nothing else. Presets and org defaults are
 on the roadmap as opt-in extras that can never change a plain file's meaning.
 
@@ -52,7 +52,7 @@ limit, minimum release age, whether automerge is allowed) live there, not in rep
 ## Configuration
 
 A repo needs no file: without one ripple updates its Go modules with the server defaults. To change
-that, add `.github/ripple.yml`. This is the whole schema:
+that, add `.ripple.yaml` at the repository root. This is the whole schema:
 
 ```yaml
 version: 1
@@ -81,7 +81,13 @@ updates:
 - `cooldown` can only **raise** the server's minimum release age; `open-pull-requests-limit` can
   only **lower** the server's limit; `automerge` works only if the server allows it.
 - Unknown keys are errors that name the key and line. `ripple config validate [FILE]` checks a file
-  and prints a corrected example. An invalid file means no updates for that repo until it is fixed.
+  (by default `.ripple.yaml` in the current directory) and prints a corrected example. An invalid file means no updates for that repo until it is fixed.
+- **File location.** `.ripple.yaml` at the repository root is the file, and it is the same on every
+  host. v0.1.0 read `.github/ripple.yml`; that path still works as a **deprecated** alias with the
+  same meaning and ripple logs a deprecation warning on each scan of such a repo. If both files
+  exist, `.ripple.yaml` wins, the alias is ignored (not merged), and ripple warns that both exist;
+  `ripple config validate` prints the same warning. The alias is removed no earlier than the minor
+  release after next, so not before v0.3.0. To migrate: `git mv .github/ripple.yml .ripple.yaml`.
 - A `regex` update takes `files` (globs) and `patterns` (RE2 with `(?P<name>...)` and
   `(?P<version>...)` groups, or a fixed `package`).
 

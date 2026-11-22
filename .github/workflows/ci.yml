@@ -1,0 +1,45 @@
+name: ci
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: ripple
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+      dynamodb:
+        image: amazon/dynamodb-local
+        ports: ["8000:8000"]
+    env:
+      RIPPLE_TEST_POSTGRES_DSN: postgres://postgres:ripple@localhost:5432/postgres?sslmode=disable
+      RIPPLE_TEST_DYNAMODB_ENDPOINT: http://localhost:8000
+      AWS_ACCESS_KEY_ID: local
+      AWS_SECRET_ACCESS_KEY: local
+      AWS_REGION: us-east-1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go build ./...
+      - run: go vet ./...
+      - run: test -z "$(gofmt -l .)"
+      - name: test (fails if the service-backed tests were skipped)
+        run: go test -race -count=1 -v ./... | tee test.log
+      - run: |
+          if grep -E -- '--- SKIP' test.log; then echo "service-backed tests were skipped"; exit 1; fi
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t ripple:ci .
+      - run: docker run --rm ripple:ci config example

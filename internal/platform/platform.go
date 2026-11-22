@@ -37,6 +37,11 @@ var ErrNotExist = errors.New("file does not exist")
 // ErrNoToolchain means the go command is not available to RunGo.
 var ErrNoToolchain = errors.New("go toolchain not available")
 
+// ErrUnsafeCheckout means RunGo refused to run: the checkout holds a symlinked go
+// file or a local replace target outside the repository, and go would read or write
+// through it. It is permanent for that commit.
+var ErrUnsafeCheckout = errors.New("unsafe checkout")
+
 // Workspace is a shallow checkout of a repo's default branch.
 type Workspace interface {
 	DefaultBranch() string

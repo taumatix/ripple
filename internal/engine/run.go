@@ -108,6 +108,8 @@ type runner struct {
 	finished int
 	// migrated holds the module directories whose go.mod was moved to a new major path.
 	migrated map[string]bool
+	// skipped holds Go files the import rewrite could not parse; the PR body lists them.
+	skipped []string
 }
 
 func (r *runner) finish(j model.Job, state model.JobState, reason, pr string) {
@@ -134,7 +136,7 @@ func (r *runner) fail(j model.Job, err error) {
 	case errors.As(err, &rl):
 		j.Attempts--
 		j.NotBefore = rl.Until
-	case j.Attempts >= maxAttempts:
+	case errors.Is(err, platform.ErrUnsafeCheckout), j.Attempts >= maxAttempts:
 		j.State = model.JobFailed
 		r.finished++
 	default:
@@ -326,6 +328,7 @@ func (r *runner) openPR(p *prPlan) (*platform.PR, error) {
 		return nil, err
 	}
 	r.migrated = map[string]bool{}
+	r.skipped = nil
 	var applied []item
 	for _, it := range p.items {
 		ok, err := r.apply(it)
@@ -343,8 +346,18 @@ func (r *runner) openPR(p *prPlan) (*platform.PR, error) {
 	}
 	title, body := describe(p, applied)
 	var draft bool
+	if len(r.skipped) > 0 {
+		sort.Strings(r.skipped)
+		body += "\n## Files not rewritten\n\nThese Go files do not parse, so their imports were left as they were. Fix them by hand if they import the old path:\n\n"
+		for _, f := range r.skipped {
+			body += "- `" + f + "`\n"
+		}
+	}
 	if len(r.migrated) > 0 {
-		failure := r.verify()
+		failure, err := r.verify()
+		if err != nil {
+			return nil, err
+		}
 		draft = failure != ""
 		if draft {
 			body += "\n## Verification failed\n\nThe import rewrite was applied but the module does not build. This pull request is a draft; it needs a human.\n\n```\n" + failure + "\n```\n"
@@ -399,9 +412,11 @@ func (r *runner) apply(it item) (bool, error) {
 			return false, err
 		}
 		if d.Package != it.job.Package {
-			if _, err := manager.RewriteGoImports(r.ws, d.File, d.Package, it.job.Package, content); err != nil {
+			_, skipped, err := manager.RewriteGoImports(r.ws, d.File, d.Package, it.job.Package, content)
+			if err != nil {
 				return false, err
 			}
+			r.skipped = append(r.skipped, skipped...)
 			r.migrated[path.Dir(d.File)] = true
 		}
 		if err := r.ws.WriteFile(d.File, out); err != nil {
@@ -414,7 +429,7 @@ func (r *runner) apply(it item) (bool, error) {
 
 // verify tidies, builds and vets every module a major bump touched, and returns
 // the compiler output of the first step that failed, or "" when all passed.
-func (r *runner) verify() string {
+func (r *runner) verify() (string, error) {
 	dirs := make([]string, 0, len(r.migrated))
 	for d := range r.migrated {
 		dirs = append(dirs, d)
@@ -424,14 +439,17 @@ func (r *runner) verify() string {
 		for _, args := range [][]string{{"mod", "tidy"}, {"build", "./..."}, {"vet", "./..."}} {
 			out, err := r.ws.RunGo(r.ctx, dir, args...)
 			if errors.Is(err, platform.ErrNoToolchain) {
-				return "ripple could not verify this update: the go toolchain is not installed on the server."
+				return "ripple could not verify this update: the go toolchain is not installed on the server.", nil
+			}
+			if errors.Is(err, platform.ErrUnsafeCheckout) {
+				return "", err
 			}
 			if err != nil {
-				return fmt.Sprintf("$ go %s   (in %s)\n%s\n%v", strings.Join(args, " "), dir, out, err)
+				return fmt.Sprintf("$ go %s   (in %s)\n%s\n%v", strings.Join(args, " "), dir, out, err), nil
 			}
 		}
 	}
-	return ""
+	return "", nil
 }
 
 func labelsFor(items []item) []string {

@@ -3,6 +3,7 @@ package github_test
 import (
 	"context"
 	"crypto/rsa"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -159,4 +160,62 @@ func mustKey(t *testing.T, gh *testutil.GitHub) *rsa.PrivateKey {
 		t.Fatal(err)
 	}
 	return k
+}
+
+func checkoutWith(t *testing.T, files map[string]string) platform.Workspace {
+	t.Helper()
+	gh := testutil.NewGitHub(t)
+	gh.AddRepo("acme/r", files)
+	c := &github.Client{APIBase: gh.APIURL, GitBase: gh.GitBase, Tokens: gh.Auth, WorkDir: t.TempDir(), GoSumDB: "off", GoProxy: "off"}
+	ws, err := c.Checkout(context.Background(), model.Repo{FullName: "acme/r", InstallationID: 1, DefaultBranch: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ws.Close() })
+	return ws
+}
+
+func TestRunGoRefusesUnsafeCheckouts(t *testing.T) {
+	outside := filepath.Join(t.TempDir(), "victim")
+	if err := os.WriteFile(outside, []byte("UNTOUCHED"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	outDir := t.TempDir()
+	const mod = "module x\n\ngo 1.22\n"
+	for name, files := range map[string]map[string]string{
+		"symlinked go.sum":               {"go.mod": mod, "go.sum": "symlink:" + outside},
+		"symlinked go.mod":               {"go.mod": "symlink:" + outside},
+		"symlinked go.work":              {"go.mod": mod, "go.work": "symlink:" + outside},
+		"symlinked .go":                  {"go.mod": mod, "a.go": "symlink:" + outside},
+		"nested symlinked":               {"go.mod": mod, "pkg/deep/b.go": "symlink:" + outside},
+		"absolute replace":               {"go.mod": mod + "\nreplace example.com/y => " + outDir + "\n"},
+		"parent replace":                 {"go.mod": mod + "\nreplace example.com/y => ../../..\n"},
+		"nested module absolute replace": {"go.mod": mod, "sub/go.mod": mod + "\nreplace example.com/y => " + outDir + "\n"},
+		"replace through symlink dir":    {"go.mod": mod + "\nreplace example.com/y => ./link\n", "link": "symlink:" + outDir},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ws := checkoutWith(t, files)
+			for _, args := range [][]string{{"mod", "tidy"}, {"build", "./..."}, {"vet", "./..."}} {
+				out, err := ws.RunGo(context.Background(), ".", args...)
+				if !errors.Is(err, platform.ErrUnsafeCheckout) {
+					t.Fatalf("go %v: err = %v (out %q), want ErrUnsafeCheckout", args, err, out)
+				}
+			}
+			if b, _ := os.ReadFile(outside); string(b) != "UNTOUCHED" {
+				t.Errorf("file outside the checkout changed: %q", b)
+			}
+		})
+	}
+}
+
+func TestRunGoAllowsLocalReplaceInsideCheckout(t *testing.T) {
+	ws := checkoutWith(t, map[string]string{
+		"go.mod":               "module x\n\ngo 1.22\n\nrequire example.com/y v0.0.0\n\nreplace example.com/y => ./third_party/y\n",
+		"main.go":              "package main\n\nimport _ \"example.com/y\"\n\nfunc main() {}\n",
+		"third_party/y/go.mod": "module example.com/y\n\ngo 1.22\n",
+		"third_party/y/y.go":   "package y\n",
+	})
+	if out, err := ws.RunGo(context.Background(), ".", "build", "./..."); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
 }

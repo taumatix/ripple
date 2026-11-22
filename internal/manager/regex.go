@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"regexp"
+	"sort"
 
 	"github.com/taumatix/ripple/internal/config"
 	"github.com/taumatix/ripple/internal/glob"
@@ -91,17 +92,30 @@ func (r *Regex) Apply(content []byte, dep model.Dependency, newPackage, newVersi
 	if len(spans) == 0 {
 		return nil, fmt.Errorf("%s: %s %s no longer present: %w", dep.File, dep.Package, dep.Version, ErrStale)
 	}
-	// Replace back to front so earlier offsets stay valid; skip overlaps from
-	// several patterns matching the same bytes.
-	out := append([]byte(nil), content...)
-	last := len(out) + 1
-	for i := len(spans) - 1; i >= 0; i-- {
-		s := spans[i]
-		if s.end > last {
-			continue
+	// Hits come grouped by pattern, not by position: order them, collapse identical
+	// spans (two patterns capturing the same bytes), refuse partial overlaps, and
+	// replace back to front so earlier offsets stay valid.
+	sort.Slice(spans, func(i, j int) bool {
+		if spans[i].start != spans[j].start {
+			return spans[i].start < spans[j].start
 		}
+		return spans[i].end < spans[j].end
+	})
+	uniq := spans[:1]
+	for _, s := range spans[1:] {
+		prev := uniq[len(uniq)-1]
+		switch {
+		case s.start == prev.start && s.end == prev.end:
+		case s.start < prev.end:
+			return nil, fmt.Errorf("%s: patterns match overlapping text at bytes %d-%d and %d-%d", dep.File, prev.start, prev.end, s.start, s.end)
+		default:
+			uniq = append(uniq, s)
+		}
+	}
+	out := append([]byte(nil), content...)
+	for i := len(uniq) - 1; i >= 0; i-- {
+		s := uniq[i]
 		out = append(out[:s.start:s.start], append(bytes.Clone([]byte(newVersion)), out[s.end:]...)...)
-		last = s.start
 	}
 	return out, nil
 }

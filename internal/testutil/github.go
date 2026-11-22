@@ -107,6 +107,7 @@ func (g *GitHub) AddRepo(repo string, files map[string]string) {
 }
 
 // Commit adds a commit on main with files (a human pushing to the default branch).
+// A content of the form "symlink:<target>" commits a symbolic link instead.
 func (g *GitHub) Commit(repo string, files map[string]string) {
 	g.t.Helper()
 	work := g.t.TempDir()
@@ -117,6 +118,13 @@ func (g *GitHub) Commit(repo string, files map[string]string) {
 		full := filepath.Join(w, p)
 		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
 			g.t.Fatal(err)
+		}
+		if target, ok := strings.CutPrefix(c, "symlink:"); ok {
+			_ = os.Remove(full)
+			if err := os.Symlink(target, full); err != nil {
+				g.t.Fatal(err)
+			}
+			continue
 		}
 		if err := os.WriteFile(full, []byte(c), 0o644); err != nil {
 			g.t.Fatal(err)

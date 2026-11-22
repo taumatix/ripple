@@ -268,3 +268,31 @@ func TestRewriteImportsSyntaxError(t *testing.T) {
 		t.Fatal("want a parse error")
 	}
 }
+
+func TestRegexSeveralPatternsOutOfOrder(t *testing.T) {
+	r, err := NewRegex("regex#0", config.Update{Files: []string{"VERSIONS"}, Package: "example.com/tool", Patterns: []string{`A=(?P<version>v[0-9.]+)`, `B=(?P<version>v[0-9.]+)`}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := "B=v1.0.0\nA=v1.0.0\n"
+	deps, _ := r.Extract("VERSIONS", []byte(in))
+	if len(deps) != 2 {
+		t.Fatalf("deps = %+v", deps)
+	}
+	out, err := r.Apply([]byte(in), model.Dependency{File: "VERSIONS", Package: "example.com/tool", Version: "v1.0.0"}, "example.com/tool", "v1.2.0")
+	if err != nil || string(out) != "B=v1.2.0\nA=v1.2.0\n" {
+		t.Fatalf("out = %q, err = %v", out, err)
+	}
+}
+
+func TestRegexOverlappingMatchesRejected(t *testing.T) {
+	r, err := NewRegex("regex#0", config.Update{Files: []string{"V"}, Package: "example.com/tool", Patterns: []string{`(?P<version>1\.1)\.1`, `1\.(?P<version>1\.1)`}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Two patterns capture different spans of overlapping text: refuse rather than guess.
+	in := "1.1.1\n"
+	if _, err := r.Apply([]byte(in), model.Dependency{File: "V", Package: "example.com/tool", Version: "1.1"}, "example.com/tool", "2.0"); err == nil {
+		t.Fatal("want an error for overlapping matches")
+	}
+}

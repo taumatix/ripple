@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"golang.org/x/mod/modfile"
 	"io"
 	"io/fs"
 	"net/url"
@@ -258,6 +259,9 @@ func (w *workspace) RunGo(ctx context.Context, dir string, args ...string) (stri
 	if rel, err := filepath.Rel(root, abs); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("directory %q escapes the checkout", dir)
 	}
+	if err := checkGoSafe(root); err != nil {
+		return "", err
+	}
 	gobin, err := exec.LookPath("go")
 	if err != nil {
 		return "", platform.ErrNoToolchain
@@ -318,4 +322,68 @@ func (w *workspace) Close() error {
 		w.root.Close()
 	}
 	return os.RemoveAll(w.dir)
+}
+
+// checkGoSafe refuses a checkout the go tool must not be run in. The repository is
+// untrusted: a go.mod, go.sum, go.work or .go file that is a symlink lets "go mod
+// tidy" write through it to a path outside the checkout, and a replace directive
+// with an absolute or escaping local target makes go read arbitrary server paths
+// whose contents then surface in error output. No go process has started when this
+// returns an error. root must already be symlink-resolved.
+func checkGoSafe(root string) error {
+	var mods []string
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(root, p)
+		if d.IsDir() {
+			if rel == ".git" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		name := d.Name()
+		if name != "go.mod" && name != "go.sum" && name != "go.work" && !strings.HasSuffix(name, ".go") {
+			return nil
+		}
+		if d.Type()&fs.ModeSymlink != 0 {
+			return fmt.Errorf("%w: %s is a symbolic link", platform.ErrUnsafeCheckout, filepath.ToSlash(rel))
+		}
+		if name == "go.mod" {
+			mods = append(mods, p)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	for _, mod := range mods {
+		data, err := os.ReadFile(mod)
+		if err != nil {
+			return err
+		}
+		f, err := modfile.Parse(mod, data, nil)
+		if err != nil {
+			continue // go will report the syntax error itself
+		}
+		for _, r := range f.Replace {
+			if !modfile.IsDirectoryPath(r.New.Path) {
+				continue
+			}
+			rel, _ := filepath.Rel(root, mod)
+			target := filepath.FromSlash(r.New.Path)
+			if filepath.IsAbs(target) || strings.HasPrefix(r.New.Path, "/") {
+				return fmt.Errorf("%w: %s replaces %s with the absolute path %s", platform.ErrUnsafeCheckout, filepath.ToSlash(rel), r.Old.Path, r.New.Path)
+			}
+			abs := filepath.Join(filepath.Dir(mod), target)
+			if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+				abs = resolved
+			}
+			if r2, err := filepath.Rel(root, abs); err != nil || r2 == ".." || strings.HasPrefix(r2, ".."+string(filepath.Separator)) {
+				return fmt.Errorf("%w: %s replaces %s with %s, which is outside the repository", platform.ErrUnsafeCheckout, filepath.ToSlash(rel), r.Old.Path, r.New.Path)
+			}
+		}
+	}
+	return nil
 }

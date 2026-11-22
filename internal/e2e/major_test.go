@@ -2,6 +2,9 @@ package e2e
 
 import (
 	"context"
+	"github.com/taumatix/ripple/internal/model"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -398,4 +401,88 @@ func TestMajorSuffixShapes(t *testing.T) {
 			})
 		})
 	}
+}
+
+// A hostile repo must not make ripple's go invocation touch the server. Each case
+// plants something go would follow out of the checkout; the outside file must be
+// byte-identical afterwards, the job failed for good, and no pull request exists.
+func TestMajorRefusesUnsafeCheckout(t *testing.T) {
+	const secret = "TOP SECRET: not for a pull request\n"
+	for _, tc := range []struct {
+		name  string
+		files func(outside string) map[string]string
+	}{
+		{"symlinked go.sum", func(outside string) map[string]string {
+			return map[string]string{"go.sum": "symlink:" + outside}
+		}},
+		{"replace to absolute path", func(outside string) map[string]string {
+			return map[string]string{"go.mod": fxGoMod + "\nreplace example.com/x => " + filepath.Dir(outside) + "\n"}
+		}},
+		{"replace outside the repository", func(string) map[string]string {
+			return map[string]string{"go.mod": fxGoMod + "\nreplace example.com/x => ../../etc\n"}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			forEach(t, func(t *testing.T, st store.Store) {
+				outside := filepath.Join(t.TempDir(), "outside")
+				if err := os.WriteFile(outside, []byte(secret), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				e := majorEnv(t, st, tc.files(outside), "NewClient")
+				start(t, e, "acme/ghclient", "acme/unrelated")
+				e.clock.Advance(time.Minute)
+				e.publish(ghV61, "v61.0.0")
+				e.tick()
+
+				if prs := e.gh.PRs("acme/ghclient"); len(prs) != 0 {
+					t.Fatalf("want no PR, got %+v", prs)
+				}
+				got, err := os.ReadFile(outside)
+				if err != nil || string(got) != secret {
+					t.Fatalf("outside file changed: %q, %v", got, err)
+				}
+				j := e.job("acme/ghclient", ghV61, "v61.0.0")
+				if j.State != model.JobFailed || !strings.Contains(j.Reason, "unsafe checkout") {
+					t.Errorf("job state=%v reason=%q, want failed with an unsafe checkout reason", j.State, j.Reason)
+				}
+			})
+		})
+	}
+}
+
+func TestMajorSkipsUnparsableAndIgnoredDirs(t *testing.T) {
+	forEach(t, func(t *testing.T, st store.Store) {
+		const broken = "package main\n\nimport (\n\t\"github.com/google/go-github/v60/github\"\n"
+		e := majorEnv(t, st, map[string]string{
+			"testdata/x.go":  broken,
+			"testdata/y.go":  fxSub,
+			"_scratch/z.go":  fxSub,
+			".hidden/h.go":   fxSub,
+			"broken/real.go": broken,
+		}, "NewClient")
+		start(t, e, "acme/ghclient", "acme/unrelated")
+		e.clock.Advance(time.Minute)
+		e.publish(ghV61, "v61.0.0")
+		e.tick()
+
+		prs := e.gh.PRs("acme/ghclient")
+		if len(prs) != 1 {
+			t.Fatalf("one unparsable file must not fail the job; PRs = %+v", prs)
+		}
+		pr := prs[0]
+		if !strings.Contains(pr.Body, "Files not rewritten") || !strings.Contains(pr.Body, "`broken/real.go`") {
+			t.Errorf("body should list the unparsable file:\n%s", pr.Body)
+		}
+		if strings.Contains(pr.Body, "testdata/x.go") {
+			t.Errorf("testdata is ignored by go and must not be reported:\n%s", pr.Body)
+		}
+		for f, w := range map[string]string{
+			"testdata/x.go": broken, "testdata/y.go": fxSub, "_scratch/z.go": fxSub, ".hidden/h.go": fxSub,
+			"broken/real.go": broken, "main.go": fxMainWant, "sub/sub.go": fxSubWant,
+		} {
+			if got, _ := e.gh.FileAt("acme/ghclient", pr.Head, f); got != w {
+				t.Errorf("%s:\n%s\nwant:\n%s", f, got, w)
+			}
+		}
+	})
 }

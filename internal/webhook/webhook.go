@@ -50,8 +50,9 @@ type Event struct {
 	Files         []string
 }
 
-// Sink consumes events. Returning an error makes the receiver answer 503 so
-// GitHub can redeliver.
+// Sink consumes events. Returning an error makes the receiver answer 503, but
+// GitHub does not redeliver a failed delivery on its own: the event is lost unless
+// someone redelivers it from the App's "Recent Deliveries" page or the API.
 type Sink interface {
 	Handle(ctx context.Context, e Event) error
 }

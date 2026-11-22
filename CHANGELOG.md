@@ -17,3 +17,18 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
   rewritten with `go/parser`, verified with `go mod tidy`, `go build` and `go vet`, opened as a
   labelled `[major]` PR (a draft with the compiler output if verification fails), never auto-merged
   unless the repo file says `automerge: major`. New server setting `RIPPLE_GOPROXY`.
+
+### Security
+- `go` is no longer run in a checkout containing a symlinked `go.mod`, `go.sum`, `go.work` or `.go`
+  file, or a `replace` to an absolute or out-of-repository path; the job fails permanently, no PR.
+
+### Fixed
+- The regex manager replaced only some matches when several patterns matched out of offset order;
+  matches are now sorted, and overlapping ones are rejected.
+- A major bump no longer fails because one `.go` file does not parse (it is listed in the PR body),
+  and no longer rewrites `testdata/` or directories starting with `_` or `.`.
+- Corrected the `webhook.Sink` comment: GitHub does not redeliver a failed webhook by itself.
+
+### Documentation
+- README section "Known limitations and security model"; ROADMAP entries for an OS sandbox,
+  durable per-installation queues, scan bounds, webhook body bounds, per-command tokens and delivery dedupe.

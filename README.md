@@ -123,6 +123,26 @@ Minor and patch PRs edit `go.mod` only; `go.sum` is refreshed only for major bum
 is the top of the roadmap for the rest). Releases are stored only
 for packages that have dependents.
 
+## Known limitations and security model
+
+ripple runs `git` and `go` on repositories it does not trust. **There is no OS-level sandbox.**
+What exists is: a scrubbed environment (no inherited secrets, `GOENV=off`, `GOTOOLCHAIN=local`,
+`GOWORK=off`, `GOVCS=*:off`, an allowlist of three `go` commands), the installation token kept out of
+the build, and, before any `go` process starts, a refusal to run in a checkout where a `go.mod`,
+`go.sum`, `go.work` or `.go` file is a symbolic link, or where a `replace` directive points at an
+absolute path or outside the repository. Such a job fails permanently with a clear reason and opens no
+pull request. These checks stop the known write and read escapes; they do not contain a build that runs hostile code (a malicious dependency or a toolchain bug is
+outside what they can promise).
+
+Operators should therefore run ripple as an unprivileged user in a container where only the
+workspace directory is writable, the root filesystem is read-only, and egress is restricted to
+GitHub, the module index and the Go proxy. Do not mount credentials other than the App key's
+secret store, and do not run it on a host with access to a private network.
+
+Other limits: webhook events are processed one at a time and are lost, not replayed, when the
+server is overloaded or down; a replayed signed delivery is accepted again. See
+[ROADMAP.md](ROADMAP.md) for the planned fixes.
+
 ## Upstream contracts
 
 The feed format and GitHub API version ripple was built against, with check dates: [UPSTREAM.md](UPSTREAM.md).

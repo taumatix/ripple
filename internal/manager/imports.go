@@ -20,11 +20,14 @@ import (
 // byte for byte, so comments, string constants, alias names and "." and "_" imports
 // are untouched. It must run on the go.mod as it was before the migration:
 // requirements of the same module that live below oldPath keep the packages they
-// own. It returns the files it changed.
-func RewriteGoImports(ws platform.Workspace, goModFile, oldPath, newPath string, goMod []byte) ([]string, error) {
+// own. Directories the go tool ignores (testdata, and names starting with "_" or
+// ".") are left alone. A file that does not parse is skipped, not fatal: it is
+// returned in skipped so the caller can tell a human. It returns the files it
+// changed.
+func RewriteGoImports(ws platform.Workspace, goModFile, oldPath, newPath string, goMod []byte) (changed, skipped []string, err error) {
 	f, err := modfile.ParseLax(goModFile, goMod, nil)
 	if err != nil {
-		return nil, fmt.Errorf("parse %s: %w", goModFile, err)
+		return nil, nil, fmt.Errorf("parse %s: %w", goModFile, err)
 	}
 	var nested []string // other modules required below oldPath: they own their packages
 	for _, r := range f.Require {
@@ -39,37 +42,52 @@ func RewriteGoImports(ws platform.Workspace, goModFile, oldPath, newPath string,
 		switch {
 		case path.Base(p) == "go.mod":
 			modRoots[path.Dir(p)] = true
-		case strings.HasSuffix(p, ".go"):
+		case strings.HasSuffix(p, ".go") && !ignoredByGo(p):
 			gofiles = append(gofiles, p)
 		}
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	sort.Strings(gofiles)
-	var changed []string
 	for _, p := range gofiles {
 		if owner(p, modRoots) != root {
 			continue
 		}
 		src, err := ws.ReadFile(p)
 		if err != nil {
-			return changed, err
+			return changed, skipped, err
 		}
 		out, n, err := rewriteImports(p, src, oldPath, newPath, nested)
 		if err != nil {
-			return changed, err
+			skipped = append(skipped, p)
+			continue
 		}
 		if n == 0 {
 			continue
 		}
 		if err := ws.WriteFile(p, out); err != nil {
-			return changed, err
+			return changed, skipped, err
 		}
 		changed = append(changed, p)
 	}
-	return changed, nil
+	return changed, skipped, nil
+}
+
+// ignoredByGo reports whether the go tool skips the directory chain of p: testdata,
+// or a directory whose name starts with "_" or ".".
+func ignoredByGo(p string) bool {
+	dirs := strings.Split(path.Dir(p), "/")
+	for _, d := range dirs {
+		if d == "." && len(dirs) == 1 {
+			continue
+		}
+		if d == "testdata" || strings.HasPrefix(d, "_") || strings.HasPrefix(d, ".") {
+			return true
+		}
+	}
+	return false
 }
 
 // owner is the directory of the nearest go.mod above file p.

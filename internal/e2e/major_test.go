@@ -486,3 +486,85 @@ func TestMajorSkipsUnparsableAndIgnoredDirs(t *testing.T) {
 		}
 	})
 }
+
+const (
+	genOld = `package main
+
+//go:generate go run github.com/google/go-github/v60/github/dot -out gen.txt
+//go:generate -command dot go run github.com/google/go-github/v60/github/dot
+//go:generate go run github.com/google/go-github/v60/github/dot@latest
+//go:generate mockgen github.com/google/go-github/v60/github Client
+//go:generate go run ./local
+
+// A directive inside a comment, a string or a raw string is not a directive:
+// //go:generate go run github.com/google/go-github/v60/github/dot
+var inString = "\n//go:generate go run github.com/google/go-github/v60/github/dot"
+
+var inRaw = ` + "`" + `
+//go:generate go run github.com/google/go-github/v60/github/dot
+` + "`" + `
+`
+	genWant = `package main
+
+//go:generate go run github.com/google/go-github/v61/github/dot -out gen.txt
+//go:generate -command dot go run github.com/google/go-github/v61/github/dot
+//go:generate go run github.com/google/go-github/v60/github/dot@latest
+//go:generate mockgen github.com/google/go-github/v60/github Client
+//go:generate go run ./local
+
+// A directive inside a comment, a string or a raw string is not a directive:
+// //go:generate go run github.com/google/go-github/v60/github/dot
+var inString = "\n//go:generate go run github.com/google/go-github/v60/github/dot"
+
+var inRaw = ` + "`" + `
+//go:generate go run github.com/google/go-github/v60/github/dot
+` + "`" + `
+`
+	genTagged     = "//go:build integration\n\npackage main\n\n//go:generate go run github.com/google/go-github/v60/github/dot\n"
+	genTaggedWant = "//go:build integration\n\npackage main\n\n//go:generate go run github.com/google/go-github/v61/github/dot\n"
+	mirrorOld     = "package mirror // import \"github.com/google/go-github/v60/github/mirror\"\n"
+	mirrorWant    = "package mirror // import \"github.com/google/go-github/v61/github/mirror\"\n"
+	// Other import comments are the repository's own and stay.
+	ownComment = "package own // import \"example.com/ghclient/own\"\n"
+	// A copy of the library under a nested module keeps its own paths.
+	vendoredGen = "package vendored\n\n//go:generate go run github.com/google/go-github/v60/github/dot\n"
+)
+
+func TestMajorRewritesGenerateAndImportComments(t *testing.T) {
+	forEach(t, func(t *testing.T, st store.Store) {
+		e := majorEnv(t, st, map[string]string{
+			"gen.go":                      genOld,
+			"gen_tagged.go":               genTagged,
+			"mirror/mirror.go":            mirrorOld,
+			"own/own.go":                  ownComment,
+			"testdata/gen.go":             genOld,
+			"third_party/vendored/gen.go": vendoredGen,
+		}, "NewClient")
+		start(t, e, "acme/ghclient")
+		e.clock.Advance(time.Minute)
+		e.publish(ghV61, "v61.0.0")
+		e.tick()
+
+		prs := e.gh.PRs("acme/ghclient")
+		if len(prs) != 1 || prs[0].Draft {
+			t.Fatalf("want one non-draft PR (it builds), got %+v", prs)
+		}
+		pr := prs[0]
+		for f, w := range map[string]string{
+			"gen.go": genWant, "gen_tagged.go": genTaggedWant, "mirror/mirror.go": mirrorWant,
+			"own/own.go": ownComment, "testdata/gen.go": genOld, "third_party/vendored/gen.go": vendoredGen,
+		} {
+			if got, _ := e.gh.FileAt("acme/ghclient", pr.Head, f); got != w {
+				t.Errorf("%s:\n--- got\n%s\n--- want\n%s", f, got, w)
+			}
+		}
+		if !strings.Contains(pr.Body, "Old path left in place") || !strings.Contains(pr.Body, "`gen.go:5`") || !strings.Contains(pr.Body, "`gen.go:6`") {
+			t.Errorf("body should list the ambiguous directives:\n%s", pr.Body)
+		}
+		for _, no := range []string{"`gen.go:3`", "`gen.go:4`", "gen_tagged.go", "testdata"} {
+			if strings.Contains(pr.Body, no) {
+				t.Errorf("body should not list %s:\n%s", no, pr.Body)
+			}
+		}
+	})
+}

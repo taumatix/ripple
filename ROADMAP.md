@@ -85,8 +85,10 @@ Everything else:
    rewrites unrelated lines; consider limiting the PR to the dependency's own `go.sum` entries.
 21. **Go toolchain and `go` directive bumps.** Propose `toolchain` and `go` line updates as their own
    update type, from the Go release feed.
-22. **Rewrite `go:generate` lines and `// import` comments on a major bump.** Only import specs are
-   rewritten now; `go run example.com/m/v2/cmd/x` in a directive and canonical import comments are not.
+22. **Directive residuals on a major bump.** `go:generate` lines are rewritten only for a plain
+   `go run <package>`; the rest is reported in the PR body, not changed. Handle `go run pkg@vX` (pick a
+   version of the new major), other generators that take import paths (`mockgen`, `stringer -type`), and
+   `go tool`; examine directives in files whose body does not parse.
 23. **Verify with cgo and private modules.** The sandbox builds with `CGO_ENABLED=0` (cgo files are
    rewritten but not compiled) and only from `RIPPLE_GOPROXY`; support a toolchain image with C
    headers and credentials for private proxies, without exposing the App token to the build.

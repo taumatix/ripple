@@ -26,6 +26,9 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
 - Fan-out loads and parses a repo's config once per release instead of once per dependency row.
 
 ### Added
+- A major bump now also rewrites `//go:generate go run <package>` lines and canonical `// import "..."`
+  comments, and lists directives that still mention the old path in the PR body. `manager.RewriteGo` returns
+  that report; `RewriteGoImports` keeps its signature.
 - Every Go update, not only majors, runs `go mod tidy`, build and vet in the modules it edits, so minor and
   patch PRs carry a correct `go.sum`; a failure opens a draft with the output.
 - Multi-module repos: other modules that require the updated dependency or an edited module are tidied and

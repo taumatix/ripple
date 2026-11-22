@@ -3,6 +3,9 @@ package app
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -18,8 +21,6 @@ import (
 	"github.com/taumatix/ripple/internal/webhook"
 )
 
-var errQueueFull = errors.New("event queue full")
-
 type App struct {
 	Engine  *engine.Engine
 	Watcher *engine.Watcher
@@ -27,24 +28,57 @@ type App struct {
 	Log     *slog.Logger
 	// PollEvery is the feed poll and job run period; zero disables the loop (tests call Tick).
 	PollEvery time.Duration
+	// Queue holds received events until they are handled; nil means a Queue with
+	// its defaults over Engine.Store. Its Store and Process are filled in when unset.
+	Queue *Queue
 
-	events chan webhook.Event
-	once   sync.Once
+	once sync.Once
+	jobs engine.JobRunner
 }
 
 func (a *App) init() {
-	a.once.Do(func() { a.events = make(chan webhook.Event, 1024) })
+	a.once.Do(func() {
+		if a.Queue == nil {
+			a.Queue = &Queue{}
+		}
+		if a.Queue.Store == nil {
+			a.Queue.Store = a.Engine.Store
+		}
+		if a.Queue.Process == nil {
+			a.Queue.Process = a.process
+		}
+		if a.Queue.Log == nil {
+			a.Queue.Log = a.Log
+		}
+		a.jobs.Engine = a.Engine
+	})
 }
 
-// Handle queues a verified event so the HTTP response does not wait on a clone.
-func (a *App) Handle(_ context.Context, ev webhook.Event) error {
+// maxDeliveryID is the longest X-GitHub-Delivery used as-is in an event id (GitHub sends a 36-character GUID).
+const maxDeliveryID = 64
+
+// Handle persists a verified event, one queued event per repo, so the HTTP response
+// does not wait on a clone and a restart does not lose it. ErrBacklogFull (the
+// receiver answers 503) when the backlog is at its cap.
+func (a *App) Handle(ctx context.Context, ev webhook.Event) error {
 	a.init()
-	select {
-	case a.events <- ev:
-		return nil
-	default:
-		return errQueueFull
+	prefix := ev.Delivery
+	switch {
+	case prefix == "":
+		b := make([]byte, 12)
+		_, _ = rand.Read(b)
+		prefix = "nodelivery-" + hex.EncodeToString(b)
+	case len(prefix) > maxDeliveryID:
+		// The header is unsigned and unbounded; a store key is not (DynamoDB: 2 KB).
+		h := sha256.Sum256([]byte(prefix))
+		prefix = "sha256-" + hex.EncodeToString(h[:])
 	}
+	evs := make([]model.Event, 0, len(ev.Repos))
+	for i, repo := range ev.Repos {
+		evs = append(evs, model.Event{ID: fmt.Sprintf("%s/%d", prefix, i), InstallationID: ev.InstallationID,
+			Kind: ev.Kind, Repo: repo, Ref: ev.Ref, Files: ev.Files})
+	}
+	return a.Queue.Add(ctx, evs...)
 }
 
 // Handler serves POST /webhook and GET /healthz.
@@ -63,10 +97,16 @@ func (a *App) Run(ctx context.Context, ln net.Listener) error {
 	go func() { errc <- srv.Serve(ln) }()
 	var wg sync.WaitGroup
 	wg.Add(1)
-	go func() { defer wg.Done(); a.eventLoop(ctx) }()
+	go func() {
+		defer wg.Done()
+		if err := a.Queue.Run(ctx); err != nil {
+			a.Log.Error("event queue", "err", err)
+		}
+	}()
 	if a.PollEvery > 0 {
-		wg.Add(1)
-		go func() { defer wg.Done(); a.tickLoop(ctx) }()
+		wg.Add(2)
+		go func() { defer wg.Done(); a.pollLoop(ctx) }()
+		go func() { defer wg.Done(); a.jobs.Run(ctx, a.PollEvery) }()
 	}
 	var err error
 	select {
@@ -83,19 +123,6 @@ func (a *App) Run(ctx context.Context, ln net.Listener) error {
 	return err
 }
 
-func (a *App) eventLoop(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case ev := <-a.events:
-			if err := a.process(ctx, ev); err != nil {
-				a.Log.Error("event failed", "kind", ev.Kind, "err", err)
-			}
-		}
-	}
-}
-
 // Tick runs one feed poll and one pass over due jobs; exported for tests and for
 // operators who drive it from cron.
 func (a *App) Tick(ctx context.Context) {
@@ -109,11 +136,20 @@ func (a *App) Tick(ctx context.Context) {
 	}
 }
 
-func (a *App) tickLoop(ctx context.Context) {
+// pollLoop polls the feed every PollEvery. Jobs run on their own loop (see
+// engine.JobRunner), so a slow job never delays the next poll.
+func (a *App) pollLoop(ctx context.Context) {
 	t := time.NewTicker(a.PollEvery)
 	defer t.Stop()
 	for {
-		a.Tick(ctx)
+		if n, err := a.Watcher.Poll(ctx); err != nil {
+			if ctx.Err() == nil {
+				a.Log.Error("feed poll", "err", err)
+			}
+		} else if n > 0 {
+			a.Log.Info("feed poll enqueued jobs", "jobs", n)
+			a.jobs.Wake()
+		}
 		select {
 		case <-ctx.Done():
 			return
@@ -122,30 +158,23 @@ func (a *App) tickLoop(ctx context.Context) {
 	}
 }
 
-func (a *App) process(ctx context.Context, ev webhook.Event) error {
-	var errs []error
-	for _, name := range ev.Repos {
-		switch ev.Kind {
-		case "repos_added":
-			if err := a.Engine.Scan(ctx, model.Repo{FullName: name, InstallationID: ev.InstallationID}); err != nil {
-				errs = append(errs, err)
-			}
-		case "repos_removed":
-			if err := a.Engine.Remove(ctx, name); err != nil {
-				errs = append(errs, err)
-			}
-		case "push":
-			if err := a.push(ctx, name, ev); err != nil {
-				errs = append(errs, err)
-			}
-		}
+// process handles one queued event.
+func (a *App) process(ctx context.Context, ev model.Event) error {
+	switch ev.Kind {
+	case "repos_added":
+		return a.Engine.Scan(ctx, model.Repo{FullName: ev.Repo, InstallationID: ev.InstallationID})
+	case "repos_removed":
+		return a.Engine.Remove(ctx, ev.Repo)
+	case "push":
+		return a.push(ctx, ev.Repo, ev)
 	}
-	return errors.Join(errs...)
+	a.Log.Warn("unknown queued event kind; dropped", "kind", ev.Kind, "event", ev.ID)
+	return nil
 }
 
 // push re-scans a registered repo when its default branch changed a file a manager
 // or the config cares about.
-func (a *App) push(ctx context.Context, name string, ev webhook.Event) error {
+func (a *App) push(ctx context.Context, name string, ev model.Event) error {
 	repo, ok, err := a.Engine.Store.GetRepo(ctx, name)
 	if err != nil || !ok {
 		return err

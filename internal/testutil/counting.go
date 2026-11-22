@@ -15,6 +15,31 @@ type CountingPlatform struct {
 
 	mu    sync.Mutex
 	calls map[string]int
+	held  map[string]chan struct{}
+}
+
+// Hold makes every Checkout of repo block until Release (or its context ends), so a
+// test can keep a scan or a job busy for as long as it needs.
+func (c *CountingPlatform) Hold(repo string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.held == nil {
+		c.held = map[string]chan struct{}{}
+	}
+	if c.held[repo] == nil {
+		c.held[repo] = make(chan struct{})
+	}
+}
+
+// Release unblocks the checkouts of repo held by Hold.
+func (c *CountingPlatform) Release(repo string) {
+	c.mu.Lock()
+	ch := c.held[repo]
+	delete(c.held, repo)
+	c.mu.Unlock()
+	if ch != nil {
+		close(ch)
+	}
 }
 
 func (c *CountingPlatform) hit(repo string) {
@@ -35,6 +60,16 @@ func (c *CountingPlatform) Calls(repo string) int {
 
 func (c *CountingPlatform) Checkout(ctx context.Context, r model.Repo) (platform.Workspace, error) {
 	c.hit(r.FullName)
+	c.mu.Lock()
+	ch := c.held[r.FullName]
+	c.mu.Unlock()
+	if ch != nil {
+		select {
+		case <-ch:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 	return c.Inner.Checkout(ctx, r)
 }
 

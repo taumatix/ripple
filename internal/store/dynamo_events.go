@@ -72,8 +72,9 @@ func (d *Dynamo) UpdateEvent(ctx context.Context, e model.Event) error {
 	_, err := d.db.UpdateItem(ctx, &dynamodb.UpdateItemInput{
 		TableName:                 &d.table,
 		Key:                       map[string]types.AttributeValue{"PK": s("EVENT#" + e.ID), "SK": s("META")},
-		UpdateExpression:          aws.String("SET Attempts = :a, NotBefore = :nb"),
+		UpdateExpression:          aws.String("SET #a = :a, #nb = :nb"),
 		ConditionExpression:       aws.String("attribute_exists(PK)"),
+		ExpressionAttributeNames:  map[string]string{"#a": "Attempts", "#nb": "NotBefore"},
 		ExpressionAttributeValues: map[string]types.AttributeValue{":a": &types.AttributeValueMemberN{Value: fmt.Sprint(e.Attempts)}, ":nb": s(ts(e.NotBefore))},
 	})
 	var cc *types.ConditionalCheckFailedException

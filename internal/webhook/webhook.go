@@ -54,7 +54,9 @@ func Verify(secret, body []byte, header string) bool {
 type Event struct {
 	Kind           string // "repos_added", "repos_removed", "push"
 	InstallationID int64
-	Repos          []string
+	// Delivery is the X-GitHub-Delivery header, empty when absent. It is unsigned.
+	Delivery string
+	Repos    []string
 	// push only
 	Ref           string
 	DefaultBranch string
@@ -219,6 +221,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	ev.Delivery = delivery
 	if !h.claim(delivery) {
 		h.Log.Info("webhook duplicate delivery dropped", "delivery", delivery)
 		w.WriteHeader(http.StatusAccepted)

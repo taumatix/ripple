@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/taumatix/ripple/internal/model"
 	"github.com/taumatix/ripple/internal/store"
+	"github.com/taumatix/ripple/internal/webhook"
 )
 
 // gate blocks Process for the repos it holds until they are released, and records
@@ -233,4 +235,25 @@ func TestRestartResumesQueuedEvents(t *testing.T) {
 		t.Fatalf("resumed out of order: %v", g2.handled())
 	}
 	eventually(t, "store drained", func() bool { return stored(t, st) == 0 })
+}
+
+func TestHandleSplitsADeliveryIntoOneEventPerRepo(t *testing.T) {
+	st := store.NewMemory()
+	a := &App{Engine: nil, Queue: &Queue{Store: st, Process: newGate().process}}
+	long := strings.Repeat("x", 5000)
+	if err := a.Handle(context.Background(), webhook.Event{Kind: "repos_added", InstallationID: 7, Delivery: "abc", Repos: []string{"acme/a", "acme/b"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Handle(context.Background(), webhook.Event{Kind: "push", InstallationID: 7, Delivery: long, Repos: []string{"acme/a"}, Ref: "refs/heads/main", Files: []string{"go.mod"}}); err != nil {
+		t.Fatal(err)
+	}
+	// The same delivery again, as a manual redelivery while it is still queued.
+	_ = a.Handle(context.Background(), webhook.Event{Kind: "repos_added", InstallationID: 7, Delivery: "abc", Repos: []string{"acme/a", "acme/b"}})
+	evs, _ := st.ListEvents(context.Background())
+	if len(evs) != 3 || evs[0].ID != "abc/0" || evs[0].Repo != "acme/a" || evs[1].ID != "abc/1" || evs[1].Repo != "acme/b" {
+		t.Fatalf("events: %+v", evs)
+	}
+	if p := evs[2]; len(p.ID) > 80 || p.Kind != "push" || p.Ref != "refs/heads/main" || fmt.Sprint(p.Files) != "[go.mod]" {
+		t.Fatalf("push event: %+v", p)
+	}
 }

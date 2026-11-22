@@ -82,3 +82,20 @@ func TestServerLoopbackHTTPAllowed(t *testing.T) {
 		}
 	}
 }
+
+func TestServerEventQueue(t *testing.T) {
+	s, err := LoadServer(env(base))
+	if err != nil || s.EventWorkers != 4 || s.EventWorkersPerInstallation != 2 || s.EventBacklog != 10_000 || s.EventInstallationBacklog != 1_000 {
+		t.Fatalf("defaults: %+v, %v", s, err)
+	}
+	s, err = LoadServer(env(with("RIPPLE_EVENT_WORKERS", "8", "RIPPLE_EVENT_WORKERS_PER_INSTALLATION", "3",
+		"RIPPLE_EVENT_BACKLOG", "50", "RIPPLE_EVENT_INSTALLATION_BACKLOG", "20")))
+	if err != nil || s.EventWorkers != 8 || s.EventWorkersPerInstallation != 3 || s.EventBacklog != 50 || s.EventInstallationBacklog != 20 {
+		t.Fatalf("set: %+v, %v", s, err)
+	}
+	for _, k := range []string{"RIPPLE_EVENT_WORKERS", "RIPPLE_EVENT_WORKERS_PER_INSTALLATION", "RIPPLE_EVENT_BACKLOG", "RIPPLE_EVENT_INSTALLATION_BACKLOG"} {
+		if _, err := LoadServer(env(with(k, "0"))); err == nil {
+			t.Errorf("%s=0 accepted", k)
+		}
+	}
+}

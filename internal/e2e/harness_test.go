@@ -57,6 +57,9 @@ type env struct {
 	hook  string
 	ticks int
 	logs  *syncBuf
+
+	newApp  func() *app.App
+	stopApp func()
 }
 
 // syncBuf collects the engine's log so tests can assert on what was warned.
@@ -96,7 +99,20 @@ func defaultLimits() rules.Limits {
 	return rules.Limits{MinimumReleaseAge: 0, OpenPRLimit: 5, AllowAutomerge: true}
 }
 
+// opts are the knobs a few tests turn; the zero value is what newEnv uses.
+type opts struct {
+	// pollEvery runs the app's own poll and job loops; zero leaves them to e.tick.
+	pollEvery time.Duration
+	// queue configures the event queue; nil keeps its defaults.
+	queue func(q *app.Queue)
+}
+
 func newEnv(t *testing.T, st store.Store, lim rules.Limits) *env {
+	t.Helper()
+	return newEnvOpts(t, st, lim, opts{})
+}
+
+func newEnvOpts(t *testing.T, st store.Store, lim rules.Limits, o opts) *env {
 	t.Helper()
 	e := &env{t: t, st: st, gh: testutil.NewGitHub(t), idx: testutil.NewIndex(t), clock: &clock{t: t0}, proxy: testutil.NewGoProxy(t), logs: &syncBuf{}}
 	gh := &github.Client{APIBase: e.gh.APIURL, GitBase: e.gh.GitBase, Tokens: e.gh.Auth, WorkDir: t.TempDir(),
@@ -104,8 +120,24 @@ func newEnv(t *testing.T, st store.Store, lim rules.Limits) *env {
 		Log: slog.New(slog.NewTextHandler(testWriter{t}, nil))}
 	e.plat = &testutil.CountingPlatform{Inner: gh}
 	eng := &engine.Engine{Store: st, Platform: e.plat, Limits: lim, Now: e.clock.Now, Workers: 2, Log: slog.New(slog.NewTextHandler(io.MultiWriter(testWriter{t}, e.logs), nil))}
-	e.app = &app.App{Engine: eng, Secret: []byte(secret), Log: slog.New(slog.NewTextHandler(testWriter{t}, nil)),
-		Watcher: &engine.Watcher{Engine: eng, Feed: &feed.GoIndex{BaseURL: e.idx.URL}}}
+	e.newApp = func() *app.App {
+		a := &app.App{Engine: eng, Secret: []byte(secret), Log: slog.New(slog.NewTextHandler(testWriter{t}, nil)),
+			PollEvery: o.pollEvery, Queue: &app.Queue{},
+			Watcher: &engine.Watcher{Engine: eng, Feed: &feed.GoIndex{BaseURL: e.idx.URL}}}
+		if o.queue != nil {
+			o.queue(a.Queue)
+		}
+		return a
+	}
+	e.startApp()
+	return e
+}
+
+// startApp serves a fresh App over the env's store, platform and clock; stopApp ends
+// it the way a SIGTERM does. Together they are a process restart.
+func (e *env) startApp() {
+	t := e.t
+	e.app = e.newApp()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -114,13 +146,16 @@ func newEnv(t *testing.T, st store.Store, lim rules.Limits) *env {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- e.app.Run(ctx, ln) }()
-	t.Cleanup(func() {
-		cancel()
-		if err := <-done; err != nil {
-			t.Errorf("app.Run: %v", err)
-		}
-	})
-	return e
+	var once sync.Once
+	e.stopApp = func() {
+		once.Do(func() {
+			cancel()
+			if err := <-done; err != nil {
+				t.Errorf("app.Run: %v", err)
+			}
+		})
+	}
+	t.Cleanup(e.stopApp)
 }
 
 type testWriter struct{ t *testing.T }

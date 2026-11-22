@@ -296,3 +296,18 @@ func TestRegexOverlappingMatchesRejected(t *testing.T) {
 		t.Fatal("want an error for overlapping matches")
 	}
 }
+
+func TestMigrateGoWorkReplace(t *testing.T) {
+	in := "go 1.22\n\nuse ./a\n\nreplace example.com/lib => ../fork\n\nreplace example.com/lib v1.0.0 => example.com/other v1.0.0\n\nreplace example.com/keep => ../keep\n"
+	out, changed, err := RewriteGoWork([]byte(in), "example.com/lib", "example.com/lib/v2")
+	if err != nil || !changed {
+		t.Fatalf("changed=%v err=%v", changed, err)
+	}
+	want := "go 1.22\n\nuse ./a\n\nreplace example.com/keep => ../keep\n\nreplace example.com/lib/v2 => ../fork\n"
+	if string(out) != want {
+		t.Errorf("got:\n%s\nwant:\n%s", out, want)
+	}
+	if _, changed, _ := RewriteGoWork([]byte("go 1.22\n\nuse ./a\n"), "example.com/lib", "example.com/lib/v2"); changed {
+		t.Errorf("a go.work that never names the path must be left alone")
+	}
+}

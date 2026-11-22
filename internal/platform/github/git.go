@@ -15,6 +15,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -267,13 +268,17 @@ func (w *workspace) CommitAndPush(ctx context.Context, branch, message string) (
 	return true, nil
 }
 
-var goCommands = map[string]bool{"mod tidy": true, "build ./...": true, "vet ./...": true}
+var goCommands = map[string]bool{"mod tidy": true, "mod vendor": true, "build ./...": true, "vet ./...": true, "work sync": true}
 
 const goTimeout = 10 * time.Minute
 
 func (w *workspace) RunGo(ctx context.Context, dir string, args ...string) (string, error) {
 	if !goCommands[strings.Join(args, " ")] {
 		return "", fmt.Errorf("go %s is not allowed", strings.Join(args, " "))
+	}
+	inWork := platform.InWorkspaceMode(ctx)
+	if args[0] == "work" && !inWork {
+		return "", fmt.Errorf("go %s needs workspace mode", strings.Join(args, " "))
 	}
 	if !fs.ValidPath(dir) || dir == ".git" || strings.HasPrefix(dir, ".git/") {
 		return "", fmt.Errorf("invalid directory %q", dir)
@@ -320,6 +325,9 @@ func (w *workspace) RunGo(ctx context.Context, dir string, args ...string) (stri
 	if w.c.GoSumDB != "" {
 		env = append(env, "GOSUMDB="+w.c.GoSumDB)
 	}
+	if inWork {
+		env = slices.DeleteFunc(env, func(kv string) bool { return kv == "GOWORK=off" })
+	}
 	ctx, cancel := context.WithTimeout(ctx, goTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, gobin, args...)
@@ -361,7 +369,7 @@ func (w *workspace) Close() error {
 // whose contents then surface in error output. No go process has started when this
 // returns an error. root must already be symlink-resolved.
 func checkGoSafe(root string) error {
-	var mods []string
+	var mods, works []string
 	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -374,19 +382,27 @@ func checkGoSafe(root string) error {
 			return nil
 		}
 		name := d.Name()
-		if name != "go.mod" && name != "go.sum" && name != "go.work" && !strings.HasSuffix(name, ".go") {
+		if name != "go.mod" && name != "go.sum" && name != "go.work" && name != "go.work.sum" && !strings.HasSuffix(name, ".go") {
 			return nil
 		}
 		if d.Type()&fs.ModeSymlink != 0 {
 			return fmt.Errorf("%w: %s is a symbolic link", platform.ErrUnsafeCheckout, filepath.ToSlash(rel))
 		}
-		if name == "go.mod" {
+		switch name {
+		case "go.mod":
 			mods = append(mods, p)
+		case "go.work":
+			works = append(works, p)
 		}
 		return nil
 	})
 	if err != nil {
 		return err
+	}
+	for _, work := range works {
+		if err := checkWorkSafe(root, work); err != nil {
+			return err
+		}
 	}
 	for _, mod := range mods {
 		data, err := os.ReadFile(mod)
@@ -413,6 +429,43 @@ func checkGoSafe(root string) error {
 			if r2, err := filepath.Rel(root, abs); err != nil || r2 == ".." || strings.HasPrefix(r2, ".."+string(filepath.Separator)) {
 				return fmt.Errorf("%w: %s replaces %s with %s, which is outside the repository", platform.ErrUnsafeCheckout, filepath.ToSlash(rel), r.Old.Path, r.New.Path)
 			}
+		}
+	}
+	return nil
+}
+
+// checkWorkSafe refuses a go.work that points outside the repository: with the
+// workspace on, a use directive or a directory replace is read like a module.
+func checkWorkSafe(root, work string) error {
+	data, err := os.ReadFile(work)
+	if err != nil {
+		return err
+	}
+	f, err := modfile.ParseWork(work, data, nil)
+	if err != nil {
+		return nil // go will report the syntax error itself
+	}
+	rel, _ := filepath.Rel(root, work)
+	rel = filepath.ToSlash(rel)
+	inside := func(p string) bool {
+		if filepath.IsAbs(filepath.FromSlash(p)) || strings.HasPrefix(p, "/") {
+			return false
+		}
+		abs := filepath.Join(filepath.Dir(work), filepath.FromSlash(p))
+		if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+			abs = resolved
+		}
+		r, err := filepath.Rel(root, abs)
+		return err == nil && r != ".." && !strings.HasPrefix(r, ".."+string(filepath.Separator))
+	}
+	for _, u := range f.Use {
+		if !inside(u.Path) {
+			return fmt.Errorf("%w: %s uses %s, which is outside the repository", platform.ErrUnsafeCheckout, rel, u.Path)
+		}
+	}
+	for _, r := range f.Replace {
+		if modfile.IsDirectoryPath(r.New.Path) && !inside(r.New.Path) {
+			return fmt.Errorf("%w: %s replaces %s with %s, which is outside the repository", platform.ErrUnsafeCheckout, rel, r.Old.Path, r.New.Path)
 		}
 	}
 	return nil

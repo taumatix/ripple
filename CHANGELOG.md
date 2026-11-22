@@ -12,12 +12,20 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
   `webhook.Handler` gains optional `MaxBody`, `MaxInflight`, `DedupeTTL` and `Now` fields; zero values keep safe defaults.
 
 ### Changed
+- A repo that lists a Go dependency it never imports now has that requirement dropped by the `go mod tidy`
+  that every update runs.
 - The installation token is fetched from the token source for each network git command (clone and push), not once per job, so a job that outlives one token still pushes. The token reaches git only through that process's environment, never argv or the remote URL.
 - Clones pass `--filter=blob:limit=1m`; with `--depth 1` and a checkout this saves little (measured in
   docs/bounds.md).
 - Fan-out loads and parses a repo's config once per release instead of once per dependency row.
 
 ### Added
+- Every Go update, not only majors, runs `go mod tidy`, build and vet in the modules it edits, so minor and
+  patch PRs carry a correct `go.sum`; a failure opens a draft with the output.
+- Multi-module repos: other modules that require the updated dependency or an edited module are tidied and
+  verified; a `vendor/` directory is refreshed with `go mod vendor`; a `go.work` has its replaces follow a
+  major bump and is checked with `go work sync`, build and vet. `go.work` entries that point outside the
+  repository are refused like an escaping `replace`.
 - `RIPPLE_MAX_FILES` (default 100000) and `RIPPLE_MAX_DEPENDENCIES` (default 5000) cap one repo scan; a repo
   over a cap is skipped with a logged warning and no updates until it is under it
   ([docs/bounds.md](docs/bounds.md)).

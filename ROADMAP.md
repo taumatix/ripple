@@ -68,12 +68,11 @@ auth model, rate limits); the notes below are what I expect, **unverified** unti
 
 Everything else:
 
-19. **`go.sum` and `go mod tidy` refresh for every update.** Major bumps already tidy, build and vet
-   in the branch; minor and patch PRs still edit `go.mod` only, so many fail CI until someone runs
-   `go mod tidy`. Reuse the same verification and draft-on-failure path.
-20. **Major bumps in repos with several modules, `go.work`, or `vendor/`.** Today only the module
-   whose `go.mod` lists the dependency is rewritten and verified; a workspace, other modules that
-   require it, and a vendor directory (`go mod vendor`) are not refreshed.
+19. **`go work vendor` and workspace-only module graphs.** A workspace-level `vendor/` is not refreshed,
+   and modules that reach each other only through `go.work` (no `replace`) fail the per-module
+   `go mod tidy`, which ignores the workspace, so those PRs open as drafts.
+20. **Tidy only what the update needs.** `go mod tidy` also drops requirements the repo never imports and
+   rewrites unrelated lines; consider limiting the PR to the dependency's own `go.sum` entries.
 21. **Go toolchain and `go` directive bumps.** Propose `toolchain` and `go` line updates as their own
    update type, from the Go release feed.
 22. **Rewrite `go:generate` lines and `// import` comments on a major bump.** Only import specs are

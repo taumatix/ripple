@@ -1,4 +1,4 @@
-.PHONY: build vet test test-services services-up services-down
+.PHONY: build vet test test-gomod test-services services-up services-down
 build:
 	go build ./...
 vet:
@@ -11,6 +11,10 @@ services-up:
 	docker run -d --name ripple-ddb -p 58000:8000 amazon/dynamodb-local
 services-down:
 	-docker rm -f ripple-pg ripple-ddb
+# The go.sum, go.work and vendor/ refresh paths end to end (fake GitHub, local module proxy, real git).
+test-gomod:
+	go test -race ./internal/e2e -run 'TestMinorBump|TestMajor'
+	go test -race ./internal/manager ./internal/platform/github ./internal/engine
 test-services:
 	RIPPLE_TEST_POSTGRES_DSN='postgres://postgres:ripple@localhost:55432/postgres?sslmode=disable' \
 	RIPPLE_TEST_DYNAMODB_ENDPOINT=http://localhost:58000 go test -race ./...

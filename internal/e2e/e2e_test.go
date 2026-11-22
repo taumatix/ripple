@@ -13,9 +13,27 @@ import (
 
 func forEach(t *testing.T, fn func(t *testing.T, st store.Store)) { testutil.ForEachStore(t, fn) }
 
+// stubModule publishes versions of a module with one empty package, so ripple's
+// go mod tidy can resolve it; blankImports is the main.go that keeps it required.
+func stubModule(e *env, pkg string, versions ...string) {
+	for _, v := range versions {
+		e.proxy.Publish(pkg, v, map[string]string{"x.go": "package x\n"})
+	}
+}
+
+func blankImports(pkgs ...string) string {
+	s := "package main\n\nimport (\n"
+	for _, p := range pkgs {
+		s += "\t_ \"" + p + "\"\n"
+	}
+	return s + ")\n\nfunc main() {}\n"
+}
+
 func baseRepos(e *env) {
-	e.gh.AddRepo("acme/uses-lib", map[string]string{"go.mod": gomod("example.com/uses-lib", "example.com/lib v1.0.0")})
-	e.gh.AddRepo("acme/also-uses", map[string]string{"go.mod": gomod("example.com/also", "example.com/lib v1.0.5", "example.com/other v1.0.0")})
+	stubModule(e, "example.com/lib", "v1.0.0", "v1.0.5", "v1.1.0")
+	stubModule(e, "example.com/other", "v1.0.0")
+	e.gh.AddRepo("acme/uses-lib", map[string]string{"go.mod": gomod("example.com/uses-lib", "example.com/lib v1.0.0"), "main.go": blankImports("example.com/lib")})
+	e.gh.AddRepo("acme/also-uses", map[string]string{"go.mod": gomod("example.com/also", "example.com/lib v1.0.5", "example.com/other v1.0.0"), "main.go": blankImports("example.com/lib", "example.com/other")})
 	e.gh.AddRepo("acme/unrelated", map[string]string{"go.mod": gomod("example.com/unrelated", "example.com/other v1.0.0")})
 }
 
@@ -47,7 +65,7 @@ func TestFanOutOnlyImportingRepos(t *testing.T) {
 				t.Errorf("%s: unexpected PR %+v", r, prs[0])
 			}
 			got, ok := e.gh.FileAt(r, prs[0].Head, "go.mod")
-			if !ok || !strings.Contains(got, "\texample.com/lib v1.1.0\n") {
+			if !ok || !strings.Contains(got, "example.com/lib v1.1.0\n") {
 				t.Errorf("%s: go.mod on %s lacks literal 'example.com/lib v1.1.0':\n%s", r, prs[0].Head, got)
 			}
 		}
@@ -157,7 +175,13 @@ func TestRepoFileCooldownTightensServerDefault(t *testing.T) {
 func TestRepoFileIgnoreGroupsAutomerge(t *testing.T) {
 	forEach(t, func(t *testing.T, st store.Store) {
 		e := newEnv(t, st, defaultLimits())
+		stubModule(e, "github.com/aws/a", "v1.0.0", "v1.0.1")
+		stubModule(e, "github.com/aws/b", "v1.0.0", "v1.0.1")
+		stubModule(e, "github.com/legacy/x", "v1.0.0", "v1.1.0")
+		stubModule(e, "example.com/lib", "v1.0.0", "v1.1.0")
+		stubModule(e, "example.com/big", "v1.0.0", "v2.0.0")
 		e.gh.AddRepo("acme/cfg", map[string]string{
+			"main.go": blankImports("github.com/aws/a", "github.com/aws/b", "github.com/legacy/x", "example.com/lib", "example.com/big"),
 			"go.mod": gomod("example.com/cfg",
 				"github.com/aws/a v1.0.0", "github.com/aws/b v1.0.0", "github.com/legacy/x v1.0.0",
 				"example.com/lib v1.0.0", "example.com/big v1.0.0"),

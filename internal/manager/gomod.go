@@ -117,3 +117,38 @@ var ErrStale = errors.New("stale dependency")
 
 // ErrUnsupported means the manager cannot perform the requested kind of update.
 var ErrUnsupported = errors.New("update not supported by this manager")
+
+// RewriteGoWork follows a major bump in a go.work file: an unversioned replace of
+// oldPath moves to newPath, and a replace pinned to a version of the old major is
+// dropped, as in a go.mod. changed is false when the file never names oldPath.
+func RewriteGoWork(content []byte, oldPath, newPath string) (out []byte, changed bool, err error) {
+	f, err := modfile.ParseWork("go.work", content, nil)
+	if err != nil {
+		return nil, false, fmt.Errorf("parse go.work: %w", err)
+	}
+	// modfile zeroes a dropped entry in place, so copy before dropping.
+	reps := make([]modfile.Replace, 0, len(f.Replace))
+	for _, r := range f.Replace {
+		reps = append(reps, *r)
+	}
+	for _, r := range reps {
+		if r.Old.Path != oldPath {
+			continue
+		}
+		changed = true
+		if err := f.DropReplace(r.Old.Path, r.Old.Version); err != nil {
+			return nil, false, err
+		}
+		if r.Old.Version == "" {
+			if err := f.AddReplace(newPath, "", r.New.Path, r.New.Version); err != nil {
+				return nil, false, err
+			}
+		}
+	}
+	if !changed {
+		return content, false, nil
+	}
+	f.SortBlocks()
+	f.Cleanup()
+	return modfile.Format(f.Syntax), true, nil
+}

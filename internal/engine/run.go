@@ -106,8 +106,10 @@ type runner struct {
 	ms       []manager.Manager
 	ws       platform.Workspace
 	finished int
-	// migrated holds the module directories whose go.mod was moved to a new major path.
-	migrated map[string]bool
+	// touched holds the module directories whose go.mod this PR edits.
+	touched map[string]bool
+	// migrations are the major bumps in this PR.
+	migrations []migration
 	// skipped holds Go files the import rewrite could not parse; the PR body lists them.
 	skipped []string
 }
@@ -327,7 +329,8 @@ func (r *runner) openPR(p *prPlan) (*platform.PR, error) {
 	} else if err := r.ws.Reset(r.ctx); err != nil {
 		return nil, err
 	}
-	r.migrated = map[string]bool{}
+	r.touched = map[string]bool{}
+	r.migrations = nil
 	r.skipped = nil
 	var applied []item
 	for _, it := range p.items {
@@ -345,6 +348,9 @@ func (r *runner) openPR(p *prPlan) (*platform.PR, error) {
 		return nil, nil
 	}
 	title, body := describe(p, applied)
+	if err := r.rewriteWorks(); err != nil {
+		return nil, err
+	}
 	var draft bool
 	if len(r.skipped) > 0 {
 		sort.Strings(r.skipped)
@@ -353,14 +359,32 @@ func (r *runner) openPR(p *prPlan) (*platform.PR, error) {
 			body += "- `" + f + "`\n"
 		}
 	}
-	if len(r.migrated) > 0 {
-		failure, err := r.verify()
+	if len(r.touched) > 0 {
+		var olds []string
+		for _, it := range applied {
+			for _, d := range it.deps {
+				olds = append(olds, d.Package)
+			}
+		}
+		failure, err := r.verify(olds)
+		major := len(r.migrations) > 0
+		switch {
+		case errors.Is(err, platform.ErrNoToolchain) && major:
+			failure, err = "ripple could not verify this update: the go toolchain is not installed on the server.", nil
+		case errors.Is(err, platform.ErrNoToolchain):
+			body += "\n_ripple could not refresh go.sum or verify this update: the go toolchain is not installed on the server._\n"
+			failure, err = "", nil
+		}
 		if err != nil {
 			return nil, err
 		}
 		draft = failure != ""
 		if draft {
-			body += "\n## Verification failed\n\nThe import rewrite was applied but the module does not build. This pull request is a draft; it needs a human.\n\n```\n" + failure + "\n```\n"
+			what := "The go.mod change was applied but the module does not build"
+			if major {
+				what = "The import rewrite was applied but the module does not build"
+			}
+			body += "\n## Verification failed\n\n" + what + ". This pull request is a draft; it needs a human.\n\n```\n" + failure + "\n```\n"
 		}
 	}
 	changed, err := r.ws.CommitAndPush(r.ctx, p.branch, title)
@@ -417,39 +441,17 @@ func (r *runner) apply(it item) (bool, error) {
 				return false, err
 			}
 			r.skipped = append(r.skipped, skipped...)
-			r.migrated[path.Dir(d.File)] = true
+			r.migrations = append(r.migrations, migration{d.Package, it.job.Package})
 		}
 		if err := r.ws.WriteFile(d.File, out); err != nil {
 			return false, err
 		}
+		if d.Manager == "gomod" {
+			r.touched[path.Dir(d.File)] = true
+		}
 		touched = true
 	}
 	return touched, nil
-}
-
-// verify tidies, builds and vets every module a major bump touched, and returns
-// the compiler output of the first step that failed, or "" when all passed.
-func (r *runner) verify() (string, error) {
-	dirs := make([]string, 0, len(r.migrated))
-	for d := range r.migrated {
-		dirs = append(dirs, d)
-	}
-	sort.Strings(dirs)
-	for _, dir := range dirs {
-		for _, args := range [][]string{{"mod", "tidy"}, {"build", "./..."}, {"vet", "./..."}} {
-			out, err := r.ws.RunGo(r.ctx, dir, args...)
-			if errors.Is(err, platform.ErrNoToolchain) {
-				return "ripple could not verify this update: the go toolchain is not installed on the server.", nil
-			}
-			if errors.Is(err, platform.ErrUnsafeCheckout) {
-				return "", err
-			}
-			if err != nil {
-				return fmt.Sprintf("$ go %s   (in %s)\n%s\n%v", strings.Join(args, " "), dir, out, err), nil
-			}
-		}
-	}
-	return "", nil
 }
 
 func labelsFor(items []item) []string {

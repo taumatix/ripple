@@ -42,6 +42,21 @@ var ErrNoToolchain = errors.New("go toolchain not available")
 // through it. It is permanent for that commit.
 var ErrUnsafeCheckout = errors.New("unsafe checkout")
 
+type workspaceModeKey struct{}
+
+// WithWorkspaceMode returns a context for RunGo that lets the go command use the
+// go.work file above dir. Without it RunGo runs every command with the workspace
+// off, so each module is judged on its own go.mod and go.sum.
+func WithWorkspaceMode(ctx context.Context) context.Context {
+	return context.WithValue(ctx, workspaceModeKey{}, true)
+}
+
+// InWorkspaceMode reports whether ctx came from WithWorkspaceMode.
+func InWorkspaceMode(ctx context.Context) bool {
+	on, _ := ctx.Value(workspaceModeKey{}).(bool)
+	return on
+}
+
 // Workspace is a shallow checkout of a repo's default branch.
 type Workspace interface {
 	DefaultBranch() string
@@ -55,7 +70,8 @@ type Workspace interface {
 	// CommitAndPush commits all changes on a new branch and force-pushes it
 	// (branches under the ripple/ prefix are ours). false means nothing changed.
 	CommitAndPush(ctx context.Context, branch, message string) (bool, error)
-	// RunGo runs one of `go mod tidy`, `go build ./...` or `go vet ./...` in dir
+	// RunGo runs one of `go mod tidy`, `go mod vendor`, `go build ./...`, `go vet ./...`
+	// or (only with WithWorkspaceMode) `go work sync` in dir
 	// (relative to the repo root) and returns its combined output, trimmed to the
 	// tail. Nothing else is allowed: the checkout is untrusted, so the environment is
 	// stripped, cgo and toolchain downloads are off, and modules come only from the

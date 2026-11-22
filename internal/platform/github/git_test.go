@@ -351,3 +351,23 @@ func TestCloneIsPartialAndLargeHeadBlobStillCheckedOut(t *testing.T) {
 		t.Errorf("large HEAD blob not checked out: %v", err)
 	}
 }
+
+func TestRunGoWorkspaceRules(t *testing.T) {
+	_, ws := checkout(t)
+	if _, err := ws.RunGo(context.Background(), ".", "work", "sync"); err == nil || !strings.Contains(err.Error(), "workspace mode") {
+		t.Errorf("go work sync without workspace mode: %v", err)
+	}
+	if _, err := ws.RunGo(context.Background(), ".", "mod", "download"); err == nil {
+		t.Errorf("go mod download must stay disallowed")
+	}
+	// A go.work that uses a directory outside the checkout is refused before go starts.
+	for _, body := range []string{"go 1.22\n\nuse ../elsewhere\n", "go 1.22\n\nuse .\n\nreplace example.com/x => /etc\n"} {
+		if err := ws.WriteFile("go.work", []byte(body)); err != nil {
+			t.Fatal(err)
+		}
+		_, err := ws.RunGo(platform.WithWorkspaceMode(context.Background()), ".", "work", "sync")
+		if !errors.Is(err, platform.ErrUnsafeCheckout) {
+			t.Errorf("go.work %q: err = %v, want ErrUnsafeCheckout", body, err)
+		}
+	}
+}

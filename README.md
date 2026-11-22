@@ -110,7 +110,15 @@ build fails, the PR is still opened, as a **draft** carrying the compiler output
 auto-merged unless the repo file says `automerge: major`, and a draft never is. The server needs the
 `go` command installed (the Docker image has it); without it every major PR is a draft saying so.
 
-Not covered yet: repos with several modules, `go.work`, vendor directories, `go:generate` lines and
+Every Go update, minor and patch included, runs `go mod tidy`, `go build ./...` and `go vet ./...` in each
+module it edits, so the PR carries a correct `go.sum`; a failure opens a draft with the output. In repos with
+several modules, any other module that requires the dependency (even indirectly) or an edited module is
+refreshed and verified too. A module with a `vendor/modules.txt` gets `go mod vendor`. A `go.work` has its
+`replace` directives follow a major bump, and the workspace is checked with `go work sync` and a build and
+vet of each used module. Without the `go` command, a minor or patch PR is opened as before and says it
+was not verified.
+
+Not covered yet: `go work vendor` for a workspace-level `vendor/`, `go:generate` lines and
 `// import` comments (see [ROADMAP.md](ROADMAP.md)).
 
 ## Architecture
@@ -127,15 +135,13 @@ Interfaces from day one: `Platform` (GitHub), `Feed` (Go modules), `Manager` (go
 
 ## Known limits
 
-Minor and patch PRs edit `go.mod` only; `go.sum` is refreshed only for major bumps (`go mod tidy`
-is the top of the roadmap for the rest). Releases are stored only
-for packages that have dependents.
+Releases are stored only for packages that have dependents.
 
 ## Known limitations and security model
 
 ripple runs `git` and `go` on repositories it does not trust. **There is no OS-level sandbox.**
 What exists is: a scrubbed environment (no inherited secrets, `GOENV=off`, `GOTOOLCHAIN=local`,
-`GOWORK=off`, `GOVCS=*:off`, an allowlist of three `go` commands), the installation token fetched fresh for each network git command and kept out of
+`GOWORK=off`, `GOVCS=*:off`, an allowlist of five `go` commands (`go work sync` only for a workspace inside the checkout)), the installation token fetched fresh for each network git command and kept out of
 the build, and, before any `go` process starts, a refusal to run in a checkout where a `go.mod`,
 `go.sum`, `go.work` or `.go` file is a symbolic link, or where a `replace` directive points at an
 absolute path or outside the repository. Such a job fails permanently with a clear reason and opens no

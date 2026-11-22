@@ -31,7 +31,7 @@ func TestDependencyUpdateUnderOSSandbox(t *testing.T) {
 		t.Fatalf("want 1 PR under the sandbox, got %d\nlogs:\n%s", len(prs), e.logs.String())
 	}
 	got, _ := e.gh.FileAt("acme/uses-lib", prs[0].Head, "go.mod")
-	if !strings.Contains(got, "\texample.com/lib v1.1.0\n") {
+	if !strings.Contains(got, "example.com/lib v1.1.0") {
 		t.Errorf("go.mod lacks the bump:\n%s", got)
 	}
 }

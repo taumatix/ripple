@@ -4,7 +4,7 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
 
 ## [Unreleased]
 
-## [Unreleased]
+## [0.2.0] - 2026-11-22
 
 ### Added
 - `.ripple.yaml` (repository root, the same on every host) is the per-repo configuration file;
@@ -14,6 +14,10 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
 - `.github/ripple.yml`, the path v0.1.0 read, is a deprecated alias for `.ripple.yaml` with identical
   meaning. When both exist `.ripple.yaml` wins, the alias is ignored, and a warning is logged and shown
   by `ripple config validate`. Removal no earlier than v0.3.0.
+
+### Documentation
+- ROADMAP entries for every Renovate code host, container job runners with updaters as OCI images,
+  a prebuilt image and binaries, and hermetic integration tests.
 
 ## [0.1.0] - 2026-11-22
 
@@ -47,5 +51,6 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
 - README section "Known limitations and security model"; ROADMAP entries for an OS sandbox,
   durable per-installation queues, scan bounds, webhook body bounds, per-command tokens and delivery dedupe.
 
-[Unreleased]: https://github.com/taumatix/ripple/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/taumatix/ripple/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/taumatix/ripple/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/taumatix/ripple/releases/tag/v0.1.0

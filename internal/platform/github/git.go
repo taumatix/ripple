@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/taumatix/ripple/internal/model"
@@ -47,15 +48,11 @@ func (c *Client) Checkout(ctx context.Context, repo model.Repo) (platform.Worksp
 	if err != nil || gb.Scheme == "" {
 		return nil, fmt.Errorf("invalid git base URL")
 	}
-	tok, err := c.Tokens.Token(ctx, repo.InstallationID)
-	if err != nil {
-		return nil, err
-	}
 	dir, err := os.MkdirTemp(c.WorkDir, "ripple-")
 	if err != nil {
 		return nil, err
 	}
-	w := &workspace{dir: dir, c: c, branch: repo.DefaultBranch, secrets: []string{tok, base64.StdEncoding.EncodeToString([]byte("x-access-token:" + tok))}}
+	w := &workspace{dir: dir, c: c, branch: repo.DefaultBranch, installation: repo.InstallationID}
 	w.env = []string{
 		"PATH=" + os.Getenv("PATH"),
 		"HOME=" + dir,
@@ -63,9 +60,6 @@ func (c *Client) Checkout(ctx context.Context, repo model.Repo) (platform.Worksp
 		"GIT_CONFIG_NOSYSTEM=1",
 		"GIT_TERMINAL_PROMPT=0",
 		"GIT_ALLOW_PROTOCOL=" + gb.Scheme,
-		"GIT_CONFIG_COUNT=1",
-		"GIT_CONFIG_KEY_0=http." + strings.TrimRight(c.GitBase, "/") + "/.extraHeader",
-		"GIT_CONFIG_VALUE_0=Authorization: Basic " + w.secrets[1],
 	}
 	repoDir := filepath.Join(dir, "repo")
 	cloneURL := strings.TrimRight(c.GitBase, "/") + "/" + repo.FullName + ".git"
@@ -78,7 +72,7 @@ func (c *Client) Checkout(ctx context.Context, repo model.Repo) (platform.Worksp
 		args = append(args, "--branch", repo.DefaultBranch)
 	}
 	args = append(args, "--", cloneURL, repoDir)
-	if _, err := w.git(ctx, dir, args...); err != nil {
+	if _, err := w.gitNet(ctx, dir, args...); err != nil {
 		w.Close()
 		return nil, err
 	}
@@ -100,16 +94,22 @@ func (c *Client) Checkout(ctx context.Context, repo model.Repo) (platform.Worksp
 
 type workspace struct {
 	dir, repoDir, branch string
+	installation         int64
 	c                    *Client
-	env                  []string
-	secrets              []string
+	env                  []string // credential-free; network commands add a header per command
 	root                 *os.Root
+
+	mu      sync.Mutex
+	secrets []string // every token this workspace has used, for redaction
 }
 
 func (w *workspace) DefaultBranch() string { return w.branch }
 
 func (w *workspace) redact(s string) string {
-	for _, sec := range w.secrets {
+	w.mu.Lock()
+	secrets := append([]string(nil), w.secrets...)
+	w.mu.Unlock()
+	for _, sec := range secrets {
 		if sec != "" {
 			s = strings.ReplaceAll(s, sec, "***")
 		}
@@ -117,13 +117,39 @@ func (w *workspace) redact(s string) string {
 	return s
 }
 
+// git runs a local git command: no credentials are in its environment.
 func (w *workspace) git(ctx context.Context, dir string, args ...string) (string, error) {
+	return w.runGit(ctx, dir, w.env, args...)
+}
+
+// gitNet runs a git command that talks to the remote (clone, fetch, push). It asks
+// the TokenSource for an installation token at that moment, so a job that outlives
+// one token never sends a stale one, and hands it to git only through that one
+// process's environment, never argv or the remote URL.
+func (w *workspace) gitNet(ctx context.Context, dir string, args ...string) (string, error) {
+	tok, err := w.c.Tokens.Token(ctx, w.installation)
+	if err != nil {
+		return "", err
+	}
+	basic := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + tok))
+	w.mu.Lock()
+	w.secrets = append(w.secrets, tok, basic)
+	w.mu.Unlock()
+	env := append(append([]string(nil), w.env...),
+		"GIT_CONFIG_COUNT=1",
+		"GIT_CONFIG_KEY_0=http."+strings.TrimRight(w.c.GitBase, "/")+"/.extraHeader",
+		"GIT_CONFIG_VALUE_0=Authorization: Basic "+basic,
+	)
+	return w.runGit(ctx, dir, env, args...)
+}
+
+func (w *workspace) runGit(ctx context.Context, dir string, env []string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, gitTimeout)
 	defer cancel()
 	full := append([]string{"-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "protocol.version=2"}, args...)
 	cmd := exec.CommandContext(ctx, "git", full...)
 	cmd.Dir = dir
-	cmd.Env = w.env
+	cmd.Env = env
 	cmd.WaitDelay = 5 * time.Second
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
@@ -230,7 +256,11 @@ func (w *workspace) CommitAndPush(ctx context.Context, branch, message string) (
 		{"-c", "user.name=" + name, "-c", "user.email=" + email, "commit", "--no-verify", "--no-gpg-sign", "-m", message},
 		{"push", "--force", "origin", "HEAD:refs/heads/" + branch},
 	} {
-		if _, err := w.git(ctx, w.repoDir, a...); err != nil {
+		run := w.git
+		if a[0] == "push" {
+			run = w.gitNet
+		}
+		if _, err := run(ctx, w.repoDir, a...); err != nil {
 			return false, err
 		}
 	}

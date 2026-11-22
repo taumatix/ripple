@@ -11,6 +11,9 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
   replayed signed event is handled once; a delivery that failed with 503 can still be redelivered.
   `webhook.Handler` gains optional `MaxBody`, `MaxInflight`, `DedupeTTL` and `Now` fields; zero values keep safe defaults.
 
+### Changed
+- The installation token is fetched from the token source for each network git command (clone and push), not once per job, so a job that outlives one token still pushes. The token reaches git only through that process's environment, never argv or the remote URL.
+
 ## [0.2.0] - 2026-11-22
 
 ### Added

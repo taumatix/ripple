@@ -52,6 +52,10 @@ type GitHub struct {
 	prs     map[string][]*PR
 	graphql int
 	tokens  int
+	issued  map[string]*issuedToken
+	// TokenTTL, when set, is how long a minted installation token lives. It is
+	// reported to the client as expires_at and enforced by the git HTTP server.
+	TokenTTL time.Duration
 	// RateLimitOnce makes the next pulls POST answer 429 with Retry-After: 1.
 	RateLimitOnce bool
 }
@@ -252,9 +256,18 @@ func (g *GitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		g.mu.Lock()
 		g.tokens++
 		n := g.tokens
+		ttl := g.TokenTTL
+		if ttl == 0 {
+			ttl = time.Hour
+		}
+		tok := "ghs_fake" + strconv.Itoa(n)
+		if g.issued == nil {
+			g.issued = map[string]*issuedToken{}
+		}
+		g.issued[tok] = &issuedToken{expires: time.Now().Add(ttl)}
 		g.mu.Unlock()
 		w.WriteHeader(http.StatusCreated)
-		_ = json.NewEncoder(w).Encode(map[string]any{"token": "ghs_fake" + strconv.Itoa(n), "expires_at": time.Now().Add(time.Hour).UTC().Format(time.RFC3339)})
+		_ = json.NewEncoder(w).Encode(map[string]any{"token": tok, "expires_at": time.Now().Add(ttl).UTC().Format(time.RFC3339)})
 		return
 	}
 	if !strings.HasPrefix(auth, "ghs_fake") {

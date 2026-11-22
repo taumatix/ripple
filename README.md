@@ -135,7 +135,7 @@ for packages that have dependents.
 
 ripple runs `git` and `go` on repositories it does not trust. **There is no OS-level sandbox.**
 What exists is: a scrubbed environment (no inherited secrets, `GOENV=off`, `GOTOOLCHAIN=local`,
-`GOWORK=off`, `GOVCS=*:off`, an allowlist of three `go` commands), the installation token kept out of
+`GOWORK=off`, `GOVCS=*:off`, an allowlist of three `go` commands), the installation token fetched fresh for each network git command and kept out of
 the build, and, before any `go` process starts, a refusal to run in a checkout where a `go.mod`,
 `go.sum`, `go.work` or `.go` file is a symbolic link, or where a `replace` directive points at an
 absolute path or outside the repository. Such a job fails permanently with a clear reason and opens no

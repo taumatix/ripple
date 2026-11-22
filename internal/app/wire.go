@@ -16,6 +16,7 @@ import (
 	"github.com/taumatix/ripple/internal/feed"
 	"github.com/taumatix/ripple/internal/platform/github"
 	"github.com/taumatix/ripple/internal/rules"
+	"github.com/taumatix/ripple/internal/sandbox"
 	"github.com/taumatix/ripple/internal/store"
 )
 
@@ -57,8 +58,12 @@ func New(ctx context.Context, s *config.Server, log *slog.Logger) (*App, store.S
 		return nil, nil, err
 	}
 	httpc := &http.Client{Timeout: 30 * time.Second}
+	sb, err := sandbox.Detect(s.Sandbox, nil)
+	if err != nil {
+		return nil, nil, err
+	}
 	gh := &github.Client{
-		APIBase: s.GitHubAPIURL, GitBase: s.GitHubGitURL, HTTP: httpc, Log: log, WorkDir: s.WorkDir, GoProxy: s.GoProxy,
+		APIBase: s.GitHubAPIURL, GitBase: s.GitHubGitURL, HTTP: httpc, Log: log, WorkDir: s.WorkDir, GoProxy: s.GoProxy, Sandbox: sb,
 		Tokens:     &github.AppAuth{AppID: s.GitHubAppID, Key: key, APIBase: s.GitHubAPIURL, HTTP: httpc},
 		AuthorName: "ripple[bot]", AuthorEmail: "ripple@users.noreply.github.com",
 	}

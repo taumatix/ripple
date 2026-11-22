@@ -99,3 +99,14 @@ func TestServerEventQueue(t *testing.T) {
 		}
 	}
 }
+
+func TestServerSandbox(t *testing.T) {
+	s, err := LoadServer(env(base))
+	if err != nil || s.Sandbox != "none" {
+		t.Fatalf("default: %+v, %v", s, err)
+	}
+	s, err = LoadServer(env(with("RIPPLE_SANDBOX", "auto")))
+	if err != nil || s.Sandbox != "auto" {
+		t.Fatalf("set: %+v, %v", s, err)
+	}
+}

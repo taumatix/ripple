@@ -24,6 +24,7 @@ import (
 	"github.com/taumatix/ripple/internal/model"
 	"github.com/taumatix/ripple/internal/platform/github"
 	"github.com/taumatix/ripple/internal/rules"
+	"github.com/taumatix/ripple/internal/sandbox"
 	"github.com/taumatix/ripple/internal/store"
 	"github.com/taumatix/ripple/internal/testutil"
 )
@@ -105,6 +106,8 @@ type opts struct {
 	pollEvery time.Duration
 	// queue configures the event queue; nil keeps its defaults.
 	queue func(q *app.Queue)
+	// sandbox confines the go and git commands run on checkouts; nil is unconfined.
+	sandbox sandbox.Backend
 }
 
 func newEnv(t *testing.T, st store.Store, lim rules.Limits) *env {
@@ -116,7 +119,7 @@ func newEnvOpts(t *testing.T, st store.Store, lim rules.Limits, o opts) *env {
 	t.Helper()
 	e := &env{t: t, st: st, gh: testutil.NewGitHub(t), idx: testutil.NewIndex(t), clock: &clock{t: t0}, proxy: testutil.NewGoProxy(t), logs: &syncBuf{}}
 	gh := &github.Client{APIBase: e.gh.APIURL, GitBase: e.gh.GitBase, Tokens: e.gh.Auth, WorkDir: t.TempDir(),
-		GoProxy: e.proxy.URL, GoSumDB: "off", GoCacheDir: goCache(t),
+		GoProxy: e.proxy.URL, GoSumDB: "off", GoCacheDir: goCache(t), Sandbox: o.sandbox,
 		Log: slog.New(slog.NewTextHandler(testWriter{t}, nil))}
 	e.plat = &testutil.CountingPlatform{Inner: gh}
 	eng := &engine.Engine{Store: st, Platform: e.plat, Limits: lim, Now: e.clock.Now, Workers: 2, Log: slog.New(slog.NewTextHandler(io.MultiWriter(testWriter{t}, e.logs), nil))}

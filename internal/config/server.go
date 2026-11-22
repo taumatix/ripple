@@ -23,6 +23,7 @@ type Server struct {
 	FeedURL           string
 	FeedInterval      time.Duration
 	GoProxy           string
+	Sandbox           string // none, auto, bwrap, seatbelt
 	Store             string // memory, postgres, dynamodb
 	PostgresDSN       string
 	DynamoTable       string
@@ -130,6 +131,7 @@ func LoadServer(getenv func(string) string) (*Server, error) {
 		FeedURL:           strings.TrimRight(str("RIPPLE_FEED_URL", "https://index.golang.org"), "/"),
 		FeedInterval:      dur("RIPPLE_FEED_INTERVAL", "1m"),
 		GoProxy:           strings.TrimRight(str("RIPPLE_GOPROXY", "https://proxy.golang.org"), "/"),
+		Sandbox:           str("RIPPLE_SANDBOX", "none"),
 		Store:             str("RIPPLE_STORE", "memory"),
 		PostgresDSN:       getenv("RIPPLE_POSTGRES_DSN"),
 		DynamoTable:       str("RIPPLE_DYNAMODB_TABLE", "ripple"),

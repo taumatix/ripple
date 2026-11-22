@@ -2,7 +2,10 @@
 
 Ordered by how much each entry limits real deployments. The top is next.
 
-1. **OS-level sandbox for `go` and `git`.** A hostile repo's build runs as the server's uid with the whole filesystem readable. Run each job under bwrap/nsjail or in a per-job container with a separate uid, a read-only root, only the workspace writable and no network except the proxy. This is the minimum for a single host; entry 2 generalises it to container runners.
+1. **Linux sandbox that can reach the proxy.** `RIPPLE_SANDBOX=bwrap` cannot confine the network to the
+   module proxy, so `go` refuses to run under it, and bwrap has never run on a Linux host. Give it a
+   network namespace with a forwarded socket to the gate (or run `go` with a prefilled module cache),
+   and add a Linux CI job that runs the sandbox end-to-end tests. See [docs/sandbox.md](docs/sandbox.md).
 2. **Run jobs in a container runner, with updaters as OCI images.** Entry 1 contains the build; this entry
    moves the whole job (clone, edit, verify, push) out of the server process. Define a `Runner` interface
    (start a job from an image with a workspace, an env allowlist, a network policy and CPU, memory and time limits;

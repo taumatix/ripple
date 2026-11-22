@@ -13,8 +13,8 @@ COPY . .
 RUN set -e; \
     export CGO_ENABLED=0 GOOS="${TARGETOS:-linux}" GOARCH="${TARGETARCH:-$(go env GOARCH)}"; \
     if [ -n "$VERSION" ]; then \
-      GOBIN=/tmp/gobin GOPROXY=direct GONOSUMDB=github.com/taumatix/ripple go install -trimpath -ldflags="-s -w" "github.com/taumatix/ripple/cmd/ripple@$VERSION"; \
-      mkdir -p /out && mv "$(find /tmp/gobin -name ripple -type f)" /out/ripple; \
+      GOPATH=/tmp/gopath GOPROXY=direct GONOSUMDB=github.com/taumatix/ripple go install -trimpath -ldflags="-s -w" "github.com/taumatix/ripple/cmd/ripple@$VERSION"; \
+      mkdir -p /out && mv "$(find /tmp/gopath/bin -name ripple -type f)" /out/ripple; \
     else \
       go build -trimpath -ldflags="-s -w" -o /out/ripple ./cmd/ripple; \
     fi

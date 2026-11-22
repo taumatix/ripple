@@ -96,8 +96,9 @@ jobs:
           GONOSUMDB: github.com/taumatix/ripple
         run: |
           set -euo pipefail
-          GOBIN="$RUNNER_TEMP/gobin" go install -trimpath -ldflags="-s -w" "github.com/taumatix/ripple/cmd/ripple@$VERSION"
-          exe=$(find "$RUNNER_TEMP/gobin" -type f -name 'ripple*')
+          # GOBIN cannot be set when cross-compiling: use a fresh GOPATH and find the binary under it.
+          GOPATH="$RUNNER_TEMP/gopath" go install -trimpath -ldflags="-s -w" "github.com/taumatix/ripple/cmd/ripple@$VERSION"
+          exe=$(find "$RUNNER_TEMP/gopath/bin" -type f -name 'ripple*')
           name="ripple_${VERSION}_${GOOS}_${GOARCH}"
           mkdir -p "dist/$name"
           cp "$exe" LICENSE README.md "dist/$name/"

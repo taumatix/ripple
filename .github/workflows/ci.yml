@@ -37,7 +37,9 @@ jobs:
       - name: test (fails if the service-backed tests were skipped)
         run: go test -race -count=1 -v ./... | tee test.log
       - run: |
-          if grep -E -- '--- SKIP' test.log; then echo "service-backed tests were skipped"; exit 1; fi
+          # RIPPLE_REQUIRE_SERVICES already fails a skipped service test; this catches any other skip.
+          # The image smoke test skips here by design: the docker job runs it against the built image.
+          if grep -E -- '--- SKIP' test.log | grep -v -- 'TestRippleOpensExactlyOnePR'; then echo "tests were skipped"; exit 1; fi
   docker:
     runs-on: ubuntu-latest
     steps:

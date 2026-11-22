@@ -1,4 +1,8 @@
-package github
+// Package gitws is the git checkout every platform shares: a shallow clone of the
+// default branch in a private directory, confined file access, commit-and-push of a
+// ripple/ branch, and the allow-listed go commands. A platform supplies the clone URL
+// and a credential; nothing here knows which host it talks to.
+package gitws
 
 import (
 	"bytes"
@@ -6,7 +10,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"golang.org/x/mod/modfile"
 	"io"
 	"io/fs"
 	"net/url"
@@ -21,7 +24,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/taumatix/ripple/internal/model"
+	"golang.org/x/mod/modfile"
+
 	"github.com/taumatix/ripple/internal/platform"
 	"github.com/taumatix/ripple/internal/sandbox"
 )
@@ -40,22 +44,53 @@ func checkBranch(b string) error {
 	return nil
 }
 
-// Checkout shallow-clones the default branch into a private temp directory. The
-// clone talks to git with an environment that cannot read host configuration,
-// run hooks, or use any protocol other than the one in GitBase.
-func (c *Client) Checkout(ctx context.Context, repo model.Repo) (platform.Workspace, error) {
-	if err := checkRepo(repo); err != nil {
-		return nil, err
-	}
-	gb, err := url.Parse(c.GitBase)
+// Options are what every checkout on one host shares.
+type Options struct {
+	// GitBase is the clone URL prefix, e.g. https://github.com. Every clone URL must
+	// start with it; the credential header is scoped to it and its scheme is the only
+	// protocol git may use.
+	GitBase string
+	// AuthorName and AuthorEmail identify commits.
+	AuthorName, AuthorEmail string
+	// WorkDir is where checkouts are created; empty means the OS temp dir.
+	WorkDir string
+	// GoProxy is the only module source the go command may use (GOPROXY); empty
+	// means https://proxy.golang.org. GoSumDB is GOSUMDB, empty means the default.
+	GoProxy, GoSumDB string
+	// GoCacheDir shares the build cache between checkouts; empty means a private
+	// cache per checkout, which is slower but isolates repositories from each other.
+	GoCacheDir string
+	// Sandbox confines the go command and local git commands run on an untrusted
+	// checkout. Nil means no confinement. Network git commands (clone, fetch, push)
+	// run unconfined: they hold the credential and execute no repository code.
+	Sandbox sandbox.Backend
+}
+
+// CredentialFunc returns the credential for one network git command. It is called
+// per command, so a job that outlives one short-lived token still pushes.
+type CredentialFunc func(ctx context.Context) (platform.Credential, error)
+
+// Checkout shallow-clones cloneURL into a private temp directory, on branch when it
+// is set and on the remote's default branch otherwise. The clone talks to git with an
+// environment that cannot read host configuration, run hooks, or use any protocol
+// other than the one in o.GitBase.
+func Checkout(ctx context.Context, o Options, cloneURL, branch string, cred CredentialFunc) (platform.Workspace, error) {
+	gb, err := url.Parse(o.GitBase)
 	if err != nil || gb.Scheme == "" {
 		return nil, fmt.Errorf("invalid git base URL")
 	}
-	dir, err := os.MkdirTemp(c.WorkDir, "ripple-")
+	base := strings.TrimRight(o.GitBase, "/")
+	if !strings.HasPrefix(cloneURL, base+"/") {
+		return nil, fmt.Errorf("clone URL is not under the git base URL")
+	}
+	if branch != "" && (strings.HasPrefix(branch, "-") || strings.ContainsAny(branch, " \t\n:~^?*[\\")) {
+		return nil, fmt.Errorf("refusing unsafe branch name %q", branch)
+	}
+	dir, err := os.MkdirTemp(o.WorkDir, "ripple-")
 	if err != nil {
 		return nil, err
 	}
-	w := &workspace{dir: dir, c: c, branch: repo.DefaultBranch, installation: repo.InstallationID}
+	w := &workspace{dir: dir, o: o, base: base, cred: cred, branch: branch}
 	w.env = []string{
 		"PATH=" + os.Getenv("PATH"),
 		"HOME=" + dir,
@@ -66,14 +101,9 @@ func (c *Client) Checkout(ctx context.Context, repo model.Repo) (platform.Worksp
 		"GIT_ALLOW_PROTOCOL=" + gb.Scheme,
 	}
 	repoDir := filepath.Join(dir, "repo")
-	cloneURL := strings.TrimRight(c.GitBase, "/") + "/" + repo.FullName + ".git"
 	args := []string{"clone", "--depth", "1", "--filter=blob:limit=1m", "--no-tags", "--single-branch", "--no-recurse-submodules"}
-	if repo.DefaultBranch != "" {
-		if strings.HasPrefix(repo.DefaultBranch, "-") || strings.ContainsAny(repo.DefaultBranch, " \t\n:~^?*[\\") {
-			w.Close()
-			return nil, fmt.Errorf("refusing unsafe branch name %q", repo.DefaultBranch)
-		}
-		args = append(args, "--branch", repo.DefaultBranch)
+	if branch != "" {
+		args = append(args, "--branch", branch)
 	}
 	args = append(args, "--", cloneURL, repoDir)
 	if _, err := w.gitNet(ctx, dir, args...); err != nil {
@@ -98,13 +128,14 @@ func (c *Client) Checkout(ctx context.Context, repo model.Repo) (platform.Worksp
 
 type workspace struct {
 	dir, repoDir, branch string
-	installation         int64
-	c                    *Client
+	o                    Options
+	base                 string
+	cred                 CredentialFunc
 	env                  []string // credential-free; network commands add a header per command
 	root                 *os.Root
 
 	mu      sync.Mutex
-	secrets []string // every token this workspace has used, for redaction
+	secrets []string // every credential this workspace has used, for redaction
 }
 
 func (w *workspace) DefaultBranch() string { return w.branch }
@@ -127,23 +158,27 @@ func (w *workspace) git(ctx context.Context, dir string, args ...string) (string
 }
 
 // gitNet runs a git command that talks to the remote (clone, fetch, push). It asks
-// the TokenSource for an installation token at that moment, so a job that outlives
-// one token never sends a stale one, and hands it to git only through that one
-// process's environment, never argv or the remote URL.
+// for a credential at that moment and hands it to git only through that one
+// process's environment, never argv or the remote URL. An empty secret sends none.
 func (w *workspace) gitNet(ctx context.Context, dir string, args ...string) (string, error) {
-	tok, err := w.c.Tokens.Token(ctx, w.installation)
-	if err != nil {
-		return "", err
+	env := w.env
+	if w.cred != nil {
+		c, err := w.cred(ctx)
+		if err != nil {
+			return "", err
+		}
+		if c.Secret != "" {
+			basic := base64.StdEncoding.EncodeToString([]byte(c.Username + ":" + c.Secret))
+			w.mu.Lock()
+			w.secrets = append(w.secrets, c.Secret, basic)
+			w.mu.Unlock()
+			env = append(append([]string(nil), w.env...),
+				"GIT_CONFIG_COUNT=1",
+				"GIT_CONFIG_KEY_0=http."+w.base+"/.extraHeader",
+				"GIT_CONFIG_VALUE_0=Authorization: Basic "+basic,
+			)
+		}
 	}
-	basic := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + tok))
-	w.mu.Lock()
-	w.secrets = append(w.secrets, tok, basic)
-	w.mu.Unlock()
-	env := append(append([]string(nil), w.env...),
-		"GIT_CONFIG_COUNT=1",
-		"GIT_CONFIG_KEY_0=http."+strings.TrimRight(w.c.GitBase, "/")+"/.extraHeader",
-		"GIT_CONFIG_VALUE_0=Authorization: Basic "+basic,
-	)
 	return w.runGit(ctx, dir, env, false, args...)
 }
 
@@ -254,7 +289,7 @@ func (w *workspace) CommitAndPush(ctx context.Context, branch, message string) (
 	if strings.TrimSpace(st) == "" {
 		return false, nil
 	}
-	name, email := w.c.AuthorName, w.c.AuthorEmail
+	name, email := w.o.AuthorName, w.o.AuthorEmail
 	if name == "" {
 		name = "ripple[bot]"
 	}
@@ -311,11 +346,11 @@ func (w *workspace) RunGo(ctx context.Context, dir string, args ...string) (stri
 	if err != nil {
 		return "", platform.ErrNoToolchain
 	}
-	proxy := w.c.GoProxy
+	proxy := w.o.GoProxy
 	if proxy == "" {
 		proxy = "https://proxy.golang.org"
 	}
-	cache := w.c.GoCacheDir
+	cache := w.o.GoCacheDir
 	if cache == "" {
 		cache = filepath.Join(w.dir, "gocache")
 	}
@@ -333,8 +368,8 @@ func (w *workspace) RunGo(ctx context.Context, dir string, args ...string) (stri
 		"GOPROXY=" + proxy,
 		"GOVCS=*:off",
 	}
-	if w.c.GoSumDB != "" {
-		env = append(env, "GOSUMDB="+w.c.GoSumDB)
+	if w.o.GoSumDB != "" {
+		env = append(env, "GOSUMDB="+w.o.GoSumDB)
 	}
 	if inWork {
 		env = slices.DeleteFunc(env, func(kv string) bool { return kv == "GOWORK=off" })
@@ -407,15 +442,15 @@ func isExecutable(p string) bool {
 
 // sandboxed reports whether commands run under a real confinement backend.
 func (w *workspace) sandboxed() bool {
-	return w.c.Sandbox != nil && w.c.Sandbox.Name() != "none"
+	return w.o.Sandbox != nil && w.o.Sandbox.Name() != "none"
 }
 
 // confine wraps argv in the configured sandbox; with none configured it is unchanged.
 func (w *workspace) confine(p sandbox.Policy, argv []string) ([]string, error) {
-	if w.c.Sandbox == nil {
+	if w.o.Sandbox == nil {
 		return argv, nil
 	}
-	return w.c.Sandbox.Wrap(p, argv)
+	return w.o.Sandbox.Wrap(p, argv)
 }
 
 // dirOutside returns the workspace root as an extra writable path when dir is a
@@ -549,4 +584,12 @@ func checkWorkSafe(root, work string) error {
 		}
 	}
 	return nil
+}
+
+func snippet(b []byte) string {
+	s := strings.TrimSpace(string(b))
+	if len(s) > 300 {
+		s = s[:300] + "..."
+	}
+	return s
 }

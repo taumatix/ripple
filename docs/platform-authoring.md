@@ -1,0 +1,105 @@
+# Adding a code host
+
+This is for whoever adds GitLab, Gitea/Forgejo, Bitbucket Cloud, Bitbucket Server, Azure DevOps,
+CodeCommit, Gerrit or SCM-Manager (ROADMAP entries 11–18). Several hosts are being added in parallel,
+so a host touches **only files it creates**, plus `UPSTREAM.md`, its own ROADMAP entry and one
+CHANGELOG line.
+No shared file needs an edit to register a host.
+
+## Before any code
+
+Fetch the host's own documentation for webhook events and their signatures, the pull request API,
+the auth model and rate limits, and vendor what you rely on under `docs/upstream/<host>/`. Pin the
+API version you built against in `UPSTREAM.md`'s yaml block in the same PR. That is the one shared
+file a host edits: append your entry at the end of the block, and when another host's branch merged
+first, resolve the conflict by keeping both entries. Anything you did not read in the vendored text
+is "assumed, unverified" in code comments and in the PR body.
+
+## The files, and nothing else
+
+| File | What goes in it |
+|---|---|
+| `internal/platform/<host>/client.go` | the `platform.Platform` (and any optional capabilities) |
+| `internal/platform/<host>/receiver.go` | the webhook `http.Handler` that turns deliveries into `platform.Event`s (skip if the host has none) |
+| `internal/platform/<host>/host.go` | `HostName` and `NewHost(...) *platform.Host` |
+| `internal/platform/<host>/*_test.go` | unit tests for the client and receiver |
+| `internal/platform/<host>/conformance_test.go` | a `platformtest.Fixture` over your fake, and `platformtest.Run` |
+| `internal/testutil/<host>.go` | the fake server (REST API + bare git repos on disk); `testutil.GitHub` is the model |
+| `internal/app/host_<host>.go` | the registration line and the builder that reads your settings |
+| `docs/host-<host>.md` | your settings (`RIPPLE_<HOST>_*`), how to create the credential and the webhook |
+
+**The single registration point** is one line in `internal/app/host_<host>.go`:
+
+```go
+func init() { RegisterHost(gitlab.HostName, buildGitLab) }
+```
+
+`buildGitLab(ctx, app.HostDeps) (*platform.Host, error)` reads its settings with `d.Getenv`
+(never by adding fields to `config.Server`, which every branch would then edit), and returns
+`nil, nil` when they are absent, so an unconfigured host costs nothing. `d.Git` carries the shared
+checkout setup (work dir, module proxy, sandbox): copy it and set `GitBase`. `d.HTTP` is the shared client.
+
+## What a host implements
+
+Required, in `platform.Platform`:
+
+- `Checkout`: call `gitws.Checkout(ctx, opts, cloneURL, repo.DefaultBranch, credFunc)`. Do not write
+  your own clone: `gitws` holds the sandboxing, path confinement, credential redaction and the
+  allow-listed `go` commands. `cloneURL` must start with `opts.GitBase`. Validate `repo.FullName`
+  against the host's own path grammar before building any URL from it.
+- `ListOpenPRs(repo, prefix)`: open PRs whose head branch starts with `prefix` (`ripple/`), every page.
+- `CreatePR(repo, spec)`: honour `Draft`; labels are best effort; return `PR.ID` if a later call needs
+  a handle other than `Number`.
+- Return `*platform.RateLimitError{Until}` for the host's rate-limit answer, with `Until` computed
+  from an injectable clock (the suite's clock is not the wall clock).
+
+Optional, each a separate interface in `internal/platform/host.go`; implement it or leave it out:
+
+| Interface | Implement when | If absent |
+|---|---|---|
+| `AutoMerger` | the host can merge on green (GitLab MWPS, Azure auto-complete, Gitea/Forgejo auto-merge) | PRs stay open for review; the job still succeeds |
+| `RateLimiter` | always, if the host rate-limits. Record the last `Until` per credential scope | one limited host keeps getting calls until each one fails |
+| `Lister` | the host has no install event (CodeCommit, Gerrit, SCM-Manager, a PAT-only setup) | repos register only through the receiver |
+| `LegacyConfig` | never: `.github/ripple.yml` is GitHub's alone | only `.ripple.yaml` at the repo root is read |
+
+Credentials: implement `platform.Credentials`, or use `platform.StaticCredential{Username, Secret}`
+for a fixed token. Git sends it as HTTP basic auth (`oauth2:<token>` on GitLab, `x-token-auth` on
+Bitbucket Cloud: check the vendored docs). It is asked for per request, so a minting source may rotate.
+
+## Repo names and events
+
+Your client sees host-native paths (`group/sub/project`, `org/project/repo`). The store sees
+`<host>:<path>`; `platform.Mux` adds and strips the prefix, so your code never does. GitHub alone is
+unprefixed. Everything up to the first `:` names the host, so your paths may contain `:` themselves.
+
+The receiver authenticates a delivery from its headers before reading the body, bounds the body,
+and calls `sink.HandleEvent` with `Kind` (`ReposAdded`, `ReposRemoved`, `Push`), the native repo
+paths, and for a push the ref, default branch and changed files. Leave `Files` empty when the payload
+does not list them: that forces a re-scan, which is correct but costs a clone. Set `Scope` to the
+credential scope the event belongs to (0 if there is one credential); the queue shares workers
+between scopes. `model.Repo.InstallationID` carries that scope back to your client.
+`internal/webhook` is GitHub's receiver and a reference for the hardening (signature first, inflight cap, dedupe).
+
+The receiver is served at `POST /webhook/<host>`.
+
+## Done means the conformance suite passes
+
+`internal/platform/platformtest` drives the real app against your fake: a release opens exactly one
+PR in exactly the importing repos and costs a non-importing repo zero calls; a push re-scans, and an
+irrelevant push costs nothing; `.ripple.yaml` means the same as on GitHub; auto-merge is requested
+only when you implement it; a rate limit holds back your other repos until its time. The suite is
+not to be weakened per host. If your host cannot do something the suite assumes (Gerrit has changes,
+not branches), say so in the PR and extend the suite for every host rather than skipping it.
+
+Run it with `go test ./internal/platform/<host>/ -run TestConformance -v`. `TestBareHostConforms`
+in `platformtest` is the smallest host that passes it and shows a listing-only host's fixture.
+
+## Known gaps in the seam
+
+- `gitws` pushes to `refs/heads/<branch>`; Gerrit needs `refs/for/<branch>` with a Change-Id. Add a
+  push-target option to `gitws.Options` in the Gerrit branch.
+- A `Lister` host with no push events is re-scanned only when it is re-registered; periodic
+  re-scans are a ROADMAP entry.
+- The previous listing is one store cursor per host, which fits tens of thousands of repo names,
+  not more.
+- `Receiver` is HTTP. CodeCommit's EventBridge→SNS fits it as an HTTPS subscription; SQS polling does not.

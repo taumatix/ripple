@@ -14,10 +14,12 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/taumatix/ripple/internal/model"
 	"github.com/taumatix/ripple/internal/platform"
+	"github.com/taumatix/ripple/internal/platform/gitws"
 	"github.com/taumatix/ripple/internal/sandbox"
 )
 
@@ -31,9 +33,13 @@ type Client struct {
 	APIBase string
 	// GitBase is the clone URL prefix, e.g. https://github.com; the clone URL is GitBase/owner/repo.git
 	GitBase string
-	Tokens  TokenSource
-	HTTP    *http.Client
-	Log     *slog.Logger
+	// Tokens mints installation tokens (AppAuth) or returns a fixed one (StaticToken).
+	Tokens TokenSource
+	// Credentials, when set, replaces Tokens as the credential source for API calls
+	// and git; nil means AppCredentials{Tokens}.
+	Credentials platform.Credentials
+	HTTP        *http.Client
+	Log         *slog.Logger
 	// AuthorName and AuthorEmail identify commits.
 	AuthorName, AuthorEmail string
 	// WorkDir is where checkouts are created; empty means the OS temp dir.
@@ -48,9 +54,48 @@ type Client struct {
 	// checkout. Nil means no confinement. Network git commands (clone, fetch, push)
 	// run unconfined: they hold the installation token and execute no repository code.
 	Sandbox sandbox.Backend
+	// Now is the clock a Retry-After is counted from; nil means time.Now.
+	Now func() time.Time
+
+	mu      sync.Mutex
+	limited map[int64]time.Time
 }
 
-var _ platform.Platform = (*Client)(nil)
+var (
+	_ platform.Platform     = (*Client)(nil)
+	_ platform.AutoMerger   = (*Client)(nil)
+	_ platform.RateLimiter  = (*Client)(nil)
+	_ platform.LegacyConfig = (*Client)(nil)
+)
+
+func (c *Client) credentials() platform.Credentials {
+	if c.Credentials != nil {
+		return c.Credentials
+	}
+	return AppCredentials{Tokens: c.Tokens}
+}
+
+// ReadsLegacyConfig is true: .github/ripple.yml is a deprecated alias on GitHub only.
+func (c *Client) ReadsLegacyConfig(model.Repo) bool { return true }
+
+// RateLimitedUntil is when the last rate-limited answer for repo's installation
+// asked us to retry; GitHub's limits are per installation.
+func (c *Client) RateLimitedUntil(repo model.Repo) time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.limited[repo.InstallationID]
+}
+
+func (c *Client) noteLimit(inst int64, until time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.limited == nil {
+		c.limited = map[int64]time.Time{}
+	}
+	if until.After(c.limited[inst]) {
+		c.limited[inst] = until
+	}
+}
 
 func setHeaders(r *http.Request) {
 	r.Header.Set("Accept", "application/vnd.github+json")
@@ -72,8 +117,8 @@ func checkRepo(r model.Repo) error {
 	return nil
 }
 
-func (c *Client) do(ctx context.Context, inst int64, method, rawURL string, in, out any) (int, error) {
-	tok, err := c.Tokens.Token(ctx, inst)
+func (c *Client) do(ctx context.Context, repo model.Repo, method, rawURL string, in, out any) (int, error) {
+	cred, err := c.credentials().Credential(ctx, repo)
 	if err != nil {
 		return 0, err
 	}
@@ -87,7 +132,7 @@ func (c *Client) do(ctx context.Context, inst int64, method, rawURL string, in, 
 		return 0, err
 	}
 	setHeaders(req)
-	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("Authorization", "Bearer "+cred.Secret)
 	if in != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -98,7 +143,9 @@ func (c *Client) do(ctx context.Context, inst int64, method, rawURL string, in, 
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if resp.StatusCode == http.StatusTooManyRequests || (resp.StatusCode == http.StatusForbidden && (resp.Header.Get("X-RateLimit-Remaining") == "0" || resp.Header.Get("Retry-After") != "")) {
-		return resp.StatusCode, &platform.RateLimitError{Until: retryAt(resp)}
+		until := retryAt(resp, c.now())
+		c.noteLimit(repo.InstallationID, until)
+		return resp.StatusCode, &platform.RateLimitError{Until: until}
 	}
 	if resp.StatusCode >= 300 {
 		return resp.StatusCode, fmt.Errorf("github %s %s: status %d: %s", method, req.URL.Path, resp.StatusCode, snippet(data))
@@ -111,14 +158,21 @@ func (c *Client) do(ctx context.Context, inst int64, method, rawURL string, in, 
 	return resp.StatusCode, nil
 }
 
-func retryAt(r *http.Response) time.Time {
+func (c *Client) now() time.Time {
+	if c.Now != nil {
+		return c.Now()
+	}
+	return time.Now()
+}
+
+func retryAt(r *http.Response, now time.Time) time.Time {
 	if s, err := strconv.Atoi(r.Header.Get("Retry-After")); err == nil {
-		return time.Now().Add(time.Duration(s) * time.Second)
+		return now.Add(time.Duration(s) * time.Second)
 	}
 	if s, err := strconv.ParseInt(r.Header.Get("X-RateLimit-Reset"), 10, 64); err == nil {
 		return time.Unix(s, 0)
 	}
-	return time.Now().Add(time.Minute)
+	return now.Add(time.Minute)
 }
 
 func snippet(b []byte) string {
@@ -139,7 +193,7 @@ type prJSON struct {
 }
 
 func (p prJSON) pr() platform.PR {
-	return platform.PR{Number: p.Number, URL: p.HTMLURL, NodeID: p.NodeID, Head: p.Head.Ref}
+	return platform.PR{Number: p.Number, URL: p.HTMLURL, ID: p.NodeID, Head: p.Head.Ref}
 }
 
 func (c *Client) ListOpenPRs(ctx context.Context, repo model.Repo, prefix string) ([]platform.PR, error) {
@@ -150,7 +204,7 @@ func (c *Client) ListOpenPRs(ctx context.Context, repo model.Repo, prefix string
 	for page := 1; page <= 10; page++ {
 		var prs []prJSON
 		u := fmt.Sprintf("%s/repos/%s/pulls?state=open&per_page=100&page=%d", strings.TrimRight(c.APIBase, "/"), repo.FullName, page)
-		if _, err := c.do(ctx, repo.InstallationID, http.MethodGet, u, nil, &prs); err != nil {
+		if _, err := c.do(ctx, repo, http.MethodGet, u, nil, &prs); err != nil {
 			return nil, err
 		}
 		for _, p := range prs {
@@ -175,7 +229,7 @@ func (c *Client) CreatePR(ctx context.Context, repo model.Repo, s platform.PRSpe
 	if s.Draft {
 		payload["draft"] = true
 	}
-	_, err := c.do(ctx, repo.InstallationID, http.MethodPost, u, payload, &p)
+	_, err := c.do(ctx, repo, http.MethodPost, u, payload, &p)
 	if err != nil {
 		return platform.PR{}, err
 	}
@@ -183,7 +237,7 @@ func (c *Client) CreatePR(ctx context.Context, repo model.Repo, s platform.PRSpe
 	pr.Head = s.Head
 	if len(s.Labels) > 0 {
 		lu := fmt.Sprintf("%s/repos/%s/issues/%d/labels", strings.TrimRight(c.APIBase, "/"), repo.FullName, pr.Number)
-		if _, err := c.do(ctx, repo.InstallationID, http.MethodPost, lu, map[string]any{"labels": s.Labels}, nil); err != nil && c.Log != nil {
+		if _, err := c.do(ctx, repo, http.MethodPost, lu, map[string]any{"labels": s.Labels}, nil); err != nil && c.Log != nil {
 			c.Log.Warn("labelling pull request failed", "repo", repo.FullName, "pr", pr.Number, "err", err)
 		}
 	}
@@ -192,10 +246,11 @@ func (c *Client) CreatePR(ctx context.Context, repo model.Repo, s platform.PRSpe
 
 const automergeMutation = `mutation($id: ID!) { enablePullRequestAutoMerge(input: {pullRequestId: $id, mergeMethod: SQUASH}) { pullRequest { number } } }`
 
-// EnableAutoMerge uses GraphQL (REST has no auto-merge endpoint). It fails when
-// the repository does not allow auto-merge or has no required checks.
-func (c *Client) EnableAutoMerge(ctx context.Context, repo model.Repo, pr platform.PR) error {
-	if pr.NodeID == "" {
+// RequestAutoMerge enables auto-merge (squash) through GraphQL: REST has no
+// auto-merge endpoint. It fails when the repository does not allow auto-merge or
+// has no required checks.
+func (c *Client) RequestAutoMerge(ctx context.Context, repo model.Repo, pr platform.PR) error {
+	if pr.ID == "" {
 		return errors.New("pull request has no node id")
 	}
 	var out struct {
@@ -205,11 +260,25 @@ func (c *Client) EnableAutoMerge(ctx context.Context, repo model.Repo, pr platfo
 	if err != nil {
 		return err
 	}
-	if _, err := c.do(ctx, repo.InstallationID, http.MethodPost, u, map[string]any{"query": automergeMutation, "variables": map[string]string{"id": pr.NodeID}}, &out); err != nil {
+	if _, err := c.do(ctx, repo, http.MethodPost, u, map[string]any{"query": automergeMutation, "variables": map[string]string{"id": pr.ID}}, &out); err != nil {
 		return err
 	}
 	if len(out.Errors) > 0 {
 		return fmt.Errorf("enable auto-merge: %s", out.Errors[0].Message)
 	}
 	return nil
+}
+
+// Checkout shallow-clones the repo's default branch (see gitws.Checkout) with an
+// installation token fetched per network git command.
+func (c *Client) Checkout(ctx context.Context, repo model.Repo) (platform.Workspace, error) {
+	if err := checkRepo(repo); err != nil {
+		return nil, err
+	}
+	o := gitws.Options{GitBase: c.GitBase, AuthorName: c.AuthorName, AuthorEmail: c.AuthorEmail, WorkDir: c.WorkDir,
+		GoProxy: c.GoProxy, GoSumDB: c.GoSumDB, GoCacheDir: c.GoCacheDir, Sandbox: c.Sandbox}
+	cloneURL := strings.TrimRight(c.GitBase, "/") + "/" + repo.FullName + ".git"
+	return gitws.Checkout(ctx, o, cloneURL, repo.DefaultBranch, func(ctx context.Context) (platform.Credential, error) {
+		return c.credentials().Credential(ctx, repo)
+	})
 }

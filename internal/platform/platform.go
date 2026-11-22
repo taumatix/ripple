@@ -1,4 +1,6 @@
-// Package platform abstracts the code host: clone, edit, push, open PRs.
+// Package platform abstracts the code host: clone, edit, push, open PRs, and how a
+// host tells ripple which repositories to watch. docs/platform-authoring.md says how
+// to add one.
 package platform
 
 import (
@@ -10,11 +12,15 @@ import (
 	"github.com/taumatix/ripple/internal/model"
 )
 
+// PR is an open pull request (merge request, change) as the engine sees it.
 type PR struct {
 	Number int
 	URL    string
-	NodeID string
 	Head   string
+	// ID is the host's own handle for the PR when its API needs one beyond Number
+	// (GitHub: the GraphQL node id that auto-merge takes). Only the platform that
+	// returned the PR reads it.
+	ID string
 }
 
 type PRSpec struct {
@@ -83,10 +89,13 @@ type Workspace interface {
 	Close() error
 }
 
+// Platform is what every code host provides. Optional capabilities are separate
+// interfaces a platform may also implement: AutoMerger, RateLimiter, Lister and
+// LegacyConfig (see host.go). A call that the host refuses for rate limiting
+// returns *RateLimitError.
 type Platform interface {
 	Checkout(ctx context.Context, repo model.Repo) (Workspace, error)
 	// ListOpenPRs returns open PRs whose head branch starts with headPrefix.
 	ListOpenPRs(ctx context.Context, repo model.Repo, headPrefix string) ([]PR, error)
 	CreatePR(ctx context.Context, repo model.Repo, spec PRSpec) (PR, error)
-	EnableAutoMerge(ctx context.Context, repo model.Repo, pr PR) error
 }

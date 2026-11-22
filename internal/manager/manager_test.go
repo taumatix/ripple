@@ -2,12 +2,36 @@ package manager
 
 import (
 	"errors"
+	"sort"
 	"strings"
 	"testing"
 
 	"github.com/taumatix/ripple/internal/config"
 	"github.com/taumatix/ripple/internal/model"
+	"github.com/taumatix/ripple/internal/platform"
 )
+
+// memWS is an in-memory platform.Workspace: only the file methods are implemented.
+type memWS struct {
+	platform.Workspace
+	files map[string]string
+}
+
+func (m *memWS) ReadFile(p string) ([]byte, error)  { return []byte(m.files[p]), nil }
+func (m *memWS) WriteFile(p string, d []byte) error { m.files[p] = string(d); return nil }
+func (m *memWS) Walk(fn func(string) error) error {
+	var names []string
+	for k := range m.files {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	for _, k := range names {
+		if err := fn(k); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 const goMod = `module example.com/app
 
@@ -238,10 +262,10 @@ import (
 // github.com/a/b/v2 in a comment stays.
 var s = "github.com/a/b/v2"
 
-//go:generate go run github.com/a/b/v2/cmd/gen
+//go:generate go run github.com/a/b/v3/cmd/gen
 `
 	out, n, err := rewriteImports("p.go", []byte(src), "github.com/a/b/v2", "github.com/a/b/v3", nil)
-	if err != nil || n != 4 || string(out) != want {
+	if err != nil || n != 5 || string(out) != want {
 		t.Fatalf("n=%d err=%v\n%s", n, err, out)
 	}
 }
@@ -310,4 +334,102 @@ func TestMigrateGoWorkReplace(t *testing.T) {
 	if _, changed, _ := RewriteGoWork([]byte("go 1.22\n\nuse ./a\n"), "example.com/lib", "example.com/lib/v2"); changed {
 		t.Errorf("a go.work that never names the path must be left alone")
 	}
+}
+
+func rewriteGoWant(t *testing.T, src, want string, wantN int, wantAmbiguous ...string) {
+	t.Helper()
+	out, n, amb, err := rewriteGo("p.go", []byte(src), "github.com/a/b/v2", "github.com/a/b/v3", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) != want || n != wantN {
+		t.Errorf("n=%d (want %d)\n--- got\n%s\n--- want\n%s", n, wantN, out, want)
+	}
+	if strings.Join(amb, "|") != strings.Join(wantAmbiguous, "|") {
+		t.Errorf("ambiguous = %q, want %q", amb, wantAmbiguous)
+	}
+}
+
+func TestRewriteGenerateGoRun(t *testing.T) {
+	src := "package p\n\n" +
+		"//go:generate go run github.com/a/b/v2/cmd/gen -o out.go github.com/a/b/v2/arg\n" +
+		"//go:generate\tgo   run -tags tools -mod=mod github.com/a/b/v2/cmd/gen\n" +
+		"//go:generate -command g go run github.com/a/b/v2/cmd/gen\n" +
+		"//go:generate go run ./cmd/local\n" +
+		"//go:generate go run github.com/a/b/v2cmd/x\n" +
+		"//go:generate go run github.com/a/b/v4/cmd/x\n"
+	want := "package p\n\n" +
+		"//go:generate go run github.com/a/b/v3/cmd/gen -o out.go github.com/a/b/v2/arg\n" +
+		"//go:generate\tgo   run -tags tools -mod=mod github.com/a/b/v3/cmd/gen\n" +
+		"//go:generate -command g go run github.com/a/b/v3/cmd/gen\n" +
+		"//go:generate go run ./cmd/local\n" +
+		"//go:generate go run github.com/a/b/v2cmd/x\n" +
+		"//go:generate go run github.com/a/b/v4/cmd/x\n"
+	// the program's own argument that names the old path is ambiguous, not rewritten
+	rewriteGoWant(t, src, want, 3, "p.go:3")
+}
+
+func TestRewriteGenerateAmbiguousLeftAlone(t *testing.T) {
+	src := "package p\n\n" +
+		"//go:generate go run github.com/a/b/v2/cmd/gen@latest\n" +
+		"//go:generate go run \"github.com/a/b/v2/cmd/gen\"\n" +
+		"//go:generate go run $PKG github.com/a/b/v2/x\n" +
+		"//go:generate go run -weird github.com/a/b/v2/cmd/gen\n" +
+		"//go:generate mockgen github.com/a/b/v2/pkg Iface\n" +
+		"//go:generate go tool github.com/a/b/v2/cmd/gen\n"
+	rewriteGoWant(t, src, src, 0, "p.go:3", "p.go:4", "p.go:5", "p.go:6", "p.go:7", "p.go:8")
+}
+
+func TestRewriteGenerateNotADirective(t *testing.T) {
+	src := "package p\n\n" +
+		"// //go:generate go run github.com/a/b/v2/cmd/gen\n" +
+		"var _ = 1 //go:generate go run github.com/a/b/v2/cmd/gen\n" +
+		"/* //go:generate go run github.com/a/b/v2/cmd/gen */\n" +
+		"//  go:generate go run github.com/a/b/v2/cmd/gen\n" +
+		"var s = \"\\n//go:generate go run github.com/a/b/v2/cmd/gen\"\n" +
+		"var r = `\n//go:generate go run github.com/a/b/v2/cmd/gen\n`\n"
+	rewriteGoWant(t, src, src, 0)
+}
+
+func TestRewriteImportComment(t *testing.T) {
+	for _, tc := range []struct{ name, src, want string }{
+		{"line", "package p // import \"github.com/a/b/v2/p\"\n", "package p // import \"github.com/a/b/v3/p\"\n"},
+		{"block", "package p /* import \"github.com/a/b/v2\" */\n", "package p /* import \"github.com/a/b/v3\" */\n"},
+		{"other module", "package p // import \"github.com/a/c/p\"\n", "package p // import \"github.com/a/c/p\"\n"},
+		{"not canonical position", "package p\n\n// import \"github.com/a/b/v2/p\"\nvar x int // import \"github.com/a/b/v2/p\"\n",
+			"package p\n\n// import \"github.com/a/b/v2/p\"\nvar x int // import \"github.com/a/b/v2/p\"\n"},
+		{"prose", "package p // see import \"github.com/a/b/v2/p\"\n", "package p // see import \"github.com/a/b/v2/p\"\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			n := 0
+			if tc.src != tc.want {
+				n = 1
+			}
+			rewriteGoWant(t, tc.src, tc.want, n)
+		})
+	}
+}
+
+func TestRewriteGoImportsReportsAmbiguous(t *testing.T) {
+	ws := &memWS{files: map[string]string{
+		"go.mod": "module example.com/app\n\ngo 1.22\n\nrequire github.com/a/b/v2 v2.0.0\n",
+		"a.go":   "package p\n\n//go:generate go run github.com/a/b/v2/cmd/gen@latest\n",
+		"b.go":   "package p\n\n//go:generate go run github.com/a/b/v2/cmd/gen\n",
+	}}
+	r, err := RewriteGo(ws, "go.mod", "github.com/a/b/v2", "github.com/a/b/v3", []byte(ws.files["go.mod"]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(r.Changed, ",") != "b.go" || strings.Join(r.Ambiguous, ",") != "a.go:3" || len(r.Skipped) != 0 {
+		t.Fatalf("%+v", r)
+	}
+	if ws.files["b.go"] != "package p\n\n//go:generate go run github.com/a/b/v3/cmd/gen\n" {
+		t.Fatalf("b.go = %q", ws.files["b.go"])
+	}
+}
+
+func TestRewriteGoFallsBackWhenBodyDoesNotParse(t *testing.T) {
+	src := "package p // import \"github.com/a/b/v2/p\"\n\nimport \"github.com/a/b/v2/x\"\n\n//go:generate go run github.com/a/b/v2/cmd/gen\nfunc ( {\n"
+	want := "package p // import \"github.com/a/b/v3/p\"\n\nimport \"github.com/a/b/v3/x\"\n\n//go:generate go run github.com/a/b/v2/cmd/gen\nfunc ( {\n"
+	rewriteGoWant(t, src, want, 2, "p.go (go:generate lines not examined: file does not parse)")
 }

@@ -112,6 +112,9 @@ type runner struct {
 	migrations []migration
 	// skipped holds Go files the import rewrite could not parse; the PR body lists them.
 	skipped []string
+	// ambiguous holds "file:line" of references to the old path in //go:generate lines
+	// that were left alone; the PR body lists them.
+	ambiguous []string
 }
 
 func (r *runner) finish(j model.Job, state model.JobState, reason, pr string) {
@@ -332,6 +335,7 @@ func (r *runner) openPR(p *prPlan) (*platform.PR, error) {
 	r.touched = map[string]bool{}
 	r.migrations = nil
 	r.skipped = nil
+	r.ambiguous = nil
 	var applied []item
 	for _, it := range p.items {
 		ok, err := r.apply(it)
@@ -356,6 +360,13 @@ func (r *runner) openPR(p *prPlan) (*platform.PR, error) {
 		sort.Strings(r.skipped)
 		body += "\n## Files not rewritten\n\nThese Go files do not parse, so their imports were left as they were. Fix them by hand if they import the old path:\n\n"
 		for _, f := range r.skipped {
+			body += "- `" + f + "`\n"
+		}
+	}
+	if len(r.ambiguous) > 0 {
+		sort.Strings(r.ambiguous)
+		body += "\n## Old path left in place\n\nThese //go:generate lines still mention the old import path. They are not a plain `go run <package>` (a version suffix, quoting, a variable, another command or a program argument), so they were left as they were. Check them by hand:\n\n"
+		for _, f := range r.ambiguous {
 			body += "- `" + f + "`\n"
 		}
 	}
@@ -436,11 +447,12 @@ func (r *runner) apply(it item) (bool, error) {
 			return false, err
 		}
 		if d.Package != it.job.Package {
-			_, skipped, err := manager.RewriteGoImports(r.ws, d.File, d.Package, it.job.Package, content)
+			res, err := manager.RewriteGo(r.ws, d.File, d.Package, it.job.Package, content)
 			if err != nil {
 				return false, err
 			}
-			r.skipped = append(r.skipped, skipped...)
+			r.skipped = append(r.skipped, res.Skipped...)
+			r.ambiguous = append(r.ambiguous, res.Ambiguous...)
 			r.migrations = append(r.migrations, migration{d.Package, it.job.Package})
 		}
 		if err := r.ws.WriteFile(d.File, out); err != nil {

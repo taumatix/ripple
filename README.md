@@ -120,8 +120,13 @@ refreshed and verified too. A module with a `vendor/modules.txt` gets `go mod ve
 vet of each used module. Without the `go` command, a minor or patch PR is opened as before and says it
 was not verified.
 
-Not covered yet: `go work vendor` for a workspace-level `vendor/`, `go:generate` lines and
-`// import` comments (see [ROADMAP.md](ROADMAP.md)).
+A major bump also rewrites the package of a plain `//go:generate go run <package>` and canonical
+`package p // import "..."` comments (both found with go/parser, never by pattern). Directives that
+mention the old path in any other shape (`@version`, quoting, a variable, another command, a program
+argument) are left alone and listed in the PR body.
+
+Not covered yet: `go work vendor` for a workspace-level `vendor/` and the remaining directive shapes
+(see [ROADMAP.md](ROADMAP.md)).
 
 ## Architecture
 

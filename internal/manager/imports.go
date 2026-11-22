@@ -1,7 +1,9 @@
 package manager
 
 import (
+	"bytes"
 	"fmt"
+	"go/ast"
 	"go/parser"
 	"go/token"
 	"path"
@@ -14,20 +16,37 @@ import (
 	"github.com/taumatix/ripple/internal/platform"
 )
 
-// RewriteGoImports rewrites, in every .go file owned by the module whose go.mod is
-// goModFile, the import paths under oldPath so they sit under newPath. Files are
-// parsed with go/parser and only the string literal of an import spec is replaced,
-// byte for byte, so comments, string constants, alias names and "." and "_" imports
-// are untouched. It must run on the go.mod as it was before the migration:
+// GoRewrite is what RewriteGo did: the files it changed, the files it could not
+// parse, and the places it found a reference to the old path that it could not
+// safely rewrite and left as it was ("file:line").
+type GoRewrite struct {
+	Changed, Skipped, Ambiguous []string
+}
+
+// RewriteGoImports is RewriteGo without the ambiguous report.
+func RewriteGoImports(ws platform.Workspace, goModFile, oldPath, newPath string, goMod []byte) (changed, skipped []string, err error) {
+	r, err := RewriteGo(ws, goModFile, oldPath, newPath, goMod)
+	return r.Changed, r.Skipped, err
+}
+
+// RewriteGo rewrites, in every .go file owned by the module whose go.mod is
+// goModFile, the references to packages under oldPath so they sit under newPath:
+// import specs, canonical import comments (package p // import "...") and the
+// package argument of "go run" in //go:generate directives. Files are parsed with
+// go/parser and only the quoted path (or the one directive word) is replaced, byte
+// for byte, so other comments, string constants, alias names and "." and "_"
+// imports are untouched. A directive whose reference is not plainly the package
+// of a "go run" (a version suffix, quoting, a variable, another command, a
+// program argument) is left alone and reported in Ambiguous. It must run on the go.mod as it was before the migration:
 // requirements of the same module that live below oldPath keep the packages they
 // own. Directories the go tool ignores (testdata, and names starting with "_" or
 // ".") are left alone. A file that does not parse is skipped, not fatal: it is
 // returned in skipped so the caller can tell a human. It returns the files it
 // changed.
-func RewriteGoImports(ws platform.Workspace, goModFile, oldPath, newPath string, goMod []byte) (changed, skipped []string, err error) {
+func RewriteGo(ws platform.Workspace, goModFile, oldPath, newPath string, goMod []byte) (res GoRewrite, err error) {
 	f, err := modfile.ParseLax(goModFile, goMod, nil)
 	if err != nil {
-		return nil, nil, fmt.Errorf("parse %s: %w", goModFile, err)
+		return res, fmt.Errorf("parse %s: %w", goModFile, err)
 	}
 	var nested []string // other modules required below oldPath: they own their packages
 	for _, r := range f.Require {
@@ -48,7 +67,7 @@ func RewriteGoImports(ws platform.Workspace, goModFile, oldPath, newPath string,
 		return nil
 	})
 	if err != nil {
-		return nil, nil, err
+		return res, err
 	}
 	sort.Strings(gofiles)
 	for _, p := range gofiles {
@@ -57,22 +76,23 @@ func RewriteGoImports(ws platform.Workspace, goModFile, oldPath, newPath string,
 		}
 		src, err := ws.ReadFile(p)
 		if err != nil {
-			return changed, skipped, err
+			return res, err
 		}
-		out, n, err := rewriteImports(p, src, oldPath, newPath, nested)
+		out, n, amb, err := rewriteGo(p, src, oldPath, newPath, nested)
 		if err != nil {
-			skipped = append(skipped, p)
+			res.Skipped = append(res.Skipped, p)
 			continue
 		}
+		res.Ambiguous = append(res.Ambiguous, amb...)
 		if n == 0 {
 			continue
 		}
 		if err := ws.WriteFile(p, out); err != nil {
-			return changed, skipped, err
+			return res, err
 		}
-		changed = append(changed, p)
+		res.Changed = append(res.Changed, p)
 	}
-	return changed, skipped, nil
+	return res, nil
 }
 
 // ignoredByGo reports whether the go tool skips the directory chain of p: testdata,
@@ -134,16 +154,33 @@ func isMajorElem(rest string) bool {
 }
 
 func rewriteImports(name string, src []byte, oldPath, newPath string, nested []string) ([]byte, int, error) {
+	out, n, _, err := rewriteGo(name, src, oldPath, newPath, nested)
+	return out, n, err
+}
+
+type edit struct {
+	start, end int
+	text       string
+}
+
+// rewriteGo returns src with every safe reference to oldPath moved to newPath, how
+// many edits it made, and the "name:line" of references it left alone. A file whose
+// body does not parse still gets its imports and import comment rewritten when its
+// header parses; its directives are then not examined, which is reported.
+func rewriteGo(name string, src []byte, oldPath, newPath string, nested []string) ([]byte, int, []string, error) {
 	fset := token.NewFileSet()
-	af, err := parser.ParseFile(fset, name, src, parser.ImportsOnly)
+	full := true
+	af, err := parser.ParseFile(fset, name, src, parser.ParseComments)
 	if err != nil {
-		return nil, 0, fmt.Errorf("parse %s: %w", name, err)
-	}
-	type edit struct {
-		start, end int
-		text       string
+		full = false
+		fset = token.NewFileSet()
+		af, err = parser.ParseFile(fset, name, src, parser.ImportsOnly|parser.ParseComments)
+		if err != nil {
+			return nil, 0, nil, fmt.Errorf("parse %s: %w", name, err)
+		}
 	}
 	var edits []edit
+	var ambiguous []string
 	for _, spec := range af.Imports {
 		lit := spec.Path
 		val, err := strconv.Unquote(lit.Value)
@@ -157,9 +194,29 @@ func rewriteImports(name string, src []byte, oldPath, newPath string, nested []s
 		q := string(lit.Value[0]) // keep "..." or `...`
 		edits = append(edits, edit{fset.Position(lit.Pos()).Offset, fset.Position(lit.End()).Offset, q + nv + q})
 	}
-	if len(edits) == 0 {
-		return src, 0, nil
+	rewrite := func(s string) (string, bool) { return mapImport(s, oldPath, newPath, nested) }
+	for _, cg := range af.Comments {
+		for _, c := range cg.List {
+			if e, ok := importCommentEdit(fset, af, c, rewrite); ok {
+				edits = append(edits, e)
+			}
+			if !full {
+				continue
+			}
+			es, amb := generateEdits(fset, c, oldPath, rewrite)
+			edits = append(edits, es...)
+			if amb {
+				ambiguous = append(ambiguous, fmt.Sprintf("%s:%d", name, fset.Position(c.Pos()).Line))
+			}
+		}
 	}
+	if !full && bytes.Contains(src, []byte("//go:generate")) {
+		ambiguous = append(ambiguous, name+" (go:generate lines not examined: file does not parse)")
+	}
+	if len(edits) == 0 {
+		return src, 0, ambiguous, nil
+	}
+	sort.Slice(edits, func(i, j int) bool { return edits[i].start < edits[j].start })
 	out := make([]byte, 0, len(src)+len(edits)*4)
 	prev := 0
 	for _, e := range edits {
@@ -168,5 +225,167 @@ func rewriteImports(name string, src []byte, oldPath, newPath string, nested []s
 		prev = e.end
 	}
 	out = append(out, src[prev:]...)
-	return out, len(edits), nil
+	return out, len(edits), ambiguous, nil
+}
+
+// importCommentEdit finds the canonical import comment: a comment that is exactly
+// import "path", on the line of the package clause and before any declaration.
+func importCommentEdit(fset *token.FileSet, af *ast.File, c *ast.Comment, rewrite func(string) (string, bool)) (edit, bool) {
+	if c.Pos() < af.Name.End() || fset.Position(c.Pos()).Line != fset.Position(af.Name.End()).Line {
+		return edit{}, false
+	}
+	if len(af.Decls) > 0 && af.Decls[0].Pos() < c.Pos() {
+		return edit{}, false
+	}
+	var inner string
+	switch {
+	case strings.HasPrefix(c.Text, "//"):
+		inner = c.Text[2:]
+	case strings.HasPrefix(c.Text, "/*") && strings.HasSuffix(c.Text, "*/") && len(c.Text) >= 4:
+		inner = c.Text[2 : len(c.Text)-2]
+	default:
+		return edit{}, false
+	}
+	inner = strings.TrimSpace(inner)
+	lit, ok := strings.CutPrefix(inner, "import")
+	if !ok || lit == "" || (lit[0] != ' ' && lit[0] != '\t') {
+		return edit{}, false
+	}
+	lit = strings.TrimSpace(lit)
+	val, err := strconv.Unquote(lit)
+	if err != nil || lit[0] != '"' {
+		return edit{}, false
+	}
+	nv, ok := rewrite(val)
+	if !ok {
+		return edit{}, false
+	}
+	off := strings.Index(c.Text, lit)
+	start := fset.Position(c.Pos()).Offset + off
+	return edit{start, start + len(lit), `"` + nv + `"`}, true
+}
+
+// goRunValueFlags take a separate value; goRunBoolFlags do not. Any other flag
+// before the package makes the directive ambiguous.
+var (
+	goRunValueFlags = map[string]bool{"-tags": true, "-mod": true, "-o": true, "-C": true, "-exec": true,
+		"-p": true, "-ldflags": true, "-gcflags": true, "-asmflags": true, "-gccgoflags": true,
+		"-pkgdir": true, "-toolexec": true, "-modfile": true, "-overlay": true, "-pgo": true, "-buildmode": true, "-compiler": true}
+	goRunBoolFlags = map[string]bool{"-race": true, "-msan": true, "-asan": true, "-a": true, "-n": true,
+		"-x": true, "-v": true, "-work": true, "-trimpath": true, "-linkshared": true, "-modcacherw": true}
+)
+
+type word struct {
+	start, end int // offsets in the comment text
+	text       string
+	plain      bool // no quote, escape or variable: the text is what go generate passes on
+}
+
+// splitWords tokenises a go:generate argument line the way cmd/go does: words are
+// separated by spaces and tabs, and a double-quoted section (Go string syntax)
+// belongs to the word it appears in.
+func splitWords(s string) []word {
+	var ws []word
+	for i := 0; i < len(s); {
+		if s[i] == ' ' || s[i] == '\t' {
+			i++
+			continue
+		}
+		start, plain := i, true
+		for i < len(s) && s[i] != ' ' && s[i] != '\t' {
+			switch s[i] {
+			case '"':
+				plain = false
+				i++
+				for i < len(s) && s[i] != '"' {
+					if s[i] == '\\' && i+1 < len(s) {
+						i++
+					}
+					i++
+				}
+			case '$', '\\', '\'':
+				plain = false
+			}
+			i++
+		}
+		if i > len(s) {
+			i = len(s)
+		}
+		ws = append(ws, word{start, i, s[start:i], plain})
+	}
+	return ws
+}
+
+// mentions reports whether w holds oldPath as a whole path (not as the prefix of a
+// longer element such as .../v2cmd).
+func mentions(w, oldPath string) bool {
+	isPath := func(b byte) bool {
+		return b == '.' || b == '-' || b == '_' || b == '/' || b >= '0' && b <= '9' || b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z'
+	}
+	for off := 0; ; {
+		i := strings.Index(w[off:], oldPath)
+		if i < 0 {
+			return false
+		}
+		i += off
+		end := i + len(oldPath)
+		if (i == 0 || !isPath(w[i-1])) && (end == len(w) || w[end] == '/' || !isPath(w[end])) {
+			return true
+		}
+		off = i + 1
+	}
+}
+
+// generateEdits handles one comment: if it is a //go:generate directive it returns
+// the edit for the package of a plain "go run", and whether the directive mentions
+// oldPath anywhere it did not rewrite.
+func generateEdits(fset *token.FileSet, c *ast.Comment, oldPath string, rewrite func(string) (string, bool)) (edits []edit, ambiguous bool) {
+	const prefix = "//go:generate"
+	if fset.Position(c.Pos()).Column != 1 || !strings.HasPrefix(c.Text, prefix) {
+		return nil, false
+	}
+	if rest := c.Text[len(prefix):]; rest == "" || (rest[0] != ' ' && rest[0] != '\t') {
+		return nil, false
+	}
+	ws := splitWords(c.Text)[1:] // [0] is the directive itself
+	if len(ws) >= 2 && ws[0].text == "-command" {
+		ws = ws[2:] // //go:generate -command name args...: args is a command too
+	}
+	used := -1
+	if len(ws) >= 2 && ws[0].text == "go" && ws[1].text == "run" {
+		used = goRunPackage(ws)
+	}
+	if used >= 0 && ws[used].plain && !strings.Contains(ws[used].text, "@") {
+		if nv, ok := rewrite(ws[used].text); ok {
+			base := fset.Position(c.Pos()).Offset
+			edits = append(edits, edit{base + ws[used].start, base + ws[used].end, nv})
+		}
+	}
+	for i, w := range ws {
+		if i == used && len(edits) > 0 {
+			continue
+		}
+		if mentions(w.text, oldPath) {
+			ambiguous = true
+		}
+	}
+	return edits, ambiguous
+}
+
+// goRunPackage returns the index in ws of the package argument of "go run", or -1
+// when a flag before it is not one we know the shape of.
+func goRunPackage(ws []word) int {
+	for i := 2; i < len(ws); i++ {
+		t := ws[i].text
+		switch {
+		case !strings.HasPrefix(t, "-"):
+			return i
+		case strings.Contains(t, "="), goRunBoolFlags[t]:
+		case goRunValueFlags[t]:
+			i++
+		default:
+			return -1
+		}
+	}
+	return -1
 }

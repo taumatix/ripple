@@ -148,7 +148,9 @@ GitHub, the module index and the Go proxy. Do not mount credentials other than t
 secret store, and do not run it on a host with access to a private network.
 
 Other limits: webhook events are processed one at a time and are lost, not replayed, when the
-server is overloaded or down; a replayed signed delivery is accepted again. See
+server is overloaded or down. The webhook receiver refuses unsigned requests before reading the body,
+buffers at most 4 bodies at once, and drops a repeated `X-GitHub-Delivery` for an hour (in memory, per
+process; the id is an unsigned header, so this stops redelivery and naive replays, not a rewritten header). See
 [ROADMAP.md](ROADMAP.md) for the planned fixes.
 
 ## Upstream contracts

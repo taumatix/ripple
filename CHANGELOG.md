@@ -5,6 +5,14 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
 ## [Unreleased]
 
 ### Added
+- Release workflow (`.github/workflows/release.yml`): a pushed `vX.Y.Z` tag builds a multi-arch (amd64, arm64)
+  image for GHCR with the version tag and digest, attaches static binaries and `SHA256SUMS` to the GitHub
+  release, then installs the published artifacts from scratch and runs `ripple version`. The Dockerfile takes a
+  `VERSION` build arg so the image reports the tag. Pull requests touching the workflow or Dockerfile run it
+  as a dry run that publishes nothing.
+- `make test-services` starts Postgres and DynamoDB Local itself and runs the suite with
+  `RIPPLE_REQUIRE_SERVICES=1`, which turns a skipped service test into a failure; CI sets it too.
+- CI smoke test of the built image over HTTP against a fake GitHub (`internal/smoke`, `make test-smoke`).
 - Bitbucket Cloud host (`RIPPLE_BITBUCKET_*`): workspace discovery, `repo:push` webhooks (changed files from the diffstat), pull requests, and auto-merge through merge queues only (otherwise reported unsupported). The platform conformance suite gains an optional `FilelessPushes` marker for hosts whose push payload lists no files. See [docs/platform-bitbucket.md](docs/platform-bitbucket.md).
 
 ### Security

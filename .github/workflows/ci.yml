@@ -20,6 +20,7 @@ jobs:
         image: amazon/dynamodb-local
         ports: ["8000:8000"]
     env:
+      RIPPLE_REQUIRE_SERVICES: "1"
       RIPPLE_TEST_POSTGRES_DSN: postgres://postgres:ripple@localhost:5432/postgres?sslmode=disable
       RIPPLE_TEST_DYNAMODB_ENDPOINT: http://localhost:8000
       AWS_ACCESS_KEY_ID: local
@@ -41,5 +42,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
       - run: docker build -t ripple:ci .
       - run: docker run --rm ripple:ci config example
+      # The built image serves webhooks over HTTP against a fake GitHub: one signed push event and
+      # one new release must end in exactly one pull request.
+      - name: smoke test the image
+        run: RIPPLE_SMOKE_IMAGE=ripple:ci go test -count=1 -v ./internal/smoke/

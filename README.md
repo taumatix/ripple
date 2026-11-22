@@ -1,0 +1,137 @@
+# ripple
+
+An event-driven dependency updater for GitHub. ripple watches the Go module feed once, looks up
+which repositories import the package that just released, and opens a pull request in those
+repositories only.
+
+**Status: v0.1, unreleased.** Go modules only (plus a generic regex manager). See [ROADMAP.md](ROADMAP.md).
+
+## Why it is different
+
+Renovate and Dependabot walk every repository on a schedule and ask the registry about every
+dependency. ripple inverts that:
+
+- The feed (index.golang.org) is read **once**, however many repositories you have.
+- A **reverse index** maps package to importing repos. A release for a package nobody imports costs
+  nothing; a release for one importer costs one clone, not a scan of the org.
+- Result: far fewer API calls and rate-limit pressure, and a PR as soon as the cooldown allows,
+  not at the next scheduled run.
+
+**Simplicity is a design goal.** Renovate's power comes from layered presets, `packageRules` and
+precedence. ripple deliberately has none of that in v0.1: one small file per repo, no inherited
+defaults, no rule ordering. A file means what it says and nothing else. Presets and org defaults are
+on the roadmap as opt-in extras that can never change a plain file's meaning.
+
+## Install
+
+```sh
+go install github.com/taumatix/ripple/cmd/ripple@latest   # needs git on PATH
+docker build -t ripple .                                    # or: the Dockerfile in this repo
+```
+
+No tagged release exists yet; `@latest` resolves to the head of `main`.
+
+## Run
+
+1. Create a GitHub App with permissions Contents: read and write, Pull requests: read and write,
+   Metadata: read; subscribe to `installation`, `installation_repositories` and `push`; set a
+   webhook secret and point it at `https://<host>/webhook`.
+2. Configure the service through the environment and start it:
+
+```sh
+export RIPPLE_WEBHOOK_SECRET=... RIPPLE_GITHUB_APP_ID=... RIPPLE_GITHUB_KEY_FILE=/run/secrets/app.pem
+export RIPPLE_STORE=postgres RIPPLE_POSTGRES_DSN=postgres://...
+ripple serve
+```
+
+`ripple config validate --server` lists every variable. Service-wide defaults (feed URL, open-PR
+limit, minimum release age, whether automerge is allowed) live there, not in repo files.
+
+## Configuration
+
+A repo needs no file: without one ripple updates its Go modules with the server defaults. To change
+that, add `.github/ripple.yml`. This is the whole schema:
+
+```yaml
+version: 1
+open-pull-requests-limit: 3        # at most this many ripple PRs open at once
+updates:
+  - ecosystem: gomod               # gomod, or regex (see README)
+    directory: /                   # this directory and everything below it
+    cooldown: 7d                   # wait this long after a release (never less than the server minimum)
+    schedule:
+      days: [mon, tue]
+      from: "22:00"
+      to: "05:00"
+      timezone: Europe/Paris
+    ignore:
+      - dependency: github.com/legacy/*
+      - dependency: github.com/foo/bar
+        update-types: [major]
+    groups:
+      aws:
+        patterns: ["github.com/aws/*"]
+    automerge: patch               # patch, minor or major (default: never); needs auto-merge on the repo
+```
+
+- `automerge: major` is the only way a major update is ever merged automatically; `patch` and
+  `minor` never include one.
+- `cooldown` can only **raise** the server's minimum release age; `open-pull-requests-limit` can
+  only **lower** the server's limit; `automerge` works only if the server allows it.
+- Unknown keys are errors that name the key and line. `ripple config validate [FILE]` checks a file
+  and prints a corrected example. An invalid file means no updates for that repo until it is fixed.
+- A `regex` update takes `files` (globs) and `patterns` (RE2 with `(?P<name>...)` and
+  `(?P<version>...)` groups, or a fixed `package`).
+
+## Major version bumps
+
+Go puts the major version in the module path (`/v2` and up; `gopkg.in` paths always carry `.vN`; the
+Go modules reference documents both, <https://go.dev/ref/mod#major-version-suffixes>). ripple's reverse
+index therefore keys on the *line*: the path without its major suffix, so `example.com/m/v2` and
+`example.com/m/v3` are one entry and a release of v3 finds the repos still on v2. The same holds for
+`example.com/m` to `example.com/m/v2` and `gopkg.in/yaml.v2` to `gopkg.in/yaml.v3`.
+
+For a major update the gomod manager rewrites `go.mod` (require; an unversioned `replace` follows the
+new path; a `replace` or `exclude` pinned to an old-major version is dropped) and every import path
+in the module's Go files. Imports are located with `go/parser`, so aliased, `.` and `_` imports,
+test files, build-tagged files and cgo files are covered, while comments and string constants are not
+touched. Then ripple runs `go mod tidy`, `go build ./...` and `go vet ./...` in the branch, with the
+environment stripped, cgo and toolchain downloads off and modules fetched only from `RIPPLE_GOPROXY`.
+The PR is titled `[major] ...`, labelled `major` and `breaking`, and links the release notes. If the
+build fails, the PR is still opened, as a **draft** carrying the compiler output. Majors are never
+auto-merged unless the repo file says `automerge: major`, and a draft never is. The server needs the
+`go` command installed (the Docker image has it); without it every major PR is a draft saying so.
+
+Not covered yet: repos with several modules, `go.work`, vendor directories, `go:generate` lines and
+`// import` comments (see [ROADMAP.md](ROADMAP.md)).
+
+## Architecture
+
+```
+GitHub App webhook ──► app ──► engine.Scan ──► managers ──► Store (repo -> deps)
+index.golang.org   ──► Watcher ──► reverse index lookup ──► jobs (one per repo|pkg|version)
+                                                     └──► workers ──► Platform: clone, edit, push, open PR
+```
+
+Interfaces from day one: `Platform` (GitHub), `Feed` (Go modules), `Manager` (gomod, regex),
+`Store` (Postgres, DynamoDB, in-memory). The DynamoDB access patterns are in
+[docs/store-dynamodb.md](docs/store-dynamodb.md).
+
+## Known limits
+
+Minor and patch PRs edit `go.mod` only; `go.sum` is refreshed only for major bumps (`go mod tidy`
+is the top of the roadmap for the rest). Releases are stored only
+for packages that have dependents.
+
+## Upstream contracts
+
+The feed format and GitHub API version ripple was built against, with check dates: [UPSTREAM.md](UPSTREAM.md).
+
+## Development
+
+`make test` runs unit tests; `make services-up test-services` also runs the Postgres and DynamoDB
+Local tests. CI always runs them.
+
+## License
+
+Apache-2.0.

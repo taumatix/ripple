@@ -1,0 +1,71 @@
+// Package platform abstracts the code host: clone, edit, push, open PRs.
+package platform
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/taumatix/ripple/internal/model"
+)
+
+type PR struct {
+	Number int
+	URL    string
+	NodeID string
+	Head   string
+}
+
+type PRSpec struct {
+	Head, Base, Title, Body string
+	// Draft opens the PR as a draft; a draft is never auto-merged.
+	Draft bool
+	// Labels are best effort: a failure to label does not fail the PR.
+	Labels []string
+}
+
+// RateLimitError means the platform asked us to back off until Until.
+type RateLimitError struct{ Until time.Time }
+
+func (e *RateLimitError) Error() string {
+	return fmt.Sprintf("rate limited until %s", e.Until.Format(time.RFC3339))
+}
+
+var ErrNotExist = errors.New("file does not exist")
+
+// ErrNoToolchain means the go command is not available to RunGo.
+var ErrNoToolchain = errors.New("go toolchain not available")
+
+// Workspace is a shallow checkout of a repo's default branch.
+type Workspace interface {
+	DefaultBranch() string
+	// ReadFile returns ErrNotExist when the path is absent. Paths are
+	// slash-separated and relative to the repo root; escapes are refused.
+	ReadFile(path string) ([]byte, error)
+	// WriteFile creates or overwrites a regular file inside the checkout.
+	WriteFile(path string, data []byte) error
+	// Walk calls fn for every regular file, skipping .git, vendor and node_modules.
+	Walk(fn func(path string) error) error
+	// CommitAndPush commits all changes on a new branch and force-pushes it
+	// (branches under the ripple/ prefix are ours). false means nothing changed.
+	CommitAndPush(ctx context.Context, branch, message string) (bool, error)
+	// RunGo runs one of `go mod tidy`, `go build ./...` or `go vet ./...` in dir
+	// (relative to the repo root) and returns its combined output, trimmed to the
+	// tail. Nothing else is allowed: the checkout is untrusted, so the environment is
+	// stripped, cgo and toolchain downloads are off, and modules come only from the
+	// configured proxy. ErrNoToolchain when go is not installed.
+	RunGo(ctx context.Context, dir string, args ...string) (string, error)
+	// Reset discards local changes and returns to the default branch so the next
+	// branch starts from a clean tree.
+	Reset(ctx context.Context) error
+	Close() error
+}
+
+type Platform interface {
+	Checkout(ctx context.Context, repo model.Repo) (Workspace, error)
+	// ListOpenPRs returns open PRs whose head branch starts with headPrefix.
+	ListOpenPRs(ctx context.Context, repo model.Repo, headPrefix string) ([]PR, error)
+	CreatePR(ctx context.Context, repo model.Repo, spec PRSpec) (PR, error)
+	EnableAutoMerge(ctx context.Context, repo model.Repo, pr PR) error
+}

@@ -4,6 +4,13 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
 
 ## [Unreleased]
 
+### Security
+- Webhook receiver: requests without a well-formed `X-Hub-Signature-256` are refused before the body is
+  read, at most 4 bodies are buffered at once (others get 503 with `Retry-After`), and a declared length
+  over the limit gets 413. A repeated `X-GitHub-Delivery` within an hour is acknowledged and dropped, so a
+  replayed signed event is handled once; a delivery that failed with 503 can still be redelivered.
+  `webhook.Handler` gains optional `MaxBody`, `MaxInflight`, `DedupeTTL` and `Now` fields; zero values keep safe defaults.
+
 ## [0.2.0] - 2026-11-22
 
 ### Added

@@ -219,3 +219,100 @@ func TestRunGoAllowsLocalReplaceInsideCheckout(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out)
 	}
 }
+
+// A job outlives its installation token: the token minted for the clone is dead by
+// the time of the push, and the push must still succeed with a fresh one. The git
+// remote is a real smart-HTTP server that refuses expired tokens.
+func TestPushSucceedsAfterCloneTokenExpired(t *testing.T) {
+	gh := testutil.NewGitHub(t)
+	gh.TokenTTL = time.Minute // under AppAuth's reuse margin, so every command mints
+	gh.AddRepo("acme/r", map[string]string{"go.mod": "module x\n"})
+	remote := gh.ServeGit()
+	c := &github.Client{APIBase: gh.APIURL, GitBase: remote.URL, Tokens: gh.Auth, WorkDir: t.TempDir(), GoSumDB: "off", GoProxy: "off"}
+	ws, err := c.Checkout(context.Background(), model.Repo{FullName: "acme/r", InstallationID: 1, DefaultBranch: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ws.Close()
+	gh.ExpireTokens() // everything minted for the clone is now dead
+	if err := ws.WriteFile("go.mod", []byte("module y\n")); err != nil {
+		t.Fatal(err)
+	}
+	pushed, err := ws.CommitAndPush(context.Background(), "ripple/go/fresh", "msg")
+	if err != nil || !pushed {
+		t.Fatalf("CommitAndPush = %v, %v", pushed, err)
+	}
+	if got, _ := gh.FileAt("acme/r", "ripple/go/fresh", "go.mod"); got != "module y\n" {
+		t.Errorf("pushed go.mod = %q", got)
+	}
+	if gh.Tokens() < 2 {
+		t.Errorf("minted %d tokens, want one per network command", gh.Tokens())
+	}
+}
+
+func TestTokenNeverLeaks(t *testing.T) {
+	gh := testutil.NewGitHub(t)
+	gh.TokenTTL = time.Minute
+	gh.AddRepo("acme/r", map[string]string{"go.mod": "module x\n\ngo 1.22\n", "main.go": "package main\n\nfunc main() {}\n"})
+	remote := gh.ServeGit()
+	work := t.TempDir()
+	argv, goEnv := shim(t, "git"), shim(t, "go")
+	c := &github.Client{APIBase: gh.APIURL, GitBase: remote.URL, Tokens: gh.Auth, WorkDir: work, GoSumDB: "off", GoProxy: "off"}
+	ws, err := c.Checkout(context.Background(), model.Repo{FullName: "acme/r", InstallationID: 1, DefaultBranch: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ws.Close() })
+	out, err := ws.RunGo(context.Background(), ".", "build", "./...")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if err := ws.WriteFile("go.mod", []byte("module y\n\ngo 1.22\n")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ws.CommitAndPush(context.Background(), "ripple/go/leak", "msg"); err != nil {
+		t.Fatal(err)
+	}
+	for _, u := range remote.RequestURLs() {
+		if strings.Contains(u, "ghs_") || strings.Contains(u, "x-access-token") {
+			t.Errorf("credential in request URL %q", u)
+		}
+	}
+	if b, _ := os.ReadFile(argv); !strings.Contains(string(b), "push") || strings.Contains(string(b), "ghs_fake") {
+		t.Errorf("git argv log missing push or holding a token:\n%s", b)
+	}
+	if b, _ := os.ReadFile(goEnv); !strings.Contains(string(b), "build") || strings.Contains(string(b), "ghs_fake") || strings.Contains(string(b), "x-access-token") {
+		t.Errorf("go build ran with a credential or not at all:\n%s", b)
+	}
+	// Nothing the job left on disk (.git/config, remotes, the Go cache) holds a token.
+	filepath.WalkDir(work, func(p string, d os.DirEntry, err error) error {
+		if err != nil || !d.Type().IsRegular() {
+			return nil
+		}
+		if b, _ := os.ReadFile(p); strings.Contains(string(b), "ghs_fake") || strings.Contains(string(b), "x-access-token") {
+			t.Errorf("credential written to %s", p)
+		}
+		return nil
+	})
+}
+
+// shim puts a logging wrapper for tool first on PATH and returns its log file. The
+// log records each invocation's argv and, for non-git tools, its environment.
+func shim(t *testing.T, tool string) string {
+	t.Helper()
+	real, err := exec.LookPath(tool)
+	if err != nil {
+		t.Skipf("%s not on PATH", tool)
+	}
+	dir, log := t.TempDir(), filepath.Join(t.TempDir(), tool+".log")
+	script := "#!/bin/sh\necho \"$@\" >> '" + log + "'\n"
+	if tool != "git" {
+		script += "env >> '" + log + "'\n"
+	}
+	script += "exec '" + real + "' \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(dir, tool), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return log
+}

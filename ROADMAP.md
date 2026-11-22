@@ -8,36 +8,76 @@ Ordered by how much each entry limits real deployments. The top is next.
 4. **Bound the webhook body read.** Up to 25MB is buffered per request before the HMAC is checked, so concurrent unauthenticated posts exhaust memory. Gate the read with a semaphore and check the signature on a stream or a smaller limit.
 5. **Fetch the installation token per network git command.** The token is minted once per job and can expire mid-job on a slow clone or push. Use a credential helper that asks `auth.go` each time (`git.go` clone, fetch and push).
 6. **Dedupe `X-GitHub-Delivery` with a TTL.** A captured signed event can be replayed indefinitely; remember delivery ids for a window and drop repeats.
-7. **`go.sum` and `go mod tidy` refresh for every update.** Major bumps already tidy, build and vet
+
+Platforms (code hosts). The goal is the whole list Renovate supports, each behind the one `Platform`
+interface, each with the same end-to-end test (a push or release event leads to exactly one PR in
+exactly the importing repos, and zero API calls for the rest). Every platform entry starts by
+fetching and vendoring that platform's own documentation (webhook events and signatures, PR API,
+auth model, rate limits); the notes below are what I expect, **unverified** until then.
+
+7. **Platform seam and conformance suite.** Before a second platform: take the GitHub-isms out of the
+   interface (App installation tokens, GraphQL node ids and the auto-merge mutation in `platform.PR`,
+   installation events as the way repos get registered) and replace them with what every host can
+   provide: a credential source per host, repo discovery (webhook, group/project hook, or a periodic
+   listing where a host has no install event), a "request auto-merge or merge when green" capability that
+   may be absent, and a per-platform rate-limit signal. Turn the GitHub e2e tests into one shared
+   suite that each platform's fake server must pass. Also decide where the per-repo file lives on hosts
+   with no `.github/` directory (a root `ripple.yml` read from every host, with `.github/ripple.yml` as a
+   GitHub-only alias), and keep the file's meaning identical everywhere.
+8. **GitLab** (gitlab.com and self-managed). Merge requests, project/group webhooks, `Private-Token` or
+   OAuth, merge-when-pipeline-succeeds. Subgroups and per-project tokens are the awkward part.
+9. **Gitea and Forgejo.** One client with two flavours: Forgejo forked Gitea and their APIs diverge
+   slowly. Webhook signature headers and the auto-merge call differ; detect the flavour from the version endpoint.
+10. **Bitbucket Cloud.** Pull requests, repository webhooks, app passwords or OAuth consumers; no native
+    auto-merge, so automerge is a merge-check poll or unsupported (say which).
+11. **Azure DevOps.** Service hooks (code pushed, PR events), PAT or Entra token, auto-complete on PRs,
+    organisation/project/repo hierarchy instead of owner/repo.
+12. **Bitbucket Server / Data Center.** A different REST API from Bitbucket Cloud; webhooks per
+    repo or project; HTTP access tokens.
+13. **AWS CodeCommit.** No webhooks: repository events arrive through EventBridge or SNS, so this needs an
+    inbound adapter (SQS or an HTTPS subscription) in front of the same event path. PRs have no
+    auto-merge. IAM credentials per account and region.
+14. **Gerrit.** Changes, not pull requests: push to `refs/for/<branch>`, one change per update with a
+    stable Change-Id so a re-push amends it, labels and submit rules instead of auto-merge. Events from the webhooks
+    plugin or `stream-events`; the project listing and ACLs are per instance.
+15. **SCM-Manager.** Pull requests and webhooks via its REST API and the webhook plugin
+    (<https://docs.renovatebot.com/modules/platform/scm-manager/> is Renovate's reference for what it needs from the host).
+
+Everything else:
+
+16. **`go.sum` and `go mod tidy` refresh for every update.** Major bumps already tidy, build and vet
    in the branch; minor and patch PRs still edit `go.mod` only, so many fail CI until someone runs
    `go mod tidy`. Reuse the same verification and draft-on-failure path.
-8. **Major bumps in repos with several modules, `go.work`, or `vendor/`.** Today only the module
+17. **Major bumps in repos with several modules, `go.work`, or `vendor/`.** Today only the module
    whose `go.mod` lists the dependency is rewritten and verified; a workspace, other modules that
    require it, and a vendor directory (`go mod vendor`) are not refreshed.
-9. **Go toolchain and `go` directive bumps.** Propose `toolchain` and `go` line updates as their own
+18. **Go toolchain and `go` directive bumps.** Propose `toolchain` and `go` line updates as their own
    update type, from the Go release feed.
-10. **Rewrite `go:generate` lines and `// import` comments on a major bump.** Only import specs are
+19. **Rewrite `go:generate` lines and `// import` comments on a major bump.** Only import specs are
    rewritten now; `go run example.com/m/v2/cmd/x` in a directive and canonical import comments are not.
-11. **Verify with cgo and private modules.** The sandbox builds with `CGO_ENABLED=0` (cgo files are
+20. **Verify with cgo and private modules.** The sandbox builds with `CGO_ENABLED=0` (cgo files are
    rewritten but not compiled) and only from `RIPPLE_GOPROXY`; support a toolchain image with C
    headers and credentials for private proxies, without exposing the App token to the build.
-12. **Supersede and close stale PRs.** A newer release leaves the older ripple PR open next to it.
-13. **Backfill for newly registered dependencies.** A repo that starts importing a package only hears
+21. **Supersede and close stale PRs.** A newer release leaves the older ripple PR open next to it.
+22. **Backfill for newly registered dependencies.** A repo that starts importing a package only hears
    about releases published afterwards; compare against the latest stored release on registration.
    This also closes the DynamoDB GSI eventual-consistency window.
-14. **Default-branch rename handling.** Handle the `repository` rename and default-branch change
+23. **Default-branch rename handling.** Handle the `repository` rename and default-branch change
    events; today a stale `DefaultBranch` is corrected only on the next push.
-15. **Dependency dashboard issue.** One issue per repo listing pending, deferred and failed jobs.
-16. **Dynamo hot partition.** Shard `JOBS#pending` and very popular `PKG#` partitions; revisit the
+24. **Dependency dashboard issue.** One issue per repo listing pending, deferred and failed jobs.
+25. **Dynamo hot partition.** Shard `JOBS#pending` and very popular `PKG#` partitions; revisit the
    eventual-consistency notes in `docs/store-dynamodb.md` under load.
-17. **More datasources and feeds.** npm replicate, PyPI, crates.io sparse index, Docker/OCI tags.
-18. **More managers, toward Renovate parity.** Dockerfile, GitHub Actions, npm, Cargo, pip, Helm.
-19. **OSV advisories as an event source.** A security advisory becomes a job that bypasses the cooldown.
-20. **GitLab, Bitbucket and Gitea** behind the existing `Platform` interface.
-21. **GHES GraphQL** differences and per-host API base handling.
-22. **Plugin mechanism** for out-of-tree managers and datasources.
-23. **Presets, org-level defaults and packageRules-like matching.** Later and strictly opt-in: a repo
+26. **More datasources and feeds, as many ecosystems as Renovate has.** npm replicate, PyPI, crates.io
+   sparse index, Maven, NuGet, RubyGems, Packagist, Docker/OCI tags, GitHub releases/tags, Helm, Terraform
+   registry. Where a registry has a changes feed, use it; where it has none (OCI registries), fall back to polling
+   only the packages the reverse index says someone imports, never every repo. Each datasource says which of the two it is.
+27. **More managers, toward Renovate parity.** Dockerfile, GitHub Actions, npm, Cargo, pip, Helm,
+   and the long tail; each manager and datasource pair is its own entry once the first few exist.
+28. **OSV advisories as an event source.** A security advisory becomes a job that bypasses the cooldown.
+29. **GHES GraphQL** differences and per-host API base handling.
+30. **Plugin mechanism** for out-of-tree managers, datasources and platforms.
+31. **Presets, org-level defaults and packageRules-like matching.** Later and strictly opt-in: a repo
     file must opt into a preset by name, and none of these may ever change the meaning of a plain
     per-repo `.github/ripple.yml`. No implicit inheritance, no rule precedence.
-24. **MIGRATION notes policy.** Rules for config-schema and API changes: additive first, deprecate
+32. **MIGRATION notes policy.** Rules for config-schema and API changes: additive first, deprecate
     across a minor release, `MIGRATION.md` for any break.

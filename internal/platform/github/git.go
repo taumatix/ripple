@@ -63,7 +63,7 @@ func (c *Client) Checkout(ctx context.Context, repo model.Repo) (platform.Worksp
 	}
 	repoDir := filepath.Join(dir, "repo")
 	cloneURL := strings.TrimRight(c.GitBase, "/") + "/" + repo.FullName + ".git"
-	args := []string{"clone", "--depth", "1", "--no-tags", "--single-branch", "--no-recurse-submodules"}
+	args := []string{"clone", "--depth", "1", "--filter=blob:limit=1m", "--no-tags", "--single-branch", "--no-recurse-submodules"}
 	if repo.DefaultBranch != "" {
 		if strings.HasPrefix(repo.DefaultBranch, "-") || strings.ContainsAny(repo.DefaultBranch, " \t\n:~^?*[\\") {
 			w.Close()

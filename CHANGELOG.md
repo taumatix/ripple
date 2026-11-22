@@ -13,6 +13,14 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
 
 ### Changed
 - The installation token is fetched from the token source for each network git command (clone and push), not once per job, so a job that outlives one token still pushes. The token reaches git only through that process's environment, never argv or the remote URL.
+- Clones pass `--filter=blob:limit=1m`; with `--depth 1` and a checkout this saves little (measured in
+  docs/bounds.md).
+- Fan-out loads and parses a repo's config once per release instead of once per dependency row.
+
+### Added
+- `RIPPLE_MAX_FILES` (default 100000) and `RIPPLE_MAX_DEPENDENCIES` (default 5000) cap one repo scan; a repo
+  over a cap is skipped with a logged warning and no updates until it is under it
+  ([docs/bounds.md](docs/bounds.md)).
 
 ## [0.2.0] - 2026-11-22
 

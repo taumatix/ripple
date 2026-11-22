@@ -32,7 +32,16 @@ type Server struct {
 	AllowAutomerge    bool
 	Workers           int
 	WorkDir           string
+	// MaxFiles and MaxDependencies cap one repo scan; a repo over either is skipped.
+	MaxFiles        int
+	MaxDependencies int
 }
+
+// Default scan caps (RIPPLE_MAX_FILES, RIPPLE_MAX_DEPENDENCIES).
+const (
+	DefaultMaxFiles        = 100_000
+	DefaultMaxDependencies = 5_000
+)
 
 // ServerEnv documents every variable; `ripple config validate --server` prints it.
 const ServerEnv = `RIPPLE_LISTEN                 listen address (default :8080)
@@ -52,6 +61,8 @@ RIPPLE_MINIMUM_RELEASE_AGE    default 3d; a repo may only raise it
 RIPPLE_OPEN_PR_LIMIT          default 5; a repo may only lower it
 RIPPLE_ALLOW_AUTOMERGE        default true; false forbids automerge everywhere
 RIPPLE_WORKERS                default 4
+RIPPLE_MAX_FILES              default 100000; a repo with more files is skipped with a warning
+RIPPLE_MAX_DEPENDENCIES       default 5000; a repo with more dependencies is skipped with a warning
 RIPPLE_WORK_DIR               checkout directory (default: OS temp dir)
 `
 
@@ -118,6 +129,8 @@ func LoadServer(getenv func(string) string) (*Server, error) {
 		AllowAutomerge:    true,
 		Workers:           num("RIPPLE_WORKERS", 4, 1),
 		WorkDir:           getenv("RIPPLE_WORK_DIR"),
+		MaxFiles:          num("RIPPLE_MAX_FILES", DefaultMaxFiles, 1),
+		MaxDependencies:   num("RIPPLE_MAX_DEPENDENCIES", DefaultMaxDependencies, 1),
 	}
 	if v := getenv("RIPPLE_ALLOW_AUTOMERGE"); v != "" {
 		b, err := strconv.ParseBool(v)

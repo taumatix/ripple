@@ -107,6 +107,8 @@ func (g *GitHub) AddRepo(repo string, files map[string]string) {
 		g.t.Fatal(err)
 	}
 	git(g.t, bare, "init", "--bare", "-b", "main")
+	// GitHub serves partial clones; so does the fake.
+	git(g.t, bare, "config", "uploadpack.allowFilter", "true")
 	g.Commit(repo, files)
 }
 

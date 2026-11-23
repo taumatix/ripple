@@ -289,3 +289,11 @@ Everything else:
     packages, the `deprecated` shape, a `latest` tag that exists are assumed; see UPSTREAM.md). Also: `npm:packages` is one
     read-modify-write cursor (see 96), versions carry no publication date (the full document has `time` but is much larger),
     and the PR footer still says "module index" (see 99).
+150. **Replicas: a consistent older-event check on DynamoDB.** Events are now numbered by the store (shipped), but
+    `HasOlderEvent` on DynamoDB still reads the eventually consistent `gsi1`, so an older event written a moment ago can be
+    missed (DynamoDB refuses `ConsistentRead` on a GSI); Postgres and the memory store have no such window. Write a base-table
+    item per live event under `REPOEVENTS#<repo>` (sort key `<seq, 20 digits>\x1f<id>`) in the same transaction as the event,
+    move or delete it wherever the event's index keys change (`UpdateEvent*`, `DeleteEvent*`, dead-lettering, requeue, purge),
+    backfill it for events from before, and make the check a consistent Query on it. Needs DynamoDB Local to verify the
+    transactions; the in-process fake covers them locally. Also: the sequence counter item is one hot key (one write per event;
+    fine at webhook rates, unmeasured), and Postgres numbers a duplicate delivery too (a gap, harmless).

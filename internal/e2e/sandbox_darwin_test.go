@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/taumatix/ripple/internal/engine"
 	"github.com/taumatix/ripple/internal/sandbox"
 	"github.com/taumatix/ripple/internal/store"
 )
@@ -33,5 +34,24 @@ func TestDependencyUpdateUnderOSSandbox(t *testing.T) {
 	got, _ := e.gh.FileAt("acme/uses-lib", prs[0].Head, "go.mod")
 	if !strings.Contains(got, "example.com/lib v1.1.0") {
 		t.Errorf("go.mod lacks the bump:\n%s", got)
+	}
+}
+
+// cgo and a proxy credential under the real seatbelt: the C compiler runs confined, and
+// the gate (not go's environment) authenticates the fetch.
+func TestCgoAndProxyCredentialUnderOSSandbox(t *testing.T) {
+	sb, err := sandbox.Detect("seatbelt", nil)
+	if err != nil {
+		t.Skipf("no seatbelt: %v", err)
+	}
+	needCC(t)
+	e := newEnvOpts(t, store.NewMemory(), defaultLimits(), opts{sandbox: sb, engine: func(en *engine.Engine) {
+		en.GoProxyUser, en.GoProxyToken = "ripple", proxyToken
+	}})
+	e.proxy.RequireAuth("ripple", proxyToken)
+	cgoRepo(t, e, map[string]string{"main.go": cgoOnly}, "    cgo: true\n")
+	_, body := onePR(t, e, "acme/app", false)
+	if strings.Contains(body, "could not verify") || strings.Contains(body, proxyToken) {
+		t.Errorf("body:\n%s", body)
 	}
 }

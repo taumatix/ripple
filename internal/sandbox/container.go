@@ -163,7 +163,7 @@ func (c container) Wrap(p Policy, argv []string) ([]string, error) {
 }
 
 // Reap kills and removes the container a Wrap'd argv started. The client process being
-// killed (a timeout) does not stop the container; verified with Apple's CLI.
+// killed (a timeout) neither stops nor removes the container; verified with Apple's CLI.
 func (c container) Reap(argv []string) {
 	name := ""
 	for i, a := range argv {
@@ -177,9 +177,10 @@ func (c container) Reap(argv []string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	_ = exec.CommandContext(ctx, c.bin, "kill", name).Run()
-	if c.fl != FlavourApple { // Apple's --rm removes it once stopped
-		_ = exec.CommandContext(ctx, c.bin, "rm", "-f", name).Run()
-	}
+	// --rm is carried out by the client, which a timeout has just killed, so every
+	// flavour needs the explicit remove: with Apple's CLI about half of the containers
+	// killed this way stayed behind "stopped" (TestAppleContainerReapAfterClientKilled).
+	_ = exec.CommandContext(ctx, c.bin, "rm", "-f", name).Run()
 }
 
 // mountSet drops duplicates and any path inside another, keeping a stable order.

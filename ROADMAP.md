@@ -105,9 +105,6 @@ Everything else:
    `go run <package>`; the rest is reported in the PR body, not changed. Handle `go run pkg@vX` (pick a
    version of the new major), other generators that take import paths (`mockgen`, `stringer -type`), and
    `go tool`; examine directives in files whose body does not parse.
-23. **Verify with cgo and private modules.** The sandbox builds with `CGO_ENABLED=0` (cgo files are
-   rewritten but not compiled) and only from `RIPPLE_GOPROXY`; support a toolchain image with C
-   headers and credentials for private proxies, without exposing the App token to the build.
 27. **Dependency dashboard issue.** One issue per repo listing pending, deferred and failed jobs.
 29. **More datasources and feeds, as many ecosystems as Renovate has.** npm replicate, PyPI, crates.io
    sparse index, Maven, NuGet, RubyGems, Packagist, Docker/OCI tags, GitHub releases/tags, Helm, Terraform
@@ -187,3 +184,9 @@ Everything else:
 57. **Pause rather than skip on archive.** Archive drops the repo's index and skips its pending jobs; unarchive
     rescans, but jobs skipped meanwhile are not restored. Also: a repo name reused after a rename drops the old
     repo's pending jobs.
+58. **Prove the credentialed container path live.** `RIPPLE_GOPROXY_TOKEN` under a container backend (GOPROXY
+    userinfo over https) is covered by argv and refusal tests only, not run against a real container and an
+    https proxy. Also offer an image with a C toolchain and headers, and a preflight that checks it for `cgo: true`.
+59. **Private modules without a proxy.** Modules reachable only by direct VCS fetch are not supported, because
+    `GOVCS=*:off` forbids it. Consider `GOAUTH`, or a ripple-run caching proxy fed from the repo's own credentials,
+    and make `build`/`vet` stop asking the proxy for `.info` so a proxy that rejects it cannot fail verification.

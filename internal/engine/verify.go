@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -153,16 +154,17 @@ func (r *runner) verify(olds []string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	run := func(dir string, workspace bool, args ...string) (string, bool, error) {
+	run := func(dir string, workspace bool, members []string, args ...string) (string, bool, error) {
 		ctx := r.ctx
 		if workspace {
 			ctx = platform.WithWorkspaceMode(ctx)
 		}
+		ctx = platform.WithGoVerify(ctx, r.goVerify(members, args))
 		out, err := r.ws.RunGo(ctx, dir, args...)
 		if err == nil {
 			return "", true, nil
 		}
-		if errors.Is(err, platform.ErrNoToolchain) || errors.Is(err, platform.ErrUnsafeCheckout) {
+		if errors.Is(err, platform.ErrNoToolchain) || errors.Is(err, platform.ErrNoCompiler) || errors.Is(err, platform.ErrUnsafeCheckout) {
 			return "", false, err
 		}
 		return fmt.Sprintf("$ go %s   (in %s)\n%s\n%v", strings.Join(args, " "), dir, out, err), false, nil
@@ -174,10 +176,11 @@ func (r *runner) verify(olds []string) (string, error) {
 		}
 		steps = append(steps, []string{"build", "./..."}, []string{"vet", "./..."})
 		for _, args := range steps {
-			if failure, ok, err := run(dir, false, args...); err != nil || !ok {
+			if failure, ok, err := run(dir, false, []string{dir}, args...); err != nil || !ok {
 				return failure, err
 			}
 		}
+		r.noteUncompiledCgo(dir)
 	}
 	works, err := r.goWorks()
 	if err != nil {
@@ -200,16 +203,72 @@ func (r *runner) verify(olds []string) (string, error) {
 		if !used {
 			continue
 		}
-		if failure, ok, err := run(w, true, "work", "sync"); err != nil || !ok {
+		if failure, ok, err := run(w, true, works[w], "work", "sync"); err != nil || !ok {
 			return failure, err
 		}
 		for _, u := range works[w] {
 			for _, args := range [][]string{{"build", "./..."}, {"vet", "./..."}} {
-				if failure, ok, err := run(u, true, args...); err != nil || !ok {
+				if failure, ok, err := run(u, true, []string{u}, args...); err != nil || !ok {
 					return failure, err
 				}
 			}
 		}
 	}
 	return "", nil
+}
+
+// goVerify is what RunGo needs to know for one step over the module directories
+// members: the union of their updates' cgo and private-modules settings, plus the
+// server's proxy credential, which only a step that executes no repository code
+// (tidy, vendor, work sync) may carry.
+func (r *runner) goVerify(members []string, args []string) platform.GoVerify {
+	v := platform.GoVerify{CC: r.e.GoCC}
+	seen := map[string]bool{}
+	for _, m := range members {
+		u, ok := r.cfg.UpdateFor("gomod", path.Join(m, "go.mod"))
+		if !ok {
+			continue
+		}
+		v.CGO = v.CGO || u.CGO
+		for _, p := range u.PrivateModules {
+			if !seen[p] {
+				seen[p] = true
+				v.Private = append(v.Private, p)
+			}
+		}
+	}
+	sort.Strings(v.Private)
+	netStep := args[0] == "mod" || args[0] == "work"
+	if netStep && r.e.GoProxyToken != "" {
+		v.Username, v.Token, v.Credentialed = r.e.GoProxyUser, r.e.GoProxyToken, true
+	}
+	return v
+}
+
+var importC = regexp.MustCompile(`(?m)^\s*(?:import\s+)?"C"\s*$`)
+
+// noteUncompiledCgo records, for the PR body, that a module with cgo files was built
+// with cgo off, so a green build does not read as proof the C parts compile.
+func (r *runner) noteUncompiledCgo(dir string) {
+	if u, ok := r.cfg.UpdateFor("gomod", path.Join(dir, "go.mod")); ok && u.CGO {
+		return
+	}
+	prefix := dir + "/"
+	if dir == "." {
+		prefix = ""
+	}
+	found := ""
+	_ = r.ws.Walk(func(p string) error {
+		if found != "" || !strings.HasSuffix(p, ".go") || !strings.HasPrefix(p, prefix) {
+			return nil
+		}
+		if data, err := r.ws.ReadFile(p); err == nil && importC.Match(data) {
+			found = p
+		}
+		return nil
+	})
+	if found == "" {
+		return
+	}
+	r.notes = append(r.notes, fmt.Sprintf("_ripple built `%s` with cgo off, so the C code in `%s` was not compiled. Set `cgo: true` in `.ripple.yaml` for this directory to verify it with a C compiler._", dir, found))
 }

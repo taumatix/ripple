@@ -27,10 +27,19 @@ type Gate struct {
 }
 
 // NewGate listens on 127.0.0.1 and forwards to upstream.
-func NewGate(upstream string) (*Gate, error) {
+func NewGate(upstream string) (*Gate, error) { return NewGateAuth(upstream, "", "") }
+
+// NewGateAuth is NewGate for an upstream that wants HTTP basic authentication: when
+// token is not empty the gate sends user:token on every upstream request, replacing
+// whatever Authorization header the command sent, so the credential is never in the
+// command's environment, argv or URL. The upstream must be https (or loopback).
+func NewGateAuth(upstream, user, token string) (*Gate, error) {
 	u, err := url.Parse(upstream)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return nil, fmt.Errorf("sandbox gate: unusable upstream %q", upstream)
+	}
+	if token != "" && u.Scheme != "https" && !loopbackHost(u.Hostname()) {
+		return nil, fmt.Errorf("sandbox gate: refusing to send a credential to %s over plain http", u.Hostname())
 	}
 	var rnd [16]byte
 	if _, err := rand.Read(rnd[:]); err != nil {
@@ -47,6 +56,9 @@ func NewGate(upstream string) (*Gate, error) {
 			r.Out.URL.RawPath = ""
 			r.SetURL(u)
 			r.Out.Host = u.Host
+			if token != "" {
+				r.Out.SetBasicAuth(user, token)
+			}
 		},
 	}
 	mux := http.NewServeMux()
@@ -62,3 +74,11 @@ func (g *Gate) Port() int { return g.ln.Addr().(*net.TCPAddr).Port }
 
 // Close stops the gate.
 func (g *Gate) Close() error { return g.srv.Close() }
+
+func loopbackHost(h string) bool {
+	if h == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(h)
+	return ip != nil && ip.IsLoopback()
+}

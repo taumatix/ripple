@@ -54,6 +54,11 @@ type Engine struct {
 	// means DefaultMaxBackfill.
 	MaxBackfill int
 
+	// GoCC is the C compiler for repositories that opt into cgo; empty means cc.
+	// GoProxyUser and GoProxyToken authenticate to the configured module proxy for the
+	// steps that execute no repository code; empty means no credential.
+	GoCC, GoProxyUser, GoProxyToken string
+
 	// parseConfig is a test seam counting repo-file parses; nil means RepoConfig.
 	parseConfig func([]byte) (*config.Repo, error)
 

@@ -149,6 +149,15 @@ A major bump also rewrites the package of a plain `//go:generate go run <package
 mention the old path in any other shape (`@version`, quoting, a variable, another command, a program
 argument) are left alone and listed in the PR body.
 
+**cgo and private modules.** Verification builds with cgo off by default, so a module with cgo files that has
+a pure-Go fallback builds green without compiling its C; the PR then says the C code was not compiled. Set
+`cgo: true` on a `gomod` entry to build with a C compiler (`RIPPLE_GO_CC`, default `cc`); with no compiler the
+PR says it could not verify (a draft for a major bump), never a silent pass. Under a container backend the image
+brings the compiler. `private-modules:` lists module patterns (`example.com/team/*`, `*.corp.example.com`)
+kept out of the checksum database. A proxy that needs credentials takes `RIPPLE_GOPROXY_USER` and
+`RIPPLE_GOPROXY_TOKEN` (https only, with `RIPPLE_GOPROXY` set to that proxy); only `go mod tidy`, `vendor` and `work sync` get them, never `build` or
+`vet`, and they stay out of go's environment, argv, logs and PRs. Details in [docs/sandbox.md](docs/sandbox.md).
+
 Not covered yet: `go work vendor` for a workspace-level `vendor/` and the remaining directive shapes
 (see [ROADMAP.md](ROADMAP.md)).
 

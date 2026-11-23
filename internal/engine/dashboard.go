@@ -196,6 +196,11 @@ func (e *Engine) setDashboardCursor(ctx context.Context, repo, val string) error
 	return e.saveCursorSet(ctx, watchCursor, watch)
 }
 
+// dashboardClosedCursor holds the number of the dashboard issue ripple itself closed
+// when the key was turned off, so turning it back on reopens that issue and not one a
+// person closed.
+func dashboardClosedCursor(repo string) string { return "dashboard-closed:" + repo }
+
 func dashboardOffCursor(repo string) string { return "dashboard-off:" + repo }
 
 // markDashboard remembers that repo's jobs changed outside a run of its own, so the
@@ -367,9 +372,20 @@ func (e *Engine) closeDashboard(ctx context.Context, repo model.Repo) error {
 	if number == 0 {
 		return nil
 	}
+	// Only an issue that is open now is one ripple closes, and so one it may reopen when
+	// the key comes back: a person's own close is left to stand.
+	var weClosed bool
+	if iss, found, ferr := platform.FindIssue(ctx, e.Platform, repo, DashboardLabel, DashboardMarker); ferr == nil && found && iss.Number == number {
+		weClosed = !iss.Closed
+	}
 	err = platform.CloseIssue(ctx, e.Platform, repo, number)
 	if err != nil && !errors.Is(err, platform.ErrIssueGone) && !errors.Is(err, platform.ErrNoIssues) {
 		return err
+	}
+	if weClosed && err == nil {
+		if serr := e.Store.SetCursor(ctx, dashboardClosedCursor(repo.FullName), strconv.Itoa(number)); serr != nil {
+			return serr
+		}
 	}
 	return e.setDashboardCursor(ctx, repo.FullName, "")
 }
@@ -429,6 +445,9 @@ func (e *Engine) updateDashboard(ctx context.Context, repo model.Repo, lister st
 			return e.createDashboard(ctx, repo, body, save)
 		}
 		number = iss.Number
+		if iss.Closed {
+			e.reopenOurs(ctx, repo, number)
+		}
 		if iss.Body == body {
 			return save(number)
 		}
@@ -455,6 +474,22 @@ func (e *Engine) updateDashboard(ctx context.Context, repo model.Repo, lister st
 		return err
 	}
 	return save(number)
+}
+
+// reopenOurs reopens issue number when ripple closed it for a repo whose key was off, and
+// forgets that it did. A failure is logged: the dashboard is still updated, closed.
+func (e *Engine) reopenOurs(ctx context.Context, repo model.Repo, number int) {
+	v, err := e.Store.GetCursor(ctx, dashboardClosedCursor(repo.FullName))
+	if err != nil || v != strconv.Itoa(number) {
+		return
+	}
+	if err := platform.ReopenIssue(ctx, e.Platform, repo, number); err != nil && !errors.Is(err, platform.ErrNoIssues) {
+		e.log().Warn("dependency dashboard not reopened", "repo", repo.FullName, "err", err)
+		return
+	}
+	if err := e.Store.SetCursor(ctx, dashboardClosedCursor(repo.FullName), ""); err != nil {
+		e.log().Warn("forget dashboard close", "repo", repo.FullName, "err", err)
+	}
 }
 
 func (e *Engine) createDashboard(ctx context.Context, repo model.Repo, body string, save func(int) error) error {

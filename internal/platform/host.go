@@ -242,6 +242,24 @@ type IssueCloser interface {
 	CloseIssue(ctx context.Context, repo model.Repo, number int) error
 }
 
+// IssueReopener is the optional capability to reopen an issue ripple closed itself, used
+// when a repo turns its dependency dashboard back on. A host without it keeps updating
+// the closed issue, as it does for one a person closed.
+type IssueReopener interface {
+	// ReopenIssue reopens the issue and changes nothing else. Reopening an open issue
+	// is not an error; ErrIssueGone when the issue is not there.
+	ReopenIssue(ctx context.Context, repo model.Repo, number int) error
+}
+
+// ReopenIssue is p's ReopenIssue, or ErrNoIssues when p cannot reopen issues.
+func ReopenIssue(ctx context.Context, p Platform, repo model.Repo, number int) error {
+	r, ok := p.(IssueReopener)
+	if !ok {
+		return ErrNoIssues
+	}
+	return r.ReopenIssue(ctx, repo, number)
+}
+
 // CloseIssue is p's CloseIssue, or ErrNoIssues when p cannot close issues.
 func CloseIssue(ctx context.Context, p Platform, repo model.Repo, number int) error {
 	c, ok := p.(IssueCloser)

@@ -567,9 +567,19 @@ func (f *Fake) updateItem(body []byte) (any, error) {
 			changed[a] = next[a]
 		}
 		out["Attributes"] = changed
+	case "UPDATED_OLD":
+		changed := map[string]av{}
+		for _, a := range upd.targets {
+			if v, ok := old[a]; ok {
+				changed[a] = v
+			}
+		}
+		if len(changed) > 0 {
+			out["Attributes"] = changed
+		}
 	case "", "NONE":
 	default:
-		return nil, validation("dynamofake supports ReturnValues NONE, ALL_NEW and UPDATED_NEW")
+		return nil, validation("dynamofake supports ReturnValues NONE, ALL_NEW, UPDATED_NEW and UPDATED_OLD")
 	}
 	return out, nil
 }

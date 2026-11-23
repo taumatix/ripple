@@ -536,3 +536,25 @@ func TestThrottleNextIsRetriedByTheClientThenSurfaces(t *testing.T) {
 		t.Fatalf("throttle cleared: %v", err)
 	}
 }
+
+// UPDATED_OLD returns only the targeted attributes that existed before the update, and nothing at all
+// for a new item: that absence is how a caller learns it created the counter.
+func TestUpdateItemUpdatedOld(t *testing.T) {
+	db, _ := client(t)
+	upd := func() *dynamodb.UpdateItemOutput {
+		out, err := db.UpdateItem(context.Background(), &dynamodb.UpdateItemInput{TableName: aws.String("t"),
+			Key:              map[string]types.AttributeValue{"PK": sv("c"), "SK": sv("META")},
+			UpdateExpression: aws.String("ADD Deps :d"), ReturnValues: types.ReturnValueUpdatedOld,
+			ExpressionAttributeValues: map[string]types.AttributeValue{":d": nv("2")}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	if first := upd(); len(first.Attributes) != 0 {
+		t.Fatalf("a created item returned old attributes %v", first.Attributes)
+	}
+	if second := upd(); second.Attributes["Deps"].(*types.AttributeValueMemberN).Value != "2" {
+		t.Fatalf("old Deps = %v, want 2", second.Attributes)
+	}
+}

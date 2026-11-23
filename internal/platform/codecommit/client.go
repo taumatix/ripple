@@ -24,6 +24,7 @@ import (
 	"log/slog"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -293,6 +294,9 @@ type pullRequest struct {
 		Repository string `json:"repositoryName"`
 		Source     string `json:"sourceReference"`
 		Dest       string `json:"destinationReference"`
+		SourceSHA  string `json:"sourceCommit"`
+		DestSHA    string `json:"destinationCommit"`
+		MergeBase  string `json:"mergeBase"`
 	} `json:"pullRequestTargets"`
 }
 
@@ -356,6 +360,173 @@ func (c *Client) ListOpenPRs(ctx context.Context, repo model.Repo, prefix string
 		}
 	}
 	return res, nil
+}
+
+var _ platform.PRCloser = (*Client)(nil)
+
+func (c *Client) log() *slog.Logger {
+	if c.Log != nil {
+		return c.Log
+	}
+	return slog.New(slog.DiscardHandler)
+}
+
+// maxPRCommits bounds the walk over a pull request's commits: a branch longer than
+// this is not one ripple wrote, and the walk is not worth its API calls.
+const maxPRCommits = 50
+
+// CloseUntouchedPR closes pr, leaving comment, only when no person is known to have
+// touched it. See platform.PRCloser. What CodeCommit lets this read:
+//
+//   - GetPullRequest: status, source branch, source and destination commits and the
+//     merge base (api-API_GetPullRequest.md, api-API_PullRequestTarget.md).
+//   - DescribePullRequestEvents: every event type but PULL_REQUEST_CREATED,
+//     PULL_REQUEST_SOURCE_REFERENCE_UPDATED and PULL_REQUEST_MERGE_STATE_CHANGED
+//     (a status change, an approval or an approval rule edit) is a person's, and an
+//     unknown type is treated as one (https://docs.aws.amazon.com/codecommit/latest/APIReference/API_DescribePullRequestEvents.md).
+//   - GetCommentsForPullRequest: any comment at all, deleted or not
+//     (https://docs.aws.amazon.com/codecommit/latest/APIReference/API_GetCommentsForPullRequest.md).
+//   - GetCommit: author and committer email of each commit from the source tip back
+//     to the merge base; all must be ripple's, and a merge commit is a person's
+//     (https://docs.aws.amazon.com/codecommit/latest/APIReference/API_GetCommit.md).
+//
+// A title or description edit is not reported by any CodeCommit API and is not
+// detected. Close is UpdatePullRequestStatus to CLOSED
+// (https://docs.aws.amazon.com/codecommit/latest/APIReference/API_UpdatePullRequestStatus.md),
+// then PostCommentForPullRequest, which needs the destination and source commit ids
+// (https://docs.aws.amazon.com/codecommit/latest/APIReference/API_PostCommentForPullRequest.md).
+// Whether CodeCommit accepts a comment on a closed pull request is unverified: a
+// refusal is logged and the close stands.
+func (c *Client) CloseUntouchedPR(ctx context.Context, repo model.Repo, pr platform.PR, comment string) (bool, error) {
+	region, name, err := CheckPath(repo.FullName)
+	if err != nil {
+		return false, err
+	}
+	id := strconv.Itoa(pr.Number)
+	var got struct {
+		PR pullRequest `json:"pullRequest"`
+	}
+	if err := c.call(ctx, region, "GetPullRequest", map[string]string{"pullRequestId": id}, &got); err != nil {
+		return false, err
+	}
+	if got.PR.Status != "OPEN" || got.PR.head(name) != pr.Head {
+		return false, nil
+	}
+	if touched, err := c.eventsTouched(ctx, region, id); err != nil || touched {
+		return false, err
+	}
+	if touched, err := c.commentsTouched(ctx, region, id); err != nil || touched {
+		return false, err
+	}
+	var src, dst, base string
+	for _, t := range got.PR.Targets {
+		if t.Repository == name {
+			src, dst, base = t.SourceSHA, t.DestSHA, t.MergeBase
+		}
+	}
+	if src == "" || dst == "" || base == "" {
+		return false, fmt.Errorf("codecommit: pull request %s names no source, destination or merge base commit", id)
+	}
+	if touched, err := c.commitsTouched(ctx, region, name, src, base); err != nil || touched {
+		return false, err
+	}
+	if err := c.call(ctx, region, "UpdatePullRequestStatus", map[string]string{"pullRequestId": id, "pullRequestStatus": "CLOSED"}, nil); err != nil {
+		return false, err
+	}
+	in := map[string]string{"pullRequestId": id, "repositoryName": name, "beforeCommitId": dst, "afterCommitId": src,
+		"content": comment, "clientRequestToken": "ripple-supersede-" + id}
+	if err := c.call(ctx, region, "PostCommentForPullRequest", in, nil); err != nil {
+		c.log().Warn("codecommit: closed a superseded pull request but could not comment", "repo", repo.FullName, "pr", pr.Number, "err", err)
+	}
+	return true, nil
+}
+
+// eventsTouched is whether the pull request's event history holds anything a person did.
+func (c *Client) eventsTouched(ctx context.Context, region, id string) (bool, error) {
+	token := ""
+	for page := 0; page < maxPages; page++ {
+		in := map[string]any{"pullRequestId": id}
+		if token != "" {
+			in["nextToken"] = token
+		}
+		var out struct {
+			Events []struct {
+				Type string `json:"pullRequestEventType"`
+			} `json:"pullRequestEvents"`
+			Next string `json:"nextToken"`
+		}
+		if err := c.call(ctx, region, "DescribePullRequestEvents", in, &out); err != nil {
+			return false, err
+		}
+		for _, e := range out.Events {
+			switch e.Type {
+			case "PULL_REQUEST_CREATED", "PULL_REQUEST_SOURCE_REFERENCE_UPDATED", "PULL_REQUEST_MERGE_STATE_CHANGED":
+			default:
+				return true, nil
+			}
+		}
+		if token = out.Next; token == "" {
+			return false, nil
+		}
+	}
+	return false, fmt.Errorf("codecommit: pull request %s has more than %d pages of events", id, maxPages)
+}
+
+// commentsTouched is whether the pull request has any comment.
+func (c *Client) commentsTouched(ctx context.Context, region, id string) (bool, error) {
+	token := ""
+	for page := 0; page < maxPages; page++ {
+		in := map[string]any{"pullRequestId": id}
+		if token != "" {
+			in["nextToken"] = token
+		}
+		var out struct {
+			Data []struct {
+				Comments []json.RawMessage `json:"comments"`
+			} `json:"commentsForPullRequestData"`
+			Next string `json:"nextToken"`
+		}
+		if err := c.call(ctx, region, "GetCommentsForPullRequest", in, &out); err != nil {
+			return false, err
+		}
+		for _, d := range out.Data {
+			if len(d.Comments) > 0 {
+				return true, nil
+			}
+		}
+		if token = out.Next; token == "" {
+			return false, nil
+		}
+	}
+	return false, fmt.Errorf("codecommit: pull request %s has more than %d pages of comments", id, maxPages)
+}
+
+// commitsTouched is whether any commit from src back to base is not ripple's: a
+// different author or committer email, a merge, a branch that does not reach base
+// within maxPRCommits, or no commits at all (not a branch ripple pushed).
+func (c *Client) commitsTouched(ctx context.Context, region, name, src, base string) (bool, error) {
+	want := gitws.AuthorEmail(gitws.Options{AuthorEmail: c.AuthorEmail})
+	for id, n := src, 0; id != base; n++ {
+		if n >= maxPRCommits {
+			return true, nil
+		}
+		var out struct {
+			Commit struct {
+				Author    struct{ Email string } `json:"author"`
+				Committer struct{ Email string } `json:"committer"`
+				Parents   []string               `json:"parents"`
+			} `json:"commit"`
+		}
+		if err := c.call(ctx, region, "GetCommit", map[string]string{"repositoryName": name, "commitId": id}, &out); err != nil {
+			return false, err
+		}
+		cm := out.Commit
+		if cm.Author.Email != want || cm.Committer.Email != want || len(cm.Parents) != 1 {
+			return true, nil
+		}
+		id = cm.Parents[0]
+	}
+	return src == base, nil
 }
 
 func truncate(s string, n int) string {

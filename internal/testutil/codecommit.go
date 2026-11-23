@@ -38,6 +38,11 @@ type CodeCommitPR struct {
 	ID                                          int
 	// Draft is derived from the title the way ripple writes it: a leading "Draft:".
 	Draft bool
+	// Status is OPEN or CLOSED. Comments are the contents of every comment on it, in order.
+	Status   string
+	Comments []string
+	// events are the pull request event types, in order (DescribePullRequestEvents).
+	events []string
 }
 
 // CodeCommit is a fake AWS CodeCommit for one region: the JSON 1.1 API pieces ripple
@@ -66,6 +71,7 @@ type CodeCommit struct {
 	calls     map[string]int
 	prs       map[string][]*CodeCommitPR
 	limitNext bool
+	failOps   map[string]int
 	requests  []string
 	apiHost   string
 	confirmed int
@@ -194,6 +200,102 @@ func (c *CodeCommit) PRs(path string) []CodeCommitPR {
 		out = append(out, *p)
 	}
 	return out
+}
+
+// FailNext makes the next n requests for op (for example "GetCommit") answer 500.
+func (c *CodeCommit) FailNext(op string, n int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.failOps == nil {
+		c.failOps = map[string]int{}
+	}
+	c.failOps[op] = n
+}
+
+func (c *CodeCommit) pr(path string, id int) *CodeCommitPR {
+	name := c.name(path)
+	for _, p := range c.prs[name] {
+		if p.ID == id {
+			return p
+		}
+	}
+	c.t.Fatalf("fake codecommit: no pull request %d in %s", id, path)
+	return nil
+}
+
+// PushBranch adds a commit to branch (created from main when absent) in path, authored
+// and committed as email: ripple's own commit, or a person's. It records a source
+// reference update on an open pull request from branch.
+func (c *CodeCommit) PushBranch(path, branch, email string) {
+	c.t.Helper()
+	c.PushBranchAs(path, branch, email, email)
+}
+
+// HasBranch reports whether branch exists in path.
+func (c *CodeCommit) HasBranch(path, branch string) bool { return c.hasBranch(c.name(path), branch) }
+
+// PushBranchAs is PushBranch with the author and the committer given apart.
+func (c *CodeCommit) PushBranchAs(path, branch, author, committer string) {
+	c.t.Helper()
+	email := author
+	name := c.name(path)
+	work := c.t.TempDir()
+	git(c.t, work, "clone", "-q", c.bare(name), "w")
+	w := filepath.Join(work, "w")
+	if c.hasBranch(name, branch) {
+		git(c.t, w, "checkout", "-q", "-B", branch, "origin/"+branch)
+	} else {
+		git(c.t, w, "checkout", "-q", "-B", branch, "origin/main")
+	}
+	c.mu.Lock()
+	c.msgSeq++
+	seq := c.msgSeq
+	c.mu.Unlock()
+	f := filepath.Join(w, "change-"+strconv.Itoa(seq))
+	if err := os.WriteFile(f, []byte(email), 0o644); err != nil {
+		c.t.Fatal(err)
+	}
+	git(c.t, w, "add", "-A")
+	cmd := exec.Command("git", "commit", "-q", "-m", "change")
+	cmd.Dir = w
+	cmd.Env = append(gitEnv(), "GIT_AUTHOR_EMAIL="+author, "GIT_COMMITTER_EMAIL="+committer)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		c.t.Fatalf("git commit: %v\n%s", err, out)
+	}
+	git(c.t, w, "push", "-q", "origin", branch)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, p := range c.prs[name] {
+		if p.Head == branch && p.Status == "OPEN" {
+			p.events = append(p.events, "PULL_REQUEST_SOURCE_REFERENCE_UPDATED")
+		}
+	}
+}
+
+// HumanComment is a person's comment on pull request id.
+func (c *CodeCommit) HumanComment(path string, id int, content string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	p := c.pr(path, id)
+	p.Comments = append(p.Comments, content)
+}
+
+// HumanEvent records a pull request event of the given type (an approval, a status
+// change, a rule edit) as a person's action.
+func (c *CodeCommit) HumanEvent(path string, id int, eventType string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	p := c.pr(path, id)
+	p.events = append(p.events, eventType)
+}
+
+// HumanClose closes pull request id as a person would.
+func (c *CodeCommit) HumanClose(path string, id int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	p := c.pr(path, id)
+	p.Status = "CLOSED"
+	p.events = append(p.events, "PULL_REQUEST_STATUS_CHANGED")
 }
 
 // Requests is "X-Amz-Target" of every API request so far, in order.
@@ -330,7 +432,27 @@ func (c *CodeCommit) serveAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/x-amz-json-1.1")
+	c.mu.Lock()
+	failing := c.failOps[op] > 0
+	if failing {
+		c.failOps[op]--
+	}
+	c.mu.Unlock()
+	if failing {
+		c.awsErr(w, http.StatusInternalServerError, "InternalFailure", op+" failed")
+		return
+	}
 	switch op {
+	case "GetCommit":
+		c.getCommit(w, in)
+	case "DescribePullRequestEvents":
+		c.describeEvents(w, in)
+	case "GetCommentsForPullRequest":
+		c.getComments(w, in)
+	case "PostCommentForPullRequest":
+		c.postComment(w, in)
+	case "UpdatePullRequestStatus":
+		c.updateStatus(w, in)
 	case "ListRepositories":
 		c.listRepositories(w, in)
 	case "ListPullRequests":
@@ -414,7 +536,9 @@ func (c *CodeCommit) listPullRequests(w http.ResponseWriter, in map[string]any) 
 	c.mu.Lock()
 	var ids []string
 	for _, p := range c.prs[name] {
-		ids = append(ids, strconv.Itoa(p.ID))
+		if p.Status == "OPEN" {
+			ids = append(ids, strconv.Itoa(p.ID))
+		}
 	}
 	c.mu.Unlock()
 	items, next := ccPage(ids, in, "nextToken")
@@ -428,10 +552,25 @@ func (c *CodeCommit) listPullRequests(w http.ResponseWriter, in map[string]any) 
 	_ = json.NewEncoder(w).Encode(out)
 }
 
-func ccPRJSON(name string, p *CodeCommitPR) map[string]any {
+// revParse is the commit ref names in name's bare repository ("" when it does not exist).
+func (c *CodeCommit) revParse(name string, args ...string) string {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = c.bare(name)
+	cmd.Env = gitEnv()
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func (c *CodeCommit) ccPRJSON(name string, p *CodeCommitPR) map[string]any {
+	src := c.revParse(name, "rev-parse", "refs/heads/"+p.Head)
+	dst := c.revParse(name, "rev-parse", "refs/heads/"+p.Base)
 	return map[string]any{"pullRequestId": strconv.Itoa(p.ID), "title": p.Title, "description": p.Description,
-		"pullRequestStatus": "OPEN", "clientRequestToken": p.Token,
-		"pullRequestTargets": []map[string]any{{"repositoryName": name,
+		"pullRequestStatus": p.Status, "clientRequestToken": p.Token,
+		"pullRequestTargets": []map[string]any{{"repositoryName": name, "sourceCommit": src, "destinationCommit": dst,
+			"mergeBase":       c.revParse(name, "merge-base", src, dst),
 			"sourceReference": "refs/heads/" + p.Head, "destinationReference": "refs/heads/" + p.Base}}}
 }
 
@@ -443,7 +582,7 @@ func (c *CodeCommit) getPullRequest(w http.ResponseWriter, in map[string]any) {
 		for _, p := range list {
 			if strconv.Itoa(p.ID) == id && p.Repo == name {
 				c.calls[name]++
-				_ = json.NewEncoder(w).Encode(map[string]any{"pullRequest": ccPRJSON(name, p)})
+				_ = json.NewEncoder(w).Encode(map[string]any{"pullRequest": c.ccPRJSON(name, p)})
 				return
 			}
 		}
@@ -492,14 +631,15 @@ func (c *CodeCommit) createPullRequest(w http.ResponseWriter, in map[string]any)
 	// A repeated token returns the pull request it created, as the real API does.
 	for _, p := range c.prs[name] {
 		if token != "" && p.Token == token {
-			_ = json.NewEncoder(w).Encode(map[string]any{"pullRequest": ccPRJSON(name, p)})
+			_ = json.NewEncoder(w).Encode(map[string]any{"pullRequest": c.ccPRJSON(name, p)})
 			return
 		}
 	}
 	p := &CodeCommitPR{Repo: name, Head: head, Base: base, Title: title, Description: desc, Token: token,
-		ID: len(c.prs[name]) + 1, Draft: strings.HasPrefix(title, "Draft:")}
+		ID: len(c.prs[name]) + 1, Draft: strings.HasPrefix(title, "Draft:"), Status: "OPEN",
+		events: []string{"PULL_REQUEST_CREATED"}}
 	c.prs[name] = append(c.prs[name], p)
-	_ = json.NewEncoder(w).Encode(map[string]any{"pullRequest": ccPRJSON(name, p)})
+	_ = json.NewEncoder(w).Encode(map[string]any{"pullRequest": c.ccPRJSON(name, p)})
 }
 
 // serveGit answers git smart-HTTP at /v1/repos/<name>/..., after recomputing the git
@@ -666,4 +806,113 @@ func (c *CodeCommit) getDifferences(w http.ResponseWriter, in map[string]any) {
 func (c *CodeCommit) Branch(path, branch string) {
 	c.t.Helper()
 	git(c.t, c.bare(c.name(path)), "branch", branch, "main")
+}
+
+func (c *CodeCommit) findPR(w http.ResponseWriter, in map[string]any) (*CodeCommitPR, bool) {
+	id, _ := in["pullRequestId"].(string)
+	for _, list := range c.prs {
+		for _, p := range list {
+			if strconv.Itoa(p.ID) == id {
+				return p, true
+			}
+		}
+	}
+	c.awsErr(w, http.StatusBadRequest, "PullRequestDoesNotExistException", id)
+	return nil, false
+}
+
+func (c *CodeCommit) getCommit(w http.ResponseWriter, in map[string]any) {
+	name, _ := in["repositoryName"].(string)
+	id, _ := in["commitId"].(string)
+	if !c.repo(w, name) {
+		return
+	}
+	out := c.revParse(name, "log", "-1", "--format=%H%n%an%n%ae%n%cn%n%ce%n%P", id)
+	if id == "" || out == "" {
+		c.awsErr(w, http.StatusBadRequest, "CommitIdDoesNotExistException", id)
+		return
+	}
+	f := strings.Split(out, "\n")
+	for len(f) < 6 {
+		f = append(f, "")
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"commit": map[string]any{"commitId": f[0],
+		"author":    map[string]string{"name": f[1], "email": f[2]},
+		"committer": map[string]string{"name": f[3], "email": f[4]},
+		"parents":   strings.Fields(f[5])}})
+}
+
+func (c *CodeCommit) describeEvents(w http.ResponseWriter, in map[string]any) {
+	c.mu.Lock()
+	p, ok := c.findPR(w, in)
+	if !ok {
+		c.mu.Unlock()
+		return
+	}
+	var idx []string
+	for i := range p.events {
+		idx = append(idx, strconv.Itoa(i))
+	}
+	events := append([]string(nil), p.events...)
+	c.mu.Unlock()
+	items, next := ccPage(idx, in, "nextToken")
+	out := []map[string]any{}
+	for _, i := range items {
+		n, _ := strconv.Atoi(i)
+		out = append(out, map[string]any{"pullRequestEventType": events[n], "actorArn": "arn:aws:iam::123456789012:user/someone"})
+	}
+	resp := map[string]any{"pullRequestEvents": out}
+	if next != "" {
+		resp["nextToken"] = next
+	}
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func (c *CodeCommit) getComments(w http.ResponseWriter, in map[string]any) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	p, ok := c.findPR(w, in)
+	if !ok {
+		return
+	}
+	data := []map[string]any{}
+	for i, content := range p.Comments {
+		data = append(data, map[string]any{"pullRequestId": strconv.Itoa(p.ID), "repositoryName": p.Repo,
+			"comments": []map[string]any{{"commentId": strconv.Itoa(i), "content": content, "authorArn": "arn:aws:iam::123456789012:user/someone"}}})
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"commentsForPullRequestData": data})
+}
+
+func (c *CodeCommit) postComment(w http.ResponseWriter, in map[string]any) {
+	content, _ := in["content"].(string)
+	before, _ := in["beforeCommitId"].(string)
+	after, _ := in["afterCommitId"].(string)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	p, ok := c.findPR(w, in)
+	if !ok {
+		return
+	}
+	if content == "" || before == "" || after == "" || in["repositoryName"] != p.Repo {
+		c.awsErr(w, http.StatusBadRequest, "CommentContentRequiredException", "content, commit ids and repositoryName are required")
+		return
+	}
+	p.Comments = append(p.Comments, content)
+	_ = json.NewEncoder(w).Encode(map[string]any{"comment": map[string]any{"commentId": strconv.Itoa(len(p.Comments)), "content": content}})
+}
+
+func (c *CodeCommit) updateStatus(w http.ResponseWriter, in map[string]any) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	p, ok := c.findPR(w, in)
+	if !ok {
+		return
+	}
+	if in["pullRequestStatus"] != "CLOSED" || p.Status != "OPEN" {
+		c.awsErr(w, http.StatusBadRequest, "InvalidPullRequestStatusUpdateException", "only OPEN to CLOSED is faked")
+		return
+	}
+	p.Status = "CLOSED"
+	p.events = append(p.events, "PULL_REQUEST_STATUS_CHANGED")
+	_ = json.NewEncoder(w).Encode(map[string]any{"pullRequest": c.ccPRJSON(p.Repo, p)})
 }

@@ -13,5 +13,6 @@ with a comment naming its source URL.
 | `ug-monitoring-events.md`, `ug-how-to-notify*.md` | the EventBridge `referenceCreated` / `referenceUpdated` event |
 | `ug-regions.md`, `ug-welcome.md`, `ug-setting-up-gc.md` | regions and git endpoints |
 | `aws-blog-*.txt` | the July 2024 de-emphasis and the 24 Nov 2025 reopening to new customers |
+| `api-API_{Comment,CommentsForPullRequest,Commit,DescribePullRequestEvents,GetCommentsForPullRequest,GetCommit,GetPullRequestApprovalStates,PullRequestEvent,PullRequestSourceReferenceUpdatedEventMetadata,PullRequestStatusChangedEventMetadata,UpdatePullRequestStatus,UserInfo}.md` | closing a superseded pull request and deciding it is untouched. Not retrieved, assumed unverified: whether CodeCommit accepts a comment on a closed pull request, and which actor ARN ripple acts as (so events are not filtered by actor) |
 
 Nothing here was recorded from a live AWS account.

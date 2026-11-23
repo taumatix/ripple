@@ -119,3 +119,19 @@ func TestServerContainerSettings(t *testing.T) {
 		t.Fatalf("%+v, %v", s, err)
 	}
 }
+
+func TestServerDynamoShards(t *testing.T) {
+	s, err := LoadServer(env(base))
+	if err != nil || s.DynamoJobShards != 8 || s.DynamoDependentShards != 1 {
+		t.Fatalf("defaults: %+v %v", s, err)
+	}
+	s, err = LoadServer(env(with("RIPPLE_DYNAMODB_JOB_SHARDS", "16", "RIPPLE_DYNAMODB_DEPENDENT_SHARDS", "4")))
+	if err != nil || s.DynamoJobShards != 16 || s.DynamoDependentShards != 4 {
+		t.Fatalf("set: %+v %v", s, err)
+	}
+	for _, v := range []string{"0", "65", "x"} {
+		if _, err := LoadServer(env(with("RIPPLE_DYNAMODB_JOB_SHARDS", v))); err == nil {
+			t.Errorf("JOB_SHARDS=%s accepted", v)
+		}
+	}
+}

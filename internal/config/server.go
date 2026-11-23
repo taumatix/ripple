@@ -10,6 +10,15 @@ import (
 	"time"
 )
 
+// The DynamoDB shard limits. They duplicate store.DefaultJobShards, store.DefaultDependentShards
+// and store.MaxShards because importing the store here would pull every database driver into
+// config; a test in package store keeps the two in step.
+const (
+	DefaultDynamoJobShards       = 8
+	DefaultDynamoDependentShards = 1
+	MaxDynamoShards              = 64
+)
+
 // Server is the service-wide configuration, read from the environment. Repo files
 // can tighten the limits here, never widen them. Every URL comes from here and
 // never from a repo file, so a repo cannot point ripple at an internal host.
@@ -30,11 +39,15 @@ type Server struct {
 	PostgresDSN                                                                     string
 	DynamoTable                                                                     string
 	DynamoEndpoint                                                                  string
-	MinimumReleaseAge                                                               time.Duration
-	OpenPRLimit                                                                     int
-	AllowAutomerge                                                                  bool
-	Workers                                                                         int
-	WorkDir                                                                         string
+	// DynamoJobShards and DynamoDependentShards spread the pending-job queue and each
+	// package's dependents over that many index partitions (1..MaxDynamoShards).
+	DynamoJobShards       int
+	DynamoDependentShards int
+	MinimumReleaseAge     time.Duration
+	OpenPRLimit           int
+	AllowAutomerge        bool
+	Workers               int
+	WorkDir               string
 	// MaxFiles and MaxDependencies cap one repo scan; a repo over either is skipped.
 	MaxFiles        int
 	MaxDependencies int
@@ -66,6 +79,8 @@ RIPPLE_STORE                  memory (default), postgres or dynamodb
 RIPPLE_POSTGRES_DSN           required for postgres
 RIPPLE_DYNAMODB_TABLE         default ripple (dynamodb)
 RIPPLE_DYNAMODB_ENDPOINT      optional, for DynamoDB Local
+RIPPLE_DYNAMODB_JOB_SHARDS    default 8 (1-64): partitions holding pending jobs; a due-jobs poll costs this many queries
+RIPPLE_DYNAMODB_DEPENDENT_SHARDS  default 1 (1-64): partitions per package's dependents; each lookup costs this many queries
 RIPPLE_MINIMUM_RELEASE_AGE    default 3d; a repo may only raise it
 RIPPLE_OPEN_PR_LIMIT          default 5; a repo may only lower it
 RIPPLE_ALLOW_AUTOMERGE        default true; false forbids automerge everywhere
@@ -123,33 +138,43 @@ func LoadServer(getenv func(string) string) (*Server, error) {
 		}
 		return n
 	}
+	shards := func(key string, def int) int {
+		n := num(key, def, 1)
+		if n > MaxDynamoShards {
+			errs = append(errs, fmt.Errorf("%s: want an integer <= %d", key, MaxDynamoShards))
+			return def
+		}
+		return n
+	}
 	s := &Server{
-		Listen:            str("RIPPLE_LISTEN", ":8080"),
-		WebhookSecret:     getenv("RIPPLE_WEBHOOK_SECRET"),
-		GitHubAppID:       getenv("RIPPLE_GITHUB_APP_ID"),
-		GitHubKeyFile:     getenv("RIPPLE_GITHUB_KEY_FILE"),
-		GitHubAPIURL:      strings.TrimRight(str("RIPPLE_GITHUB_API_URL", "https://api.github.com"), "/"),
-		GitHubGitURL:      strings.TrimRight(str("RIPPLE_GITHUB_GIT_URL", "https://github.com"), "/"),
-		FeedURL:           strings.TrimRight(str("RIPPLE_FEED_URL", "https://index.golang.org"), "/"),
-		FeedInterval:      dur("RIPPLE_FEED_INTERVAL", "1m"),
-		GoProxy:           strings.TrimRight(str("RIPPLE_GOPROXY", "https://proxy.golang.org"), "/"),
-		Sandbox:           str("RIPPLE_SANDBOX", "none"),
-		ContainerImage:    getenv("RIPPLE_CONTAINER_IMAGE"),
-		ContainerCPUs:     getenv("RIPPLE_CONTAINER_CPUS"),
-		ContainerMemory:   getenv("RIPPLE_CONTAINER_MEMORY"),
-		ContainerPull:     getenv("RIPPLE_CONTAINER_PULL"),
-		ContainerNetwork:  getenv("RIPPLE_CONTAINER_NETWORK"),
-		Store:             str("RIPPLE_STORE", "memory"),
-		PostgresDSN:       getenv("RIPPLE_POSTGRES_DSN"),
-		DynamoTable:       str("RIPPLE_DYNAMODB_TABLE", "ripple"),
-		DynamoEndpoint:    getenv("RIPPLE_DYNAMODB_ENDPOINT"),
-		MinimumReleaseAge: dur("RIPPLE_MINIMUM_RELEASE_AGE", "3d"),
-		OpenPRLimit:       num("RIPPLE_OPEN_PR_LIMIT", 5, 1),
-		AllowAutomerge:    true,
-		Workers:           num("RIPPLE_WORKERS", 4, 1),
-		WorkDir:           getenv("RIPPLE_WORK_DIR"),
-		MaxFiles:          num("RIPPLE_MAX_FILES", DefaultMaxFiles, 1),
-		MaxDependencies:   num("RIPPLE_MAX_DEPENDENCIES", DefaultMaxDependencies, 1),
+		Listen:                str("RIPPLE_LISTEN", ":8080"),
+		WebhookSecret:         getenv("RIPPLE_WEBHOOK_SECRET"),
+		GitHubAppID:           getenv("RIPPLE_GITHUB_APP_ID"),
+		GitHubKeyFile:         getenv("RIPPLE_GITHUB_KEY_FILE"),
+		GitHubAPIURL:          strings.TrimRight(str("RIPPLE_GITHUB_API_URL", "https://api.github.com"), "/"),
+		GitHubGitURL:          strings.TrimRight(str("RIPPLE_GITHUB_GIT_URL", "https://github.com"), "/"),
+		FeedURL:               strings.TrimRight(str("RIPPLE_FEED_URL", "https://index.golang.org"), "/"),
+		FeedInterval:          dur("RIPPLE_FEED_INTERVAL", "1m"),
+		GoProxy:               strings.TrimRight(str("RIPPLE_GOPROXY", "https://proxy.golang.org"), "/"),
+		Sandbox:               str("RIPPLE_SANDBOX", "none"),
+		ContainerImage:        getenv("RIPPLE_CONTAINER_IMAGE"),
+		ContainerCPUs:         getenv("RIPPLE_CONTAINER_CPUS"),
+		ContainerMemory:       getenv("RIPPLE_CONTAINER_MEMORY"),
+		ContainerPull:         getenv("RIPPLE_CONTAINER_PULL"),
+		ContainerNetwork:      getenv("RIPPLE_CONTAINER_NETWORK"),
+		Store:                 str("RIPPLE_STORE", "memory"),
+		PostgresDSN:           getenv("RIPPLE_POSTGRES_DSN"),
+		DynamoTable:           str("RIPPLE_DYNAMODB_TABLE", "ripple"),
+		DynamoEndpoint:        getenv("RIPPLE_DYNAMODB_ENDPOINT"),
+		DynamoJobShards:       shards("RIPPLE_DYNAMODB_JOB_SHARDS", DefaultDynamoJobShards),
+		DynamoDependentShards: shards("RIPPLE_DYNAMODB_DEPENDENT_SHARDS", DefaultDynamoDependentShards),
+		MinimumReleaseAge:     dur("RIPPLE_MINIMUM_RELEASE_AGE", "3d"),
+		OpenPRLimit:           num("RIPPLE_OPEN_PR_LIMIT", 5, 1),
+		AllowAutomerge:        true,
+		Workers:               num("RIPPLE_WORKERS", 4, 1),
+		WorkDir:               getenv("RIPPLE_WORK_DIR"),
+		MaxFiles:              num("RIPPLE_MAX_FILES", DefaultMaxFiles, 1),
+		MaxDependencies:       num("RIPPLE_MAX_DEPENDENCIES", DefaultMaxDependencies, 1),
 
 		EventWorkers:                num("RIPPLE_EVENT_WORKERS", 4, 1),
 		EventWorkersPerInstallation: num("RIPPLE_EVENT_WORKERS_PER_INSTALLATION", 2, 1),

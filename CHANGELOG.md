@@ -5,6 +5,7 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
 ## [Unreleased]
 
 ### Added
+- DynamoDB: the pending-job queue is spread over `RIPPLE_DYNAMODB_JOB_SHARDS` index partitions (default 8) and a package's dependents over `RIPPLE_DYNAMODB_DEPENDENT_SHARDS` (default 1, so unchanged). Existing tables work as they are: the old keys are shard 0 and items move on their next write; the table records the highest shard count so lowering the setting strands nothing. See [docs/store-dynamodb.md](docs/store-dynamodb.md).
 - [MIGRATION.md](MIGRATION.md): the deprecation policy (additive first, deprecate then remove across a minor release) and every live deprecation; `scripts/check-migration.sh` (CI, `make check-migration`) fails when a `ripple:deprecated <id>` marker in code has no entry.
 - Container runner for the build: `RIPPLE_SANDBOX=container` (Apple `container`), `docker` or `podman` runs `go`
   and local `git` in a fresh container of `RIPPLE_CONTAINER_IMAGE` (read-only root, no capabilities, CPU, memory

@@ -117,8 +117,6 @@ Everything else:
 26. **Default-branch rename handling.** Handle the `repository` rename and default-branch change
    events; today a stale `DefaultBranch` is corrected only on the next push.
 27. **Dependency dashboard issue.** One issue per repo listing pending, deferred and failed jobs.
-28. **Dynamo hot partition.** Shard `JOBS#pending` and very popular `PKG#` partitions; revisit the
-   eventual-consistency notes in `docs/store-dynamodb.md` under load.
 29. **More datasources and feeds, as many ecosystems as Renovate has.** npm replicate, PyPI, crates.io
    sparse index, Maven, NuGet, RubyGems, Packagist, Docker/OCI tags, GitHub releases/tags, Helm, Terraform
    registry. Where a registry has a changes feed, use it; where it has none (OCI registries), fall back to polling
@@ -149,3 +147,11 @@ Everything else:
     repository's build can reach anything that network can. Ship a recipe, then a built-in option, that creates an
     internal network holding only a proxy sidecar; also run `git` and `go` together in one image with a
     documented, pinned Go version so `GOTOOLCHAIN=local` always satisfies the repo's `go` line.
+40. **Adaptive dependent sharding.** `RIPPLE_DYNAMODB_DEPENDENT_SHARDS` applies to every package, so
+    each `ListDependents` costs that many queries. Record a per-package hot flag (a counter on the release
+    item) and shard only the packages that cross a threshold, keeping the default at one query.
+41. **Run the shard queries concurrently.** `ListDueJobs` and `ListDependents` query their shards one after
+    another; at 64 shards that is latency worth removing.
+42. **A DynamoDB test double that runs without a container.** The Dynamo store is exercised only against
+    DynamoDB Local in CI; an in-process fake of the few operations used would let the sharding code run in
+    every local `go test`.

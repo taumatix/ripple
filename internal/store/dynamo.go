@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -21,7 +22,8 @@ import (
 //	repo        PK=REPO#<repo>        SK=META
 //	dependency  PK=REPO#<repo>        SK=DEP#<file>\x1f<ds>\x1f<pkg>   GSI1PK=PKG#<ds>#<line>  GSI1SK=<repo>\x1f<file>
 //	release     PK=PKG#<ds>#<pkg>     SK=REL#<version>                  (no GSI attributes)
-//	job         PK=JOB#<key>          SK=META    GSI1PK=JOBS#pending (only while pending)  GSI1SK=<not_before fixed-width>\x1f<key>
+//	job         PK=JOB#<key>          SK=META    GSI1PK=JOBS#pending[#<shard>] (only while pending)  GSI1SK=<not_before fixed-width>\x1f<key>
+//	shard marks PK=CONFIG#shards      SK=META    (high-water mark of both shard counts)
 //	cursor      PK=CURSOR#<name>      SK=META
 //
 // Reverse lookup (package -> repos) is a Query on gsi1 with GSI1PK=PKG#<ds>#<pkg>.
@@ -32,7 +34,22 @@ import (
 type Dynamo struct {
 	db    *dynamodb.Client
 	table string
+	// jobShards and depShards are how many GSI partitions the pending queue and each
+	// package's dependents are spread over. EnsureTable raises them to the high-water
+	// mark recorded in the table, so a restart with smaller settings still reads every
+	// shard that holds items. See dynamo_shard.go.
+	jobShards, depShards int
 }
+
+// DynamoOption configures NewDynamo.
+type DynamoOption func(*Dynamo)
+
+// WithJobShards sets how many partitions hold pending jobs (1..MaxShards, default DefaultJobShards).
+func WithJobShards(n int) DynamoOption { return func(d *Dynamo) { d.jobShards = clampShards(n) } }
+
+// WithDependentShards sets how many partitions hold one package's dependents
+// (1..MaxShards, default DefaultDependentShards). Every ListDependents costs this many Queries.
+func WithDependentShards(n int) DynamoOption { return func(d *Dynamo) { d.depShards = clampShards(n) } }
 
 const (
 	gsi1 = "gsi1"
@@ -40,10 +57,64 @@ const (
 	tsFm = "2006-01-02T15:04:05.000000000Z"
 )
 
-func NewDynamo(db *dynamodb.Client, table string) *Dynamo { return &Dynamo{db: db, table: table} }
+func NewDynamo(db *dynamodb.Client, table string, opts ...DynamoOption) *Dynamo {
+	d := &Dynamo{db: db, table: table, jobShards: DefaultJobShards, depShards: DefaultDependentShards}
+	for _, o := range opts {
+		o(d)
+	}
+	return d
+}
 
-// EnsureTable creates the table and its index when absent.
+// EnsureTable creates the table and its index when absent, then records the shard counts.
 func (d *Dynamo) EnsureTable(ctx context.Context) error {
+	if err := d.createTable(ctx); err != nil {
+		return err
+	}
+	return d.reconcileShards(ctx)
+}
+
+// reconcileShards keeps a high-water mark of each shard count in the table
+// (PK=CONFIG#shards) and adopts it when it exceeds the configured count: lowering the
+// setting must not strand items in shards that are no longer read. Raising it records
+// the new mark first, then reads and writes use it.
+func (d *Dynamo) reconcileShards(ctx context.Context) error {
+	var a struct {
+		item
+		Jobs, Dependents int
+	}
+	ok, err := d.get(ctx, "CONFIG#shards", "META", &a)
+	if err != nil {
+		return wrapD("read shard config", err)
+	}
+	if ok {
+		d.jobShards, d.depShards = max(d.jobShards, clampShards(a.Jobs)), max(d.depShards, clampShards(a.Dependents))
+	}
+	if ok && a.Jobs >= d.jobShards && a.Dependents >= d.depShards {
+		return nil
+	}
+	m, err := attributevalue.MarshalMap(struct {
+		item
+		Jobs, Dependents int
+	}{item{PK: "CONFIG#shards", SK: "META"}, d.jobShards, d.depShards})
+	if err != nil {
+		return err
+	}
+	_, err = d.db.PutItem(ctx, &dynamodb.PutItemInput{
+		TableName: &d.table, Item: m,
+		ConditionExpression:      aws.String("attribute_not_exists(PK) OR (#j <= :j AND #d <= :d)"),
+		ExpressionAttributeNames: map[string]string{"#j": "Jobs", "#d": "Dependents"},
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":j": &types.AttributeValueMemberN{Value: strconv.Itoa(d.jobShards)}, ":d": &types.AttributeValueMemberN{Value: strconv.Itoa(d.depShards)}},
+	})
+	var cc *types.ConditionalCheckFailedException
+	if errors.As(err, &cc) {
+		// Another instance recorded a mark above ours in one dimension: adopt it.
+		return d.reconcileShards(ctx)
+	}
+	return wrapD("write shard config", err)
+}
+
+func (d *Dynamo) createTable(ctx context.Context) error {
 	_, err := d.db.DescribeTable(ctx, &dynamodb.DescribeTableInput{TableName: &d.table})
 	if err == nil {
 		return nil
@@ -126,10 +197,12 @@ func parseTS(s string) time.Time {
 	return t
 }
 
-func depKeys(d model.Dependency) item {
+func pkgBase(ds, pkg string) string { return "PKG#" + ds + "#" + model.Line(ds, pkg) }
+
+func (st *Dynamo) depKeys(d model.Dependency) item {
 	return item{
 		PK: "REPO#" + d.Repo, SK: "DEP#" + d.File + sep + d.Datasource + sep + d.Package,
-		GSI1PK: "PKG#" + d.Datasource + "#" + model.Line(d.Datasource, d.Package), GSI1SK: d.Repo + sep + d.File,
+		GSI1PK: dependentsPK(pkgBase(d.Datasource, d.Package), shardOf(d.Repo, st.depShards)), GSI1SK: d.Repo + sep + d.File,
 	}
 }
 
@@ -266,7 +339,7 @@ func (d *Dynamo) ReplaceDependencies(ctx context.Context, repo string, deps []mo
 	seen := map[string]bool{}
 	for _, dep := range deps {
 		dep.Repo = repo
-		k := depKeys(dep)
+		k := d.depKeys(dep)
 		if seen[k.SK] {
 			continue
 		}
@@ -308,14 +381,23 @@ func (d *Dynamo) ListRepoDependencies(ctx context.Context, repo string) ([]model
 	return out, wrapD("list repo dependencies", err)
 }
 
-// ListDependents reads gsi1, which is eventually consistent.
+// ListDependents reads gsi1, which is eventually consistent. It issues one Query per
+// dependent shard (at most MaxShards, default one).
 func (d *Dynamo) ListDependents(ctx context.Context, ds, pkg string) ([]model.Dependency, error) {
-	out, err := d.collectDeps(ctx, &dynamodb.QueryInput{
-		IndexName:                 aws.String(gsi1),
-		KeyConditionExpression:    aws.String("GSI1PK = :pk"),
-		ExpressionAttributeValues: map[string]types.AttributeValue{":pk": s("PKG#" + ds + "#" + model.Line(ds, pkg))},
-	})
-	return out, wrapD("list dependents", err)
+	var out []model.Dependency
+	for sh := 0; sh < d.depShards; sh++ {
+		part, err := d.collectDeps(ctx, &dynamodb.QueryInput{
+			IndexName:                 aws.String(gsi1),
+			KeyConditionExpression:    aws.String("GSI1PK = :pk"),
+			ExpressionAttributeValues: map[string]types.AttributeValue{":pk": s(dependentsPK(pkgBase(ds, pkg), sh))},
+		})
+		if err != nil {
+			return nil, wrapD("list dependents", err)
+		}
+		out = append(out, part...)
+	}
+	SortDependencies(out)
+	return out, nil
 }
 
 func (d *Dynamo) RecordRelease(ctx context.Context, r model.Release) (bool, error) {
@@ -330,17 +412,17 @@ func (d *Dynamo) RecordRelease(ctx context.Context, r model.Release) (bool, erro
 	return err == nil, wrapD("record release", err)
 }
 
-func jobItem(j model.Job) jobAttrs {
+func (d *Dynamo) jobItem(j model.Job) jobAttrs {
 	a := jobAttrs{item: item{PK: "JOB#" + j.Key, SK: "META"}, Key: j.Key, Repo: j.Repo, Datasource: j.Datasource, Package: j.Package,
 		Version: j.Version, ReleasedAt: ts(j.ReleasedAt), NotBefore: ts(j.NotBefore), State: string(j.State), Attempts: j.Attempts, PRURL: j.PRURL, Reason: j.Reason}
 	if j.State == model.JobPending {
-		a.GSI1PK, a.GSI1SK = "JOBS#pending", ts(j.NotBefore)+sep+j.Key
+		a.GSI1PK, a.GSI1SK = pendingJobsPK(shardOf(j.Key, d.jobShards)), ts(j.NotBefore)+sep+j.Key
 	}
 	return a
 }
 
 func (d *Dynamo) EnqueueJob(ctx context.Context, j model.Job) (bool, error) {
-	err := d.put(ctx, jobItem(j), aws.String("attribute_not_exists(PK)"))
+	err := d.put(ctx, d.jobItem(j), aws.String("attribute_not_exists(PK)"))
 	var cc *types.ConditionalCheckFailedException
 	if errors.As(err, &cc) {
 		return false, nil
@@ -364,25 +446,38 @@ func (d *Dynamo) GetJob(ctx context.Context, key string) (model.Job, bool, error
 }
 
 func (d *Dynamo) UpdateJob(ctx context.Context, j model.Job) error {
-	return wrapD("update job", d.put(ctx, jobItem(j), nil))
+	return wrapD("update job", d.put(ctx, d.jobItem(j), nil))
 }
 
+// ListDueJobs queries every pending-job shard for its first limit due items and merges
+// them in (NotBefore, key) order, so the result is what one partition would give. It
+// costs exactly jobShards Queries and reads at most jobShards*limit items.
 func (d *Dynamo) ListDueJobs(ctx context.Context, now time.Time, limit int) ([]model.Job, error) {
-	var out []model.Job
-	err := d.query(ctx, &dynamodb.QueryInput{
-		IndexName:                 aws.String(gsi1),
-		KeyConditionExpression:    aws.String("GSI1PK = :pk AND GSI1SK <= :max"),
-		ExpressionAttributeValues: map[string]types.AttributeValue{":pk": s("JOBS#pending"), ":max": s(ts(now) + sep + "\U0010ffff")},
-		Limit:                     aws.Int32(int32(limit)),
-	}, limit, func(it map[string]types.AttributeValue) error {
-		var a jobAttrs
-		if err := attributevalue.UnmarshalMap(it, &a); err != nil {
-			return err
+	if limit <= 0 {
+		return nil, nil
+	}
+	parts := make([][]model.Job, 0, d.jobShards)
+	for sh := 0; sh < d.jobShards; sh++ {
+		var part []model.Job
+		err := d.query(ctx, &dynamodb.QueryInput{
+			IndexName:                 aws.String(gsi1),
+			KeyConditionExpression:    aws.String("GSI1PK = :pk AND GSI1SK <= :max"),
+			ExpressionAttributeValues: map[string]types.AttributeValue{":pk": s(pendingJobsPK(sh)), ":max": s(ts(now) + sep + "\U0010ffff")},
+			Limit:                     aws.Int32(int32(limit)),
+		}, limit, func(it map[string]types.AttributeValue) error {
+			var a jobAttrs
+			if err := attributevalue.UnmarshalMap(it, &a); err != nil {
+				return err
+			}
+			part = append(part, fromJobItem(a))
+			return nil
+		})
+		if err != nil {
+			return nil, wrapD("list due jobs", err)
 		}
-		out = append(out, fromJobItem(a))
-		return nil
-	})
-	return out, wrapD("list due jobs", err)
+		parts = append(parts, part)
+	}
+	return mergeDueJobs(parts, limit), nil
 }
 
 func (d *Dynamo) GetCursor(ctx context.Context, n string) (string, error) {

@@ -26,6 +26,8 @@ func Build(cfg *config.Repo) ([]Manager, error) {
 		switch u.Ecosystem {
 		case "gomod":
 			out = append(out, GoMod{Dir: u.Directory, Toolchain: u.GoToolchain})
+		case "github-actions":
+			out = append(out, GitHubActions{Dir: u.Directory})
 		case "regex":
 			r, err := NewRegex(cfg.ManagerName(i), u)
 			if err != nil {

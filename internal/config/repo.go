@@ -398,7 +398,7 @@ func ParseNamed(file string, data []byte) (*Repo, error) {
 		r.Version = 1
 	}
 	for i := range r.Updates {
-		if r.Updates[i].Ecosystem == "gomod" && r.Updates[i].Directory == "" {
+		if (r.Updates[i].Ecosystem == "gomod" || r.Updates[i].Ecosystem == "github-actions") && r.Updates[i].Directory == "" {
 			r.Updates[i].Directory = "/"
 		}
 	}
@@ -485,10 +485,16 @@ func (c *checker) update(n *yaml.Node, u *Update, where string) {
 				c.add(f["patterns"], "%s.patterns[%d] needs a (?P<name>...) group, or set package:", where, j)
 			}
 		}
+	case "github-actions":
+		for _, k := range []string{"files", "patterns", "package", "cgo", "security-pseudo-versions", "private-modules", "directives", "tidy", "go-toolchain"} {
+			if v := f[k]; v != nil {
+				c.add(v, "%s.%s does not apply to ecosystem: github-actions", where, k)
+			}
+		}
 	case "":
-		c.add(n, "%s.ecosystem is required (gomod or regex)", where)
+		c.add(n, "%s.ecosystem is required (gomod, github-actions or regex)", where)
 	default:
-		c.add(f["ecosystem"], "%s.ecosystem %q is not supported; use gomod or regex", where, u.Ecosystem)
+		c.add(f["ecosystem"], "%s.ecosystem %q is not supported; use gomod, github-actions or regex", where, u.Ecosystem)
 	}
 	switch u.Automerge {
 	case "", "patch", "minor", "major":

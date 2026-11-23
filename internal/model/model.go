@@ -8,6 +8,10 @@ import (
 
 const DatasourceGo = "go"
 
+// DatasourceGitHubTags is the tags of a GitHub repository: the versions of a
+// GitHub Action or reusable workflow, named by their owner/repo.
+const DatasourceGitHubTags = "github-tags"
+
 // DatasourceGoToolchain is the Go release train itself: the `go` directive
 // (package PackageGoDirective) and the `toolchain` line (PackageGoToolchain) of a
 // go.mod. They are dependencies of the module on the language, not on a module.

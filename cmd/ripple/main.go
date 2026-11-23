@@ -134,6 +134,7 @@ func serve(getenv func(string) string, errw io.Writer) error {
 		return err
 	}
 	defer st.Close()
+	defer a.Close()
 	ln, err := net.Listen("tcp", s.Listen)
 	if err != nil {
 		return err

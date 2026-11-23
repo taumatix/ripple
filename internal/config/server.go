@@ -59,10 +59,13 @@ type Server struct {
 	Sandbox        string // none, auto, bwrap, seatbelt, container, docker, podman
 	// Container* configure the container, docker and podman sandboxes (docs/sandbox.md).
 	ContainerImage, ContainerCPUs, ContainerMemory, ContainerPull, ContainerNetwork string
-	Store                                                                           string // memory, postgres, dynamodb
-	PostgresDSN                                                                     string
-	DynamoTable                                                                     string
-	DynamoEndpoint                                                                  string
+	// ContainerConfine makes the server create an internal runtime network and a proxy sidecar
+	// at start, so a container's only way out is RIPPLE_GOPROXY (docker and podman).
+	ContainerConfine bool
+	Store            string // memory, postgres, dynamodb
+	PostgresDSN      string
+	DynamoTable      string
+	DynamoEndpoint   string
 	// DynamoJobShards and DynamoDependentShards spread the pending-job queue and each
 	// package's dependents over that many index partitions (1..MaxDynamoShards).
 	DynamoJobShards       int
@@ -176,6 +179,25 @@ func isLoopback(u *url.URL) bool {
 	}
 	ip := net.ParseIP(h)
 	return ip != nil && ip.IsLoopback()
+}
+
+// checkConfine are the reasons RIPPLE_CONTAINER_CONFINE cannot work with the rest of the settings.
+func checkConfine(s *Server) []error {
+	var errs []error
+	fail := func(msg string) { errs = append(errs, errors.New("RIPPLE_CONTAINER_CONFINE: "+msg)) }
+	if s.Sandbox != "docker" && s.Sandbox != "podman" {
+		fail("needs RIPPLE_SANDBOX=docker or podman (Apple's container has no internal networks)")
+	}
+	if s.ContainerNetwork != "" {
+		fail("creates the network itself; unset RIPPLE_CONTAINER_NETWORK")
+	}
+	if u, err := url.Parse(s.GoProxy); err == nil && (u.Path != "" || u.RawQuery != "" || u.User != nil) {
+		fail("the sidecar forwards to RIPPLE_GOPROXY, which must be scheme://host[:port] with no path or credentials")
+	}
+	if s.GoProxyToken != "" {
+		fail("is not yet combined with RIPPLE_GOPROXY_TOKEN: go sends a credential only over https and the sidecar is http")
+	}
+	return errs
 }
 
 func checkURL(name, v string) error {
@@ -367,6 +389,16 @@ func LoadServer(getenv func(string) string) (*Server, error) {
 		if fi, err := os.Stat(d); err != nil || !fi.IsDir() || !filepath.IsAbs(d) {
 			errs = append(errs, errors.New("RIPPLE_GO_TOOLCHAIN_DIR: must be an absolute path to an existing directory"))
 		}
+	}
+	if v := getenv("RIPPLE_CONTAINER_CONFINE"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			errs = append(errs, errors.New("RIPPLE_CONTAINER_CONFINE: want true or false"))
+		}
+		s.ContainerConfine = b
+	}
+	if s.ContainerConfine {
+		errs = append(errs, checkConfine(s)...)
 	}
 	if s.GoToolchainDir != "" && (s.Sandbox == "container" || s.Sandbox == "docker" || s.Sandbox == "podman") {
 		errs = append(errs, errors.New("RIPPLE_GO_TOOLCHAIN_DIR: a container backend runs the Go its image carries; the directory would be ignored, so set it only with another sandbox"))

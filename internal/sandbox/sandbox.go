@@ -47,6 +47,13 @@ type NetworkOwner interface{ OwnsNetwork() bool }
 // started with argv, as returned by Wrap; it is best effort and never blocks long.
 type Reaper interface{ Reap(argv []string) }
 
+// ClientEnver is a backend whose client process (the container CLI) needs an
+// environment of its own, apart from the one the confined command runs with: the
+// client's HOME holds the runtime's state (rootless Podman keeps its image storage under
+// it), while the command's HOME is the job directory. ClientEnv returns the environment
+// to start the argv returned by Wrap with, given the policy's Env.
+type ClientEnver interface{ ClientEnv(job []string) []string }
+
 // Backend rewrites an argv so the command runs confined by a Policy.
 type Backend interface {
 	Name() string

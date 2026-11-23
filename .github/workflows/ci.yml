@@ -82,5 +82,14 @@ jobs:
         run: |
           set -o pipefail
           go test -tags containerlive -count=1 -v -timeout 20m -run 'TestContainerRuntimeLive|TestContainerConfinedNetworkLive' ./internal/sandbox/ | tee live.log
+      - name: build the runner image (git and a pinned Go)
+        run: ${{ matrix.runtime }} build -t localhost/ripple-runner:ci -f docker/runner/Dockerfile docker/runner
+      - name: live container tests on the runner image and the server's wiring
+        env:
+          RIPPLE_TEST_CONTAINER_FLAVOUR: ${{ matrix.runtime }}
+          RIPPLE_TEST_CONTAINER_IMAGE: localhost/ripple-runner:ci
+        run: |
+          set -o pipefail
+          go test -tags containerlive -count=1 -v -timeout 20m -run 'TestContainerRuntimeLive|TestContainerConfinedNetworkLive|TestContainerGitLive|TestServerConfinesContainerNetworkLive' ./internal/sandbox/ ./internal/app/ | tee live-runner.log
       - name: no skipped test
-        run: "! grep -E -- '--- SKIP' live.log"
+        run: "! grep -E -- '--- SKIP' live.log live-runner.log"

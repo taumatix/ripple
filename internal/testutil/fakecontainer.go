@@ -29,16 +29,20 @@ run) shift;;
 *) exit 0;;
 esac
 wd=.
+detached=
 while [ $# -gt 0 ]; do
   case "$1" in
     --rm|--read-only|--init) shift;;
+    -d) detached=1; shift;;
     -w) wd="$2"; shift 2;;
-    --name|--label|--progress|--pull|--pids-limit|--security-opt|--network|--tmpfs|--cap-drop|--user|--userns|-c|--cpus|-m|--memory|-v|-e) shift 2;;
+    --name|--label|--progress|--pull|--pids-limit|--security-opt|--network|--entrypoint|--tmpfs|--cap-drop|--user|--userns|-c|--cpus|-m|--memory|-v) shift 2;;
+    -e) case "$2" in *=*) export "$2";; esac; shift 2;;
     -*) echo "fake runtime: unknown option $1" >&2; exit 125;;
     *) break;;
   esac
 done
 image="$1"; shift
+[ -n "$detached" ] && exit 0
 [ -f "$dir/hang" ] && exec sleep 30
 cd "$wd" || exit 126
 exec "$@"

@@ -140,3 +140,20 @@ func TestConfineClose(t *testing.T) {
 		t.Errorf("close calls: %v", r.calls)
 	}
 }
+
+func TestRemoveConfinementRemovesSidecarThenNetwork(t *testing.T) {
+	r := &recorded{}
+	removeConfinement(context.Background(), "rn", r.run)
+	if len(r.calls) != 2 || !has(r.calls[0], "rm", "-f", "rn-proxy") || !has(r.calls[1], "network", "rm", "rn") {
+		t.Errorf("calls: %v", r.calls)
+	}
+}
+
+func TestRemoveConfinementRejectsAnUnsafeName(t *testing.T) {
+	if err := RemoveConfinement(context.Background(), FlavourDocker, "/bin/false", "r n"); err == nil {
+		t.Error("accepted")
+	}
+	if err := RemoveConfinement(context.Background(), FlavourApple, "/bin/false", "rn"); err == nil {
+		t.Error("Apple accepted")
+	}
+}

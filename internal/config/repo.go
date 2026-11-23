@@ -25,6 +25,7 @@ const (
 	FileName = ".ripple.yaml"
 	// LegacyFileName is the path v0.1.0 read. It is a deprecated alias with the same
 	// meaning, removed no earlier than v0.3.0, and ignored when FileName exists.
+	// ripple:deprecated alias-github-ripple-yml
 	LegacyFileName = ".github/ripple.yml"
 	maxRegexBytes  = 4096
 	maxCooldown    = 365 * 24 * time.Hour

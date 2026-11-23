@@ -5,6 +5,7 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
 ## [Unreleased]
 
 ### Added
+- [MIGRATION.md](MIGRATION.md): the deprecation policy (additive first, deprecate then remove across a minor release) and every live deprecation; `scripts/check-migration.sh` (CI, `make check-migration`) fails when a `ripple:deprecated <id>` marker in code has no entry.
 - Release workflow (`.github/workflows/release.yml`): a pushed `vX.Y.Z` tag builds a multi-arch (amd64, arm64)
   image for GHCR with the version tag and digest, attaches static binaries and `SHA256SUMS` to the GitHub
   release, then installs the published artifacts from scratch and runs `ripple version`. The Dockerfile takes a

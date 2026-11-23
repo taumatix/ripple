@@ -416,6 +416,9 @@ func (q *Queue) start(ctx context.Context, e *entry) {
 		case claimDeferred:
 			q.standDown(e, ev, time.Time{}, false)
 			return
+		case claimBehind:
+			q.standDown(e, ev, q.Now().Add(q.LeaseTTL/3), false)
+			return
 		}
 		defer held.Release()
 		err := q.Process(held.Ctx, ev)
@@ -439,6 +442,7 @@ const (
 	claimedElsewhere
 	claimGone     // the event no longer exists: another replica handled it
 	claimDeferred // the event is not due, or dead, by the store's account
+	claimBehind   // an older live event of the same repo is still in the store
 )
 
 // claim takes the event's lease and re-reads the event under it, so what runs is the
@@ -472,6 +476,20 @@ func (q *Queue) claim(ctx context.Context, ev model.Event) (*store.Held, model.E
 	case fresh.NotBefore.After(q.Now()):
 		held.Release()
 		return nil, fresh, claimDeferred
+	}
+	// eligible only orders the events this replica has loaded; an older event of the repo
+	// that another replica received is in the store and not here (until the rescan), so ask.
+	older, err := q.Store.HasOlderEvent(ctx, fresh)
+	switch {
+	case err != nil:
+		held.Release()
+		if ctx.Err() == nil {
+			q.Log.Error("check for an older event of the repo", "event", ev.ID, "repo", ev.Repo, "err", err)
+		}
+		return nil, fresh, claimedElsewhere
+	case older:
+		held.Release()
+		return nil, fresh, claimBehind
 	}
 	return held, fresh, claimed
 }

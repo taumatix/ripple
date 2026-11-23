@@ -12,14 +12,15 @@ import (
 
 // Memory is an in-process Store for fast unit tests.
 type Memory struct {
-	mu       sync.Mutex
-	repos    map[string]model.Repo
-	deps     map[string][]model.Dependency
-	releases map[string]model.Release
-	jobs     map[string]model.Job
-	cursors  map[string]string
-	events   map[string]model.Event
-	leases   map[string]Lease
+	mu         sync.Mutex
+	repos      map[string]model.Repo
+	deps       map[string][]model.Dependency
+	releases   map[string]model.Release
+	jobs       map[string]model.Job
+	cursors    map[string]string
+	events     map[string]model.Event
+	leases     map[string]Lease
+	deliveries map[string]time.Time
 }
 
 func NewMemory() *Memory {

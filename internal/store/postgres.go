@@ -312,3 +312,19 @@ func wrap(op string, err error) error {
 	}
 	return fmt.Errorf("postgres %s: %w", op, err)
 }
+
+// UpdateJobFenced is store.Store: one statement, so the lease is checked in the same
+// snapshot as the write. A row-less result means the job is missing or the lease is not
+// ours; the lease is the case that matters, so both read as ErrLeaseLost.
+func (p *Postgres) UpdateJobFenced(ctx context.Context, j model.Job, l Lease) error {
+	tag, err := p.pool.Exec(ctx, `UPDATE jobs SET state=$2, not_before=$3, attempts=$4, pr_url=$5, reason=$6
+WHERE key=$1 AND EXISTS (SELECT 1 FROM leases WHERE name=$7 AND owner=$8 AND token=$9)`,
+		j.Key, string(j.State), j.NotBefore, j.Attempts, j.PRURL, j.Reason, l.Name, l.Owner, l.Token)
+	if err != nil {
+		return wrap("update job", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrLeaseLost
+	}
+	return nil
+}

@@ -4,13 +4,17 @@
 //
 // It implements the operations the store uses: CreateTable, DescribeTable, DeleteTable,
 // PutItem, GetItem, DeleteItem, UpdateItem (SET and ADD), Query (table and global secondary
-// index) and BatchWriteItem. Semantics follow the API reference:
+// index), BatchWriteItem and TransactWriteItems (Put, Delete and ConditionCheck). Semantics
+// follow the API reference:
 //
 //   - Query returns items in sort-key order and evaluates at most Limit items and at most 1 MB
 //     of item data per call, applying FilterExpression after that read; it returns
 //     LastEvaluatedKey whenever it stopped on Limit or the size cap, even if nothing remains.
 //   - ConsistentRead on a global secondary index is a ValidationException.
 //   - BatchWriteItem takes at most 25 requests, rejects duplicate keys, and takes no condition.
+//   - TransactWriteItems is all or nothing: if any condition fails nothing is written and the
+//     call is a TransactionCanceledException whose CancellationReasons name each item
+//     (ConditionalCheckFailed or None). It takes at most 100 actions and no two on one key.
 //   - A failed condition is a ConditionalCheckFailedException; an unused expression attribute
 //     name or value is a ValidationException.
 //
@@ -18,7 +22,7 @@
 // synchronously, so it is never eventually consistent; there is no throttling or partition
 // limit; item and page sizes are an estimate; reserved words are not rejected; items with
 // equal index keys come back ordered by table key (DynamoDB leaves that unspecified);
-// TransactWriteItems, Scan, BatchGetItem and the rest of the expression language are not
+// Scan, BatchGetItem and the rest of the expression language are not
 // implemented and answer with a ValidationException naming the gap.
 package dynamofake
 
@@ -40,6 +44,8 @@ const (
 	MaxItemBytes = 400 << 10
 	// MaxBatch is the most requests one BatchWriteItem takes.
 	MaxBatch = 25
+	// MaxTransact is the most actions one TransactWriteItems takes.
+	MaxTransact = 100
 )
 
 // Fake is one in-memory DynamoDB endpoint.
@@ -110,18 +116,21 @@ func (f *Fake) Items(tableName string) []map[string]any {
 	return out
 }
 
-type apiError struct{ typ, msg string }
+type apiError struct {
+	typ, msg string
+	reasons  []map[string]string // TransactionCanceledException's CancellationReasons
+}
 
 func (e *apiError) Error() string { return e.typ + ": " + e.msg }
 
 func validation(msg string) error {
-	return &apiError{"com.amazon.coral.validate#ValidationException", msg}
+	return &apiError{typ: "com.amazon.coral.validate#ValidationException", msg: msg}
 }
 func notFound(msg string) error {
-	return &apiError{"com.amazonaws.dynamodb.v20120810#ResourceNotFoundException", msg}
+	return &apiError{typ: "com.amazonaws.dynamodb.v20120810#ResourceNotFoundException", msg: msg}
 }
 func condFailed() error {
-	return &apiError{"com.amazonaws.dynamodb.v20120810#ConditionalCheckFailedException", "The conditional request failed"}
+	return &apiError{typ: "com.amazonaws.dynamodb.v20120810#ConditionalCheckFailedException", msg: "The conditional request failed"}
 }
 
 func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
@@ -148,6 +157,8 @@ func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 		out, err = f.query(body)
 	case "BatchWriteItem":
 		out, err = f.batchWrite(body)
+	case "TransactWriteItems":
+		out, err = f.transactWrite(body)
 	default:
 		err = validation("dynamofake does not implement " + op)
 	}
@@ -155,10 +166,14 @@ func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		ae, ok := err.(*apiError)
 		if !ok {
-			ae = &apiError{"com.amazon.coral.service#InternalFailure", err.Error()}
+			ae = &apiError{typ: "com.amazon.coral.service#InternalFailure", msg: err.Error()}
 		}
 		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]string{"__type": ae.typ, "message": ae.msg})
+		body := map[string]any{"__type": ae.typ, "message": ae.msg, "Message": ae.msg}
+		if ae.reasons != nil {
+			body["CancellationReasons"] = ae.reasons
+		}
+		_ = json.NewEncoder(w).Encode(body)
 		return
 	}
 	_ = json.NewEncoder(w).Encode(out)
@@ -208,7 +223,7 @@ func (f *Fake) createTable(body []byte) (any, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.tables[in.TableName] != nil {
-		return nil, &apiError{"com.amazonaws.dynamodb.v20120810#ResourceInUseException", "Table already exists: " + in.TableName}
+		return nil, &apiError{typ: "com.amazonaws.dynamodb.v20120810#ResourceInUseException", msg: "Table already exists: " + in.TableName}
 	}
 	t := &table{indexes: map[string][2]string{}, items: map[string]map[string]av{}}
 	t.hash, t.rng = schemaOf(in.KeySchema)
@@ -814,3 +829,111 @@ func splitKeyCondition(n *node, hashA, rngA string) (av, *node, error) {
 }
 
 func equalAV(a, b av) bool { c, ok := compare(a, b); return ok && c == 0 }
+
+// transactWrite applies Put, Delete and ConditionCheck actions atomically: every condition is
+// evaluated against the table as it is now, and one failure cancels the lot.
+func (f *Fake) transactWrite(body []byte) (any, error) {
+	type cond struct {
+		TableName                 string
+		ConditionExpression       string
+		ExpressionAttributeNames  map[string]string
+		ExpressionAttributeValues map[string]av
+	}
+	var in struct {
+		TransactItems []struct {
+			Put *struct {
+				cond
+				Item map[string]av
+			}
+			Delete *struct {
+				cond
+				Key map[string]av
+			}
+			ConditionCheck *struct {
+				cond
+				Key map[string]av
+			}
+		}
+	}
+	if err := decode(body, &in); err != nil {
+		return nil, err
+	}
+	if n := len(in.TransactItems); n == 0 || n > MaxTransact {
+		return nil, validation("Member must have length less than or equal to 100 and at least 1")
+	}
+	type action struct {
+		t    *table
+		key  string
+		put  map[string]av
+		del  bool
+		cond *node
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var acts []action
+	seen := map[string]bool{}
+	for _, it := range in.TransactItems {
+		var a action
+		var c cond
+		var key, item map[string]av
+		switch {
+		case it.Put != nil:
+			c, item = it.Put.cond, it.Put.Item
+		case it.Delete != nil:
+			c, key, a.del = it.Delete.cond, it.Delete.Key, true
+		case it.ConditionCheck != nil:
+			c, key = it.ConditionCheck.cond, it.ConditionCheck.Key
+		default:
+			return nil, validation("TransactItems can only contain Put, Delete, Update and ConditionCheck actions in the fake")
+		}
+		t, err := f.lookup(c.TableName)
+		if err != nil {
+			return nil, err
+		}
+		a.t = t
+		if item != nil {
+			if err := t.checkItem(item); err != nil {
+				return nil, err
+			}
+			a.key, _ = itemKey(t, item)
+			a.put = item
+		} else if a.key, err = keyOf(t, key); err != nil {
+			return nil, err
+		}
+		n, sc, err := conditionOf(c.ConditionExpression, c.ExpressionAttributeNames, c.ExpressionAttributeValues)
+		if err != nil {
+			return nil, err
+		}
+		if err := sc.checkUnused(); err != nil {
+			return nil, err
+		}
+		a.cond = n
+		if seen[c.TableName+"\x00"+a.key] {
+			return nil, validation("Transaction request cannot include multiple operations on one item")
+		}
+		seen[c.TableName+"\x00"+a.key] = true
+		acts = append(acts, a)
+	}
+	failed := false
+	reasons := make([]map[string]string, len(acts))
+	for i, a := range acts {
+		reasons[i] = map[string]string{"Code": "None"}
+		if a.cond != nil && !a.cond.eval(a.t.items[a.key]) {
+			reasons[i] = map[string]string{"Code": "ConditionalCheckFailed", "Message": "The conditional request failed"}
+			failed = true
+		}
+	}
+	if failed {
+		return nil, &apiError{typ: "com.amazonaws.dynamodb.v20120810#TransactionCanceledException",
+			msg: "Transaction cancelled, please refer cancellation reasons for specific reasons", reasons: reasons}
+	}
+	for _, a := range acts {
+		switch {
+		case a.put != nil:
+			a.t.items[a.key] = a.put
+		case a.del:
+			delete(a.t.items, a.key)
+		}
+	}
+	return map[string]any{}, nil
+}

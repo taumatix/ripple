@@ -84,3 +84,11 @@ func (p *Postgres) DeleteEvent(ctx context.Context, id string) error {
 	_, err := p.pool.Exec(ctx, `DELETE FROM events WHERE id=$1`, id)
 	return wrap("delete event", err)
 }
+
+// HasOlderEvent is store.Store; events_by_repo is not needed, the (seq,id) index bounds the scan.
+func (p *Postgres) HasOlderEvent(ctx context.Context, e model.Event) (bool, error) {
+	var ok bool
+	err := p.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE repo=$1 AND dead_at IS NULL AND (seq,id) < ($2,$3))`,
+		e.Repo, e.Seq, e.ID).Scan(&ok)
+	return ok, wrap("has older event", err)
+}

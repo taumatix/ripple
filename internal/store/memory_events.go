@@ -120,3 +120,15 @@ func (m *Memory) GetEvent(_ context.Context, id string) (model.Event, bool, erro
 	e, ok := m.events[id]
 	return copyEvent(e), ok, nil
 }
+
+// HasOlderEvent is store.Store.
+func (m *Memory) HasOlderEvent(_ context.Context, e model.Event) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, o := range m.events {
+		if o.Repo == e.Repo && !o.Dead() && (o.Seq < e.Seq || o.Seq == e.Seq && o.ID < e.ID) {
+			return true, nil
+		}
+	}
+	return false, nil
+}

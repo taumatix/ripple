@@ -200,3 +200,14 @@ func SortDependencies(d []model.Dependency) {
 		return a.Package < b.Package
 	})
 }
+
+// UpdateJobFenced is store.Store: the lease check and the write share one critical section.
+func (m *Memory) UpdateJobFenced(_ context.Context, j model.Job, l Lease) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if cur, ok := m.leases[l.Name]; !ok || cur.Owner != l.Owner || cur.Token != l.Token {
+		return ErrLeaseLost
+	}
+	m.jobs[j.Key] = j
+	return nil
+}

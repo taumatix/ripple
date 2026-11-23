@@ -689,3 +689,39 @@ func wrapD(op string, err error) error {
 	}
 	return fmt.Errorf("dynamodb %s: %w", op, err)
 }
+
+// UpdateJobFenced is store.Store. One TransactWriteItems checks the lease item, writes the
+// job and writes or deletes its open-job copy, so a stale holder changes nothing, and the
+// copy cannot fall behind the job as it can in UpdateJob.
+func (d *Dynamo) UpdateJobFenced(ctx context.Context, j model.Job, l Lease) error {
+	m, err := attributevalue.MarshalMap(d.jobItem(j))
+	if err != nil {
+		return wrapD("update job", err)
+	}
+	copyKey := map[string]types.AttributeValue{"PK": s("REPO#" + j.Repo), "SK": s("OPENJOB#" + j.Key)}
+	var second types.TransactWriteItem
+	if isOpen(j) {
+		c := d.jobItem(j)
+		c.item = item{PK: "REPO#" + j.Repo, SK: "OPENJOB#" + j.Key}
+		cm, err := attributevalue.MarshalMap(c)
+		if err != nil {
+			return wrapD("update job", err)
+		}
+		second.Put = &types.Put{TableName: &d.table, Item: cm}
+	} else {
+		second.Delete = &types.Delete{TableName: &d.table, Key: copyKey}
+	}
+	_, err = d.db.TransactWriteItems(ctx, &dynamodb.TransactWriteItemsInput{TransactItems: []types.TransactWriteItem{
+		{ConditionCheck: &types.ConditionCheck{TableName: &d.table, Key: leaseKey(l.Name),
+			ConditionExpression:       aws.String("#o = :o AND #t = :t"),
+			ExpressionAttributeNames:  map[string]string{"#o": "Owner", "#t": "Token"},
+			ExpressionAttributeValues: map[string]types.AttributeValue{":o": s(l.Owner), ":t": &types.AttributeValueMemberN{Value: fmt.Sprint(l.Token)}}}},
+		{Put: &types.Put{TableName: &d.table, Item: m}},
+		second,
+	}})
+	var tc *types.TransactionCanceledException
+	if errors.As(err, &tc) {
+		return ErrLeaseLost
+	}
+	return wrapD("update job", err)
+}

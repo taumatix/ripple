@@ -29,6 +29,15 @@ upstream:
     rules: "/vN suffix required from v2, /v1 not allowed, gopkg.in paths always .vN, +incompatible marks pre-module v2+ versions"
     verified-against: "the go command in internal/e2e against a fake proxy (internal/testutil/goproxy.go); not recorded from proxy.golang.org"
     checked: 2026-11-22
+  - name: container-runtimes
+    kind: cli
+    reference: https://github.com/apple/container
+    docs: https://docs.docker.com/reference/cli/docker/container/run/
+    cli-version: "container 1.4.1 (Apple)"
+    used: ["container|docker|podman run --rm --name --label --network --read-only --tmpfs --cap-drop --user -v -w -e <image> <cmd>; Apple: --progress none -c -m; docker and podman: --pull --pids-limit --security-opt --cpus --memory; kill <name>; docker and podman: rm -f <name>"]
+    verified-against: "Apple container 1.4.1: options from `container run --help`, run for real by internal/sandbox/container_live_darwin_test.go"
+    unverified: "docker and podman: option names and semantics are from the documented CLI and a fake binary (internal/testutil/fakecontainer.go); no daemon has run them"
+    checked: 2026-11-23
   - name: gitea
     kind: http-api
     reference: https://docs.gitea.com/api/1.24/

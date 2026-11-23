@@ -6,6 +6,11 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
 
 ### Added
 - [MIGRATION.md](MIGRATION.md): the deprecation policy (additive first, deprecate then remove across a minor release) and every live deprecation; `scripts/check-migration.sh` (CI, `make check-migration`) fails when a `ripple:deprecated <id>` marker in code has no entry.
+- Container runner for the build: `RIPPLE_SANDBOX=container` (Apple `container`), `docker` or `podman` runs `go`
+  and local `git` in a fresh container of `RIPPLE_CONTAINER_IMAGE` (read-only root, no capabilities, CPU, memory
+  and process limits, only the workspace mounted, killed and removed on timeout), configured with
+  `RIPPLE_CONTAINER_CPUS`, `_MEMORY`, `_PULL` and `_NETWORK`. The default (`none`) is unchanged. Apple's runtime is
+  tested for real on a Mac; Docker and Podman only against a fake CLI. See docs/sandbox.md.
 - Release workflow (`.github/workflows/release.yml`): a pushed `vX.Y.Z` tag builds a multi-arch (amd64, arm64)
   image for GHCR with the version tag and digest, attaches static binaries and `SHA256SUMS` to the GitHub
   release, then installs the published artifacts from scratch and runs `ripple version`. The Dockerfile takes a

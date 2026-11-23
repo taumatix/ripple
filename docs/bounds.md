@@ -37,6 +37,22 @@ file is a symbolic link, the workspace returns `platform.ErrScanFallback` and th
 `partial scan unavailable; scanning a full checkout` and repeats on the usual checkout. The scan never fails
 for want of partial clone. Only GitHub was measured live; the others are from their documentation.
 
+### Hosts that serve only part of it
+
+Git protocol v2 serves any object a client names, so `uploadpack.allowAnySHA1InWant` is moot there; it matters on a host
+that speaks protocol v0 (an older git, or a proxy that drops the `Git-Protocol` header). `TestScanOnHostsWithPartialCapabilities`
+runs the fake server as such a host (`GitHTTP.SpeakProtocolV0`) in both half-way shapes:
+
+| Host serves | Scan |
+|---|---|
+| filter, but refuses a blob by object id | the batched fetch fails, the scan falls back to a full checkout (logged once) |
+| a blob by object id, but ignores the filter | the clone carries everything, no fallback, no saving |
+
+The first shape exposed a bug: the full checkout also clones with `--filter=blob:limit=1m` and its checkout fetches the
+omitted blobs by object id, so on such a host the fallback failed too and the scan never finished. A full checkout that
+fails now repeats once with an unfiltered clone, which needs neither. Which real host (GitLab, Gitea/Forgejo, Bitbucket,
+Azure DevOps, Gerrit, CodeCommit, SCM-Manager) falls in which row has not been measured; that needs each host.
+
 ### Why not sparse checkout
 
 The first version fetched through `git sparse-checkout set --no-cone --stdin` and `git checkout HEAD`. Git marks

@@ -134,9 +134,17 @@ func (g *GitHub) AddRepo(repo string, files map[string]string) {
 // DisablePartialClone makes repo's server refuse to filter, as a host that does not
 // implement partial clone does: git then sends every object and warns.
 func (g *GitHub) DisablePartialClone(repo string) {
+	g.SetPartialClone(repo, false, false)
+}
+
+// SetPartialClone sets the two capabilities a scan without a checkout needs, apart:
+// whether the server filters a clone (`filter=blob:none`) and whether it serves a
+// blob asked for by object id. A host with only the first clones lazily but refuses
+// the batched fetch, so the scan must fall back to a full checkout.
+func (g *GitHub) SetPartialClone(repo string, filter, blobByID bool) {
 	g.t.Helper()
-	git(g.t, g.bare(repo), "config", "uploadpack.allowFilter", "false")
-	git(g.t, g.bare(repo), "config", "uploadpack.allowAnySHA1InWant", "false")
+	git(g.t, g.bare(repo), "config", "uploadpack.allowFilter", strconv.FormatBool(filter))
+	git(g.t, g.bare(repo), "config", "uploadpack.allowAnySHA1InWant", strconv.FormatBool(blobByID))
 }
 
 // Commit adds a commit on main with files (a human pushing to the default branch).

@@ -461,7 +461,7 @@ func (g *GitHub) handleRepo(w http.ResponseWriter, r *http.Request) {
 		out := []map[string]any{}
 		for _, p := range g.prs[repo] {
 			if !p.Closed {
-				out = append(out, prJSON(repo, p))
+				out = append(out, g.withHeadSHA(repo, p, prJSON(repo, p)))
 			}
 		}
 		g.mu.Unlock()
@@ -690,6 +690,26 @@ func (g *GitHub) HumanCommitOnBranch(repo, branch string) {
 	git(g.t, w, "add", "-A")
 	git(g.t, w, "commit", "-q", "-m", "hand edit")
 	git(g.t, w, "push", "-q", "origin", branch)
+}
+
+// withHeadSHA adds the head commit the listing reports (head.sha); absent when the
+// branch does not exist in the bare repository.
+func (g *GitHub) withHeadSHA(repo string, p *PR, m map[string]any) map[string]any {
+	cmd := exec.Command("git", "rev-parse", "--verify", "--quiet", "refs/heads/"+p.Head)
+	cmd.Dir = g.bare(repo)
+	cmd.Env = gitEnv()
+	if out, err := cmd.Output(); err == nil {
+		m["head"].(map[string]any)["sha"] = strings.TrimSpace(string(out))
+	}
+	return m
+}
+
+// HumanResetBranch force-pushes branch back by n commits, as a person undoing their
+// own edit would. Unlike a force-push the host's issue events report, it leaves no
+// trace but the moved head.
+func (g *GitHub) HumanResetBranch(repo, branch string, n int) {
+	g.t.Helper()
+	git(g.t, g.bare(repo), "update-ref", "refs/heads/"+branch, fmt.Sprintf("refs/heads/%s~%d", branch, n))
 }
 
 func prJSON(repo string, p *PR) map[string]any {

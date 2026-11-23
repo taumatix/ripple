@@ -233,11 +233,12 @@ type prJSON struct {
 	HTMLURL string `json:"html_url"`
 	Head    struct {
 		Ref string `json:"ref"`
+		SHA string `json:"sha"`
 	} `json:"head"`
 }
 
 func (p prJSON) pr() platform.PR {
-	return platform.PR{Number: p.Number, URL: p.HTMLURL, Head: p.Head.Ref}
+	return platform.PR{Number: p.Number, URL: p.HTMLURL, Head: p.Head.Ref, HeadSHA: p.Head.SHA}
 }
 
 // paged calls fn with each page of a listing until the server stops saying there

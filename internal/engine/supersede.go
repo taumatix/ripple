@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 
 	"golang.org/x/mod/semver"
@@ -122,7 +121,7 @@ func (r *runner) closeStale(by supersededBy, exceptHead string, open []platform.
 		if !ok || old.Head == exceptHead || !r.ownedByRipple(by.ds, by.pkg, oldVersion, old) {
 			continue
 		}
-		if touched[old.URL] {
+		if stillTouched(touched, old) {
 			r.e.log().Debug("stale pull request left open: remembered as touched", "repo", r.repo.FullName, "pr", old.URL)
 			continue
 		}
@@ -139,7 +138,7 @@ func (r *runner) closeStale(by supersededBy, exceptHead string, open []platform.
 			}
 		case !done:
 			r.e.log().Info("stale pull request left open: it was touched by someone else", "repo", r.repo.FullName, "pr", old.URL)
-			touched[old.URL] = true
+			touched[old.URL] = old.HeadSHA
 			r.saveTouchedPRs(touched)
 		default:
 			closed[old.Head] = true
@@ -258,52 +257,59 @@ func supersededComment(by supersededBy, oldVersion string) string {
 		lead, by.pkg, by.version, oldVersion)
 }
 
-// touchedCursor holds, per repo, the URLs of open ripple PRs a host reported as
-// touched by a person. Touched is sticky: a comment, review or commit does not
-// un-happen, so the PR is not read again (about six requests) on every run, only
-// remembered until it leaves the open list. The repo's lease serializes writers.
+// touchedCursor holds, per repo, the open ripple PRs a host reported as touched by a
+// person, each with the head commit it had then (JSON {url: sha}; an older run wrote a
+// plain list of URLs, which reads as "head unknown"). A touch is remembered, not read
+// again (about six requests) on every run, until the PR leaves the open list or its
+// head moves: a head that moved may be a revert or a reset, so the host is asked once
+// more. A host that reports no head commit keeps the touch until the PR closes. The
+// repo's lease serializes writers.
 func (r *runner) touchedCursor() string { return "supersede-touched:" + r.repo.FullName }
 
-func (r *runner) touchedPRs() map[string]bool {
-	set := map[string]bool{}
+func (r *runner) touchedPRs() map[string]string {
+	set := map[string]string{}
 	raw, err := r.e.Store.GetCursor(r.ctx, r.touchedCursor())
 	if err != nil {
 		r.e.log().Warn("touched pull requests not read; checking them again", "repo", r.repo.FullName, "err", err)
 		return set
 	}
-	var urls []string
-	if raw != "" && json.Unmarshal([]byte(raw), &urls) != nil {
+	if json.Unmarshal([]byte(raw), &set) == nil && raw != "" {
 		return set
 	}
-	for _, u := range urls {
-		set[u] = true
+	var urls []string
+	if raw != "" && json.Unmarshal([]byte(raw), &urls) == nil {
+		for _, u := range urls {
+			set[u] = ""
+		}
 	}
 	return set
 }
 
-func (r *runner) saveTouchedPRs(set map[string]bool) {
-	urls := make([]string, 0, len(set))
-	for u := range set {
-		urls = append(urls, u)
-	}
-	sort.Strings(urls)
-	b, _ := json.Marshal(urls)
+func (r *runner) saveTouchedPRs(set map[string]string) {
+	b, _ := json.Marshal(set) // map keys marshal sorted
 	if err := r.e.Store.SetCursor(r.ctx, r.touchedCursor(), string(b)); err != nil {
 		r.e.log().Warn("touched pull requests not remembered", "repo", r.repo.FullName, "err", err)
 	}
 }
 
-// forgetClosedTouchedPRs drops what is remembered of a PR no longer open, so the
-// memory cannot outlive the PR it describes.
+// stillTouched reports whether pr is remembered as touched with the head it has now.
+// A remembered touch with an unknown head, or a PR whose host reports no head, holds.
+func stillTouched(set map[string]string, pr platform.PR) bool {
+	sha, ok := set[pr.URL]
+	return ok && (sha == "" || pr.HeadSHA == "" || sha == pr.HeadSHA)
+}
+
+// forgetClosedTouchedPRs drops what is remembered of a PR no longer open, or whose
+// head moved since it was judged, so the memory cannot outlive what it describes.
 func (r *runner) forgetClosedTouchedPRs(open []platform.PR) {
 	set := r.touchedPRs()
 	if len(set) == 0 {
 		return
 	}
-	still := map[string]bool{}
+	still := map[string]string{}
 	for _, pr := range open {
-		if set[pr.URL] {
-			still[pr.URL] = true
+		if stillTouched(set, pr) {
+			still[pr.URL] = set[pr.URL]
 		}
 	}
 	if len(still) != len(set) {

@@ -157,10 +157,6 @@ Everything else:
     one of these loses nothing only if ripple stored what it opened: record the head SHA and body hash on the
     job and compare, which would cover every host the same way. It needs the head SHA on `platform.PR` and a
     new job column (a Postgres migration and a DynamoDB attribute), so it waits for the store work in flight.
-124. **Supersede: a touched PR whose head moves.** A PR a person touched is now remembered by URL
-    (cursor `supersede-touched:<repo>`) until it leaves the open list. Touched is treated as permanent; a person
-    who undoes the touch (reverts a rename, deletes a comment) is not noticed until the PR closes. Fine for the
-    reads the hosts report today; revisit only if a host reports a revert.
 101. **Replicas: soak against real databases.** The shared suite races goroutines on one store handle and the
     e2e runs two replicas; neither is a real multi-node Postgres or DynamoDB under load, or with a skewed clock.
     Run three replicas against both with a clock offset and check one PR per job and ordered events.
@@ -349,3 +345,8 @@ Everything else:
     packages with dependents in a small index item (or a sparse GSI) so the check reads that instead. The server only
     reports drift; whether it should recount a package it finds drifted on its own (rate-limited, one replica at a time
     under the lease) is undecided.
+177. **Head commit on every host's open-PR listing.** `platform.PR.HeadSHA` is filled for GitHub (tested against the fake),
+    and read for GitLab (`sha`) and Gitea/Forgejo (`head.sha`) from their documented fields with no fake emitting it
+    and no test. Make the GitLab and Gitea fakes report it and add the supersede e2e for each; Bitbucket Cloud
+    (`source.commit.hash`), Data Center (`fromRef.latestCommit`) and Azure DevOps (`lastMergeSourceCommit`) still
+    report none, so a touched PR there stays touched until it closes.

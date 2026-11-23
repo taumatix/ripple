@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -313,7 +314,64 @@ func (a *App) pollFeed(ctx context.Context) int {
 	return n
 }
 
-func (a *App) stepDownFeed(ctx context.Context) { a.Watcher.StepDown(ctx) }
+// electedSource is a poller that one replica at a time runs: *engine.Watcher and the
+// toolchain, Actions, Docker, npm and Cargo watchers.
+type electedSource interface {
+	Poll(context.Context) (int, error)
+	PollElected(context.Context, time.Duration) (int, bool, error)
+	Elected() bool
+	StepDown(context.Context)
+}
+
+// pollSource polls src once through its election (lease feed:<name>), like the release
+// feed: of the replicas sharing a store one polls and the others skip. The claim lasts twice
+// the poll interval, so a replica that dies is replaced within about two of them.
+func (a *App) pollSource(ctx context.Context, src electedSource) (int, error) {
+	n, _, err := src.PollElected(ctx, 2*a.PollEvery)
+	return n, err
+}
+
+// sources lists the configured elected pollers by name.
+func (a *App) sources() map[string]electedSource {
+	m := map[string]electedSource{}
+	if a.Watcher != nil {
+		m["feed"] = a.Watcher
+	}
+	if a.Toolchain != nil {
+		m["go-toolchain"] = a.Toolchain
+	}
+	if a.Actions != nil {
+		m["github-actions"] = a.Actions
+	}
+	if a.Docker != nil {
+		m["docker"] = a.Docker
+	}
+	if a.Npm != nil {
+		m["npm"] = a.Npm
+	}
+	if a.Cargo != nil {
+		m["cargo"] = a.Cargo
+	}
+	return m
+}
+
+// electedNames returns the sources this replica polls now, sorted.
+func (a *App) electedNames() []string {
+	var out []string
+	for n, s := range a.sources() {
+		if s.Elected() {
+			out = append(out, n)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func (a *App) stepDownFeed(ctx context.Context) {
+	for _, s := range a.sources() {
+		s.StepDown(ctx)
+	}
+}
 
 // pollAdvisories runs one OSV poll when enabled. A failure is logged and nothing else:
 // normal updates never wait on OSV.
@@ -503,7 +561,7 @@ func (a *App) pollActions(ctx context.Context) int {
 	if a.Actions == nil {
 		return 0
 	}
-	n, err := a.Actions.Poll(ctx)
+	n, err := a.pollSource(ctx, a.Actions)
 	switch {
 	case err != nil && ctx.Err() == nil:
 		a.Log.Error("github actions poll", "err", err)
@@ -518,7 +576,7 @@ func (a *App) pollDocker(ctx context.Context) int {
 	if a.Docker == nil {
 		return 0
 	}
-	n, err := a.Docker.Poll(ctx)
+	n, err := a.pollSource(ctx, a.Docker)
 	switch {
 	case err != nil && ctx.Err() == nil:
 		a.Log.Error("container image poll", "err", err)
@@ -533,7 +591,7 @@ func (a *App) pollNpm(ctx context.Context) int {
 	if a.Npm == nil {
 		return 0
 	}
-	n, err := a.Npm.Poll(ctx)
+	n, err := a.pollSource(ctx, a.Npm)
 	switch {
 	case err != nil && ctx.Err() == nil:
 		a.Log.Error("npm poll", "err", err)
@@ -548,7 +606,7 @@ func (a *App) pollCargo(ctx context.Context) int {
 	if a.Cargo == nil {
 		return 0
 	}
-	n, err := a.Cargo.Poll(ctx)
+	n, err := a.pollSource(ctx, a.Cargo)
 	switch {
 	case err != nil && ctx.Err() == nil:
 		a.Log.Error("cargo poll", "err", err)
@@ -563,7 +621,7 @@ func (a *App) pollToolchain(ctx context.Context) int {
 	if a.Toolchain == nil {
 		return 0
 	}
-	n, err := a.Toolchain.Poll(ctx)
+	n, err := a.pollSource(ctx, a.Toolchain)
 	switch {
 	case err != nil && ctx.Err() == nil:
 		a.Log.Error("go release poll", "err", err)

@@ -24,42 +24,114 @@ type election struct {
 // another replica takes over once the claim lapses. Two replicas polling would be safe (job
 // enqueue is insert-if-absent) but each release would be fetched twice.
 func (w *Watcher) PollElected(ctx context.Context, ttl time.Duration) (jobs int, polled bool, err error) {
-	e := w.Engine
-	l, ok, err := e.Store.AcquireLease(ctx, feedLease(w.Feed.Name()), e.replicaID(), ttl)
-	w.elect.mu.Lock()
+	return w.elect.poll(ctx, w.Engine, feedLease(w.Feed.Name()), ttl, w.Poll)
+}
+
+// Elected reports whether this replica held the feed's claim at its last PollElected.
+func (w *Watcher) Elected() bool { return w.elect.isHeld() }
+
+// StepDown gives the claim up so another replica can poll at once; call it when stopping.
+func (w *Watcher) StepDown(ctx context.Context) { w.elect.stepDown(ctx, w.Engine) }
+
+// poll takes or extends the claim named lease and, when this replica holds it, runs fn.
+func (el *election) poll(ctx context.Context, e *Engine, lease string, ttl time.Duration, fn func(context.Context) (int, error)) (int, bool, error) {
+	l, ok, err := e.Store.AcquireLease(ctx, lease, e.replicaID(), ttl)
+	el.mu.Lock()
 	switch {
 	case err != nil || !ok:
-		w.elect.held = false
+		el.held = false
 	default:
-		if l.Token > 1 && l.Token != w.elect.lease.Token {
+		if l.Token > 1 && l.Token != el.lease.Token {
 			// The same owner re-acquiring a live claim keeps its token; a new token above 1 is a
 			// takeover from a replica that died or stalled.
 			store.NoteTakeover(e.log(), l, e.replicaID())
 		}
-		w.elect.lease, w.elect.held = l, true
+		el.lease, el.held = l, true
 	}
-	w.elect.mu.Unlock()
+	el.mu.Unlock()
 	if err != nil || !ok {
 		return 0, false, err
 	}
-	jobs, err = w.Poll(ctx)
-	return jobs, true, err
+	n, err := fn(ctx)
+	return n, true, err
 }
 
-// Elected reports whether this replica held the feed's claim at its last PollElected.
-func (w *Watcher) Elected() bool {
-	w.elect.mu.Lock()
-	defer w.elect.mu.Unlock()
-	return w.elect.held
+func (el *election) isHeld() bool {
+	el.mu.Lock()
+	defer el.mu.Unlock()
+	return el.held
 }
 
-// StepDown gives the claim up so another replica can poll at once; call it when stopping.
-func (w *Watcher) StepDown(ctx context.Context) {
-	w.elect.mu.Lock()
-	l, held := w.elect.lease, w.elect.held
-	w.elect.held = false
-	w.elect.mu.Unlock()
+func (el *election) stepDown(ctx context.Context, e *Engine) {
+	el.mu.Lock()
+	l, held := el.lease, el.held
+	el.held = false
+	el.mu.Unlock()
 	if held {
-		_ = w.Engine.Store.ReleaseLease(ctx, l)
+		_ = e.Store.ReleaseLease(ctx, l)
 	}
 }
+
+// Source poll names: the lease of each non-feed poller is "feed:<name>", like the Go module feed's.
+const (
+	toolchainPollName = "go-toolchain"
+	actionsPollName   = "github-actions"
+	dockerPollName    = "docker"
+	npmPollName       = "npm"
+	cargoPollName     = "cargo"
+)
+
+// PollElected is Poll for replicas sharing a store; see Watcher.PollElected.
+func (w *ToolchainWatcher) PollElected(ctx context.Context, ttl time.Duration) (int, bool, error) {
+	return w.elect.poll(ctx, w.Engine, feedLease(toolchainPollName), ttl, w.Poll)
+}
+
+// Elected reports whether this replica held the claim at its last PollElected.
+func (w *ToolchainWatcher) Elected() bool { return w.elect.isHeld() }
+
+// StepDown gives the claim up; call it when stopping.
+func (w *ToolchainWatcher) StepDown(ctx context.Context) { w.elect.stepDown(ctx, w.Engine) }
+
+// PollElected is Poll for replicas sharing a store; see Watcher.PollElected.
+func (w *ActionsWatcher) PollElected(ctx context.Context, ttl time.Duration) (int, bool, error) {
+	return w.elect.poll(ctx, w.Engine, feedLease(actionsPollName), ttl, w.Poll)
+}
+
+// Elected reports whether this replica held the claim at its last PollElected.
+func (w *ActionsWatcher) Elected() bool { return w.elect.isHeld() }
+
+// StepDown gives the claim up; call it when stopping.
+func (w *ActionsWatcher) StepDown(ctx context.Context) { w.elect.stepDown(ctx, w.Engine) }
+
+// PollElected is Poll for replicas sharing a store; see Watcher.PollElected.
+func (w *DockerWatcher) PollElected(ctx context.Context, ttl time.Duration) (int, bool, error) {
+	return w.elect.poll(ctx, w.Engine, feedLease(dockerPollName), ttl, w.Poll)
+}
+
+// Elected reports whether this replica held the claim at its last PollElected.
+func (w *DockerWatcher) Elected() bool { return w.elect.isHeld() }
+
+// StepDown gives the claim up; call it when stopping.
+func (w *DockerWatcher) StepDown(ctx context.Context) { w.elect.stepDown(ctx, w.Engine) }
+
+// PollElected is Poll for replicas sharing a store; see Watcher.PollElected.
+func (w *NpmWatcher) PollElected(ctx context.Context, ttl time.Duration) (int, bool, error) {
+	return w.elect.poll(ctx, w.Engine, feedLease(npmPollName), ttl, w.Poll)
+}
+
+// Elected reports whether this replica held the claim at its last PollElected.
+func (w *NpmWatcher) Elected() bool { return w.elect.isHeld() }
+
+// StepDown gives the claim up; call it when stopping.
+func (w *NpmWatcher) StepDown(ctx context.Context) { w.elect.stepDown(ctx, w.Engine) }
+
+// PollElected is Poll for replicas sharing a store; see Watcher.PollElected.
+func (w *CargoWatcher) PollElected(ctx context.Context, ttl time.Duration) (int, bool, error) {
+	return w.elect.poll(ctx, w.Engine, feedLease(cargoPollName), ttl, w.Poll)
+}
+
+// Elected reports whether this replica held the claim at its last PollElected.
+func (w *CargoWatcher) Elected() bool { return w.elect.isHeld() }
+
+// StepDown gives the claim up; call it when stopping.
+func (w *CargoWatcher) StepDown(ctx context.Context) { w.elect.stepDown(ctx, w.Engine) }

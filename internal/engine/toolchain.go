@@ -22,6 +22,8 @@ type ToolchainSource interface {
 type ToolchainWatcher struct {
 	Engine *Engine
 	Source ToolchainSource
+
+	elect election // PollElected's claim
 }
 
 // Poll enqueues the jobs the current list calls for and returns how many were new.

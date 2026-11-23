@@ -43,6 +43,8 @@ func applicableCargo(d model.Dependency, pkg, version string) (rules.UpdateType,
 // job per (repo, crate, target version).
 type CargoWatcher struct {
 	Engine *Engine
+
+	elect election // PollElected's claim
 }
 
 // Poll returns how many jobs were new. It makes no request while no repo uses a crate,

@@ -143,6 +143,8 @@ func applicableTag(d model.Dependency, pkg, version string) (rules.UpdateType, b
 // makes the poll idempotent.
 type ActionsWatcher struct {
 	Engine *Engine
+
+	elect election // PollElected's claim
 }
 
 // Poll returns how many jobs were new. It makes no request while no repo uses an action.

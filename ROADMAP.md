@@ -256,9 +256,6 @@ Everything else:
     would remove each other's, and a killed server's job containers keep the network alive until they exit (the next
     start then fails to recreate it). Name it per `RIPPLE_REPLICA` and remove the labelled job containers of that
     replica at start, then test the kill-and-restart case live.
-144. **Replicas: elect the other pollers.** Only the Go module feed poll is elected; the toolchain, Actions and Docker
-    pollers still run on every replica (safe, wasteful). Give each its own `feed:<name>` lease the way `PollElected`
-    does.
 145. **DynamoDB: the hygiene commands at scale, and on a schedule.** `ripple dynamodb check-counts`, `recount` and
     `backfill-failed-jobs` find their work by a Scan of the whole table, which has only run against the in-process fake
     (the DynamoDB Local run is CI-only, real AWS never). Measure the Scan and the per-package recount on a large table,
@@ -309,3 +306,8 @@ Everything else:
     fine, but neither was measured under contention against DynamoDB Local or real DynamoDB. The marker backfill reads the
     eventually consistent index once, so an event an older replica wrote just before the first check can lack a marker until
     that replica's version is gone; Postgres also numbers a duplicate delivery (a gap, harmless).
+158. **Replicas: elect the advisory poll, and say which sources a replica polls in the fleet count.** The OSV advisory poll
+    (`pollAdvisories`, its own loop) still runs on every replica. Each source is elected on its own lease, so two replicas
+    starting together may split the sources; `feed_pollers` counts replicas polling any source and cannot say which one is
+    unpolled. Heartbeat the set of sources (needs a `store.ReplicaInfo` field and a column or attribute per store) so the
+    fleet view can alert on a source nobody polls. Also: `App.Tick` (cron-driven) now goes through the elections too.

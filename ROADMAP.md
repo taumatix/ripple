@@ -229,8 +229,6 @@ Everything else:
     the pseudo-version and released after its timestamp, opt-in.
 128. **Docker: private registries.** Only anonymous pulls work; a private image answers 401/403 and is skipped.
     Add per-registry credentials (a token or `config.json`-style auth) kept out of logs and PR bodies.
-129. **Docker: compose files, Kubernetes manifests and `ARG` tags.** `image:` keys in compose files, `ARG
-    VERSION=...` used in `FROM image:${VERSION}`, and `COPY --from=image:tag` are not read.
 130. **Docker: verify against real registries.** The client and the fake were written from the spec excerpts
     (`docs/vendor/registry`); run it against Docker Hub and GHCR once (host, `library/` prefix, index digest
     `Accept` types, 429 handling) and record the result in UPSTREAM.md.
@@ -329,3 +327,6 @@ Everything else:
     prerelease, `peerDependencies`, `overrides`/`resolutions`, `npm:` aliases and workspace specs. Also npm classifies by
     number position, so `0.2.3` -> `0.3.0` is "minor" (Cargo has used the leftmost-nonzero rule since 154); do the same
     here once a repo reports it.
+165. **Docker: Helm values, Kustomize and per-stage ARGs.** Compose files, Kubernetes manifests, `COPY --from` and global
+    `ARG` tags are read (docs/docker.md). Not read: Helm `values.yaml` (`repository:`/`tag:` pairs), Kustomize `images:`,
+    `ARG` declared after a `FROM`, an ARG that is only part of a tag, and `RUN --mount=from=`.

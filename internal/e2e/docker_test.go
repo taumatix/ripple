@@ -121,3 +121,52 @@ func TestDockerUpToDateOpensNothing(t *testing.T) {
 		}
 	})
 }
+
+func TestDockerComposeManifestArgAndCopyFromMove(t *testing.T) {
+	forEach(t, func(t *testing.T, st store.Store) {
+		e, reg := dockerEnv(t, st)
+		for _, r := range [][2]string{{"library/nginx", "1.25"}, {"library/node", "20.11"}, {"org/tool", "v1.0.0"}, {"library/redis", "7.0"}} {
+			reg.AddTag(r[0], r[1])
+		}
+		compose := "services:\n  web:\n    image: nginx:1.25\n"
+		manifest := "apiVersion: v1\nkind: Pod\nspec:\n  containers:\n    - image: redis:7.0\n"
+		df := "ARG NODE=20.11\nFROM node:${NODE}\nCOPY --from=ghcr.io/org/tool:v1.0.0 /t /t\n"
+		e.gh.AddRepo("acme/app", map[string]string{".ripple.yaml": dockerConfig,
+			"docker-compose.yml": compose, "k8s/pod.yaml": manifest, "Dockerfile": df})
+		start(t, e, "acme/app")
+		e.clock.Advance(time.Minute)
+		reg.AddTag("library/nginx", "1.26")
+		reg.AddTag("library/node", "22.1")
+		reg.AddTag("org/tool", "v1.1.0")
+		reg.AddTag("library/redis", "7.2")
+		e.tick()
+		e.tick()
+
+		prs := e.gh.PRs("acme/app")
+		if len(prs) != 4 {
+			t.Fatalf("one PR per image expected, got %d", len(prs))
+		}
+		want := map[string]string{
+			"docker-compose.yml": strings.Replace(compose, "1.25", "1.26", 1),
+			"k8s/pod.yaml":       strings.Replace(manifest, "7.0", "7.2", 1),
+		}
+		seen := map[string]bool{}
+		for _, pr := range prs {
+			for f, w := range want {
+				if got, _ := e.gh.FileAt("acme/app", pr.Head, f); got == w {
+					seen[f] = true
+				}
+			}
+			if got, _ := e.gh.FileAt("acme/app", pr.Head, "Dockerfile"); got == "ARG NODE=22.1\nFROM node:${NODE}\nCOPY --from=ghcr.io/org/tool:v1.0.0 /t /t\n" {
+				seen["arg"] = true
+			} else if got == "ARG NODE=20.11\nFROM node:${NODE}\nCOPY --from=ghcr.io/org/tool:v1.1.0 /t /t\n" {
+				seen["copy"] = true
+			}
+		}
+		for _, k := range []string{"docker-compose.yml", "k8s/pod.yaml", "arg", "copy"} {
+			if !seen[k] {
+				t.Errorf("no PR moved %s", k)
+			}
+		}
+	})
+}

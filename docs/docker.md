@@ -9,9 +9,17 @@ updates:
 ```
 
 Only `directory` applies (and the shared keys such as cooldown and grouping). Without the entry ripple does not
-read Dockerfiles. Compose files are not read.
+read Dockerfiles, Compose files or Kubernetes manifests.
 
 ## What is read
+
+Beyond `FROM`, also read: `COPY --from=image:tag`; `ARG V=1.2` declared before the first `FROM` when used as the whole
+tag of one image (`FROM image:${V}`; the ARG line moves, and an ARG feeding two different images, a missing default or
+`${V}-alpine` is left alone); the `image:` key of Compose files (`docker-compose*.yml`, `compose*.yml`, `*.compose.yml`)
+and of Kubernetes manifests (a `.yml`/`.yaml` below a `k8s`, `kubernetes`, `kube`, `manifests`, `deploy`, `deployment`
+or `deployments` directory containing `apiVersion:` and `kind:`). YAML is edited line by line, keeping quotes,
+indentation and comments; `image: ${IMG:-nginx:1.25}` is not tracked, and `golang` images in YAML are (the Go-version
+follow code edits Dockerfiles only). Helm values and Kustomize `images:` are not read.
 
 `FROM [--platform=...] image[:tag][@sha256:...] [AS name]` in files named `Dockerfile` or `Containerfile`, `Dockerfile.*`,
 `Containerfile.*`, `*.Dockerfile` or `*.Containerfile` under `directory` (not `.md`, `.yml` and similar).

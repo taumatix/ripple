@@ -738,6 +738,71 @@ func Run(t *testing.T, mk func(t *testing.T) store.Store) {
 		}
 	})
 
+	t.Run("store-assigned event sequence", func(t *testing.T) {
+		s := mk(t)
+		q, ok := s.(store.EventSequencer)
+		if !ok {
+			t.Fatal("store has no EventSequencer")
+		}
+		// An event stored before the sequence existed carries a clock Seq; new ones sort after it.
+		before := model.Event{ID: "old", Seq: time.Now().Add(-time.Hour).UnixNano(), InstallationID: 7, Kind: "push", Repo: "acme/web"}
+		if _, err := s.EnqueueEvent(ctx, before); err != nil {
+			t.Fatal(err)
+		}
+		in := func(id, repo string) model.Event {
+			// A caller's own Seq is ignored: this one claims to be first of all.
+			return model.Event{ID: id, Seq: 1, InstallationID: 7, Kind: "push", Repo: repo}
+		}
+		a, okA, err := q.EnqueueSequenced(ctx, in("a", "acme/web"))
+		if err != nil || !okA {
+			t.Fatalf("a: ok=%v err=%v", okA, err)
+		}
+		b, okB, err := q.EnqueueSequenced(ctx, in("b", "acme/web"))
+		if err != nil || !okB {
+			t.Fatalf("b: ok=%v err=%v", okB, err)
+		}
+		if a.Seq <= before.Seq || b.Seq <= a.Seq {
+			t.Fatalf("seq old=%d a=%d b=%d; want strictly increasing and above the earlier row", before.Seq, a.Seq, b.Seq)
+		}
+		if dup, ok, err := q.EnqueueSequenced(ctx, in("a", "acme/other")); err != nil || ok {
+			t.Fatalf("duplicate id: ok=%v err=%v (seq %d)", ok, err, dup.Seq)
+		}
+		got, err := s.ListEvents(ctx)
+		if err != nil || len(got) != 3 || got[0].ID != "old" || got[1].ID != "a" || got[1].Seq != a.Seq || got[1].Repo != "acme/web" || got[2].ID != "b" || got[2].Seq != b.Seq {
+			t.Fatalf("list = %+v, err=%v; want old, a, b with the returned Seq and a's first Repo", got, err)
+		}
+		if ok, err := s.HasOlderEvent(ctx, b); err != nil || !ok {
+			t.Fatalf("b has an older event (a): %v %v", ok, err)
+		}
+		// Racing writers all get distinct numbers and every event is stored.
+		const writers = 8
+		seqs := make(chan int64, writers)
+		errs := make(chan error, writers)
+		for i := range writers {
+			go func() {
+				e, ok, err := q.EnqueueSequenced(ctx, in(fmt.Sprintf("r%d", i), "acme/api"))
+				if err == nil && !ok {
+					err = fmt.Errorf("r%d not new", i)
+				}
+				seqs <- e.Seq
+				errs <- err
+			}()
+		}
+		seen := map[int64]bool{}
+		for range writers {
+			if err := <-errs; err != nil {
+				t.Fatal(err)
+			}
+			seen[<-seqs] = true
+		}
+		if len(seen) != writers {
+			t.Fatalf("%d distinct numbers for %d racing events", len(seen), writers)
+		}
+		if got, _ := s.ListEvents(ctx); len(got) != 3+writers {
+			t.Fatalf("%d events stored, want %d", len(got), 3+writers)
+		}
+	})
+
 	t.Run("fenced job update", func(t *testing.T) {
 		s := mk(t)
 		const ttl = 400 * time.Millisecond

@@ -171,16 +171,6 @@ Everything else:
     (cursor `supersede-touched:<repo>`) until it leaves the open list. Touched is treated as permanent; a person
     who undoes the touch (reverts a rename, deletes a comment) is not noticed until the PR closes. Fine for the
     reads the hosts report today; revisit only if a host reports a revert.
-100. **Replicas: a store-assigned event sequence.** Event order across replicas now holds only as far as
-    each replica's clock does: `Seq` is the receiving replica's `UnixNano`, so skewed clocks can order two events
-    of a repo wrongly, and the claim-time `HasOlderEvent` check trusts that order. On DynamoDB the check reads the
-    eventually consistent `gsi1`, so an older event written a moment ago can be missed; Postgres and the memory
-    store have no such window. Assign `Seq` in the store (a Postgres sequence in a new migration, a DynamoDB counter
-    item bumped by a transaction with the event put; `Queue.Add` stops using its clock) and keep the `Seq` that
-    existing rows carry sorting before new ones. Looked at in the replicas pass and not started: a global index
-    cannot be read consistently (DynamoDB refuses `ConsistentRead` on a GSI), so the DynamoDB check needs a base-table
-    key per repo (`REPOEVENTS#<repo>` items written with the event) to be consistent, a data-model change that needs
-    DynamoDB Local to verify.
 101. **Replicas: soak against real databases.** The shared suite races goroutines on one store handle and the
     e2e runs two replicas; neither is a real multi-node Postgres or DynamoDB under load, or with a skewed clock.
     Run three replicas against both with a clock offset and check one PR per job and ordered events.
@@ -299,3 +289,11 @@ Everything else:
     packages, the `deprecated` shape, a `latest` tag that exists are assumed; see UPSTREAM.md). Also: `npm:packages` is one
     read-modify-write cursor (see 96), versions carry no publication date (the full document has `time` but is much larger),
     and the PR footer still says "module index" (see 99).
+150. **Replicas: a consistent older-event check on DynamoDB.** Events are now numbered by the store (shipped), but
+    `HasOlderEvent` on DynamoDB still reads the eventually consistent `gsi1`, so an older event written a moment ago can be
+    missed (DynamoDB refuses `ConsistentRead` on a GSI); Postgres and the memory store have no such window. Write a base-table
+    item per live event under `REPOEVENTS#<repo>` (sort key `<seq, 20 digits>\x1f<id>`) in the same transaction as the event,
+    move or delete it wherever the event's index keys change (`UpdateEvent*`, `DeleteEvent*`, dead-lettering, requeue, purge),
+    backfill it for events from before, and make the check a consistent Query on it. Needs DynamoDB Local to verify the
+    transactions; the in-process fake covers them locally. Also: the sequence counter item is one hot key (one write per event;
+    fine at webhook rates, unmeasured), and Postgres numbers a duplicate delivery too (a gap, harmless).

@@ -157,7 +157,8 @@ func (q *Queue) poke() {
 	}
 }
 
-// Add persists evs and queues them, assigning Seq in argument order. Events whose ID
+// Add persists evs and queues them, numbering them in argument order: the store's own sequence
+// when it has one (store.EventSequencer), else this replica's clock. Events whose ID
 // is already stored are skipped (a redelivery of a queued delivery). Before Run has
 // loaded the store, events are only persisted; the load picks them up.
 func (q *Queue) Add(ctx context.Context, evs ...model.Event) error {
@@ -191,8 +192,15 @@ func (q *Queue) Add(ctx context.Context, evs ...model.Event) error {
 
 	var added []model.Event
 	var err error
+	sequencer, sequenced := q.Store.(store.EventSequencer)
 	for _, e := range evs {
-		ok, perr := q.Store.EnqueueEvent(ctx, e)
+		var ok bool
+		var perr error
+		if sequenced {
+			e, ok, perr = sequencer.EnqueueSequenced(ctx, e) // the store's Seq replaces the clock's
+		} else {
+			ok, perr = q.Store.EnqueueEvent(ctx, e)
+		}
 		if perr != nil {
 			err = fmt.Errorf("persist event: %w", perr)
 			break

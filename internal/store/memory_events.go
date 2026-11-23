@@ -132,3 +132,20 @@ func (m *Memory) HasOlderEvent(_ context.Context, e model.Event) (bool, error) {
 	}
 	return false, nil
 }
+
+// EnqueueSequenced is store.EventSequencer. The number is drawn and the event stored under
+// one lock, so no event with a higher number is visible before this one.
+func (m *Memory) EnqueueSequenced(_ context.Context, e model.Event) (model.Event, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.events == nil {
+		m.events = map[string]model.Event{}
+	}
+	if _, ok := m.events[e.ID]; ok {
+		return e, false, nil
+	}
+	m.eventSeq = max(m.eventSeq+1, firstEventSeq())
+	e.Seq = m.eventSeq
+	m.events[e.ID] = copyEvent(e)
+	return e, true, nil
+}

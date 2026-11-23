@@ -198,6 +198,13 @@ func (e *env) register(shorts ...string) {
 			_, ok, err := e.st.GetRepo(context.Background(), name)
 			return err == nil && ok
 		})
+		// The repo row exists before its scan stores the dependencies; a poll in between
+		// finds no dependent of the release and opens no PR. The scan also holds the repo
+		// until it syncs the dashboard, so wait for it to end.
+		e.eventually("repo "+name+" scanned", func() bool {
+			d, err := e.st.ListRepoDependencies(context.Background(), name)
+			return err == nil && len(d) > 0 && e.app.Engine.RepoIdle(name)
+		})
 	}
 	e.tick()
 }

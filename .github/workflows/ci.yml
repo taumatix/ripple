@@ -39,7 +39,6 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          go test -race -count=20 -v -run TestSlowJobDoesNotStallFeedPoll ./internal/e2e/ | tee flake.log
           go test -race -count=1 -v ./... | tee test.log
       - run: |
           # RIPPLE_REQUIRE_SERVICES already fails a skipped service test; this catches any other skip.

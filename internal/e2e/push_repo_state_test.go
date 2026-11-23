@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/taumatix/ripple/internal/model"
 	"github.com/taumatix/ripple/internal/store"
 )
 
@@ -176,5 +177,109 @@ func TestPushUnderOldNameAfterRenameFollowsAlias(t *testing.T) {
 	e.eventually("push applied to the renamed repo", func() bool { return len(e.deps("acme/renamed")) == 2 })
 	if _, ok, _ := e.st.GetRepo(context.Background(), "acme/uses-lib"); ok {
 		t.Fatalf("the old name was registered again")
+	}
+}
+
+// Archive pauses a repo instead of forgetting it: its index and pending jobs stay,
+// nothing is done to it while it is read-only, and unarchive resumes the jobs with no
+// scan.
+func TestArchivePausesAndUnarchiveResumes(t *testing.T) {
+	forEach(t, func(t *testing.T, st store.Store) {
+		lim := defaultLimits()
+		lim.MinimumReleaseAge = 72 * time.Hour
+		e := newEnv(t, st, lim)
+		baseRepos(e)
+		repo := "acme/uses-lib"
+		start(t, e, repo)
+		e.clock.Advance(time.Minute)
+		e.publish("example.com/lib", "v1.1.0")
+		e.tick()
+
+		e.repoEvent("archived", repo, "main", nil)
+		e.eventually("archive processed", func() bool { return e.logLines("repository archived", repo) == 1 })
+		if len(e.deps(repo)) != 1 {
+			t.Fatalf("archive dropped the index: %+v", e.deps(repo))
+		}
+		calls := e.gh.Calls(repo)
+		e.clock.Advance(73 * time.Hour)
+		e.tick()
+		e.tick()
+		if n := len(e.gh.PRs(repo)); n != 0 || e.gh.Calls(repo) != calls {
+			t.Fatalf("acted on an archived repo: %d PRs, %d new calls", n, e.gh.Calls(repo)-calls)
+		}
+		j := e.job(repo, "example.com/lib", "v1.1.0")
+		if j.State != model.JobPending || j.Attempts != 0 {
+			t.Fatalf("job while paused: state=%s attempts=%d, want pending with no attempts", j.State, j.Attempts)
+		}
+
+		e.repoEvent("unarchived", repo, "main", nil)
+		e.eventually("unarchive processed", func() bool { return e.logLines("repository unarchived", repo) == 1 })
+		if e.gh.Calls(repo) != calls {
+			t.Errorf("unarchive cost %d platform calls (a re-scan), want 0", e.gh.Calls(repo)-calls)
+		}
+		e.tick()
+		if prs := e.gh.PRs(repo); len(prs) != 1 {
+			t.Fatalf("want the paused job to open 1 PR after unarchive, got %d", len(prs))
+		}
+		if j := e.job(repo, "example.com/lib", "v1.1.0"); j.State != model.JobDone {
+			t.Errorf("job after resume: %+v", j)
+		}
+	})
+}
+
+// A release that arrives while the repo is archived waits for the unarchive too.
+func TestReleaseDuringArchiveWaitsForUnarchive(t *testing.T) {
+	e := newEnv(t, store.NewMemory(), defaultLimits())
+	baseRepos(e)
+	repo := "acme/uses-lib"
+	start(t, e, repo)
+	e.repoEvent("archived", repo, "main", nil)
+	e.eventually("archive processed", func() bool { return e.logLines("repository archived", repo) == 1 })
+	e.clock.Advance(time.Minute)
+	e.publish("example.com/lib", "v1.1.0")
+	e.tick()
+	e.tick()
+	if n := len(e.gh.PRs(repo)); n != 0 {
+		t.Fatalf("PR opened in an archived repo")
+	}
+	if j := e.job(repo, "example.com/lib", "v1.1.0"); j.State != model.JobPending {
+		t.Fatalf("job state %s, want pending", j.State)
+	}
+	e.repoEvent("unarchived", repo, "main", nil)
+	e.eventually("unarchive processed", func() bool { return e.logLines("repository unarchived", repo) == 1 })
+	e.tick()
+	if n := len(e.gh.PRs(repo)); n != 1 {
+		t.Fatalf("want 1 PR after unarchive, got %d", n)
+	}
+}
+
+// Unarchiving a repo ripple no longer holds (archived before pausing existed, or removed
+// meanwhile) registers it, as it always did.
+func TestUnarchiveOfUnknownRepoRegistersIt(t *testing.T) {
+	e := newEnv(t, store.NewMemory(), defaultLimits())
+	baseRepos(e)
+	e.repoEvent("unarchived", "acme/uses-lib", "main", nil)
+	e.waitRepo("acme/uses-lib")
+	if len(e.deps("acme/uses-lib")) != 1 {
+		t.Errorf("not scanned")
+	}
+}
+
+// Deleting still forgets everything, including a pause.
+func TestDeleteAfterArchiveForgets(t *testing.T) {
+	e := newEnv(t, store.NewMemory(), defaultLimits())
+	baseRepos(e)
+	start(t, e, "acme/uses-lib")
+	e.repoEvent("archived", "acme/uses-lib", "main", nil)
+	e.eventually("archive processed", func() bool { return e.logLines("repository archived", "acme/uses-lib") == 1 })
+	e.repoEvent("deleted", "acme/uses-lib", "main", nil)
+	e.repoGone("acme/uses-lib")
+	// A new repo that takes the name is not paused.
+	e.install("acme/uses-lib")
+	e.clock.Advance(time.Minute)
+	e.publish("example.com/lib", "v1.1.0")
+	e.tick()
+	if n := len(e.gh.PRs("acme/uses-lib")); n != 1 {
+		t.Fatalf("a new repo under a deleted archived name got %d PRs, want 1", n)
 	}
 }

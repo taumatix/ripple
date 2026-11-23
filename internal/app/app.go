@@ -298,6 +298,14 @@ func (a *App) process(ctx context.Context, ev model.Event) error {
 		return a.Engine.Scan(ctx, model.Repo{FullName: ev.Repo, InstallationID: ev.InstallationID})
 	case "repos_removed":
 		return a.Engine.Remove(ctx, ev.Repo)
+	case string(platform.RepoArchived):
+		return a.Engine.Pause(ctx, ev.Repo)
+	case string(platform.RepoUnarchived):
+		err := a.Engine.Resume(ctx, ev.Repo, ev.InstallationID)
+		if err == nil {
+			a.jobs.Wake()
+		}
+		return err
 	case "push":
 		return a.push(ctx, ev.Repo, ev)
 	case string(platform.RepoRenamed):

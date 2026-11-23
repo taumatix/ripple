@@ -159,6 +159,16 @@ func (r *runner) fail(j model.Job, err error) {
 
 func (e *Engine) runRepo(ctx context.Context, name string, jobs []model.Job) int {
 	defer e.lockRepo(name)()
+	if e.Paused(ctx, name) {
+		// Archived: read-only. Keep the jobs and look again later; Resume makes them due.
+		for _, j := range jobs {
+			j.NotBefore, j.Reason = e.now().Add(pauseDefer), pausedReason
+			if err := e.Store.UpdateJob(ctx, j); err != nil {
+				e.log().Error("defer job of archived repo", "job", j.Key, "err", err)
+			}
+		}
+		return 0
+	}
 	defer func() { e.syncDashboard(ctx, name) }()
 	r := &runner{e: e, ctx: ctx}
 	var err error

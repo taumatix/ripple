@@ -127,6 +127,13 @@ const (
 	// DefaultBranchChanged: the repo's default branch is now DefaultBranch. Optional,
 	// like RepoRenamed. Existing PRs are left alone; the repo is re-scanned.
 	DefaultBranchChanged EventKind = "default_branch_changed"
+	// RepoArchived: the repo is read-only. Optional, like RepoRenamed. ripple keeps its
+	// index and pending jobs and acts on neither until RepoUnarchived; a host that does
+	// not send it sends ReposRemoved and loses both.
+	RepoArchived EventKind = "repo_archived"
+	// RepoUnarchived: the repo is writable again; the paused jobs resume. A repo ripple no
+	// longer holds is registered (scanned) as ReposAdded would.
+	RepoUnarchived EventKind = "repo_unarchived"
 )
 
 // Event is one host notification in the host-neutral form the event queue stores.

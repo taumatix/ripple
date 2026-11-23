@@ -46,7 +46,7 @@ func Verify(secret, body []byte, header string) bool {
 
 // Event is the subset of a delivery ripple acts on.
 type Event struct {
-	Kind           string // "repos_added", "repos_removed", "push", "repo_renamed", "default_branch_changed"
+	Kind           string // "repos_added", "repos_removed", "push", "repo_renamed", "default_branch_changed", "repo_archived", "repo_unarchived"
 	InstallationID int64
 	// Delivery is the X-GitHub-Delivery header, empty when absent. It is unsigned.
 	Delivery string
@@ -264,8 +264,8 @@ type login struct {
 	Login string `json:"login"`
 }
 
-// parseRepository maps the repository event (docs/vendor/github). Archiving and
-// deleting forget the repo, unarchiving registers it again, a rename or transfer
+// parseRepository maps the repository event (docs/vendor/github). Deleting forgets the
+// repo, archiving pauses it and unarchiving resumes it, a rename or transfer
 // moves the stored identity, and a changed default branch re-scans against it.
 func parseRepository(body []byte) (Event, error) {
 	var p struct {
@@ -298,10 +298,12 @@ func parseRepository(body []byte) (Event, error) {
 	ev := Event{InstallationID: p.Installation.ID, Repos: []string{p.Repository.FullName}, DefaultBranch: p.Repository.DefaultBranch}
 	owner, _, _ := strings.Cut(p.Repository.FullName, "/")
 	switch p.Action {
-	case "archived", "deleted":
+	case "deleted":
 		ev.Kind = "repos_removed"
+	case "archived":
+		ev.Kind = "repo_archived"
 	case "unarchived":
-		ev.Kind = "repos_added"
+		ev.Kind = "repo_unarchived"
 	case "renamed":
 		from := p.Changes.Repository.Name.From
 		if from == "" {

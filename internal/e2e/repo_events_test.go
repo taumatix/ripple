@@ -180,38 +180,27 @@ func TestRepositoryEditedOtherFieldsCostNothing(t *testing.T) {
 	}
 }
 
-func TestRepositoryArchivedDeletedUnarchived(t *testing.T) {
+func TestRepositoryDeleted(t *testing.T) {
 	forEach(t, func(t *testing.T, st store.Store) {
-		for _, gone := range []string{"archived", "deleted"} {
-			t.Run(gone, func(t *testing.T) {
-				e := newEnv(t, st, defaultLimits())
-				baseRepos(e)
-				repo := "acme/uses-lib"
-				start(t, e, repo)
-				e.clock.Advance(time.Minute)
-				e.repoEvent(gone, repo, "main", nil)
-				e.repoGone(repo)
-				calls := e.gh.Calls(repo)
-				e.publish("example.com/lib", "v1.1.0")
-				e.tick()
-				if n := len(e.gh.PRs(repo)); n != 0 || e.gh.Calls(repo) != calls {
-					t.Fatalf("acted on a %s repo: %d PRs, %d new calls", gone, n, e.gh.Calls(repo)-calls)
-				}
-				if gone == "archived" {
-					e.repoEvent("unarchived", repo, "main", nil)
-					e.waitRepo(repo)
-					if len(e.deps(repo)) != 1 {
-						t.Errorf("unarchived repo was not re-scanned")
-					}
-				}
-			})
+		e := newEnv(t, st, defaultLimits())
+		baseRepos(e)
+		repo := "acme/uses-lib"
+		start(t, e, repo)
+		e.clock.Advance(time.Minute)
+		e.repoEvent("deleted", repo, "main", nil)
+		e.repoGone(repo)
+		calls := e.gh.Calls(repo)
+		e.publish("example.com/lib", "v1.1.0")
+		e.tick()
+		if n := len(e.gh.PRs(repo)); n != 0 || e.gh.Calls(repo) != calls {
+			t.Fatalf("acted on a deleted repo: %d PRs, %d new calls", n, e.gh.Calls(repo)-calls)
 		}
 	})
 }
 
 // A name freed by a rename and taken by a new repository must not be acted on with the old
-// repository's pending jobs. (Those jobs are lost: the name is registered again, so
-// nothing says which repository they were for.)
+// repository's pending jobs: they moved to the renamed repository with the rename, so they
+// are neither lost nor run against the newcomer.
 func TestRenamedNameReusedDoesNotInheritJobs(t *testing.T) {
 	lim := defaultLimits()
 	lim.MinimumReleaseAge = 72 * time.Hour
@@ -232,5 +221,8 @@ func TestRenamedNameReusedDoesNotInheritJobs(t *testing.T) {
 	e.tick()
 	if n := len(e.gh.PRs("acme/uses-lib")); n != 0 {
 		t.Errorf("the new repository got %d PRs from the old one's job", n)
+	}
+	if n := len(e.gh.PRs("acme/renamed")); n != 1 {
+		t.Errorf("the renamed repository got %d PRs from its own pending job, want 1", n)
 	}
 }

@@ -329,9 +329,9 @@ func TestParseRepositoryEvents(t *testing.T) {
 		{"default branch edited", `{"action":"edited",` + repo(`,"changes":{"default_branch":{"from":"main"}}`) + `}`,
 			&Event{Kind: "default_branch_changed", InstallationID: 7, Repos: []string{"acme/new"}, DefaultBranch: "trunk"}, false},
 		{"other edit", `{"action":"edited",` + repo(`,"changes":{"description":{"from":"x"}}`) + `}`, nil, false},
-		{"archived", `{"action":"archived",` + repo("") + `}`, &Event{Kind: "repos_removed", InstallationID: 7, DefaultBranch: "trunk", Repos: []string{"acme/new"}}, false},
+		{"archived", `{"action":"archived",` + repo("") + `}`, &Event{Kind: "repo_archived", InstallationID: 7, DefaultBranch: "trunk", Repos: []string{"acme/new"}}, false},
 		{"deleted", `{"action":"deleted",` + repo("") + `}`, &Event{Kind: "repos_removed", InstallationID: 7, DefaultBranch: "trunk", Repos: []string{"acme/new"}}, false},
-		{"unarchived", `{"action":"unarchived",` + repo("") + `}`, &Event{Kind: "repos_added", InstallationID: 7, DefaultBranch: "trunk", Repos: []string{"acme/new"}}, false},
+		{"unarchived", `{"action":"unarchived",` + repo("") + `}`, &Event{Kind: "repo_unarchived", InstallationID: 7, DefaultBranch: "trunk", Repos: []string{"acme/new"}}, false},
 		{"created is ignored", `{"action":"created",` + repo("") + `}`, nil, false},
 		{"no repository", `{"action":"renamed"}`, nil, true},
 	}

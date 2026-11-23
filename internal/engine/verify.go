@@ -283,11 +283,46 @@ func (r *runner) goVerify(members []string, args []string) platform.GoVerify {
 		}
 	}
 	sort.Strings(v.Private)
+	v.GoBinary = r.namedGo(members)
 	netStep := args[0] == "mod" || args[0] == "work"
 	if netStep && r.e.GoProxyToken != "" {
 		v.Username, v.Token, v.Credentialed = r.e.GoProxyUser, r.e.GoProxyToken, true
 	}
 	return v
+}
+
+// namedGo finds, in the server's toolchain directory, the Go release the go.mod files of
+// members name (the toolchain line, else the go line), so a bump is checked by the Go it
+// asks for. With several members the newest release wins, as it satisfies them all. It
+// returns "" when no directory is set or none of them has an installed release, and
+// then verification runs with the server's Go.
+func (r *runner) namedGo(members []string) string {
+	if r.e.GoToolchainDir == "" {
+		return ""
+	}
+	var best, bestRel string
+	for _, m := range members {
+		data, err := r.ws.ReadFile(path.Join(m, "go.mod"))
+		if err != nil {
+			continue
+		}
+		f, err := modfile.ParseLax("go.mod", data, nil)
+		if err != nil || f.Go == nil {
+			continue
+		}
+		tc := ""
+		if f.Toolchain != nil {
+			tc = f.Toolchain.Name
+		}
+		bin, rel := platform.FindGo(r.e.GoToolchainDir, f.Go.Version, tc)
+		if bin != "" && (best == "" || semver.Compare("v"+rel, "v"+bestRel) > 0) {
+			best, bestRel = bin, rel
+		}
+	}
+	if best != "" {
+		r.namedRelease = bestRel
+	}
+	return best
 }
 
 var importC = regexp.MustCompile(`(?m)^\s*(?:import\s+)?"C"\s*$`)

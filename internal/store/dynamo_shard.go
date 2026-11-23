@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"hash/fnv"
+	"math/rand/v2"
 	"sort"
 	"strconv"
 	"strings"
@@ -207,6 +208,97 @@ func (d *Dynamo) depShardsFor(ctx context.Context, base string, fresh bool) (int
 
 func (d *Dynamo) adaptiveOn() bool { return d.adaptive > 0 || d.adaptiveSeen }
 
+// RecountDependents recounts one package's dependents from the index, rewrites the counter
+// to the truth, raises the recorded shard count if the count calls for it, and moves every
+// dependent to the shard its repo hashes to. It returns the count. It is the repair for a
+// counter that drifted (the counter is not transactional with the item writes) and for a
+// table whose dependents predate the option, and is safe to repeat and to run beside
+// writers: a move only applies to an item still where it was read, and a writer that races
+// the final count leaves drift the next recount removes. It needs WithAdaptiveDependents.
+func (d *Dynamo) RecountDependents(ctx context.Context, ds, pkg string) (int, error) {
+	if d.adaptive <= 0 {
+		return 0, errors.New("dynamodb recount dependents: needs WithAdaptiveDependents")
+	}
+	n, err := d.recountBase(ctx, pkgBase(ds, pkg))
+	return n, wrapD("recount dependents", err)
+}
+
+func (d *Dynamo) recountBase(ctx context.Context, base string) (int, error) {
+	shards, err := d.depShardsFor(ctx, base, true)
+	if err != nil {
+		return 0, err
+	}
+	type found struct{ pk, sk, gsi, repo string }
+	var all []found
+	for sh := 0; sh < shards; sh++ {
+		err := d.query(ctx, &dynamodb.QueryInput{
+			IndexName:                 aws.String(gsi1),
+			KeyConditionExpression:    aws.String("GSI1PK = :pk"),
+			ProjectionExpression:      aws.String("PK, SK, GSI1PK, Repo"),
+			ExpressionAttributeValues: map[string]types.AttributeValue{":pk": s(dependentsPK(base, sh))},
+		}, 0, func(it map[string]types.AttributeValue) error {
+			str := func(k string) string {
+				v, _ := it[k].(*types.AttributeValueMemberS)
+				if v == nil {
+					return ""
+				}
+				return v.Value
+			}
+			all = append(all, found{str("PK"), str("SK"), str("GSI1PK"), str("Repo")})
+			return nil
+		})
+		if err != nil {
+			return 0, err
+		}
+	}
+	count := len(all)
+	want := max(shards, targetShards(count, d.adaptive))
+	counter := map[string]types.AttributeValue{"PK": s(pkgCountPK(base)), "SK": s("META")}
+	// Raise the shard count before moving anything, so a reader that sees a moved item
+	// already reads the shard it moved to.
+	if want > 1 {
+		if err := d.raiseShards(ctx, base, want); err != nil {
+			return 0, err
+		}
+	}
+	d.pkgShards.Store(base, want)
+	for _, f := range all {
+		to := dependentsPK(base, shardOf(f.repo, want))
+		if to == f.gsi {
+			continue
+		}
+		_, err := d.db.UpdateItem(ctx, &dynamodb.UpdateItemInput{
+			TableName: &d.table, Key: map[string]types.AttributeValue{"PK": s(f.pk), "SK": s(f.sk)},
+			UpdateExpression:          aws.String("SET GSI1PK = :to"),
+			ConditionExpression:       aws.String("GSI1PK = :from"),
+			ExpressionAttributeValues: map[string]types.AttributeValue{":to": s(to), ":from": s(f.gsi)},
+		})
+		var cc *types.ConditionalCheckFailedException
+		if err != nil && !errors.As(err, &cc) {
+			return 0, err
+		}
+	}
+	stripes, _, _, err := d.counterItems(ctx, base)
+	if err != nil {
+		return 0, err
+	}
+	for _, sk := range stripes {
+		if _, err := d.db.UpdateItem(ctx, &dynamodb.UpdateItemInput{
+			TableName: &d.table, Key: map[string]types.AttributeValue{"PK": s(pkgCountPK(base)), "SK": s(sk)},
+			UpdateExpression:          aws.String("SET Deps = :z"),
+			ExpressionAttributeValues: map[string]types.AttributeValue{":z": &types.AttributeValueMemberN{Value: "0"}},
+		}); err != nil {
+			return 0, err
+		}
+	}
+	_, err = d.db.UpdateItem(ctx, &dynamodb.UpdateItemInput{
+		TableName: &d.table, Key: counter,
+		UpdateExpression:          aws.String("SET Deps = :c"),
+		ExpressionAttributeValues: map[string]types.AttributeValue{":c": &types.AttributeValueMemberN{Value: strconv.Itoa(count)}},
+	})
+	return count, err
+}
+
 // adjustCounts applies per-package dependent-count deltas and grows a package's recorded
 // shard count when the rule asks for more. It only runs with the option on.
 func (d *Dynamo) adjustCounts(ctx context.Context, delta map[string]int) error {
@@ -217,16 +309,32 @@ func (d *Dynamo) adjustCounts(ctx context.Context, delta map[string]int) error {
 		if dl == 0 || base == "" {
 			continue
 		}
+		if d.stripes > 1 {
+			if err := d.adjustStriped(ctx, base, dl); err != nil {
+				return err
+			}
+			continue
+		}
 		out, err := d.db.UpdateItem(ctx, &dynamodb.UpdateItemInput{
 			TableName: &d.table, Key: map[string]types.AttributeValue{"PK": s(pkgCountPK(base)), "SK": s("META")},
 			UpdateExpression:          aws.String("ADD Deps :d"),
 			ExpressionAttributeValues: map[string]types.AttributeValue{":d": &types.AttributeValueMemberN{Value: strconv.Itoa(dl)}},
-			ReturnValues:              types.ReturnValueUpdatedNew,
+			ReturnValues:              types.ReturnValueUpdatedOld,
 		})
 		if err != nil {
 			return err
 		}
-		n, _ := strconv.Atoi(out.Attributes["Deps"].(*types.AttributeValueMemberN).Value)
+		old, had := out.Attributes["Deps"].(*types.AttributeValueMemberN)
+		if !had {
+			// This ADD created the counter, so it started from zero while dependents may already
+			// exist (written before the option was on, or before the counter was lost). Count them.
+			if _, err := d.recountBase(ctx, base); err != nil {
+				return err
+			}
+			continue
+		}
+		prev, _ := strconv.Atoi(old.Value)
+		n := prev + dl
 		want := targetShards(n, d.adaptive)
 		if want <= 1 {
 			continue
@@ -234,17 +342,95 @@ func (d *Dynamo) adjustCounts(ctx context.Context, delta map[string]int) error {
 		if cur, ok := d.pkgShards.Load(base); ok && cur.(int) >= want {
 			continue
 		}
-		_, err = d.db.UpdateItem(ctx, &dynamodb.UpdateItemInput{
-			TableName: &d.table, Key: map[string]types.AttributeValue{"PK": s(pkgCountPK(base)), "SK": s("META")},
-			UpdateExpression:          aws.String("SET Shards = :n"),
-			ConditionExpression:       aws.String("attribute_not_exists(Shards) OR Shards < :n"),
-			ExpressionAttributeValues: map[string]types.AttributeValue{":n": &types.AttributeValueMemberN{Value: strconv.Itoa(want)}},
-		})
-		var cc *types.ConditionalCheckFailedException
-		if err != nil && !errors.As(err, &cc) {
+		if err := d.raiseShards(ctx, base, want); err != nil {
 			return err
 		}
-		d.pkgShards.Store(base, want)
+	}
+	return nil
+}
+
+// raiseShards records want as base's shard count unless the table already holds more, and
+// remembers it. It never lowers: the count is a high-water mark.
+func (d *Dynamo) raiseShards(ctx context.Context, base string, want int) error {
+	_, err := d.db.UpdateItem(ctx, &dynamodb.UpdateItemInput{
+		TableName: &d.table, Key: map[string]types.AttributeValue{"PK": s(pkgCountPK(base)), "SK": s("META")},
+		UpdateExpression:          aws.String("SET Shards = :n"),
+		ConditionExpression:       aws.String("attribute_not_exists(Shards) OR Shards < :n"),
+		ExpressionAttributeValues: map[string]types.AttributeValue{":n": &types.AttributeValueMemberN{Value: strconv.Itoa(want)}},
+	})
+	var cc *types.ConditionalCheckFailedException
+	if err != nil && !errors.As(err, &cc) {
+		return err
+	}
+	d.pkgShards.Store(base, want)
+	return nil
+}
+
+// counterItems reads base's counter partition: the sort keys of its stripe items (S#<i>),
+// the number of items of any kind, and the sum of their Deps. One Query on one partition, so
+// it stays cheap while the stripes are few.
+func (d *Dynamo) counterItems(ctx context.Context, base string) (stripes []string, items, sum int, err error) {
+	err = d.query(ctx, &dynamodb.QueryInput{
+		ConsistentRead:            aws.Bool(true),
+		KeyConditionExpression:    aws.String("PK = :pk"),
+		ProjectionExpression:      aws.String("SK, Deps"),
+		ExpressionAttributeValues: map[string]types.AttributeValue{":pk": s(pkgCountPK(base))},
+	}, 0, func(it map[string]types.AttributeValue) error {
+		items++
+		if sk, _ := it["SK"].(*types.AttributeValueMemberS); sk != nil && strings.HasPrefix(sk.Value, "S#") {
+			stripes = append(stripes, sk.Value)
+		}
+		if v, _ := it["Deps"].(*types.AttributeValueMemberN); v != nil {
+			n, _ := strconv.Atoi(v.Value)
+			sum += n
+		}
+		return nil
+	})
+	return stripes, items, sum, err
+}
+
+// adjustStriped is adjustCounts for one package with striped counters: the ADD lands on a
+// random stripe, so concurrent writers do not share an item. A stripe sees about 1/stripes
+// of the count, so the stripe's own value scaled up is a cheap estimate; only when that
+// estimate says the package may need more shards is the partition summed for the exact count.
+// The estimate can lag the truth, but every later write re-checks, so growth is delayed, not lost.
+func (d *Dynamo) adjustStriped(ctx context.Context, base string, dl int) error {
+	out, err := d.db.UpdateItem(ctx, &dynamodb.UpdateItemInput{
+		TableName: &d.table, Key: map[string]types.AttributeValue{"PK": s(pkgCountPK(base)), "SK": s("S#" + strconv.Itoa(rand.IntN(d.stripes)))},
+		UpdateExpression:          aws.String("ADD Deps :d"),
+		ExpressionAttributeValues: map[string]types.AttributeValue{":d": &types.AttributeValueMemberN{Value: strconv.Itoa(dl)}},
+		ReturnValues:              types.ReturnValueUpdatedOld,
+	})
+	if err != nil {
+		return err
+	}
+	var total int
+	if old, had := out.Attributes["Deps"].(*types.AttributeValueMemberN); had {
+		prev, _ := strconv.Atoi(old.Value)
+		cur := 1
+		if v, ok := d.pkgShards.Load(base); ok {
+			cur = v.(int)
+		}
+		if targetShards((prev+dl)*d.stripes, d.adaptive) <= cur {
+			return nil
+		}
+		if _, _, total, err = d.counterItems(ctx, base); err != nil {
+			return err
+		}
+	} else {
+		// This stripe item is new. If it is the only item in the partition the counter did not
+		// exist (see adjustCounts); otherwise another stripe or the unstriped item holds the count.
+		var items int
+		if _, items, total, err = d.counterItems(ctx, base); err != nil {
+			return err
+		}
+		if items == 1 {
+			_, err = d.recountBase(ctx, base)
+			return err
+		}
+	}
+	if want := targetShards(total, d.adaptive); want > 1 {
+		return d.raiseShards(ctx, base, want)
 	}
 	return nil
 }

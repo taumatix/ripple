@@ -164,6 +164,9 @@ still runs it, then keeps every original `go.mod` requirement and `go.sum` line 
 added or raised (go.sum lines below a version `go.mod` now selects are dropped), so the PR is the update and
 little else. A module that requires a `go.work` sibling without a `replace` is tidied with the sibling as a
 temporary local replace and built in workspace mode; a workspace-level `vendor/` is refreshed with `go work vendor`.
+`tidy: minimal` stays opt-in on purpose: the default is what `go mod tidy` writes, which a maintainer can
+reproduce by hand, and minimal adds a go.sum risk (a kept requirement whose lines are missing opens a draft).
+No real PR diffs yet show the trade is worth making the default.
 
 A major bump also rewrites the package of a plain `//go:generate go run <package>` and canonical
 `package p // import "..."` comments (both found with go/parser, never by pattern). Directives that
@@ -172,8 +175,12 @@ argument) are left alone and listed in the PR body. Opt in with `directives: ext
 to also rewrite `go run <package>@<version>` (a full semantic version becomes the version being bumped
 to; `latest`, `upgrade` and `patch` stay) and `go tool <package>`, and to read the directives of a file whose
 body does not parse the way `go generate` does (as lines that start at column 1). `tool` directives in
-`go.mod` always follow the module to its new path. `mockgen` and other generators that take an import path
-as a program argument are still only listed.
+`go.mod` always follow the module to its new path. Extended also rewrites the import paths on a `mockgen`
+command line (`mockgen ...` or `go run <module>/mockgen ...`) in the forms its README documents: the package of package and
+archive mode (`mockgen [flags] <import path> <symbols>`) and the `bar/baz` of each `foo=bar/baz` element of
+`-imports`. A flag the README does not list stops the reading, and `-source` mode takes no import path. Other
+generators that take an import path as a program argument (`stringer`, `-self_package`, ...) are still only listed;
+each needs its own grammar and is added one at a time.
 
 **cgo and private modules.** Verification builds with cgo off by default, so a module with cgo files that has
 a pure-Go fallback builds green without compiling its C; the PR then says the C code was not compiled. Set

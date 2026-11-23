@@ -438,13 +438,36 @@ func generateEdits(text string, base int, oldPath string, rewrite func(string) (
 	case opts.Extended && len(ws) >= 3 && ws[0].text == "go" && ws[1].text == "tool":
 		used = goToolPackage(ws)
 	}
+	handled := map[int]bool{}
 	if used >= 0 {
 		if nv, ok := rewriteArg(ws[used], rewrite, opts); ok {
 			edits = append(edits, edit{base + ws[used].start, base + ws[used].end, nv})
+			handled[used] = true
+		}
+	}
+	if opts.Extended {
+		// The tool's own arguments: after "go run <pkg>", or the command word itself.
+		tool := -1
+		switch {
+		case used >= 0:
+			if p, _, _ := strings.Cut(ws[used].text, "@"); path.Base(p) == "mockgen" {
+				tool = used
+			}
+		case len(ws) > 0 && ws[0].text == "mockgen":
+			tool = 0
+		}
+		if tool >= 0 {
+			es, hs := mockgenEdits(ws[tool+1:], rewrite)
+			for _, e := range es {
+				edits = append(edits, edit{base + e.start, base + e.end, e.text})
+			}
+			for _, i := range hs {
+				handled[tool+1+i] = true
+			}
 		}
 	}
 	for i, w := range ws {
-		if i == used && len(edits) > 0 {
+		if handled[i] {
 			continue
 		}
 		if mentions(w.text, oldPath) {
@@ -485,4 +508,111 @@ func goRunPackage(ws []word) int {
 		}
 	}
 	return -1
+}
+
+// mockgenValueFlags and mockgenBoolFlags are the flags the mockgen documentation lists
+// (go.uber.org/mock README, docs/vendor/mockgen/README.md). A flag not listed there
+// stops the reading: ripple does not guess at its grammar.
+var mockgenValueFlags = map[string]bool{
+	"archive": true, "source": true, "destination": true, "package": true, "imports": true,
+	"aux_files": true, "build_flags": true, "mock_names": true, "self_package": true,
+	"copyright_file": true, "exclude_interfaces": true,
+}
+var mockgenBoolFlags = map[string]bool{
+	"debug_parser": true, "write_package_comment": true, "write_generate_directive": true,
+	"write_source_comment": true, "typed": true,
+}
+
+// mockgenArgs is what mockgen's command line holds for an import path.
+type mockgenArgs struct {
+	imports     []int // index of the word whose value is -imports, and where in it: see importsValue
+	importsAt   []int // offset of the value inside that word
+	positionals []int // words from the first non-flag argument on
+	hasSource   bool  // -source given: source mode takes no import path
+	ok          bool  // the line was read to the end with documented flags only
+}
+
+// readMockgen reads ws (the words after the command) the way Go's flag package does:
+// -f, --f, -f=v and, for a value flag, -f v; the first non-flag word and all after it
+// are positional.
+func readMockgen(ws []word) (a mockgenArgs) {
+	for i := 0; i < len(ws); i++ {
+		t := ws[i].text
+		if !strings.HasPrefix(t, "-") || t == "-" {
+			for j := i; j < len(ws); j++ {
+				a.positionals = append(a.positionals, j)
+			}
+			a.ok = true
+			return a
+		}
+		if t == "--" {
+			for j := i + 1; j < len(ws); j++ {
+				a.positionals = append(a.positionals, j)
+			}
+			a.ok = true
+			return a
+		}
+		name := strings.TrimPrefix(strings.TrimPrefix(t, "-"), "-")
+		name, _, inline := strings.Cut(name, "=")
+		switch {
+		case mockgenBoolFlags[name]:
+		case mockgenValueFlags[name]:
+			vi, off := i, strings.Index(t, "=")+1
+			if !inline {
+				i++
+				if i >= len(ws) {
+					return a
+				}
+				vi, off = i, 0
+			}
+			switch name {
+			case "source":
+				a.hasSource = true
+			case "imports":
+				if ws[vi].plain {
+					a.imports, a.importsAt = append(a.imports, vi), append(a.importsAt, off)
+				}
+			}
+		default:
+			return a
+		}
+	}
+	a.ok = true
+	return a
+}
+
+// mockgenEdits are the edits for the import paths on a mockgen command line: the
+// package of package and archive mode (the first of exactly two non-flag arguments,
+// the second being the symbols) and the package of each foo=bar/baz element of -imports.
+// It also returns the words it rewrote, which the caller does not report as left alone.
+func mockgenEdits(ws []word, rewrite func(string) (string, bool)) (edits []edit, handled []int) {
+	a := readMockgen(ws)
+	if !a.ok {
+		return nil, nil
+	}
+	if !a.hasSource && len(a.positionals) == 2 && ws[a.positionals[0]].plain {
+		w := ws[a.positionals[0]]
+		if nv, ok := rewrite(w.text); ok {
+			edits = append(edits, edit{w.start, w.end, nv})
+			handled = append(handled, a.positionals[0])
+		}
+	}
+	for k, vi := range a.imports {
+		w, off := ws[vi], a.importsAt[k]
+		pos := w.start + off
+		before := len(edits)
+		for _, el := range strings.Split(w.text[off:], ",") {
+			if name, pkg, ok := strings.Cut(el, "="); ok {
+				if nv, ok := rewrite(pkg); ok {
+					start := pos + len(name) + 1
+					edits = append(edits, edit{start, start + len(pkg), nv})
+				}
+			}
+			pos += len(el) + 1
+		}
+		if len(edits) > before {
+			handled = append(handled, vi)
+		}
+	}
+	return edits, handled
 }

@@ -39,7 +39,8 @@ func OpenStore(ctx context.Context, s *config.Server) (store.Store, error) {
 				o.BaseEndpoint = &s.DynamoEndpoint
 			}
 		}), s.DynamoTable, store.WithJobShards(s.DynamoJobShards), store.WithDependentShards(s.DynamoDependentShards),
-			store.WithQueryConcurrency(s.DynamoQueryConcurrency), store.WithAdaptiveDependents(s.DynamoAdaptiveDependents))
+			store.WithQueryConcurrency(s.DynamoQueryConcurrency), store.WithAdaptiveDependents(s.DynamoAdaptiveDependents),
+			store.WithCounterStripes(s.DynamoCounterStripes))
 		if err := d.EnsureTable(ctx); err != nil {
 			return nil, err
 		}
@@ -73,7 +74,7 @@ func New(ctx context.Context, s *config.Server, log *slog.Logger) (*App, store.S
 	}
 	eng := &engine.Engine{Store: st, Platform: mux, Log: log, Workers: s.Workers,
 		MaxFiles: s.MaxFiles, MaxDependencies: s.MaxDependencies,
-		GoCC: s.GoCC, GoProxyUser: s.GoProxyUser, GoProxyToken: s.GoProxyToken,
+		GoCC: s.GoCC, GoToolchainDir: s.GoToolchainDir, GoProxyUser: s.GoProxyUser, GoProxyToken: s.GoProxyToken,
 		Limits: rules.Limits{MinimumReleaseAge: s.MinimumReleaseAge, OpenPRLimit: s.OpenPRLimit, AllowAutomerge: s.AllowAutomerge}}
 	a := &App{
 		Engine: eng, Log: log, Secret: []byte(s.WebhookSecret), PollEvery: s.FeedInterval,

@@ -23,10 +23,14 @@ func sample(t *testing.T, name string) *Vuln {
 
 func TestFixForRecordedAdvisory(t *testing.T) {
 	v := sample(t, "GO-2026-6894.json")
-	// The recorded fix is a pseudo-version; the OSV value has no "v" prefix and ripple adds it.
-	fixed, ok := v.FixFor("github.com/anacrolix/torrent", "v1.50.0")
-	if !ok || fixed != "v1.61.1-0.20260911233437-76452a2c8a2f" {
-		t.Fatalf("got %q %v", fixed, ok)
+	// The recorded fix is a pseudo-version: FixFor answers only with releases, Assess says
+	// what the pseudo-version is. The OSV value has no "v" prefix and ripple adds it.
+	if fixed, ok := v.FixFor("github.com/anacrolix/torrent", "v1.50.0"); ok {
+		t.Fatalf("a pseudo-version is not a release fix, got %q", fixed)
+	}
+	got := v.Assess("github.com/anacrolix/torrent", "v1.50.0")
+	if !got.Affected || got.Fixed != "" || got.Pseudo != "v1.61.1-0.20260911233437-76452a2c8a2f" {
+		t.Fatalf("got %+v", got)
 	}
 	if _, ok := v.FixFor("github.com/anacrolix/torrent", "v1.61.1-0.20260911233437-76452a2c8a2f"); ok {
 		t.Fatal("the fixed version itself is not affected")
@@ -125,5 +129,68 @@ func TestEvaluationAlgorithmEdges(t *testing.T) {
 	}
 	if _, ok := mk(`[{"introduced":"0"},{"fixed":"2.0.0"}]`).FixFor("m.example/x", "not-a-version"); ok {
 		t.Fatal("invalid current version")
+	}
+}
+
+func vulnJSON(t *testing.T, raw string) *Vuln {
+	t.Helper()
+	var v Vuln
+	if err := json.Unmarshal([]byte(raw), &v); err != nil {
+		t.Fatal(err)
+	}
+	return &v
+}
+
+func TestAssessPrefersAReleaseFixOverAPseudoVersion(t *testing.T) {
+	v := vulnJSON(t, `{"id":"X","affected":[{"package":{"name":"example.com/m","ecosystem":"Go"},"ranges":[{"type":"SEMVER","events":[{"introduced":"0"},{"fixed":"1.0.1-0.20260911233437-76452a2c8a2f"},{"fixed":"1.0.5"}]}]}]}`)
+	got := v.Assess("example.com/m", "v1.0.0")
+	if !got.Affected || got.Fixed != "v1.0.5" || got.Pseudo != "v1.0.1-0.20260911233437-76452a2c8a2f" {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestAssessDistinguishesUnaffectedFromUnfixed(t *testing.T) {
+	unfixed := vulnJSON(t, `{"id":"X","affected":[{"package":{"name":"example.com/m","ecosystem":"Go"},"ranges":[{"type":"SEMVER","events":[{"introduced":"0"}]}]}]}`)
+	if got := unfixed.Assess("example.com/m", "v1.0.0"); !got.Affected || got.Fixed != "" || got.Pseudo != "" {
+		t.Fatalf("unfixed: %+v", got)
+	}
+	ceiling := vulnJSON(t, `{"id":"X","affected":[{"package":{"name":"example.com/m","ecosystem":"Go"},"ranges":[{"type":"SEMVER","events":[{"introduced":"0"},{"last_affected":"1.0.5"}]}]}]}`)
+	if got := ceiling.Assess("example.com/m", "v1.0.0"); !got.Affected || got.Fixed != "" {
+		t.Fatalf("ceiling: %+v", got)
+	}
+	if got := ceiling.Assess("example.com/m", "v1.0.6"); got.Affected {
+		t.Fatalf("past the ceiling: %+v", got)
+	}
+	if got := ceiling.Assess("example.com/other", "v1.0.0"); got.Affected {
+		t.Fatalf("another module: %+v", got)
+	}
+}
+
+// stdlib records are recorded from api.osv.dev (GO-2023-2041): the Go versions carry no "v",
+// and a later minor starts with "1.21.0-0".
+const stdlibRecord = `{"id":"GO-2023-2041","affected":[{"package":{"name":"stdlib","ecosystem":"Go"},"ranges":[{"type":"SEMVER","events":[{"introduced":"0"},{"fixed":"1.20.8"},{"introduced":"1.21.0-0"},{"fixed":"1.21.1"}]}]}]}`
+
+func TestAssessToolchainReadsStdlibAndToolchainEntries(t *testing.T) {
+	v := vulnJSON(t, stdlibRecord)
+	if !v.HasToolchain() || len(v.Modules()) != 0 {
+		t.Fatalf("toolchain=%v modules=%v", v.HasToolchain(), v.Modules())
+	}
+	for _, c := range []struct {
+		cur, want string
+		affected  bool
+	}{
+		{"v1.20.3", "v1.20.8", true},
+		{"v1.21.0", "v1.21.1", true},
+		{"v1.21.1", "", false},
+		{"v1.22.0", "", false},
+	} {
+		got := v.AssessToolchain(c.cur)
+		if got.Affected != c.affected || got.Fixed != c.want {
+			t.Errorf("%s: got %+v", c.cur, got)
+		}
+	}
+	other := vulnJSON(t, `{"id":"X","affected":[{"package":{"name":"toolchain","ecosystem":"Go"},"ranges":[{"type":"SEMVER","events":[{"introduced":"0"},{"fixed":"1.22.3"}]}]}]}`)
+	if got := other.AssessToolchain("v1.22.1"); !got.Affected || got.Fixed != "v1.22.3" {
+		t.Fatalf("toolchain package: %+v", got)
 	}
 }

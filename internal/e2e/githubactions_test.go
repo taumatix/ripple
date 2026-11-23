@@ -67,6 +67,9 @@ func TestActionsTagBump(t *testing.T) {
 				t.Errorf("PR body lacks %q:\n%s", w, body)
 			}
 		}
+		if strings.Contains(body, "module index") || !strings.Contains(body, "when a new tag appeared upstream") {
+			t.Errorf("the footer must not claim the Go module index:\n%s", body)
+		}
 		if !strings.HasPrefix(head, "ripple/actions/") {
 			t.Errorf("branch %q", head)
 		}

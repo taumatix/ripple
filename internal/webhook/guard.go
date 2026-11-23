@@ -316,3 +316,29 @@ func (d *Dedupe) Release(keys ...string) {
 		delete(d.seen, k)
 	}
 }
+
+// DefaultDedupeBySignature makes every receiver that calls SignatureKey (and every
+// Handler, whatever its DedupeBySignature) also treat a body whose verified signature was
+// already handled as a repeat. Off by default: the delivery id is an unsigned header, so
+// without this a captured body replayed under a new id is handled again, but with it a
+// genuine redelivery of an identical body is dropped inside the TTL. The server sets it
+// once at start from RIPPLE_WEBHOOK_DEDUPE_SIGNATURE; leave it alone elsewhere. The table
+// is in memory, per process, like Dedupe itself.
+var DefaultDedupeBySignature bool
+
+func signatureKey(sig string) string {
+	if sig == "" {
+		return ""
+	}
+	return "signature:" + sig
+}
+
+// SignatureKey is the Dedupe key for a delivery's verified signature header value, or ""
+// (which Dedupe ignores) when DefaultDedupeBySignature is off or sig is empty. Pass it
+// after the delivery id: d.Claim(now, id, SignatureKey(sig)).
+func SignatureKey(sig string) string {
+	if !DefaultDedupeBySignature {
+		return ""
+	}
+	return signatureKey(sig)
+}

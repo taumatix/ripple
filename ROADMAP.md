@@ -240,8 +240,10 @@ Everything else:
     Bitbucket Cloud's `X-Request-UUID` and Azure DevOps' payload `id` stay the same across a retry is still
     unverified: the vendored docs state neither (see docs/platform-bitbucket.md, docs/platform-azuredevops.md). A
     retry under a new id is handled again, which is safe. Needs a real workspace and organisation to observe.
-133. **Wire `DedupeBySignature`.** Still off and not wired into the app or the other signed hosts: a genuine identical
-    redelivery would be dropped. Wait for real redelivery data showing identical bodies are rare.
+133. **Signature dedupe across replicas and a default.** `RIPPLE_WEBHOOK_DEDUPE_SIGNATURE=true` is wired into every signed
+    host that has a signature to key on, but it is off by default and its table is in memory, so a replayed body that
+    reaches another replica is handled again. Turn it on by default only once real redelivery data shows identical
+    bodies are rare; to span replicas, claim `signature:<sig>` through `store.DeliveryTable` like the delivery id.
 134. **Delivery dedupe: hosts without a delivery id, and the DynamoDB cursor Scan.** The persistent claim covers events
     whose host sets `Delivery`; others rely on the in-memory table. `Dynamo.PurgeCursors` is a filtered Scan of the
     table (run at most daily) and is unmeasured on a large table; move tombstones to an indexed prefix if it hurts.

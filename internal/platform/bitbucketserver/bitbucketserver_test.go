@@ -19,6 +19,7 @@ import (
 	"github.com/taumatix/ripple/internal/platform/bitbucketserver"
 	"github.com/taumatix/ripple/internal/platform/gitws"
 	"github.com/taumatix/ripple/internal/testutil"
+	"github.com/taumatix/ripple/internal/webhook"
 )
 
 // docs/vendor/bitbucket-server/webhooks.md, "Webhook secrets": the header is
@@ -354,5 +355,25 @@ func TestPushLookupsAreBounded(t *testing.T) {
 	post(t, srv.URL, testSecret, "repo:refs_changed", "main1", refsChanged("ACME/p", "refs/heads/main", f, to, "UPDATE"))
 	if n := b.Calls("ACME/p"); n != 2 || b.Calls("ACME/p") != b.Lookups("ACME/p") || len(s.evs) != 1 || !reflect.DeepEqual(s.evs[0].Files, []string{"go.mod"}) {
 		t.Errorf("push to main: %d calls (%d lookups), events %+v", n, b.Lookups("ACME/p"), s.evs)
+	}
+}
+
+func TestReceiverDedupesARewrittenRequestIDBySignature(t *testing.T) {
+	defer func(old bool) { webhook.DefaultDedupeBySignature = old }(webhook.DefaultDedupeBySignature)
+	run := func(on bool) int {
+		webhook.DefaultDedupeBySignature = on
+		s := &sink{}
+		srv := newReceiver(&fakeLookup{def: "main", files: []string{"go.mod"}}, s)
+		defer srv.Close()
+		body := refsChanged("ACME/p", "refs/heads/main", from, to, "UPDATE")
+		post(t, srv.URL, testSecret, "repo:refs_changed", "r1", body)
+		post(t, srv.URL, testSecret, "repo:refs_changed", "r2", body)
+		return len(s.evs)
+	}
+	if n := run(false); n != 2 {
+		t.Fatalf("off: %d events, want 2", n)
+	}
+	if n := run(true); n != 1 {
+		t.Fatalf("on: %d events, want 1", n)
 	}
 }

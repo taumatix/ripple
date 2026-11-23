@@ -307,6 +307,19 @@ func TestServerReplicaAndLeaseTTL(t *testing.T) {
 	}
 }
 
+func TestServerWebhookDedupeSignature(t *testing.T) {
+	s, err := LoadServer(env(base))
+	if err != nil || s.WebhookDedupeSignature {
+		t.Fatalf("default: %v, %v", s.WebhookDedupeSignature, err)
+	}
+	if s, err = LoadServer(env(with("RIPPLE_WEBHOOK_DEDUPE_SIGNATURE", "true"))); err != nil || !s.WebhookDedupeSignature {
+		t.Fatalf("true: %v, %v", s.WebhookDedupeSignature, err)
+	}
+	if _, err = LoadServer(env(with("RIPPLE_WEBHOOK_DEDUPE_SIGNATURE", "maybe"))); err == nil {
+		t.Fatal("maybe accepted")
+	}
+}
+
 func TestServerWebhookSpool(t *testing.T) {
 	s, err := LoadServer(env(base))
 	if err != nil || s.WebhookSpool != "disk" {

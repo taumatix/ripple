@@ -427,3 +427,28 @@ func TestHandlerSlowSenderTimesOutAndFreesItsSlot(t *testing.T) {
 		t.Fatalf("genuine delivery after the timeout: %d, events %d", resp.StatusCode, hr.count())
 	}
 }
+
+func TestDefaultDedupeBySignatureAppliesToEveryHandler(t *testing.T) {
+	defer func(old bool) { DefaultDedupeBySignature = old }(DefaultDedupeBySignature)
+	DefaultDedupeBySignature = true
+	hr := newHarness()
+	hr.post("d1", pushBody)
+	if c := hr.post("d2-forged-header", pushBody); c != 202 || hr.count() != 1 {
+		t.Fatalf("captured body under a new id: code %d events %d", c, hr.count())
+	}
+}
+
+func TestSignatureKeyIsEmptyUnlessDedupeBySignatureIsOn(t *testing.T) {
+	defer func(old bool) { DefaultDedupeBySignature = old }(DefaultDedupeBySignature)
+	DefaultDedupeBySignature = false
+	if k := SignatureKey("sha256=ab"); k != "" {
+		t.Fatalf("off: %q", k)
+	}
+	DefaultDedupeBySignature = true
+	if k := SignatureKey("sha256=ab"); k == "" || k == SignatureKey("sha256=cd") {
+		t.Fatalf("on: %q", k)
+	}
+	if SignatureKey("") != "" {
+		t.Fatal("an empty signature must not be a key")
+	}
+}

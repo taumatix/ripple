@@ -12,6 +12,7 @@ import (
 
 	"github.com/taumatix/ripple/internal/platform"
 	"github.com/taumatix/ripple/internal/platform/bitbucket"
+	"github.com/taumatix/ripple/internal/webhook"
 )
 
 type sinkRec struct {
@@ -215,5 +216,30 @@ func TestReceiverOnlyAcceptsPost(t *testing.T) {
 	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/", nil))
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("status %d", w.Code)
+	}
+}
+
+func TestReceiverDedupesARewrittenRequestIDBySignature(t *testing.T) {
+	defer func(old bool) { webhook.DefaultDedupeBySignature = old }(webhook.DefaultDedupeBySignature)
+	secret := []byte("s3cret")
+	b := body(t, pushBody("acme/app", "main", "aaaaaaa", "bbbbbbb"))
+	run := func(on bool) int {
+		webhook.DefaultDedupeBySignature = on
+		sink := &sinkRec{}
+		h := &bitbucket.Receiver{Secret: secret, Sink: sink}
+		for _, id := range []string{"u1", "u2"} {
+			req := httptest.NewRequest(http.MethodPost, "/webhook/bitbucket", bytes.NewReader(b))
+			req.Header.Set("X-Event-Key", "repo:push")
+			req.Header.Set("X-Request-UUID", id)
+			req.Header.Set("X-Hub-Signature", bitbucket.Sign(secret, b))
+			h.ServeHTTP(httptest.NewRecorder(), req)
+		}
+		return len(sink.got)
+	}
+	if n := run(false); n != 2 {
+		t.Fatalf("off: %d events, want 2", n)
+	}
+	if n := run(true); n != 1 {
+		t.Fatalf("on: %d events, want 1", n)
 	}
 }

@@ -124,13 +124,14 @@ func (h *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusAccepted)
 		return
 	}
-	if !h.dedupe.Claim(h.now(), delivery) {
+	keys := []string{delivery, webhook.SignatureKey(hexSig)}
+	if !h.dedupe.Claim(h.now(), keys...) {
 		w.WriteHeader(http.StatusAccepted)
 		return
 	}
 	evs, err := h.push(r.Context(), body)
 	if err != nil {
-		h.dedupe.Release(delivery)
+		h.dedupe.Release(keys...)
 		h.Log.Error("webhook lookup", "delivery", delivery, "err", err)
 		http.Error(w, "lookup failed", http.StatusServiceUnavailable)
 		return
@@ -138,7 +139,7 @@ func (h *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	for _, ev := range evs {
 		ev.Delivery = delivery
 		if err := h.Sink.HandleEvent(r.Context(), ev); err != nil {
-			h.dedupe.Release(delivery)
+			h.dedupe.Release(keys...)
 			h.Log.Error("webhook sink", "event", ev.Kind, "err", err)
 			http.Error(w, "busy", http.StatusServiceUnavailable)
 			return

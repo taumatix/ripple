@@ -172,7 +172,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ev.Delivery = delivery
 	keys := []string{delivery}
 	if h.DedupeBySignature {
-		keys = append(keys, sig)
+		keys = append(keys, signatureKey(sig))
+	} else {
+		keys = append(keys, SignatureKey(sig))
 	}
 	if !h.dedupe.Claim(h.Now(), keys...) {
 		h.Log.Info("webhook duplicate delivery dropped", "delivery", delivery)

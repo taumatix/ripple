@@ -76,6 +76,8 @@ jobs:
       - name: live container tests
         env:
           RIPPLE_TEST_CONTAINER_FLAVOUR: ${{ matrix.runtime }}
-        run: go test -tags containerlive -count=1 -v -timeout 20m -run 'TestContainerRuntimeLive|TestContainerConfinedNetworkLive' ./internal/sandbox/ | tee live.log
+        run: |
+          set -o pipefail
+          go test -tags containerlive -count=1 -v -timeout 20m -run 'TestContainerRuntimeLive|TestContainerConfinedNetworkLive' ./internal/sandbox/ | tee live.log
       - name: no skipped test
         run: "! grep -E -- '--- SKIP' live.log"

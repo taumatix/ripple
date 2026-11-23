@@ -54,12 +54,14 @@ type GitHub struct {
 	root string
 	key  *rsa.PrivateKey
 
-	mu      sync.Mutex
-	calls   map[string]int
-	prs     map[string][]*PR
-	graphql int
-	tokens  int
-	issued  map[string]*issuedToken
+	mu    sync.Mutex
+	calls map[string]int
+	prs   map[string][]*PR
+	// issueState holds the issues API's records; see github_issues.go.
+	issueState *issueState
+	graphql    int
+	tokens     int
+	issued     map[string]*issuedToken
 	// TokenTTL, when set, is how long a minted installation token lives. It is
 	// reported to the client as expires_at and enforced by the git HTTP server.
 	TokenTTL time.Duration
@@ -360,7 +362,7 @@ func (g *GitHub) handleGraphQL(w http.ResponseWriter, r *http.Request) {
 
 func (g *GitHub) handleRepo(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/repos/"), "/")
-	if len(parts) < 3 || !(parts[2] == "pulls" || (len(parts) >= 5 && parts[2] == "issues")) {
+	if len(parts) < 3 || !(parts[2] == "pulls" || parts[2] == "issues") {
 		g.fail(w, http.StatusNotFound, "unknown route %s", r.URL.Path)
 		return
 	}
@@ -371,7 +373,7 @@ func (g *GitHub) handleRepo(w http.ResponseWriter, r *http.Request) {
 	}
 	g.mu.Lock()
 	g.calls[repo]++
-	limit := g.RateLimitOnce && r.Method == http.MethodPost && len(parts) == 3
+	limit := g.RateLimitOnce && r.Method == http.MethodPost && len(parts) == 3 && parts[2] == "pulls"
 	if limit {
 		g.RateLimitOnce = false
 	}
@@ -384,6 +386,10 @@ func (g *GitHub) handleRepo(w http.ResponseWriter, r *http.Request) {
 	}
 	if failing {
 		g.fail(w, http.StatusInternalServerError, "injected failure")
+		return
+	}
+	if parts[2] == "issues" && len(parts) < 5 {
+		g.handleIssues(w, r, repo, parts)
 		return
 	}
 	if len(parts) > 3 {

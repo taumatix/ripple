@@ -112,3 +112,29 @@ func (c *CountingPlatform) RateLimitedUntil(r model.Repo) time.Time {
 func (c *CountingPlatform) ReadsLegacyConfig(r model.Repo) bool {
 	return platform.ReadsLegacyConfig(c.Inner, r)
 }
+
+// FindIssue, CreateIssue and UpdateIssueBody forward to Inner, or answer
+// platform.ErrNoIssues (without counting a call) when Inner has no issue tracker.
+func (c *CountingPlatform) FindIssue(ctx context.Context, r model.Repo, label, marker string) (platform.Issue, bool, error) {
+	if _, ok := c.Inner.(platform.IssueTracker); !ok {
+		return platform.Issue{}, false, platform.ErrNoIssues
+	}
+	c.hit(r.FullName)
+	return platform.FindIssue(ctx, c.Inner, r, label, marker)
+}
+
+func (c *CountingPlatform) CreateIssue(ctx context.Context, r model.Repo, spec platform.IssueSpec) (platform.Issue, error) {
+	if _, ok := c.Inner.(platform.IssueTracker); !ok {
+		return platform.Issue{}, platform.ErrNoIssues
+	}
+	c.hit(r.FullName)
+	return platform.CreateIssue(ctx, c.Inner, r, spec)
+}
+
+func (c *CountingPlatform) UpdateIssueBody(ctx context.Context, r model.Repo, number int, body string) error {
+	if _, ok := c.Inner.(platform.IssueTracker); !ok {
+		return platform.ErrNoIssues
+	}
+	c.hit(r.FullName)
+	return platform.UpdateIssueBody(ctx, c.Inner, r, number, body)
+}

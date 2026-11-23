@@ -123,3 +123,29 @@ func (m *Mux) ReadsLegacyConfig(repo model.Repo) bool {
 	p, r, err := m.route(repo)
 	return err == nil && ReadsLegacyConfig(p, r)
 }
+
+// FindIssue, CreateIssue and UpdateIssueBody route to the repo's host and answer
+// ErrNoIssues for a host without the capability.
+func (m *Mux) FindIssue(ctx context.Context, repo model.Repo, label, marker string) (Issue, bool, error) {
+	p, r, err := m.route(repo)
+	if err != nil {
+		return Issue{}, false, err
+	}
+	return FindIssue(ctx, p, r, label, marker)
+}
+
+func (m *Mux) CreateIssue(ctx context.Context, repo model.Repo, spec IssueSpec) (Issue, error) {
+	p, r, err := m.route(repo)
+	if err != nil {
+		return Issue{}, err
+	}
+	return CreateIssue(ctx, p, r, spec)
+}
+
+func (m *Mux) UpdateIssueBody(ctx context.Context, repo model.Repo, number int, body string) error {
+	p, r, err := m.route(repo)
+	if err != nil {
+		return err
+	}
+	return UpdateIssueBody(ctx, p, r, number, body)
+}

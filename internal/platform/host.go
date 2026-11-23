@@ -175,3 +175,73 @@ type Host struct {
 	// its headers. Nil when the host has no webhooks (it must then be a Lister).
 	Receiver func(sink Sink) http.Handler
 }
+
+// ErrNoIssues means the host has no issue tracker ripple can write to, so there is
+// no dependency dashboard. It is not a failure.
+var ErrNoIssues = errors.New("host has no issues")
+
+// ErrIssuesUnavailable means the host has issues but not for this repo: they are
+// disabled, or the credential may not write them (GitHub: the App lacks the
+// "Issues" permission). The caller logs it once and carries on.
+var ErrIssuesUnavailable = errors.New("issues are disabled or not writable for this repository")
+
+// ErrIssueGone means the issue number asked for no longer exists (deleted).
+var ErrIssueGone = errors.New("issue no longer exists")
+
+// Issue is an issue as the dependency dashboard sees it.
+type Issue struct {
+	Number int
+	Body   string
+	// Closed is whether a person closed it. The dashboard keeps updating a closed
+	// issue's body and never reopens it.
+	Closed bool
+}
+
+// IssueSpec is a new issue.
+type IssueSpec struct {
+	Title, Body string
+	// Labels are applied when the issue is created.
+	Labels []string
+}
+
+// IssueTracker is the optional capability to keep one ripple-owned issue per repo
+// (the dependency dashboard). A host that has no issues, or cannot be written to
+// reliably, does not implement it. Each method returns ErrIssuesUnavailable when
+// the repo's issues are disabled or the credential may not write them.
+type IssueTracker interface {
+	// FindIssue returns the issue carrying label whose body starts with marker, closed
+	// ones included; false when there is none. A person's issue that merely has the
+	// label is not ripple's and is not returned.
+	FindIssue(ctx context.Context, repo model.Repo, label, marker string) (Issue, bool, error)
+	CreateIssue(ctx context.Context, repo model.Repo, spec IssueSpec) (Issue, error)
+	// UpdateIssueBody replaces the body; ErrIssueGone when the issue is not there.
+	// It changes nothing else (state, title, labels).
+	UpdateIssueBody(ctx context.Context, repo model.Repo, number int, body string) error
+}
+
+// FindIssue is p's FindIssue, or ErrNoIssues.
+func FindIssue(ctx context.Context, p Platform, repo model.Repo, label, marker string) (Issue, bool, error) {
+	t, ok := p.(IssueTracker)
+	if !ok {
+		return Issue{}, false, ErrNoIssues
+	}
+	return t.FindIssue(ctx, repo, label, marker)
+}
+
+// CreateIssue is p's CreateIssue, or ErrNoIssues.
+func CreateIssue(ctx context.Context, p Platform, repo model.Repo, spec IssueSpec) (Issue, error) {
+	t, ok := p.(IssueTracker)
+	if !ok {
+		return Issue{}, ErrNoIssues
+	}
+	return t.CreateIssue(ctx, repo, spec)
+}
+
+// UpdateIssueBody is p's UpdateIssueBody, or ErrNoIssues.
+func UpdateIssueBody(ctx context.Context, p Platform, repo model.Repo, number int, body string) error {
+	t, ok := p.(IssueTracker)
+	if !ok {
+		return ErrNoIssues
+	}
+	return t.UpdateIssueBody(ctx, repo, number, body)
+}

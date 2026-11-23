@@ -180,3 +180,46 @@ func TestCargoUpToDateOpensNothing(t *testing.T) {
 		}
 	})
 }
+
+// Partial requirements move at the precision written, and a 0.x crate's minor bump is a
+// major update (cargo's rule), so a repo that ignores majors does not get it.
+func TestCargoPartialRequirementsAndZeroVersionSemantics(t *testing.T) {
+	forEach(t, func(t *testing.T, st store.Store) {
+		e, idx := cargoEnv(t, st)
+		for crate, v := range map[string]string{"part": "1.2.0", "whole": "1", "zero": "0.2.3", "pin": "0.0.3", "same": "0.4.0"} {
+			idx.Publish(crate, v)
+		}
+		cfg := cargoConfig + "    ignore:\n      - dependency: \"*\"\n        update-types: [major]\n"
+		manifest := "[dependencies]\npart = \"1.2\"\nwhole = \"1\"\nzero = \"0.2.3\"\npin = \"0.0.3\"\nsame = \"0.4\"\n"
+		e.gh.AddRepo("acme/app", map[string]string{".ripple.yaml": cfg, "Cargo.toml": manifest})
+		start(t, e, "acme/app")
+		if n := len(e.deps("acme/app")); n != 5 {
+			t.Fatalf("partial requirements are tracked, got %+v", e.deps("acme/app"))
+		}
+		e.clock.Advance(time.Minute)
+		idx.Publish("part", "1.7.4")  // 1.2 -> 1.7
+		idx.Publish("whole", "1.9.0") // "1" already allows it: nothing to change
+		idx.Publish("zero", "0.3.0")  // major under cargo: ignored
+		idx.Publish("zero", "0.2.9")  // the patch the repo may take
+		idx.Publish("pin", "0.0.4")   // major under cargo: ignored
+		idx.Publish("same", "0.4.8")  // "0.4" already names it
+		e.tick()
+		e.tick()
+		prs := e.gh.PRs("acme/app")
+		if len(prs) != 2 {
+			t.Fatalf("want PRs for part and zero only, got %d", len(prs))
+		}
+		for _, pr := range prs {
+			got, _ := e.gh.FileAt("acme/app", pr.Head, "Cargo.toml")
+			from, to := `part = "1.2"`, `part = "1.7"`
+			if strings.Contains(pr.Head, "zero") {
+				from, to = `zero = "0.2.3"`, `zero = "0.2.9"`
+			} else if !strings.Contains(pr.Head, "part") {
+				t.Fatalf("unexpected branch %q", pr.Head)
+			}
+			if want := strings.Replace(manifest, from, to, 1); got != want {
+				t.Errorf("%s:\n%s", pr.Head, got)
+			}
+		}
+	})
+}

@@ -12,6 +12,7 @@ import (
 	"github.com/taumatix/ripple/internal/manager"
 	"github.com/taumatix/ripple/internal/model"
 	"github.com/taumatix/ripple/internal/rules"
+	"golang.org/x/mod/semver"
 )
 
 // cargoPackagesCursor holds the crates some repo uses (newline separated). The index
@@ -26,16 +27,45 @@ type CratesIndex interface {
 }
 
 // applicableCargo judges an index version for a Cargo dependency: the same crate, a
-// requirement ripple can move, and a release newer than the requirement's floor.
+// requirement ripple can move, and a release newer than the requirement's floor. The
+// type follows cargo's compatibility rule, not the number position: ^0.2.3 to 0.3.0 and
+// ^0.0.3 to 0.0.4 are "major" because cargo treats them as breaking. A partial
+// requirement that already names the version at its precision ("1.2" for 1.2.9) has
+// nothing to change and is not applicable.
 func applicableCargo(d model.Dependency, pkg, version string) (rules.UpdateType, bool) {
 	if d.Datasource != model.DatasourceCargo || d.Package != pkg {
 		return "", false
 	}
-	floor, _ := manager.CargoReqFloor(d.Version)
-	if floor == "" {
+	req, ok := manager.ParseCargoReq(d.Version)
+	if !ok {
 		return "", false
 	}
-	return rules.Classify("v"+floor, "v"+version)
+	floor := req.Floor()
+	if _, ok := rules.Classify("v"+floor, "v"+version); !ok {
+		return "", false
+	}
+	if len(req.Parts) < 3 && req.Text(version) == d.Version {
+		return "", false
+	}
+	return cargoClassify(req, floor, version), true
+}
+
+// cargoClassify is the update type of floor -> version under req's compatibility rule.
+func cargoClassify(req manager.CargoReq, floor, version string) rules.UpdateType {
+	from, to := strings.Split(floor, "."), strings.Split(version, ".")
+	for i := range from {
+		if from[i] == to[i] {
+			continue
+		}
+		switch {
+		case i <= req.Breaking():
+			return rules.Major
+		case i == 1:
+			return rules.Minor
+		}
+		return rules.Patch
+	}
+	return rules.Patch
 }
 
 // CargoWatcher turns the index's versions of the crates in use into jobs, like
@@ -82,26 +112,29 @@ func (w *CargoWatcher) Poll(ctx context.Context) (int, error) {
 			if floor == "" {
 				continue
 			}
-			target := cr.Newest(floor)
-			if target == "" {
-				continue
-			}
-			typ, ok := applicable(d, model.DatasourceCargo, pkg, target)
-			if !ok {
-				continue
-			}
-			rs, err := e.repoState(ctx, repos, d.Repo)
-			if err != nil {
-				return n, err
-			}
-			if !rs.found {
-				continue
-			}
-			// The index has no publication dates: the cooldown runs from the first poll
-			// that saw the version, and EnqueueJob keeps the first ReleasedAt.
+			// The newest release of each update type, newest first: a repo that ignores
+			// majors (every 0.x minor bump is one) must still get the patch behind it.
+			var target string
+			var rs *repoState
+			var dec rules.Decision
 			at := e.now()
-			dec, ok := e.decide(rs, d, typ, at)
-			if !ok || !dec.Enabled {
+			for _, c := range cargoTargets(cr, d, pkg) {
+				if rs == nil {
+					if rs, err = e.repoState(ctx, repos, d.Repo); err != nil {
+						return n, err
+					}
+					if !rs.found {
+						break
+					}
+				}
+				// The index has no publication dates: the cooldown runs from the first poll
+				// that saw the version, and EnqueueJob keeps the first ReleasedAt.
+				if x, ok := e.decide(rs, d, c.typ, at); ok && x.Enabled {
+					target, dec = c.version, x
+					break
+				}
+			}
+			if target == "" {
 				continue
 			}
 			inserted, err := e.Store.EnqueueJob(ctx, model.Job{
@@ -118,6 +151,32 @@ func (w *CargoWatcher) Poll(ctx context.Context) (int, error) {
 		}
 	}
 	return n, nil
+}
+
+type cargoTarget struct {
+	version string
+	typ     rules.UpdateType
+}
+
+// cargoTargets lists, newest first, the newest release of each update type that is an
+// update of d.
+func cargoTargets(cr cratesindex.Crate, d model.Dependency, pkg string) []cargoTarget {
+	newest := map[rules.UpdateType]string{}
+	for _, v := range cr.Versions {
+		if v.Yanked || semver.Prerelease("v"+v.Version) != "" {
+			continue
+		}
+		typ, ok := applicableCargo(d, pkg, v.Version)
+		if ok && (newest[typ] == "" || semver.Compare("v"+v.Version, "v"+newest[typ]) > 0) {
+			newest[typ] = v.Version
+		}
+	}
+	var out []cargoTarget
+	for typ, v := range newest {
+		out = append(out, cargoTarget{v, typ})
+	}
+	sort.Slice(out, func(i, j int) bool { return semver.Compare("v"+out[i].version, "v"+out[j].version) > 0 })
+	return out
 }
 
 // cargoGuard is called before a Cargo dependency is rewritten. A non-empty reason

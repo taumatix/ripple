@@ -281,11 +281,6 @@ Everything else:
     (`RIPPLE_ACTIONS_UPSTREAM_URL`, 404 on the host then the configured upstream) and superseding of stale actions PRs were
     written against the fake; none ran against github.com or a GHES (see 61). The supersede sweep and closing of beaten PRs
     for actions rely on the branch name `ripple/actions/<slug>-<tag>`.
-154. **Cargo: requirements beyond `x.y.z`, and 0.x semantics.** Only a full version with no operator, `=`, `^` or `~`
-    is moved. Partial requirements (`1.2`), comparators, wildcards, multi-part requirements, multi-line inline tables,
-    dotted keys and workspace-inherited dependencies (`workspace = true`, resolved through `[workspace.dependencies]`) are
-    left alone; the manager is a line scanner, not a TOML parser, so a real parser is the way to widen it safely. Also
-    `^0.2.3` -> `0.3.0` is breaking for cargo but classified "minor" by the shared rules; classify 0.x the way cargo does.
 155. **Cargo: refresh Cargo.lock.** ripple edits Cargo.toml and reports the lock files it left stale (docs/cargo.md);
     a lock entry needs the checksum and dependency edges of the new version, which only cargo's resolver knows. The sparse
     index line carries `cksum` and `deps`, so a lock edit for a leaf crate whose dependencies did not change may be
@@ -326,3 +321,7 @@ Everything else:
     vendored excerpts (redirects for non-normalized names, 404 for a missing project, `releases` being documented as
     deprecated in favour of the PEP 691 index, large projects). PEP 440 ordering is implemented from the summary; compare
     it with the `packaging` library on a corpus.
+163. **Cargo: wildcards, comparators, and a real TOML parser.** Partial requirements (`1.2`) and 0.x semantics are done
+    (docs/cargo.md). Still left alone: wildcards (`1.*`), comparators (`>=1.2`), multi-part requirements (`>=1, <2`),
+    multi-line inline tables and dotted keys (`foo.version = "1"`); the manager is a line scanner, not a TOML parser, so a
+    real parser is the way to widen it safely. The same newest-only target still applies to npm (see 147).

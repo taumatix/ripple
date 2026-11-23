@@ -40,7 +40,10 @@ type App struct {
 	Docker *engine.DockerWatcher
 	// Npm polls the versions of the npm packages the repos use (ecosystem: npm);
 	// nil leaves the feature out.
-	Npm    *engine.NpmWatcher
+	Npm *engine.NpmWatcher
+	// Cargo polls the versions of the crates the repos use (ecosystem: cargo); nil
+	// leaves the feature out.
+	Cargo  *engine.CargoWatcher
 	Secret []byte
 	Log    *slog.Logger
 	// PollEvery is the feed poll and job run period; zero disables the loop (tests call Tick).
@@ -286,6 +289,7 @@ func (a *App) Tick(ctx context.Context) {
 	a.pollActions(ctx)
 	a.pollDocker(ctx)
 	a.pollNpm(ctx)
+	a.pollCargo(ctx)
 	a.pollAdvisories(ctx)
 	a.housekeep(ctx)
 	if _, err := a.Engine.RunDue(ctx); err != nil && ctx.Err() == nil {
@@ -361,6 +365,9 @@ func (a *App) pollLoop(ctx context.Context) {
 			a.jobs.Wake()
 		}
 		if a.pollNpm(ctx) > 0 {
+			a.jobs.Wake()
+		}
+		if a.pollCargo(ctx) > 0 {
 			a.jobs.Wake()
 		}
 		a.housekeep(ctx)
@@ -532,6 +539,21 @@ func (a *App) pollNpm(ctx context.Context) int {
 		a.Log.Error("npm poll", "err", err)
 	case n > 0:
 		a.Log.Info("npm poll enqueued jobs", "jobs", n)
+	}
+	return n
+}
+
+// pollCargo polls the versions of the crates in use and returns how many jobs it enqueued.
+func (a *App) pollCargo(ctx context.Context) int {
+	if a.Cargo == nil {
+		return 0
+	}
+	n, err := a.Cargo.Poll(ctx)
+	switch {
+	case err != nil && ctx.Err() == nil:
+		a.Log.Error("cargo poll", "err", err)
+	case n > 0:
+		a.Log.Info("cargo poll enqueued jobs", "jobs", n)
 	}
 	return n
 }

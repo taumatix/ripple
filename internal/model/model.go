@@ -20,6 +20,10 @@ const DatasourceDocker = "docker"
 // package.json's dependencies, named by the package name (@scope/name for a scoped one).
 const DatasourceNpm = "npm"
 
+// DatasourceCargo is the versions of a crate on crates.io (its sparse index): the
+// requirements of a Cargo.toml's dependencies, named by the crate name.
+const DatasourceCargo = "cargo"
+
 // DatasourceGoToolchain is the Go release train itself: the `go` directive
 // (package PackageGoDirective) and the `toolchain` line (PackageGoToolchain) of a
 // go.mod. They are dependencies of the module on the language, not on a module.

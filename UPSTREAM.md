@@ -37,6 +37,14 @@ upstream:
     verified-against: "docs/vendor/npm excerpts read 2026-11-23; tests use internal/testutil/npm.go, a fake written from them"
     unverified: "any real registry: the %2F encoding of scoped names, 404 or 401/403 for private packages, the exact shape of deprecated, a latest tag that exists, rate limits, abbreviated documents for very large packages (see docs/vendor/npm/README.md); .npmrc and node-semver grammar are read only as far as docs/npm.md says"
     checked: 2026-11-23
+  - name: cargo-sparse-index
+    kind: http-api
+    reference: https://doc.rust-lang.org/cargo/reference/registry-index.html
+    docs: https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html
+    format: "GET {index}/{prefix}/{lowercase name} (1/, 2/, 3/{c}/, {aa}/{bb}/), anonymous; one JSON object per line with vers and yanked"
+    verified-against: "docs/vendor/cargo excerpts read 2026-11-23; tests use internal/testutil/cratesindex.go, a fake written from them"
+    unverified: "any real index: index.crates.io's path rules for mixed-case names, 404 for a missing crate, response size for large crates, conditional requests, rate limits (see docs/vendor/cargo/README.md); TOML is read by a line scanner as far as docs/cargo.md says, not parsed"
+    checked: 2026-11-23
   - name: github-enterprise-server
     kind: http-api
     reference: https://docs.github.com/en/enterprise-server@latest/rest

@@ -221,10 +221,6 @@ Everything else:
 141. **Publish the runner image.** `docker/runner/Dockerfile` is built in the `container-runtimes` CI job and documented, but
     no image is published: build and push it to GHCR on the release train (public, since it holds only upstream
     images; check the package visibility, there is no API for it) and name the tag in docs/sandbox.md.
-142. **Confinement leftovers and sharing.** The confined network has fixed names, so two servers on one container runtime
-    would remove each other's, and a killed server's job containers keep the network alive until they exit (the next
-    start then fails to recreate it). Name it per `RIPPLE_REPLICA` and remove the labelled job containers of that
-    replica at start, then test the kill-and-restart case live.
 148. **npm: regenerate lockfiles offline.** ripple edits package.json and reports the lockfiles it could not refresh
     (`package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, `pnpm-lock.yaml`, bun). The abbreviated metadata carries
     `dist.integrity` and `dist.tarball` per version, so a package-lock v2/v3 entry for a leaf package whose own dependencies did

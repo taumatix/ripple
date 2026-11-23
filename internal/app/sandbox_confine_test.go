@@ -105,3 +105,53 @@ func TestNewSandboxConfineFailureIsAnError(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestConfineNameForAReplica(t *testing.T) {
+	long := strings.Repeat("x", 64)
+	for replica, want := range map[string]string{"": confineName, "a": confineName + "-a", "node-1.eu_west": confineName + "-node-1.eu_west"} {
+		if got := confineNameFor(replica); got != want {
+			t.Errorf("confineNameFor(%q) = %q, want %q", replica, got, want)
+		}
+	}
+	seen := map[string]string{}
+	for _, replica := range []string{long, long + "y", "a b", "a/b", "a:b", "é"} {
+		got := confineNameFor(replica)
+		if !strings.HasPrefix(got, confineName+"-") || len(got)+len("-proxy") > 63 || strings.ContainsAny(got, " /:é") {
+			t.Errorf("confineNameFor(%q) = %q: not a runtime name", replica, got)
+		}
+		if other, dup := seen[got]; dup {
+			t.Errorf("replicas %q and %q share %q", replica, other, got)
+		}
+		seen[got] = replica
+	}
+}
+
+// Two servers on one container runtime, each with its own RIPPLE_REPLICA, each confine and remove their own
+// network: starting or stopping one never touches the other's.
+func TestNewSandboxNamesTheNetworkPerReplica(t *testing.T) {
+	rt := testutil.NewFakeRuntime(t)
+	s := confineServer("podman")
+	s.Replica = "east"
+	_, closeEast, err := newTestSandbox(t, s, rt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s2 := confineServer("podman")
+	s2.Replica = "west"
+	_, closeWest, err := newTestSandbox(t, s2, rt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	all := strings.Join(calls(rt), "\n")
+	for _, want := range []string{"network create --internal --label ripple.job=1 " + confineName + "-east", "network create --internal --label ripple.job=1 " + confineName + "-west",
+		"ps -aq --filter network=" + confineName + "-east"} {
+		if !strings.Contains(all, want) {
+			t.Errorf("missing %q in the runtime calls:\n%s", want, all)
+		}
+	}
+	if strings.Contains(all, "network rm "+confineName+"\n") {
+		t.Errorf("a replica's start removed the unnamed server's network:\n%s", all)
+	}
+	closeEast()
+	closeWest()
+}

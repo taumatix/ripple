@@ -133,6 +133,6 @@ jobs:
           RIPPLE_TEST_CONTAINER_IMAGE: localhost/ripple-runner:ci
         run: |
           set -o pipefail
-          go test -tags containerlive -count=1 -v -timeout 20m -run 'TestContainerRuntimeLive|TestContainerConfinedNetworkLive|TestContainerGitLive|TestServerConfinesContainerNetworkLive' ./internal/sandbox/ ./internal/app/ | tee live-runner.log
+          go test -tags containerlive -count=1 -v -timeout 20m -run 'TestContainerRuntimeLive|TestContainerConfinedNetworkLive|TestContainerGitLive|TestServerConfinesContainerNetworkLive|TestServerConfineSurvivesAKilledServer' ./internal/sandbox/ ./internal/app/ | tee live-runner.log
       - name: no skipped test
         run: "! grep -E -- '--- SKIP' live.log live-runner.log"

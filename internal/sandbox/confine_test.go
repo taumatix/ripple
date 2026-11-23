@@ -10,12 +10,16 @@ import (
 type recorded struct {
 	calls [][]string
 	fail  func(args []string) error
+	out   func(args []string) string
 }
 
 func (r *recorded) run(_ context.Context, args ...string) (string, error) {
 	r.calls = append(r.calls, args)
 	if r.fail != nil {
 		return "", r.fail(args)
+	}
+	if r.out != nil {
+		return r.out(args), nil
 	}
 	return "", nil
 }
@@ -144,7 +148,36 @@ func TestConfineClose(t *testing.T) {
 func TestRemoveConfinementRemovesSidecarThenNetwork(t *testing.T) {
 	r := &recorded{}
 	removeConfinement(context.Background(), "rn", r.run)
-	if len(r.calls) != 2 || !has(r.calls[0], "rm", "-f", "rn-proxy") || !has(r.calls[1], "network", "rm", "rn") {
+	if len(r.calls) != 3 || !has(r.calls[0], "ps", "-aq", "--filter", "network=rn") || !has(r.calls[1], "rm", "-f", "rn-proxy") || !has(r.calls[2], "network", "rm", "rn") {
+		t.Errorf("calls: %v", r.calls)
+	}
+}
+
+// Job containers a killed server left on the network would keep it alive: they are removed first, by id,
+// and only those the runtime lists as attached to this network.
+func TestRemoveConfinementRemovesTheJobContainersOnTheNetworkFirst(t *testing.T) {
+	r := &recorded{out: func(args []string) string {
+		if has(args, "ps") {
+			return "c0ffee\ndeadbeef\n"
+		}
+		return ""
+	}}
+	removeConfinement(context.Background(), "rn", r.run)
+	if len(r.calls) != 4 || !has(r.calls[1], "rm", "-f", "c0ffee", "deadbeef") || !has(r.calls[2], "rm", "-f", "rn-proxy") || !has(r.calls[3], "network", "rm", "rn") {
+		t.Errorf("calls: %v", r.calls)
+	}
+}
+
+// A runtime that cannot list (an old one) still gets the sidecar and the network removed.
+func TestRemoveConfinementWithoutAListStillRemovesTheRest(t *testing.T) {
+	r := &recorded{fail: func(args []string) error {
+		if has(args, "ps") {
+			return errors.New("unknown flag")
+		}
+		return nil
+	}}
+	removeConfinement(context.Background(), "rn", r.run)
+	if !r.has("rm", "-f", "rn-proxy") || !r.has("network", "rm", "rn") {
 		t.Errorf("calls: %v", r.calls)
 	}
 }

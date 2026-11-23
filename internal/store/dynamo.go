@@ -477,8 +477,28 @@ func (d *Dynamo) UpdateJob(ctx context.Context, j model.Job) error {
 // them in (NotBefore, key) order, so the result is what one partition would give. It
 // costs exactly jobShards Queries and reads at most jobShards*limit items.
 func (d *Dynamo) ListDueJobs(ctx context.Context, now time.Time, limit int) ([]model.Job, error) {
+	return d.ListDueJobsExcluding(ctx, now, limit, nil)
+}
+
+// ListDueJobsExcluding is ListDueJobs with a filter expression dropping the named repos'
+// jobs. DynamoDB applies a filter after reading, so the excluded repos' due items are still
+// read (a page of limit items at a time) and not billed back; the exclusion list is the
+// handful of repos whose run is in flight.
+func (d *Dynamo) ListDueJobsExcluding(ctx context.Context, now time.Time, limit int, repos []string) ([]model.Job, error) {
 	if limit <= 0 {
 		return nil, nil
+	}
+	vals := map[string]types.AttributeValue{}
+	var filter *string
+	var names map[string]string
+	if len(repos) > 0 {
+		var conds []string
+		for i, r := range repos {
+			k := fmt.Sprintf(":x%d", i)
+			vals[k] = s(r)
+			conds = append(conds, "#repo <> "+k)
+		}
+		filter, names = aws.String(strings.Join(conds, " AND ")), map[string]string{"#repo": "Repo"}
 	}
 	parts := make([][]model.Job, 0, d.jobShards)
 	for sh := 0; sh < d.jobShards; sh++ {
@@ -486,7 +506,9 @@ func (d *Dynamo) ListDueJobs(ctx context.Context, now time.Time, limit int) ([]m
 		err := d.query(ctx, &dynamodb.QueryInput{
 			IndexName:                 aws.String(gsi1),
 			KeyConditionExpression:    aws.String("GSI1PK = :pk AND GSI1SK <= :max"),
-			ExpressionAttributeValues: map[string]types.AttributeValue{":pk": s(pendingJobsPK(sh)), ":max": s(ts(now) + sep + "\U0010ffff")},
+			FilterExpression:          filter,
+			ExpressionAttributeNames:  names,
+			ExpressionAttributeValues: withVals(vals, map[string]types.AttributeValue{":pk": s(pendingJobsPK(sh)), ":max": s(ts(now) + sep + "\U0010ffff")}),
 			Limit:                     aws.Int32(int32(limit)),
 		}, limit, func(it map[string]types.AttributeValue) error {
 			var a jobAttrs
@@ -502,6 +524,18 @@ func (d *Dynamo) ListDueJobs(ctx context.Context, now time.Time, limit int) ([]m
 		parts = append(parts, part)
 	}
 	return mergeDueJobs(parts, limit), nil
+}
+
+// withVals returns a fresh map holding both, so each shard's query owns its own.
+func withVals(a, b map[string]types.AttributeValue) map[string]types.AttributeValue {
+	out := make(map[string]types.AttributeValue, len(a)+len(b))
+	for k, v := range a {
+		out[k] = v
+	}
+	for k, v := range b {
+		out[k] = v
+	}
+	return out
 }
 
 func (d *Dynamo) GetCursor(ctx context.Context, n string) (string, error) {

@@ -73,11 +73,18 @@ func (r *JobRunner) dispatch(ctx context.Context) {
 	e := r.Engine
 	r.mu.Lock()
 	snap, full := r.gen, r.running >= r.workers()
+	var busy []string
+	for name := range r.inflight {
+		busy = append(busy, name)
+	}
 	r.mu.Unlock()
 	if full || ctx.Err() != nil {
 		return
 	}
-	jobs, err := e.Store.ListDueJobs(ctx, e.now(), dueBatch)
+	// Repos in flight are left out of the listing itself: otherwise one repo with more
+	// due jobs than a batch holds would fill every listing while it runs, and no other
+	// repo's jobs would be seen until it finished.
+	jobs, err := e.Store.ListDueJobsExcluding(ctx, e.now(), e.dueBatch(), busy)
 	if err != nil {
 		if ctx.Err() == nil {
 			e.log().Error("list due jobs", "err", err)

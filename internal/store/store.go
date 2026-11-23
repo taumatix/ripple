@@ -35,15 +35,29 @@ type Store interface {
 	UpdateJob(ctx context.Context, j model.Job) error
 	// ListDueJobs returns pending jobs with NotBefore <= now, oldest first.
 	ListDueJobs(ctx context.Context, now time.Time, limit int) ([]model.Job, error)
+	// ListDueJobsExcluding is ListDueJobs without the jobs of the named repos, applied
+	// before the limit, so repos whose run is in flight cannot fill the batch and hold
+	// back every other repo's jobs.
+	ListDueJobsExcluding(ctx context.Context, now time.Time, limit int, repos []string) ([]model.Job, error)
 
 	// EnqueueEvent persists a received event unless its ID exists; reports whether inserted.
 	EnqueueEvent(ctx context.Context, e model.Event) (bool, error)
-	// ListEvents returns every queued event, lowest Seq first (ties by ID).
+	// ListEvents returns every live (not dead) queued event, lowest Seq first (ties by ID).
 	ListEvents(ctx context.Context) ([]model.Event, error)
-	// UpdateEvent stores Attempts and NotBefore for an existing event.
+	// UpdateEvent stores Attempts, NotBefore, LastError, LastAttemptAt and DeadAt for an
+	// existing event; setting DeadAt moves it out of ListEvents into ListDeadEvents. An
+	// absent ID is not an error.
 	UpdateEvent(ctx context.Context, e model.Event) error
-	// DeleteEvent removes a handled event; an absent ID is not an error.
+	// DeleteEvent removes an event, live or dead; an absent ID is not an error.
 	DeleteEvent(ctx context.Context, id string) error
+	// ListDeadEvents returns the dead-lettered events, earliest DeadAt first (ties by ID).
+	ListDeadEvents(ctx context.Context) ([]model.Event, error)
+	// RequeueDeadEvent makes a dead event live again with Attempts 0 and no delay (LastError
+	// is kept); reports whether a dead event with that ID existed.
+	RequeueDeadEvent(ctx context.Context, id string) (bool, error)
+	// PurgeDeadEvents deletes the dead events whose DeadAt is before the given time and
+	// returns how many.
+	PurgeDeadEvents(ctx context.Context, before time.Time) (int, error)
 
 	GetCursor(ctx context.Context, name string) (string, error)
 	SetCursor(ctx context.Context, name, value string) error

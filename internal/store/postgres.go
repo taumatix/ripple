@@ -251,7 +251,14 @@ func (p *Postgres) UpdateJob(ctx context.Context, j model.Job) error {
 }
 
 func (p *Postgres) ListDueJobs(ctx context.Context, now time.Time, limit int) ([]model.Job, error) {
-	rows, err := p.pool.Query(ctx, `SELECT `+jobCols+` FROM jobs WHERE state='pending' AND not_before <= $1 ORDER BY not_before, key LIMIT $2`, now, limit)
+	return p.ListDueJobsExcluding(ctx, now, limit, nil)
+}
+
+func (p *Postgres) ListDueJobsExcluding(ctx context.Context, now time.Time, limit int, repos []string) ([]model.Job, error) {
+	if repos == nil {
+		repos = []string{}
+	}
+	rows, err := p.pool.Query(ctx, `SELECT `+jobCols+` FROM jobs WHERE state='pending' AND not_before <= $1 AND NOT (repo = ANY($3)) ORDER BY not_before, key LIMIT $2`, now, limit, repos)
 	if err != nil {
 		return nil, wrap("list due jobs", err)
 	}

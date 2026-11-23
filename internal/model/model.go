@@ -91,4 +91,14 @@ type Event struct {
 	// Attempts counts failed handling attempts; NotBefore delays the next one.
 	Attempts  int
 	NotBefore time.Time
+	// LastError and LastAttemptAt describe the latest failed attempt.
+	LastError     string
+	LastAttemptAt time.Time
+	// DeadAt is when the event used up its attempts and was dead-lettered; the zero
+	// value is a live event. A dead event is kept for an operator to list and requeue
+	// (see store.Store), and is never handled until requeued.
+	DeadAt time.Time
 }
+
+// Dead reports whether the event was dead-lettered.
+func (e Event) Dead() bool { return !e.DeadAt.IsZero() }

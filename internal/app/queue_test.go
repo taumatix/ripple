@@ -202,19 +202,117 @@ func TestBacklogIsBoundedPerInstallationAndOverall(t *testing.T) {
 	}
 }
 
-func TestFailedEventIsRetriedThenDropped(t *testing.T) {
+func TestFailedEventIsRetriedThenDeadLettered(t *testing.T) {
 	st, g := store.NewMemory(), newGate()
 	g.fail["flaky"], g.fail["broken"] = 1, 100
 	q := &Queue{Store: st, Process: g.process, MaxAttempts: 3, Backoff: func(int) time.Duration { return time.Millisecond }}
 	startQueue(t, q)
 	_ = q.Add(context.Background(), ev(1, "flaky", "acme/a"), ev(1, "broken", "acme/b"))
 	eventually(t, "flaky handled on retry", func() bool { return g.has("flaky") })
-	eventually(t, "broken given up after MaxAttempts", func() bool { return stored(t, st) == 0 })
+	eventually(t, "broken dead-lettered after MaxAttempts", func() bool { return len(dead(t, st)) == 1 })
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.fail["broken"] != 97 {
 		t.Fatalf("broken attempted %d times, want 3", 100-g.fail["broken"])
 	}
+	d := dead(t, st)[0]
+	if d.ID != "broken" || d.Attempts != 3 || d.LastError != "transient" || d.DeadAt.IsZero() || d.LastAttemptAt.IsZero() {
+		t.Fatalf("dead event keeps its attempts, last error and times: %+v", d)
+	}
+	if n := stored(t, st); n != 0 {
+		t.Fatalf("%d live events left, want none", n)
+	}
+	if q.Len() != 0 {
+		t.Fatalf("queue still holds %d", q.Len())
+	}
+}
+
+func dead(t *testing.T, st store.Store) []model.Event {
+	t.Helper()
+	d, err := st.ListDeadEvents(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return d
+}
+
+// A dead event no longer counts against the backlog caps: it is not work, and a burst of
+// poison events must not turn genuine deliveries away with 503.
+func TestDeadEventsDoNotCountAgainstTheBacklog(t *testing.T) {
+	st, g := store.NewMemory(), newGate()
+	g.fail["bad"] = 100
+	q := &Queue{Store: st, Process: g.process, MaxAttempts: 1, Backlog: 1, InstallationBacklog: 1, Backoff: func(int) time.Duration { return time.Millisecond }}
+	startQueue(t, q)
+	_ = q.Add(context.Background(), ev(1, "bad", "acme/a"))
+	eventually(t, "dead", func() bool { return len(dead(t, st)) == 1 })
+	if err := q.Add(context.Background(), ev(1, "good", "acme/b")); err != nil {
+		t.Fatalf("a dead event filled the backlog of 1: %v", err)
+	}
+	eventually(t, "good handled", func() bool { return g.has("good") })
+}
+
+// An operator requeues a dead event through the store, possibly from another process;
+// the running queue notices on its next rescan and handles it once.
+func TestRequeuedDeadEventIsHandledOnce(t *testing.T) {
+	st, g := store.NewMemory(), newGate()
+	g.fail["bad"] = 3
+	q := &Queue{Store: st, Process: g.process, MaxAttempts: 3, Rescan: 10 * time.Millisecond, Backoff: func(int) time.Duration { return time.Millisecond }}
+	startQueue(t, q)
+	_ = q.Add(context.Background(), ev(1, "bad", "acme/a"))
+	eventually(t, "dead", func() bool { return len(dead(t, st)) == 1 })
+	time.Sleep(50 * time.Millisecond) // several rescans: a dead event must stay dead
+	if g.has("bad") || len(dead(t, st)) != 1 {
+		t.Fatal("a dead event was handled without a requeue")
+	}
+	if ok, err := st.RequeueDeadEvent(context.Background(), "bad"); err != nil || !ok {
+		t.Fatalf("requeue: %v %v", ok, err)
+	}
+	eventually(t, "handled after requeue", func() bool { return g.has("bad") })
+	eventually(t, "store drained", func() bool { return stored(t, st) == 0 && len(dead(t, st)) == 0 })
+	time.Sleep(50 * time.Millisecond)
+	if n := len(g.handled()); n != 1 {
+		t.Fatalf("handled %d times, want once", n)
+	}
+	if q.Len() != 0 {
+		t.Fatalf("queue holds %d", q.Len())
+	}
+}
+
+// Rescanning must not hand an event to a worker that already has it.
+func TestRescanDoesNotDuplicateQueuedEvents(t *testing.T) {
+	st, g := store.NewMemory(), newGate()
+	q := &Queue{Store: st, Process: g.process, Workers: 1, PerInstallation: 1, Rescan: 5 * time.Millisecond}
+	startQueue(t, q)
+	g.hold("acme/a")
+	_ = q.Add(context.Background(), ev(1, "1", "acme/a"), ev(1, "2", "acme/b"))
+	time.Sleep(60 * time.Millisecond)
+	g.release("acme/a")
+	eventually(t, "both handled", func() bool { return len(g.handled()) == 2 })
+	time.Sleep(30 * time.Millisecond)
+	if fmt.Sprint(g.handled()) != "[1 2]" {
+		t.Fatalf("handled %v", g.handled())
+	}
+}
+
+func TestDeadEventsArePurgedAfterRetention(t *testing.T) {
+	st, g := store.NewMemory(), newGate()
+	g.fail["bad"], g.fail["bad2"] = 100, 100
+	now := time.Date(2026, 11, 23, 10, 0, 0, 0, time.UTC)
+	var mu sync.Mutex
+	clock := func() time.Time { mu.Lock(); defer mu.Unlock(); return now }
+	q := &Queue{Store: st, Process: g.process, MaxAttempts: 1, Rescan: 5 * time.Millisecond, DeadRetention: 48 * time.Hour, Now: clock}
+	startQueue(t, q)
+	_ = q.Add(context.Background(), ev(1, "bad", "acme/a"))
+	eventually(t, "dead", func() bool { return len(dead(t, st)) == 1 })
+	mu.Lock()
+	now = now.Add(24 * time.Hour)
+	mu.Unlock()
+	_ = q.Add(context.Background(), ev(1, "bad2", "acme/b"))
+	eventually(t, "second dead", func() bool { return len(dead(t, st)) == 2 })
+	mu.Lock()
+	now = now.Add(25 * time.Hour) // the first is now 49h old, the second 25h
+	mu.Unlock()
+	eventually(t, "only the old one purged", func() bool { d := dead(t, st); return len(d) == 1 && d[0].ID == "bad2" })
 }
 
 func TestRestartResumesQueuedEvents(t *testing.T) {

@@ -100,6 +100,22 @@ func TestServerEventQueue(t *testing.T) {
 	}
 }
 
+func TestServerEventDeadRetention(t *testing.T) {
+	s, err := LoadServer(env(base))
+	if err != nil || s.EventDeadRetention != 30*24*time.Hour {
+		t.Fatalf("default: %v, %v", s.EventDeadRetention, err)
+	}
+	s, err = LoadServer(env(with("RIPPLE_EVENT_DEAD_RETENTION", "7d")))
+	if err != nil || s.EventDeadRetention != 7*24*time.Hour {
+		t.Fatalf("set: %v, %v", s.EventDeadRetention, err)
+	}
+	for _, v := range []string{"0", "soon"} {
+		if _, err := LoadServer(env(with("RIPPLE_EVENT_DEAD_RETENTION", v))); err == nil {
+			t.Errorf("RIPPLE_EVENT_DEAD_RETENTION=%s accepted", v)
+		}
+	}
+}
+
 func TestServerSandbox(t *testing.T) {
 	s, err := LoadServer(env(base))
 	if err != nil || s.Sandbox != "none" {

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -129,12 +130,16 @@ func (m *Memory) UpdateJob(_ context.Context, j model.Job) error {
 	return nil
 }
 
-func (m *Memory) ListDueJobs(_ context.Context, now time.Time, limit int) ([]model.Job, error) {
+func (m *Memory) ListDueJobs(ctx context.Context, now time.Time, limit int) ([]model.Job, error) {
+	return m.ListDueJobsExcluding(ctx, now, limit, nil)
+}
+
+func (m *Memory) ListDueJobsExcluding(_ context.Context, now time.Time, limit int, repos []string) ([]model.Job, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []model.Job
 	for _, j := range m.jobs {
-		if j.State == model.JobPending && !j.NotBefore.After(now) {
+		if j.State == model.JobPending && !j.NotBefore.After(now) && !slices.Contains(repos, j.Repo) {
 			out = append(out, j)
 		}
 	}

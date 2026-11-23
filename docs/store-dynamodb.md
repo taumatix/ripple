@@ -12,6 +12,7 @@ Billing is on-demand. `Store.EnsureTable` creates both.
 | cursor | `CURSOR#<name>` | `META` | | |
 | shard marks | `CONFIG#shards` | `META` | | |
 | event | `EVENT#<id>` | `META` | `EVENTS` | `<seq, 20 digits>\x1f<id>` |
+| dead event | `EVENT#<id>` | `META` | `EVENTS#dead` | `<dead_at, fixed width>\x1f<id>` |
 
 ## Queries
 
@@ -22,15 +23,26 @@ Billing is on-demand. `Store.EnsureTable` creates both.
 | Replace a repo's dependencies | The query above, then a diffed BatchWrite (puts for new, deletes for gone) |
 | Which jobs are due? | One Query per job shard on `gsi1`, `GSI1PK = JOBS#pending[#<n>]`, `GSI1SK <= <now>`, each limited to the caller's limit; the results are merged in `(not_before, key)` order |
 | Job by key / cursor / repo | GetItem, strongly consistent |
-| Queued webhook events, oldest first (read once at start) | Query `gsi1`, `GSI1PK = EVENTS` |
+| Queued webhook events, oldest first (at start, then every 30s to find requeued ones) | Query `gsi1`, `GSI1PK = EVENTS` |
+| Dead events, earliest first (`ripple events list`) | Query `gsi1`, `GSI1PK = EVENTS#dead` |
+| Purge dead events older than `t` | Query `gsi1`, `GSI1PK = EVENTS#dead`, `GSI1SK < ts(t)`, then a delete conditional on `GSI1PK = EVENTS#dead` |
+| Requeue a dead event | strongly consistent GetItem, then a Put conditional on `GSI1PK = EVENTS#dead` that moves it back to `EVENTS` with attempts 0 |
 
 ## Trade-offs
 
 - **One partition for the event queue.** Every queued event shares `GSI1PK = EVENTS`. The
   receiver caps the backlog (`RIPPLE_EVENT_BACKLOG`, default 10000), and the index is read only
-  at start, so the partition stays far below its throughput limit. Being a GSI, it may miss an
+  at start and by a 30 second rescan, so the partition stays far below its throughput limit.
+  A dead event moves to `EVENTS#dead` (an additive item attribute set, old items read as live)
+  and out of the queue's partition, so it neither counts against the backlog caps nor is
+  scanned by the rescan. Being a GSI, it may miss an
   event written a moment before a restart; that event is still in the table and is picked up by
   the next start.
+
+- **Due jobs excluding in-flight repos filter after the read.** `ListDueJobsExcluding` applies the
+  repo exclusion as a `FilterExpression`, which DynamoDB evaluates after `Limit`, so the store pages
+  until it has the limit; a repo with a very large due backlog still costs reads, though it no longer
+  starves the others.
 
 - **Eventual consistency.** A GSI is always eventually consistent; `ConsistentRead` is
   not available on it. A dependency written a moment before a release lands may be missed

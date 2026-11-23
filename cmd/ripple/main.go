@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"runtime/debug"
 	"syscall"
+	"time"
 	_ "time/tzdata"
 
 	"github.com/taumatix/ripple/internal/app"
@@ -23,6 +24,9 @@ const usage = `usage:
   ripple config validate [FILE]         check a repo file (default .ripple.yaml)
   ripple config validate --server       check the RIPPLE_* environment
   ripple config example                 print a valid example file
+  ripple events list                    list events that failed 3 times and were kept (dead letters)
+  ripple events requeue ID|--all        make a dead event (or every one) live again; a running server picks it up
+  ripple events purge [AGE]             delete dead events older than AGE (default: the retention, 30d; "0" deletes all)
   ripple version                        print the module version this binary was built from
 `
 
@@ -40,6 +44,8 @@ func run(args []string, out, errw io.Writer, getenv func(string) string) int {
 		return 0
 	case len(args) >= 2 && args[0] == "config" && args[1] == "validate":
 		return validate(args[2:], out, errw, getenv)
+	case len(args) >= 1 && args[0] == "events":
+		return events(args[1:], out, errw, getenv)
 	case len(args) == 1 && args[0] == "version":
 		fmt.Fprintln(out, "ripple", buildVersion())
 		return 0
@@ -132,4 +138,61 @@ func serve(getenv func(string) string, errw io.Writer) error {
 	}
 	log.Info("listening", "addr", ln.Addr().String(), "store", s.Store)
 	return a.Run(ctx, ln)
+}
+
+// events is the operator's view of the dead-letter queue. It talks to the store the
+// server uses, named by the same RIPPLE_STORE variables, so it needs no HTTP endpoint and
+// no credentials beyond those of the store.
+func events(args []string, out, errw io.Writer, getenv func(string) string) int {
+	if len(args) == 0 || (args[0] != "list" && args[0] != "requeue" && args[0] != "purge") ||
+		(args[0] == "list" && len(args) != 1) || (args[0] == "requeue" && len(args) != 2) || len(args) > 2 {
+		fmt.Fprint(errw, usage)
+		return 2
+	}
+	// The store settings are the server's; the secrets that only serve() needs are not
+	// required here.
+	s, err := config.LoadServer(func(k string) string {
+		if v := getenv(k); v != "" {
+			return v
+		}
+		switch k {
+		case "RIPPLE_WEBHOOK_SECRET", "RIPPLE_GITHUB_APP_ID", "RIPPLE_GITHUB_KEY_FILE":
+			return "-"
+		}
+		return ""
+	})
+	if err != nil {
+		fmt.Fprintln(errw, "invalid server configuration:\n"+err.Error()+"\n\nVariables:\n"+config.ServerEnv)
+		return 1
+	}
+	retention := s.EventDeadRetention
+	if args[0] == "purge" && len(args) == 2 {
+		if retention, err = config.ParseDuration(args[1]); err != nil {
+			fmt.Fprintln(errw, "ripple:", err)
+			return 2
+		}
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	st, err := app.OpenStore(ctx, s)
+	if err != nil {
+		fmt.Fprintln(errw, "ripple:", err)
+		return 1
+	}
+	defer st.Close()
+	switch {
+	case args[0] == "list":
+		err = app.EventsList(ctx, st, out)
+	case args[0] == "requeue" && args[1] == "--all":
+		err = app.EventsRequeueAll(ctx, st, out)
+	case args[0] == "requeue":
+		err = app.EventsRequeue(ctx, st, args[1], out)
+	default:
+		err = app.EventsPurge(ctx, st, time.Now(), retention, out)
+	}
+	if err != nil {
+		fmt.Fprintln(errw, "ripple:", err)
+		return 1
+	}
+	return 0
 }

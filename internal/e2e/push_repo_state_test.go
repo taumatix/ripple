@@ -50,13 +50,18 @@ func appOnMain(t *testing.T, e *env) {
 
 // A missed `repository.edited` delivery is repaired by the next push.
 func TestPushHealsDefaultBranch(t *testing.T) {
-	forEach(t, func(t *testing.T, st store.Store) {
-		for name, ref := range map[string]string{"push to the new default": "refs/heads/trunk", "push to another branch": "refs/heads/feature"} {
-			t.Run(name, func(t *testing.T) {
+	// One fresh store per case: healing stores the new branch, and a second case on the same store
+	// would find it already healed and never rescan.
+	for _, c := range []struct{ name, ref string }{
+		{"push to the new default", "refs/heads/trunk"},
+		{"push to another branch", "refs/heads/feature"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			forEach(t, func(t *testing.T, st store.Store) {
 				e := newEnv(t, st, defaultLimits())
 				appOnMain(t, e)
 				moveToTrunk(e)
-				if code := e.pushPayload("acme/app", ref, "trunk", 11, []string{"README.md"}, ""); code != http.StatusAccepted {
+				if code := e.pushPayload("acme/app", c.ref, "trunk", 11, []string{"README.md"}, ""); code != http.StatusAccepted {
 					t.Fatalf("push: %d", code)
 				}
 				e.eventually("rescan against trunk", func() bool { return len(e.deps("acme/app")) == 2 })
@@ -65,14 +70,14 @@ func TestPushHealsDefaultBranch(t *testing.T) {
 				}
 				// Healed once: the same claim again costs nothing.
 				before := e.scans("acme/app")
-				e.pushPayload("acme/app", ref, "trunk", 11, []string{"README.md"}, "")
+				e.pushPayload("acme/app", c.ref, "trunk", 11, []string{"README.md"}, "")
 				time.Sleep(300 * time.Millisecond)
 				if n := e.scans("acme/app") - before; n != 0 {
 					t.Errorf("an agreeing push cost %d platform calls", n)
 				}
 			})
-		}
-	})
+		})
+	}
 }
 
 // The payload only says that the stored branch may be wrong. The value stored is what

@@ -529,7 +529,11 @@ func (a *App) claimDelivery(ctx context.Context, key string) (fresh bool, releas
 	}, nil
 }
 
+// nowTime reads the queue's clock. Queue.init (idempotent, under the queue's mutex) fills in a
+// nil Now, so calling it first orders this read after that write even when a delivery arrives
+// while Queue.Run is still starting.
 func (a *App) nowTime() time.Time {
+	a.Queue.init()
 	if a.Queue.Now != nil {
 		return a.Queue.Now()
 	}

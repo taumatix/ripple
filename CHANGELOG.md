@@ -72,6 +72,7 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
 
 ### Fixed
 - Container backends: a command that timed out left its container behind, stopped, about half the time under Apple's CLI (`--rm` is the killed client's job); the reaper now always removes it. The live test checks only its own container and reports debris from other runs.
+- CI: the `test` job piped `go test` into `tee` without `pipefail`, so failing tests never turned it red; it now runs with `set -o pipefail`. Data race fixed: a webhook delivery read `Queue.Now` (`App.nowTime`, from `claimDelivery`) while `Queue.Run` filled in the queue defaults; `nowTime` now goes through the idempotent, mutex-guarded `Queue.init`. Regression test `TestDeliveryWhileQueueStartsDoesNotRace`.
 
 ### Security
 - OS-level sandbox for `go` and local `git` (`RIPPLE_SANDBOX`: `none` (default), `auto`, `seatbelt`, `bwrap`).

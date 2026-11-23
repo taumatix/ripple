@@ -298,10 +298,10 @@ Everything else:
 137. **One image with git and a pinned Go.** The second half of the old entry 39: the runners are verified with a
     `go`-only image. Document and publish an image carrying both `git` and a pinned Go so `GOTOOLCHAIN=local` always
     satisfies a repo's `go` line, and run the git steps through the live job.
-138. **The `test` CI job hides failing tests.** Its step pipes `go test ... | tee test.log` without `set -o pipefail`,
-    so a failing test leaves the job green (found 2026-11-23 on PR #53: with `pipefail` the job failed on 15 `--- FAIL`
-    lines in `internal/e2e`: `TestPushHealsDefaultBranch` (memory, postgres and dynamodb subtests, about 30 s timeouts),
-    `TestKilledReplicaIsTakenOverWithOnePullRequest/dynamodb`, `TestFencedOutReplicaCannotWriteTheJobOrOpenASecondPR/dynamodb`,
-    `TestRepoFileIgnoreGroupsAutomerge/dynamodb`, and a `WARNING: DATA RACE` between `App.nowTime` and `App.claimDelivery`
-    in `internal/app/app.go`). The same unchanged step also passed a real failure of the fake-runtime container e2e test
-    on podman earlier on that PR. Fix those, then add `set -o pipefail`. The new `container-runtimes` job has it.
+139. **Direct `waitRepo` callers in `internal/e2e` can still act before the first scan ends.** Entry 138 found that
+    `env.install` returned once the repo row existed, while its scan and dependency backfill were still running, so tests
+    polling right after saw no dependents (fixed: `install` now waits for the event queue to drain). About fifteen tests
+    call `waitRepo` directly after a webhook and then act on dependencies; none failed in a green run on every store, but
+    each has the same window. Audit them (wait for the scan log line or `e.deps`), and make the e2e suite run with
+    `-count=2` in CI once the container-runtimes job is not the long pole. The earlier podman fake-runtime container
+    failure that CI missed on PR #53 was not reproduced; with `pipefail` the `container-runtimes` jobs are green.

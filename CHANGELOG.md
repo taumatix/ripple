@@ -29,6 +29,11 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
 
 ### Added
 - Gitea and Forgejo host (`RIPPLE_GITEA_*`): one client, flavour detected from `/api/v1/version`, repo discovery by listing plus push webhooks, "merge when checks succeed". Written from vendored docs and a fake, not a real instance; see [docs/platform-gitea.md](docs/platform-gitea.md).
+- GitLab (gitlab.com and self-managed) as a host, enabled by `RIPPLE_GITLAB_TOKEN` and/or `RIPPLE_GITLAB_TOKENS`
+  (per-group and per-project access tokens, longest scope wins, each with its own rate limit). Merge requests
+  (drafts as `Draft:`, labels), merge when the pipeline succeeds, push webhooks authenticated by secret token or
+  signing token at `/webhook/gitlab`, projects found by membership listing, subgroups of any depth. Written from
+  the vendored docs and **not yet run against a real GitLab**: see [docs/platform-gitlab.md](docs/platform-gitlab.md).
 - A major bump now also rewrites `//go:generate go run <package>` lines and canonical `// import "..."`
   comments, and lists directives that still mention the old path in the PR body. `manager.RewriteGo` returns
   that report; `RewriteGoImports` keeps its signature.

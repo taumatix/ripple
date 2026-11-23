@@ -48,6 +48,16 @@ upstream:
     webhooks: [push, repository, "signature X-Forgejo-Signature = hex HMAC-SHA256(body); X-Gitea-* and X-Hub-Signature-256 also accepted"]
     unverified: "whether Forgejo sends X-Hub-Signature-256 (documented sample shows only X-Forgejo-Signature); Forgejo before 7 detection; rate-limit shape; the fake is written from docs, not recorded"
     checked: 2026-11-23
+  - name: gitlab-rest-api
+    kind: http-api
+    reference: https://docs.gitlab.com/api/rest/
+    api-version: "v4"
+    docs-pinned: "GitLab 19.7.0-pre, doc/ at gitlab-org/gitlab master, vendored in docs/vendor/gitlab"
+    used: [GET /projects?membership=true, GET and POST /projects/{url-encoded path}/merge_requests (Draft: title prefix, labels), PUT /projects/{id}/merge_requests/{iid}/merge (auto_merge, merge_when_pipeline_succeeds)]
+    auth: "Authorization: Bearer <personal, project or group access token>; git basic auth oauth2:<token>"
+    webhooks: [Push Hook, header X-Gitlab-Token or Standard Webhooks signature (webhook-id, webhook-timestamp, webhook-signature = v1,base64(HMAC-SHA256(key, id.timestamp.body)), key from whsec_ token)]
+    unverified: "everything: no real GitLab instance was available. Request and response shapes, the 429 Retry-After handling, auto_merge acceptance and the signature scheme are from the vendored docs; the fake GitLab in internal/testutil is written from them, not recorded. The signature vector was computed with openssl, not taken from GitLab"
+    checked: 2026-11-23
 ```
 
 Not pinned, because they are not wire contracts: `git` (any version with `GIT_CONFIG_COUNT`,

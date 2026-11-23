@@ -21,6 +21,8 @@ const maxPagesPerPoll = 100
 type Watcher struct {
 	Engine *Engine
 	Feed   feed.Feed
+
+	elect election // PollElected's claim on the feed
 }
 
 // Poll drains the feed from the stored cursor and returns how many jobs were enqueued.

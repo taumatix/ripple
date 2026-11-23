@@ -791,6 +791,89 @@ func Run(t *testing.T, mk func(t *testing.T) store.Store) {
 		}
 	})
 
+	t.Run("fenced cursor and event writes", func(t *testing.T) {
+		s := mk(t)
+		const ttl = 400 * time.Millisecond
+		at := time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC)
+		evt := model.Event{ID: "e1", Seq: 1, Kind: "push", Repo: "acme/web", NotBefore: at}
+		if _, err := s.EnqueueEvent(ctx, evt); err != nil {
+			t.Fatal(err)
+		}
+		a, ok, err := s.AcquireLease(ctx, "event:e1", "A", ttl)
+		if err != nil || !ok {
+			t.Fatalf("acquire: %v %v", ok, err)
+		}
+		// The holder's writes land.
+		if err := s.SetCursorFenced(ctx, "paused:acme/web", "1", a); err != nil {
+			t.Fatalf("holder's cursor write: %v", err)
+		}
+		if v, _ := s.GetCursor(ctx, "paused:acme/web"); v != "1" {
+			t.Fatalf("cursor = %q", v)
+		}
+		retry := evt
+		retry.Attempts, retry.LastError, retry.NotBefore = 1, "boom", at.Add(time.Minute)
+		if err := s.UpdateEventFenced(ctx, retry, a); err != nil {
+			t.Fatalf("holder's event update: %v", err)
+		}
+		if got, _, _ := s.GetEvent(ctx, "e1"); got.Attempts != 1 || got.LastError != "boom" {
+			t.Fatalf("holder's update lost: %+v", got)
+		}
+		dead := retry
+		dead.DeadAt = at.Add(time.Hour)
+		if err := s.UpdateEventFenced(ctx, dead, a); err != nil {
+			t.Fatalf("holder's dead-letter: %v", err)
+		}
+		if live, _ := s.ListEvents(ctx); len(live) != 0 {
+			t.Fatalf("a dead-lettered event is still live: %+v", live)
+		}
+		if d, _ := s.ListDeadEvents(ctx); len(d) != 1 {
+			t.Fatalf("dead events = %+v", d)
+		}
+		// An event that is already gone is a no-op for the holder, as in UpdateEvent.
+		if err := s.UpdateEventFenced(ctx, model.Event{ID: "gone", Seq: 2, Repo: "acme/web", NotBefore: at}, a); err != nil {
+			t.Fatalf("update of a missing event: %v", err)
+		}
+		if _, ok, _ := s.GetEvent(ctx, "gone"); ok {
+			t.Fatal("update of a missing event created it")
+		}
+		// A stalls past its ttl; B takes the lease over. A's late writes are refused.
+		time.Sleep(ttl + 300*time.Millisecond)
+		b, ok, err := s.AcquireLease(ctx, "event:e1", "B", ttl)
+		if err != nil || !ok {
+			t.Fatalf("takeover: %v %v", ok, err)
+		}
+		if err := s.SetCursorFenced(ctx, "paused:acme/web", "stale", a); !errors.Is(err, store.ErrLeaseLost) {
+			t.Fatalf("displaced cursor write: %v, want ErrLeaseLost", err)
+		}
+		if v, _ := s.GetCursor(ctx, "paused:acme/web"); v != "1" {
+			t.Fatalf("stale cursor write landed: %q", v)
+		}
+		stale := dead
+		stale.Attempts, stale.DeadAt = 9, time.Time{}
+		if err := s.UpdateEventFenced(ctx, stale, a); !errors.Is(err, store.ErrLeaseLost) {
+			t.Fatalf("displaced event update: %v, want ErrLeaseLost", err)
+		}
+		if live, _ := s.ListEvents(ctx); len(live) != 0 {
+			t.Fatalf("stale update revived the event: %+v", live)
+		}
+		if err := s.DeleteEventFenced(ctx, "e1", a); !errors.Is(err, store.ErrLeaseLost) {
+			t.Fatalf("displaced delete: %v, want ErrLeaseLost", err)
+		}
+		if _, ok, _ := s.GetEvent(ctx, "e1"); !ok {
+			t.Fatal("stale delete removed the event")
+		}
+		if err := s.DeleteEventFenced(ctx, "e1", b); err != nil {
+			t.Fatalf("new holder's delete: %v", err)
+		}
+		if _, ok, _ := s.GetEvent(ctx, "e1"); ok {
+			t.Fatal("holder's delete did not remove the event")
+		}
+		// Deleting what is gone is not an error for the holder.
+		if err := s.DeleteEventFenced(ctx, "e1", b); err != nil {
+			t.Fatalf("second delete: %v", err)
+		}
+	})
+
 	t.Run("lease contention", func(t *testing.T) {
 		s := mk(t)
 		const racers, rounds = 6, 8

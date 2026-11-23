@@ -172,7 +172,7 @@ func (e *Engine) reconcileRepo(ctx context.Context, v *advisory.Vuln, repoName s
 	if len(stale) == 0 {
 		return false
 	}
-	release := e.tryRepo(ctx, repoName)
+	hold, release := e.tryRepo(ctx, repoName)
 	if release == nil {
 		e.log().Warn("osv: repo busy; the correction is retried on a later poll", "repo", repoName, "id", v.ID)
 		if err := e.indexAdd(ctx, advisoryRetryCursor, v.ID); err != nil {
@@ -197,7 +197,7 @@ func (e *Engine) reconcileRepo(ctx context.Context, v *advisory.Vuln, repoName s
 		switch cur.State {
 		case model.JobPending:
 			cur.State, cur.Reason = model.JobSkipped, reason
-			if err := e.Store.UpdateJob(ctx, cur); err != nil {
+			if err := e.updateJob(ctx, hold, cur); err != nil {
 				e.log().Warn("osv: skip corrected job", "job", cur.Key, "err", err)
 				continue
 			}
@@ -264,13 +264,14 @@ func (e *Engine) corrected(v *advisory.Vuln, j model.Job, deps []model.Dependenc
 
 // tryRepo takes the repo's in-process lock and lease for a short job of the advisory
 // poller, which must not wait out a PR run that may take minutes. It returns nil when
-// the repo stays busy for correctWait (or the lease cannot be read).
-func (e *Engine) tryRepo(ctx context.Context, name string) (release func()) {
+// the repo stays busy for correctWait (or the lease cannot be read). The returned hold
+// fences the caller's job writes on the repo lease (see updateJob).
+func (e *Engine) tryRepo(ctx context.Context, name string) (hold *repoLease, release func()) {
 	m := e.repoMutex(name)
 	deadline := time.Now().Add(correctWait)
 	for !m.TryLock() {
 		if time.Now().After(deadline) || ctx.Err() != nil {
-			return nil
+			return nil, nil
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -279,9 +280,9 @@ func (e *Engine) tryRepo(ctx context.Context, name string) (release func()) {
 	hold, err := e.acquireRepo(wctx, name, true)
 	if err != nil || hold == nil {
 		m.Unlock()
-		return nil
+		return nil, nil
 	}
-	return func() {
+	return hold, func() {
 		hold.Release()
 		m.Unlock()
 	}

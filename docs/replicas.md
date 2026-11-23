@@ -57,9 +57,9 @@ local clock.
 | Clock skew | Postgres: none (store time). DynamoDB: absorbed up to the skew margin; beyond it a lease may be taken early, which is safe by the idempotent PR but wasteful. |
 | Same event delivered to two replicas | The second fails to take `event:<id>` and holds the entry for ttl/3, then finds it gone and drops it. |
 | Stale listing of due jobs | Re-read under the lease; finished jobs are skipped. |
-| Two replicas poll the release feed | Safe: enqueueing a job is insert-if-absent. |
+| Two replicas poll the release feed | One replica is elected (lease `feed:<name>`, ttl twice the poll interval) and polls; the others skip and take over once its claim lapses or it steps down on shutdown. Safe even if two poll: enqueueing a job is insert-if-absent. Only the Go module feed is elected; the toolchain, Actions and Docker pollers still run on every replica. |
 | Events of one repo on different replicas | A claimed event asks the store (`HasOlderEvent`) for an older live event of the same repo and, if there is one, is released and held for ttl/3. Holds as far as replica clocks agree (`Seq` is the receiver's clock) and, on DynamoDB, as far as `gsi1` is current (see ROADMAP). |
-| Stale writer after a lost lease | The runner's job writes go through `UpdateJobFenced`: the write applies only while the lease name, owner and token are unchanged, and is refused with `ErrLeaseLost` otherwise. The advisory pass and event writes are not fenced yet (see ROADMAP). |
+| Stale writer after a lost lease | The runner's job writes go through `UpdateJobFenced`: the write applies only while the lease name, owner and token are unchanged, and is refused with `ErrLeaseLost` otherwise. The advisory pass's job advance, a queue replica's event update and delete (`UpdateEventFenced`, `DeleteEventFenced`, on the `event:<id>` lease) and the cursor writes of pause, resume, remove and rename (`SetCursorFenced`, on the repo lease) are fenced the same way, one atomic statement or transaction per store. Not fenced, because idempotent: `ForgetRename`, `AdoptRepoID` and the sweep memo cursors, which write the same value whoever runs them. |
 | Rename, pause, resume, remove, dashboard writes | Take the repo lease (rename takes two, in sorted order) and wait for a holder to finish. The dashboard flush skips a repo another replica holds; the holder syncs it when its run ends. |
 
 ## Verification
@@ -68,6 +68,14 @@ The shared store suite (`internal/store/storetest`) covers exclusion, renewal, t
 every store, plus the fenced job update, the older-event query and a contention race (6 goroutines, 8 rounds,
 exactly one holder at a time and no lost update); `internal/e2e/replicas_test.go` runs two engines on one store
 and one fake GitHub, asserts one PR per repo, kills a replica between push and PR to assert takeover with exactly
-one PR, and stalls a replica past its lease to assert its late job write is refused and it opens no second PR. Those run on the
+one PR, and stalls a replica past its lease to assert its late job write is refused and it opens no second PR. `internal/e2e/replicas_feed_test.go` asserts that of two replicas one polls the feed and the other takes over when it steps down; the engine and app tests assert that a stale replica cannot write cursors, advance an advisory job or finish an event. Those run on the
 memory store and the in-process DynamoDB locally; Postgres runs in CI. Not verified: a real Postgres or
 DynamoDB under real contention, or real clock skew.
+
+## Observing replicas
+
+The service has no metrics endpoint. `GET /replica` on the webhook port answers one replica as JSON:
+`replica` (its name), `feed_poller` (whether it holds the feed election), `lease_takeovers` (leases this
+process took over from a holder that died or stalled since it started; also logged as `lease taken over`) and
+`lease_ttl_seconds`. A count of live replicas is not available: no replica can list the leases of the others
+(see ROADMAP).

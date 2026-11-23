@@ -431,7 +431,7 @@ func (q *Queue) start(ctx context.Context, e *entry) {
 		q.mu.Lock()
 		e.ev = ev
 		q.mu.Unlock()
-		q.finish(ctx, e, err)
+		q.finish(ctx, e, held, err)
 	}()
 }
 
@@ -510,7 +510,7 @@ func (q *Queue) standDown(e *entry, ev model.Event, hold time.Time, drop bool) {
 	q.poke()
 }
 
-func (q *Queue) finish(ctx context.Context, e *entry, err error) {
+func (q *Queue) finish(ctx context.Context, e *entry, held *store.Held, err error) {
 	ev := e.ev
 	remove := false
 	switch {
@@ -528,7 +528,7 @@ func (q *Queue) finish(ctx context.Context, e *entry, err error) {
 			// again after a restart, which is the at-least-once side to err on.
 			ev.DeadAt = now
 			q.Log.Error("event failed; dead-lettered", "event", ev.ID, "kind", ev.Kind, "repo", ev.Repo, "attempts", ev.Attempts, "err", err)
-			if uerr := q.Store.UpdateEvent(context.WithoutCancel(ctx), ev); uerr != nil {
+			if uerr := q.updateEvent(ctx, held, ev); uerr != nil {
 				q.Log.Error("persist dead event", "event", ev.ID, "err", uerr)
 			}
 			q.mu.Lock()
@@ -544,13 +544,13 @@ func (q *Queue) finish(ctx context.Context, e *entry, err error) {
 		}
 		ev.NotBefore = now.Add(q.Backoff(ev.Attempts))
 		q.Log.Warn("event failed; will retry", "event", ev.ID, "kind", ev.Kind, "repo", ev.Repo, "attempt", ev.Attempts, "retry_at", ev.NotBefore, "err", err)
-		if uerr := q.Store.UpdateEvent(context.WithoutCancel(ctx), ev); uerr != nil {
+		if uerr := q.updateEvent(ctx, held, ev); uerr != nil {
 			q.Log.Error("persist event retry", "event", ev.ID, "err", uerr)
 		}
 	}
 	if remove {
 		// At least once: if this delete fails the event is handled again after a restart.
-		if derr := q.Store.DeleteEvent(context.WithoutCancel(ctx), ev.ID); derr != nil {
+		if derr := q.deleteEvent(ctx, held, ev.ID); derr != nil {
 			q.Log.Error("delete handled event", "event", ev.ID, "err", derr)
 		}
 	}
@@ -565,6 +565,29 @@ func (q *Queue) finish(ctx context.Context, e *entry, err error) {
 		q.drop(e)
 	}
 	q.poke()
+}
+
+// updateEvent persists an event's outcome under the event lease: the write applies only
+// while held is still this replica's claim, so one that stalled past its lease cannot
+// overwrite what the new holder decided. A refused write is not an error to retry; the
+// new holder's outcome stands.
+func (q *Queue) updateEvent(ctx context.Context, held *store.Held, ev model.Event) error {
+	err := q.Store.UpdateEventFenced(context.WithoutCancel(ctx), ev, held.Lease())
+	if errors.Is(err, store.ErrLeaseLost) {
+		q.Log.Warn("event lease lost; its outcome is left to the new holder", "event", ev.ID, "repo", ev.Repo)
+		return nil
+	}
+	return err
+}
+
+// deleteEvent removes a handled event under the event lease; see updateEvent.
+func (q *Queue) deleteEvent(ctx context.Context, held *store.Held, id string) error {
+	err := q.Store.DeleteEventFenced(context.WithoutCancel(ctx), id, held.Lease())
+	if errors.Is(err, store.ErrLeaseLost) {
+		q.Log.Warn("event lease lost; its outcome is left to the new holder", "event", id)
+		return nil
+	}
+	return err
 }
 
 // drop removes e from its installation's queue; q.mu held.

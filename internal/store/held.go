@@ -36,10 +36,10 @@ func Hold(ctx context.Context, s Leases, log *slog.Logger, name, owner string, t
 	if err != nil || !ok {
 		return nil, err
 	}
-	if l.Token > 1 && log != nil {
+	if l.Token > 1 {
 		// Release deletes the row, so a token above 1 means the previous holder did not give
 		// the name up: it died or stalled past its ttl.
-		log.Info("lease taken over", "lease", name, "owner", owner, "token", l.Token)
+		NoteTakeover(log, l, owner)
 	}
 	h := &Held{s: s, ttl: ttl, log: log, lease: l, stop: make(chan struct{})}
 	h.Ctx, h.cancel = context.WithCancelCause(ctx)

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"golang.org/x/mod/module"
 
@@ -232,11 +233,13 @@ func (e *Engine) applyAdvisory(ctx context.Context, v *advisory.Vuln, note advis
 			return n, err
 		}
 		if found && j.State == model.JobPending && j.NotBefore.After(dec.NotBefore) {
-			j.NotBefore = dec.NotBefore
-			if err := e.Store.UpdateJob(ctx, j); err != nil {
+			moved, err := e.advanceJob(ctx, d.Repo, key, dec.NotBefore)
+			if err != nil {
 				return n, err
 			}
-			n++
+			if moved {
+				n++
+			}
 		}
 	}
 	return n, nil
@@ -399,4 +402,26 @@ func (e *Engine) keepNote(ctx context.Context, key string, v *advisory.Vuln, not
 		}
 	}
 	return e.Store.SetCursor(ctx, advisoryNotePrefix+key, note)
+}
+
+// advanceJob brings a pending job's NotBefore forward to nb. The write replaces the whole
+// job row, so it runs under the repo lease and is read again under it: a run of the repo on
+// another replica may have finished the job since, and an unfenced write of the stale row
+// would put it back to pending. A repo that stays busy is an error, so the record is
+// retried on the next poll (enqueueing is insert-if-absent, so the retry is harmless).
+func (e *Engine) advanceJob(ctx context.Context, repo, key string, nb time.Time) (bool, error) {
+	hold, release := e.tryRepo(ctx, repo)
+	if release == nil {
+		return false, fmt.Errorf("osv: repo %s is busy; the job %s is advanced on a later poll", repo, key)
+	}
+	defer release()
+	j, ok, err := e.Store.GetJob(ctx, key)
+	if err != nil || !ok || j.State != model.JobPending || !j.NotBefore.After(nb) {
+		return false, err
+	}
+	j.NotBefore = nb
+	if err := e.updateJob(ctx, hold, j); err != nil {
+		return false, err
+	}
+	return true, nil
 }

@@ -83,7 +83,7 @@ func (e *Engine) Rename(ctx context.Context, old, now string, scope int64) error
 	} else if there {
 		// A push under the new name registered it before this event arrived. Its record is
 		// the fresher one, so it stays; the old one goes and the alias carries the old jobs.
-		if err := e.Store.SetCursor(ctx, renamedCursor+old, now); err != nil {
+		if err := e.setCursor(ctx, holds[old], renamedCursor+old, now); err != nil {
 			return err
 		}
 		if err := e.Store.DeleteRepo(ctx, old); err != nil {
@@ -111,11 +111,11 @@ func (e *Engine) Rename(ctx context.Context, old, now string, scope int64) error
 	if err := e.Store.ReplaceDependencies(ctx, now, deps); err != nil {
 		return err
 	}
-	if err := e.Store.SetCursor(ctx, renamedCursor+old, now); err != nil {
+	if err := e.setCursor(ctx, holds[old], renamedCursor+old, now); err != nil {
 		return err
 	}
 	if repo.RepoID != 0 {
-		if err := e.Store.SetCursor(ctx, repoIDCursor+strconv.FormatInt(repo.RepoID, 10), now); err != nil {
+		if err := e.setCursor(ctx, holds[now], repoIDCursor+strconv.FormatInt(repo.RepoID, 10), now); err != nil {
 			return err
 		}
 	}
@@ -123,10 +123,10 @@ func (e *Engine) Rename(ctx context.Context, old, now string, scope int64) error
 		return err
 	}
 	if v, _ := e.Store.GetCursor(ctx, pausedCursor+old); v != "" {
-		if err := e.Store.SetCursor(ctx, pausedCursor+now, v); err != nil {
+		if err := e.setCursor(ctx, holds[now], pausedCursor+now, v); err != nil {
 			return err
 		}
-		if err := e.Store.SetCursor(ctx, pausedCursor+old, ""); err != nil {
+		if err := e.setCursor(ctx, holds[old], pausedCursor+old, ""); err != nil {
 			return err
 		}
 	}
@@ -226,12 +226,12 @@ func (e *Engine) AdoptRepoID(ctx context.Context, name string, id int64) error {
 	return e.Store.SetCursor(ctx, repoIDCursor+strconv.FormatInt(id, 10), name)
 }
 
-func (e *Engine) releaseRepoID(ctx context.Context, id int64, name string) error {
+func (e *Engine) releaseRepoID(ctx context.Context, hold *repoLease, id int64, name string) error {
 	key := repoIDCursor + strconv.FormatInt(id, 10)
 	if v, err := e.Store.GetCursor(ctx, key); err != nil || v != name {
 		return err
 	}
-	return e.Store.SetCursor(ctx, key, "")
+	return e.setCursor(ctx, hold, key, "")
 }
 
 // RemovedRecently applies the tombstone rule (see removedCursor) to a signed push for
@@ -355,7 +355,7 @@ func (e *Engine) Paused(ctx context.Context, name string) bool {
 // Pause is what archive means: the repo is read-only, so ripple stops acting on it (no PRs,
 // no dashboard writes) but keeps its index and pending jobs. An unknown repo is ignored.
 func (e *Engine) Pause(ctx context.Context, name string) error {
-	ctx, _, release, err := e.leaseRepo(ctx, name)
+	ctx, hold, release, err := e.leaseRepo(ctx, name)
 	if err != nil {
 		return err
 	}
@@ -363,7 +363,7 @@ func (e *Engine) Pause(ctx context.Context, name string) error {
 	if _, found, err := e.Store.GetRepo(ctx, name); err != nil || !found {
 		return err
 	}
-	if err := e.Store.SetCursor(ctx, pausedCursor+name, "1"); err != nil {
+	if err := e.setCursor(ctx, hold, pausedCursor+name, "1"); err != nil {
 		return err
 	}
 	e.log().Info("repository archived; paused", "repo", name)
@@ -393,7 +393,7 @@ func (e *Engine) Resume(ctx context.Context, name string, scope int64) error {
 	}
 	defer release()
 	ctx = lctx
-	if err := e.Store.SetCursor(ctx, pausedCursor+name, ""); err != nil {
+	if err := e.setCursor(ctx, hold, pausedCursor+name, ""); err != nil {
 		return err
 	}
 	if lister, ok := e.Store.(store.OpenJobLister); ok {

@@ -39,3 +39,29 @@ func TestHoldLogsATakeoverButNotAFreshGrant(t *testing.T) {
 		t.Errorf("a fresh grant logged:\n%s", buf.String())
 	}
 }
+
+func TestLeaseTakeoversCountsOnlyTakeovers(t *testing.T) {
+	m := NewMemory()
+	ctx := context.Background()
+	before := LeaseTakeovers()
+	h, err := Hold(ctx, m, nil, "repo:a/b", "a", time.Minute)
+	if err != nil || h == nil {
+		t.Fatalf("hold: %v %v", h, err)
+	}
+	h.Release()
+	if got := LeaseTakeovers() - before; got != 0 {
+		t.Fatalf("a fresh grant counted as %d takeovers", got)
+	}
+	if _, ok, err := m.AcquireLease(ctx, "repo:c/d", "dead", time.Millisecond); err != nil || !ok {
+		t.Fatalf("seed: %v %v", ok, err)
+	}
+	time.Sleep(5 * time.Millisecond)
+	h, err = Hold(ctx, m, nil, "repo:c/d", "live", time.Minute)
+	if err != nil || h == nil {
+		t.Fatalf("hold: %v %v", h, err)
+	}
+	h.Release()
+	if got := LeaseTakeovers() - before; got != 1 {
+		t.Fatalf("takeovers = %d, want 1", got)
+	}
+}

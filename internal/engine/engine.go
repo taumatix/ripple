@@ -183,7 +183,7 @@ func (e *Engine) Scan(ctx context.Context, repo model.Repo) error {
 		err = e.scan(ctx, repo)
 	}
 	if err == nil && repo.RepoID != 0 {
-		err = e.Store.SetCursor(ctx, repoIDCursor+strconv.FormatInt(repo.RepoID, 10), repo.FullName)
+		err = e.setCursor(ctx, hold, repoIDCursor+strconv.FormatInt(repo.RepoID, 10), repo.FullName)
 	}
 	return err
 }
@@ -350,12 +350,12 @@ func (e *Engine) scan(ctx context.Context, repo model.Repo) error {
 
 // Remove forgets a repo (App uninstalled or repo removed from the installation).
 func (e *Engine) Remove(ctx context.Context, name string) error {
-	ctx, _, release, err := e.leaseRepo(ctx, name)
+	ctx, hold, release, err := e.leaseRepo(ctx, name)
 	if err != nil {
 		return err
 	}
 	defer release()
-	if err := e.Store.SetCursor(ctx, pausedCursor+name, ""); err != nil {
+	if err := e.setCursor(ctx, hold, pausedCursor+name, ""); err != nil {
 		return err
 	}
 	// Remember the removal (see removedCursor) before the record that holds the id goes.
@@ -365,11 +365,11 @@ func (e *Engine) Remove(ctx context.Context, name string) error {
 	} else if ok {
 		id = repo.RepoID
 	}
-	if err := e.Store.SetCursor(ctx, removedCursor+name, fmt.Sprintf("%d|%d", e.now().Unix(), id)); err != nil {
+	if err := e.setCursor(ctx, hold, removedCursor+name, fmt.Sprintf("%d|%d", e.now().Unix(), id)); err != nil {
 		return err
 	}
 	if id != 0 {
-		if err := e.releaseRepoID(ctx, id, name); err != nil {
+		if err := e.releaseRepoID(ctx, hold, id, name); err != nil {
 			return err
 		}
 	}

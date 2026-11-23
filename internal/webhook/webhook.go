@@ -2,13 +2,14 @@
 package webhook
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -124,18 +125,6 @@ func wellFormed(header string) bool {
 	return err == nil
 }
 
-type repoList []struct {
-	FullName string `json:"full_name"`
-}
-
-func (l repoList) names() []string {
-	var out []string
-	for _, r := range l {
-		out = append(out, r.FullName)
-	}
-	return out
-}
-
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", "POST")
@@ -151,7 +140,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	want, _ := hex.DecodeString(strings.TrimPrefix(sig, "sha256="))
-	body, res := h.guard.ReadVerified(w, r, h.MaxBody, h.Secret, nil, func(got []byte) bool { return hmac.Equal(got, want) })
+	// The body is parsed as it streams and never held: the parse of a forgery is
+	// discarded with the 401.
+	name := r.Header.Get("X-GitHub-Event")
+	var ev Event
+	var err error = errIgnored
+	var consume func(io.Reader) error
+	if watched(name) {
+		consume = func(rd io.Reader) error { ev, err = parseStream(name, rd); return nil }
+	}
+	_, res := h.guard.ReadVerifiedStream(w, r, h.MaxBody, h.Secret, nil, func(got []byte) bool { return hmac.Equal(got, want) }, consume)
 	switch res {
 	case ReadAnswered:
 		return
@@ -160,7 +158,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid signature", http.StatusUnauthorized)
 		return
 	}
-	ev, err := Parse(r.Header.Get("X-GitHub-Event"), body)
 	if errors.Is(err, errIgnored) {
 		w.WriteHeader(http.StatusAccepted)
 		return
@@ -194,58 +191,99 @@ var errIgnored = errors.New("ignored event")
 
 // Parse converts a delivery into an Event; errIgnored for events ripple does not act on.
 func Parse(name string, body []byte) (Event, error) {
+	return parseStream(name, bytes.NewReader(body))
+}
+
+// watched reports whether ripple acts on any delivery of the named event.
+func watched(name string) bool {
+	switch name {
+	case "installation", "installation_repositories", "push", "repository":
+		return true
+	}
+	return false
+}
+
+// parseStream is Parse over a reader: it keeps only the fields ripple acts on and never
+// holds the body. A malformed body is an error even for an action ripple ignores.
+func parseStream(name string, r io.Reader) (Event, error) {
+	x := &extractor{}
 	switch name {
 	case "installation":
 		var p struct {
-			Action       string             `json:"action"`
-			Installation struct{ ID int64 } `json:"installation"`
-			Repositories repoList           `json:"repositories"`
+			Action       string
+			Installation struct{ ID int64 }
+			Repositories []string
 		}
-		if err := json.Unmarshal(body, &p); err != nil {
+		err := extract(r, obj(map[string]*node{
+			"action":       x.str(&p.Action),
+			"installation": obj(map[string]*node{"id": x.i64(&p.Installation.ID)}),
+			"repositories": x.repos(&p.Repositories),
+		}))
+		if err != nil {
 			return Event{}, fmt.Errorf("bad installation payload: %w", err)
 		}
 		switch p.Action {
 		case "created":
-			return Event{Kind: "repos_added", InstallationID: p.Installation.ID, Repos: p.Repositories.names()}, nil
+			return Event{Kind: "repos_added", InstallationID: p.Installation.ID, Repos: p.Repositories}, nil
 		case "deleted":
-			return Event{Kind: "repos_removed", InstallationID: p.Installation.ID, Repos: p.Repositories.names()}, nil
+			return Event{Kind: "repos_removed", InstallationID: p.Installation.ID, Repos: p.Repositories}, nil
 		}
 	case "installation_repositories":
 		var p struct {
-			Installation struct{ ID int64 } `json:"installation"`
-			Added        repoList           `json:"repositories_added"`
-			Removed      repoList           `json:"repositories_removed"`
-			Action       string             `json:"action"`
+			Installation struct{ ID int64 }
+			Added        []string
+			Removed      []string
+			Action       string
 		}
-		if err := json.Unmarshal(body, &p); err != nil {
+		err := extract(r, obj(map[string]*node{
+			"action":               x.str(&p.Action),
+			"installation":         obj(map[string]*node{"id": x.i64(&p.Installation.ID)}),
+			"repositories_added":   x.repos(&p.Added),
+			"repositories_removed": x.repos(&p.Removed),
+		}))
+		if err != nil {
 			return Event{}, fmt.Errorf("bad installation_repositories payload: %w", err)
 		}
 		switch p.Action {
 		case "added":
-			return Event{Kind: "repos_added", InstallationID: p.Installation.ID, Repos: p.Added.names()}, nil
+			return Event{Kind: "repos_added", InstallationID: p.Installation.ID, Repos: p.Added}, nil
 		case "removed":
-			return Event{Kind: "repos_removed", InstallationID: p.Installation.ID, Repos: p.Removed.names()}, nil
+			return Event{Kind: "repos_removed", InstallationID: p.Installation.ID, Repos: p.Removed}, nil
 		}
 	case "push":
 		var p struct {
-			Ref          string             `json:"ref"`
-			Installation struct{ ID int64 } `json:"installation"`
+			Ref          string
+			Installation struct{ ID int64 }
 			Repository   struct {
-				ID            int64  `json:"id"`
-				FullName      string `json:"full_name"`
-				DefaultBranch string `json:"default_branch"`
-			} `json:"repository"`
-			Commits []struct {
-				Added, Modified, Removed []string
-			} `json:"commits"`
+				ID            int64
+				FullName      string
+				DefaultBranch string
+			}
 		}
-		if err := json.Unmarshal(body, &p); err != nil {
+		type commit struct{ added, modified, removed []string }
+		var commits []commit
+		c := obj(map[string]*node{
+			"added":    x.strsInto(func() *[]string { return &commits[len(commits)-1].added }),
+			"modified": x.strsInto(func() *[]string { return &commits[len(commits)-1].modified }),
+			"removed":  x.strsInto(func() *[]string { return &commits[len(commits)-1].removed }),
+		}).object(func() { commits = append(commits, commit{}) })
+		err := extract(r, obj(map[string]*node{
+			"ref":          x.str(&p.Ref),
+			"installation": obj(map[string]*node{"id": x.i64(&p.Installation.ID)}),
+			"repository": obj(map[string]*node{
+				"id":             x.i64(&p.Repository.ID),
+				"full_name":      x.str(&p.Repository.FullName),
+				"default_branch": x.str(&p.Repository.DefaultBranch),
+			}),
+			"commits": &node{container: true, elem: c},
+		}))
+		if err != nil {
 			return Event{}, fmt.Errorf("bad push payload: %w", err)
 		}
 		seen := map[string]bool{}
 		var files []string
-		for _, c := range p.Commits {
-			for _, l := range [][]string{c.Added, c.Modified, c.Removed} {
+		for _, c := range commits {
+			for _, l := range [][]string{c.added, c.modified, c.removed} {
 				for _, f := range l {
 					if !seen[f] {
 						seen[f] = true
@@ -257,41 +295,42 @@ func Parse(name string, body []byte) (Event, error) {
 		return Event{Kind: "push", InstallationID: p.Installation.ID, Repos: []string{p.Repository.FullName},
 			Ref: p.Ref, DefaultBranch: p.Repository.DefaultBranch, Files: files, RepoID: p.Repository.ID}, nil
 	case "repository":
-		return parseRepository(body)
+		return parseRepository(r, x)
 	}
 	return Event{}, errIgnored
-}
-
-type login struct {
-	Login string `json:"login"`
 }
 
 // parseRepository maps the repository event (docs/vendor/github). Deleting forgets the
 // repo, archiving pauses it and unarchiving resumes it, a rename or transfer
 // moves the stored identity, and a changed default branch re-scans against it.
-func parseRepository(body []byte) (Event, error) {
+func parseRepository(r io.Reader, x *extractor) (Event, error) {
 	var p struct {
-		Action       string             `json:"action"`
-		Installation struct{ ID int64 } `json:"installation"`
-		Repository   struct {
-			Name          string `json:"name"`
-			FullName      string `json:"full_name"`
-			DefaultBranch string `json:"default_branch"`
-		} `json:"repository"`
-		Changes struct {
-			Repository struct {
-				Name struct{ From string } `json:"name"`
-			} `json:"repository"`
-			Owner struct {
-				From struct {
-					User         login `json:"user"`
-					Organization login `json:"organization"`
-				} `json:"from"`
-			} `json:"owner"`
-			DefaultBranch *struct{ From string } `json:"default_branch"`
-		} `json:"changes"`
+		Action       string
+		Installation struct{ ID int64 }
+		Repository   struct{ Name, FullName, DefaultBranch string }
+		Changes      struct {
+			RenamedFrom, UserFrom, OrgFrom string
+			DefaultBranch                  bool
+		}
 	}
-	if err := json.Unmarshal(body, &p); err != nil {
+	err := extract(r, obj(map[string]*node{
+		"action":       x.str(&p.Action),
+		"installation": obj(map[string]*node{"id": x.i64(&p.Installation.ID)}),
+		"repository": obj(map[string]*node{
+			"name":           x.str(&p.Repository.Name),
+			"full_name":      x.str(&p.Repository.FullName),
+			"default_branch": x.str(&p.Repository.DefaultBranch),
+		}),
+		"changes": obj(map[string]*node{
+			"repository": obj(map[string]*node{"name": obj(map[string]*node{"from": x.str(&p.Changes.RenamedFrom)})}),
+			"owner": obj(map[string]*node{"from": obj(map[string]*node{
+				"user":         obj(map[string]*node{"login": x.str(&p.Changes.UserFrom)}),
+				"organization": obj(map[string]*node{"login": x.str(&p.Changes.OrgFrom)}),
+			})}),
+			"default_branch": obj(nil).object(func() { p.Changes.DefaultBranch = true }),
+		}),
+	}))
+	if err != nil {
 		return Event{}, fmt.Errorf("bad repository payload: %w", err)
 	}
 	if p.Repository.FullName == "" {
@@ -307,15 +346,15 @@ func parseRepository(body []byte) (Event, error) {
 	case "unarchived":
 		ev.Kind = "repo_unarchived"
 	case "renamed":
-		from := p.Changes.Repository.Name.From
+		from := p.Changes.RenamedFrom
 		if from == "" {
 			return Event{}, errors.New("renamed payload without changes.repository.name.from")
 		}
 		ev.Kind, ev.Repos, ev.NewRepo = "repo_renamed", []string{owner + "/" + from}, p.Repository.FullName
 	case "transferred":
-		from := p.Changes.Owner.From.User.Login
+		from := p.Changes.UserFrom
 		if from == "" {
-			from = p.Changes.Owner.From.Organization.Login
+			from = p.Changes.OrgFrom
 		}
 		if from == "" || p.Repository.Name == "" {
 			// The old name is unknown: watch the new one and let the old fall away.
@@ -324,7 +363,7 @@ func parseRepository(body []byte) (Event, error) {
 		}
 		ev.Kind, ev.Repos, ev.NewRepo = "repo_renamed", []string{from + "/" + p.Repository.Name}, p.Repository.FullName
 	case "edited":
-		if p.Changes.DefaultBranch == nil || p.Repository.DefaultBranch == "" {
+		if !p.Changes.DefaultBranch || p.Repository.DefaultBranch == "" {
 			return Event{}, errIgnored
 		}
 		ev.Kind = "default_branch_changed"

@@ -319,7 +319,7 @@ func (a *App) pollFeed(ctx context.Context) int {
 }
 
 // electedSource is a poller that one replica at a time runs: *engine.Watcher and the
-// toolchain, Actions, Docker, npm and Cargo watchers.
+// toolchain, Actions, Docker, npm, Cargo and pip watchers.
 type electedSource interface {
 	Poll(context.Context) (int, error)
 	PollElected(context.Context, time.Duration) (int, bool, error)
@@ -355,6 +355,9 @@ func (a *App) sources() map[string]electedSource {
 	}
 	if a.Cargo != nil {
 		m["cargo"] = a.Cargo
+	}
+	if a.Pip != nil {
+		m["pip"] = a.Pip
 	}
 	return m
 }
@@ -628,7 +631,7 @@ func (a *App) pollPip(ctx context.Context) int {
 	if a.Pip == nil {
 		return 0
 	}
-	n, err := a.Pip.Poll(ctx)
+	n, err := a.pollSource(ctx, a.Pip)
 	switch {
 	case err != nil && ctx.Err() == nil:
 		a.Log.Error("pip poll", "err", err)

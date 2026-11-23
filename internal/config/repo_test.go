@@ -75,7 +75,7 @@ func TestUnknownKeyNamesKeyAndLine(t *testing.T) {
 func TestValidationRejects(t *testing.T) {
 	cases := map[string]string{
 		"missing ecosystem":  "updates:\n  - directory: /\n",
-		"bad ecosystem":      "updates:\n  - ecosystem: npm\n",
+		"bad ecosystem":      "updates:\n  - ecosystem: cargo\n",
 		"bad automerge":      "updates:\n  - ecosystem: gomod\n    automerge: always\n",
 		"bad cooldown":       "updates:\n  - ecosystem: gomod\n    cooldown: soon\n",
 		"traversal":          "updates:\n  - ecosystem: gomod\n    directory: /../etc\n",

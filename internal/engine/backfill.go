@@ -58,7 +58,7 @@ func (e *Engine) backfill(ctx context.Context, repo string, cfg *config.Repo, pr
 	}
 	key := func(d model.Dependency) string { return d.Datasource + "|" + d.Package }
 	skip := func(d model.Dependency) bool {
-		return d.Datasource == model.DatasourceGoToolchain || d.Datasource == model.DatasourceGitHubTags || d.Datasource == model.DatasourceDocker
+		return d.Datasource == model.DatasourceGoToolchain || d.Datasource == model.DatasourceGitHubTags || d.Datasource == model.DatasourceDocker || d.Datasource == model.DatasourceNpm
 	}
 	known := map[string]bool{}
 	for _, d := range prev {

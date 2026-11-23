@@ -66,7 +66,7 @@ close-superseded-pull-requests: true  # close ripple's own untouched PR when a n
 backfill-new-dependencies: true    # bring a dependency the repo starts using to the newest release already known (default: true)
 dependency-dashboard: false        # keep one issue listing pending, deferred and failed jobs (default: false)
 updates:
-  - ecosystem: gomod               # gomod, github-actions (docs/github-actions.md), docker (docs/docker.md), or regex (see README)
+  - ecosystem: gomod               # gomod, github-actions (docs/github-actions.md), docker (docs/docker.md), npm (docs/npm.md), or regex (see README)
     directory: /                   # this directory and everything below it
     go-toolchain: toolchain        # optional, off by default: toolchain | directive (docs/go-toolchain.md)
     directives: extended           # optional, off by default: also rewrite `go run pkg@version` and `go tool pkg` on a major bump
@@ -205,7 +205,7 @@ index.golang.org   ──► Watcher ──► reverse index lookup ──► jo
                                                      └──► workers ──► Platform: clone, edit, push, open PR
 ```
 
-Interfaces from day one: `Platform` (GitHub, [GitLab](docs/platform-gitlab.md), [Azure DevOps](docs/platform-azuredevops.md); Gitea and Forgejo, [docs/platform-gitea.md](docs/platform-gitea.md); Bitbucket Cloud, [docs/platform-bitbucket.md](docs/platform-bitbucket.md); [Gerrit](docs/platform-gerrit.md); Bitbucket Server / Data Center, [docs/platform-bitbucketserver.md](docs/platform-bitbucketserver.md); AWS CodeCommit, [docs/platform-codecommit.md](docs/platform-codecommit.md); SCM-Manager, [docs/platform-scmmanager.md](docs/platform-scmmanager.md); adding a host: [docs/platform-authoring.md](docs/platform-authoring.md)), `Feed` (Go modules), `Manager` (gomod, [github-actions](docs/github-actions.md), [docker](docs/docker.md), regex),
+Interfaces from day one: `Platform` (GitHub, [GitLab](docs/platform-gitlab.md), [Azure DevOps](docs/platform-azuredevops.md); Gitea and Forgejo, [docs/platform-gitea.md](docs/platform-gitea.md); Bitbucket Cloud, [docs/platform-bitbucket.md](docs/platform-bitbucket.md); [Gerrit](docs/platform-gerrit.md); Bitbucket Server / Data Center, [docs/platform-bitbucketserver.md](docs/platform-bitbucketserver.md); AWS CodeCommit, [docs/platform-codecommit.md](docs/platform-codecommit.md); SCM-Manager, [docs/platform-scmmanager.md](docs/platform-scmmanager.md); adding a host: [docs/platform-authoring.md](docs/platform-authoring.md)), `Feed` (Go modules), `Manager` (gomod, [github-actions](docs/github-actions.md), [docker](docs/docker.md), [npm](docs/npm.md), regex),
 `Store` (Postgres, DynamoDB, in-memory). The DynamoDB access patterns are in
 [docs/store-dynamodb.md](docs/store-dynamodb.md).
 

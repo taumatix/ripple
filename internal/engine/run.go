@@ -129,6 +129,10 @@ type runner struct {
 	shas map[string]string
 	// digests caches the manifest digest of a docker job's tag, by "package:tag".
 	digests map[string]string
+	// npmLocks holds the lockfiles beside the package.json files this PR edits.
+	npmLocks map[string]bool
+	// skipReasons says why a job was skipped when it is not the common "changed since indexed".
+	skipReasons map[string]string
 }
 
 func (r *runner) finish(j model.Job, state model.JobState, reason, pr string) {
@@ -346,6 +350,9 @@ func (r *runner) plan(jobs []model.Job, deps []model.Dependency) []*prPlan {
 		if j.Datasource == model.DatasourceDocker {
 			branch = BranchPrefix + "docker/" + slug(j.Package) + "-" + slug(j.Version)
 		}
+		if j.Datasource == model.DatasourceNpm {
+			branch = BranchPrefix + "npm/" + slug(j.Package) + "-" + slug(j.Version)
+		}
 		if it.group != "" {
 			branch = BranchPrefix + "group/" + slug(it.group)
 		}
@@ -470,6 +477,7 @@ func (r *runner) openPR(p *prPlan) (*platform.PR, error) {
 	r.skipped = nil
 	r.ambiguous = nil
 	r.followed = nil
+	r.npmLocks = nil
 	var applied []item
 	for _, it := range p.items {
 		ok, err := r.apply(it)
@@ -477,7 +485,11 @@ func (r *runner) openPR(p *prPlan) (*platform.PR, error) {
 			return nil, fmt.Errorf("%s: %w", it.job.Package, err)
 		}
 		if !ok {
-			r.finish(it.job, model.JobSkipped, "dependency changed since it was indexed", "")
+			reason := "dependency changed since it was indexed"
+			if why := r.skipReasons[it.job.Key]; why != "" {
+				reason = why
+			}
+			r.finish(it.job, model.JobSkipped, reason, "")
 			continue
 		}
 		applied = append(applied, it)
@@ -555,6 +567,7 @@ func (r *runner) openPR(p *prPlan) (*platform.PR, error) {
 		}
 	}
 	body += r.actionNotes(applied)
+	body += r.npmNotes()
 	changed, err := r.ws.CommitAndPush(r.ctx, p.branch, title)
 	if err != nil {
 		if touchesWorkflows(applied) && workflowsDenied(err) {
@@ -615,12 +628,24 @@ func (r *runner) apply(it item) (bool, error) {
 		if d.Datasource == model.DatasourceDocker {
 			version = r.imageVersion(it.job.Package, version)
 		}
+		if d.Datasource == model.DatasourceNpm {
+			if why := r.npmGuard(d); why != "" {
+				if r.skipReasons == nil {
+					r.skipReasons = map[string]string{}
+				}
+				r.skipReasons[it.job.Key] = why
+				continue
+			}
+		}
 		out, err := m.Apply(content, d, it.job.Package, version)
 		if errors.Is(err, manager.ErrStale) {
 			continue
 		}
 		if err != nil {
 			return false, err
+		}
+		if d.Datasource == model.DatasourceNpm {
+			r.noteLockfiles(d)
 		}
 		if d.Package != it.job.Package {
 			u, _ := r.cfg.UpdateFor("gomod", d.File)

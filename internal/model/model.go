@@ -16,6 +16,10 @@ const DatasourceGitHubTags = "github-tags"
 // a Dockerfile's base image, named "registry/repository" (docker.io/library/nginx).
 const DatasourceDocker = "docker"
 
+// DatasourceNpm is the versions of a package on the npm registry: the ranges of a
+// package.json's dependencies, named by the package name (@scope/name for a scoped one).
+const DatasourceNpm = "npm"
+
 // DatasourceGoToolchain is the Go release train itself: the `go` directive
 // (package PackageGoDirective) and the `toolchain` line (PackageGoToolchain) of a
 // go.mod. They are dependencies of the module on the language, not on a module.

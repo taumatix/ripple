@@ -81,12 +81,12 @@ Everything else:
 - **Listing state outside a single cursor.** `App.Discover` keeps a host's previous listing as one JSON
   store cursor, which DynamoDB caps at 400 KB (roughly 10k repo names). Store it per repo before a host
   with larger installations ships.
-29. **More datasources and feeds, as many ecosystems as Renovate has.** npm replicate, PyPI, crates.io
+29. **More datasources and feeds, as many ecosystems as Renovate has.** ~~npm registry~~ (shipped with 30c, polled per package; the replicate feed is not used), PyPI, crates.io
    sparse index, Maven, NuGet, RubyGems, Packagist, ~~Docker/OCI tags~~ (shipped with 30b, polled per image), GitHub releases/tags, Helm, Terraform
    registry. Where a registry has a changes feed, use it; where it has none (OCI registries), fall back to polling
    only the packages the reverse index says someone imports, never every repo. Each datasource says which of the two it is.
 30. **More managers, toward Renovate parity.** ~~GitHub Actions~~ shipped ([docs/github-actions.md](docs/github-actions.md)).
-   ~~30b Dockerfile~~ shipped ([docs/docker.md](docs/docker.md)). Remaining, by value, each its own entry: 30c npm, 30d Cargo, 30e pip, 30f Helm, and the long tail.
+   ~~30b Dockerfile~~ shipped ([docs/docker.md](docs/docker.md)). ~~30c npm~~ shipped ([docs/npm.md](docs/npm.md)). Remaining, by value, each its own entry: 30d Cargo, 30e pip, 30f Helm, and the long tail.
 96. **Actions registry cursor.** The packages the actions watcher polls live in one cursor
     (`github-tags:packages`), written read-modify-write: replicas can lose each other's additions until the
     next scan, and a package no repo uses any more is never pruned. Keep it per package in the store.
@@ -289,3 +289,17 @@ Everything else:
 146. **e2e: run the suite with `-count=2` in CI.** Entry 139 made `waitRepo` wait for the first scan; repeating the suite
     would show any test that still depends on a run order or leftover state. Do it once the container-runtimes job is not
     the long pole. The podman fake-runtime container failure that CI missed on PR #53 was not reproduced.
+147. **npm: ranges and sections beyond `x.y.z`.** Only a full version with no operator, `=`, `^` or `~` is moved. Partial
+    versions (`^1.2`), comparators (`>=1.2.3`), unions, hyphen ranges, a current prerelease, `peerDependencies`,
+    `overrides`/`resolutions`, `npm:` aliases and workspace specs are left alone. The target is the newest release only, so a
+    repo that disables major updates gets no minor update while a newer major exists; pick the newest target per update type.
+148. **npm: regenerate lockfiles offline.** ripple edits package.json and reports the lockfiles it could not refresh
+    (`package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, `pnpm-lock.yaml`, bun). The abbreviated metadata carries
+    `dist.integrity` and `dist.tarball` per version, so a package-lock v2/v3 entry for a leaf package whose own dependencies did
+    not change could be rewritten without running npm; start there, and say what is still left to the owner.
+149. **npm: private registries, and verify against the real one.** A package whose `.npmrc` names another registry is skipped
+    (guard against dependency confusion); supporting it needs credentials and a registry setting per scope. Nothing here has run
+    against registry.npmjs.org: the client and fake come from the vendored excerpts (scoped-name encoding, 404 for private
+    packages, the `deprecated` shape, a `latest` tag that exists are assumed; see UPSTREAM.md). Also: `npm:packages` is one
+    read-modify-write cursor (see 96), versions carry no publication date (the full document has `time` but is much larger),
+    and the PR footer still says "module index" (see 99).

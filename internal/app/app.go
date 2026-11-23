@@ -38,6 +38,9 @@ type App struct {
 	// Docker polls the tags of the container images the repos use (ecosystem:
 	// docker); nil leaves the feature out.
 	Docker *engine.DockerWatcher
+	// Npm polls the versions of the npm packages the repos use (ecosystem: npm);
+	// nil leaves the feature out.
+	Npm    *engine.NpmWatcher
 	Secret []byte
 	Log    *slog.Logger
 	// PollEvery is the feed poll and job run period; zero disables the loop (tests call Tick).
@@ -278,6 +281,7 @@ func (a *App) Tick(ctx context.Context) {
 	a.pollToolchain(ctx)
 	a.pollActions(ctx)
 	a.pollDocker(ctx)
+	a.pollNpm(ctx)
 	a.pollAdvisories(ctx)
 	a.housekeep(ctx)
 	if _, err := a.Engine.RunDue(ctx); err != nil && ctx.Err() == nil {
@@ -350,6 +354,9 @@ func (a *App) pollLoop(ctx context.Context) {
 			a.jobs.Wake()
 		}
 		if a.pollDocker(ctx) > 0 {
+			a.jobs.Wake()
+		}
+		if a.pollNpm(ctx) > 0 {
 			a.jobs.Wake()
 		}
 		a.housekeep(ctx)
@@ -506,6 +513,21 @@ func (a *App) pollDocker(ctx context.Context) int {
 		a.Log.Error("container image poll", "err", err)
 	case n > 0:
 		a.Log.Info("container image poll enqueued jobs", "jobs", n)
+	}
+	return n
+}
+
+// pollNpm polls the versions of the npm packages in use and returns how many jobs it enqueued.
+func (a *App) pollNpm(ctx context.Context) int {
+	if a.Npm == nil {
+		return 0
+	}
+	n, err := a.Npm.Poll(ctx)
+	switch {
+	case err != nil && ctx.Err() == nil:
+		a.Log.Error("npm poll", "err", err)
+	case n > 0:
+		a.Log.Info("npm poll enqueued jobs", "jobs", n)
 	}
 	return n
 }

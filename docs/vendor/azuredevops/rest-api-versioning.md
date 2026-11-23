@@ -1,0 +1,150 @@
+<!-- Vendored from https://learn.microsoft.com/en-us/azure/devops/integrate/concepts/rest-api-versioning?view=azure-devops on 2026-11-23 (HTML converted to text by a script; tables and links are flattened). (c) Microsoft; kept here as a reference for tests that cite sections. -->
+
+Read in English        Edit           
+  
+ 
+ 
+  Note 
+ 
+ Access to this page requires authorization. You can try signing in or changing directories. 
+ 
+ Access to this page requires authorization. You can try changing directories. 
+    
+
+# REST API versioning 
+ 
+    
+ 
+       
+   
+
+Azure DevOps Services | Azure DevOps Server | Azure DevOps Server 2022
+ 
+Using versioned REST APIs, you can ensure that your projects are scalable and maintainable over time, and that your applications and services continue to work as APIs evolve.
+ 
+
+## Guidelines  
+- 
+API version must be specified with every request.
+  
+- 
+API versions are in the format `{major}.{minor}[-{stage}[.{resource-version}]]`. For example: `1.0`, `1.1`, `1.2-preview`, `2.0`
+  
+- 
+While an API is in preview, you can specify a precise version of a particular revision of the API when needed. For example: `1.0-preview.1`, `1.0-preview.2`
+  
+- 
+After an API is released (`1.0`, for example), its preview version (`1.0-preview`) is deprecated and can be deactivated after 12 weeks.
+  
+- 
+During this time, you should upgrade to the released version of the API. Once a preview API is deactivated, requests that specify a `-preview` version get rejected.
+   
+
+### Usage 
+The API version can be specified either in the header of the HTTP request or as a URL query parameter:
+ 
+HTTP request header:
+ 
+
+```
+Accept: application/json;api-version=1.0
+
+```
+ 
+Uri query parameter:
+ 
+
+```
+[scheme"://"][host[':'port]]"/v" major-version '/'namespace '/'resource ('/'resource)* '?' query
+
+that is, GET https://dev.azure.com/v1.0/{organization}/_apis/{area}/{resource}?some-query=1000
+
+```
+ 
+
+### Supported versions 
+ 
+Note
+ 
+All supported Rest APIs are documented in the Azure DevOps Services REST API Reference.
+  
+Team Foundation Server was renamed Azure DevOps Server in 2019.
+   
+  | Product  | 1.0  | 2.0  | 3.0  | 4.0  | 5.0  | 6.0  | 7.0 
+   
+  | Azure DevOps Services  | X  | X  | X  | X  | X  | X  | X 
+ 
+  | Azure DevOps Server 2022  | X  | X  | X  | X  | X  | X  | X 
+ 
+  | Azure DevOps Server 2020  | X  | X  | X  | X  | X  | X  | - 
+ 
+  | Azure DevOps Server 2019  | X  | X  | X  | X  | X  | -  | - 
+ 
+  | Team Foundation Server 2018  | X  | X  | X  | X  | -  | -  | - 
+ 
+  | Team Foundation Server 2017  | X  | X  | X  | -  | -  | -  | - 
+ 
+  | Team Foundation Server 2015  | X  | X  | -  | -  | -  | -  | - 
+   
+Major API version releases align with Team Foundation Server RTM releases. For example, the `3.0` API set was introduced with Team Foundation Server 2017.
+ 
+A few undocumented version 1.0 APIs existed in Team Foundation Server 2013, but aren't supported.
+ 
+
+## Related content  
+- Get started with the REST APIs 
+- Azure DevOps Services REST API Reference   
+ 
+ 
+    
+
+## Feedback 
+ 
+ Was this page helpful? 
+ 
+        No  
+ 
+ Need help with this topic? 
+ 
+ Want to try using Ask Learn to clarify or guide you through this topic? 
+ 
+ 
+              
+  
+
+##  Additional resources      
+   
+-   Last updated on  2025-04-11         
+ 
+    
+ 
+ Was this page helpful? 
+ 
+         
+ 
+ Need help with this topic? 
+ 
+ Want to try using Ask Learn to clarify or guide you through this topic? 
+ 
+ 
+                
+  
+  
+ en-us 
+   Your Privacy Choices  
+ 
+  
+  
+-    
+-    
+-          
+-  
+-  AI Disclaimer 
+-  Previous Versions  
+-  Blog  
+-  Contribute 
+-  Privacy 
+-  Consumer Health Privacy 
+-  Terms of Use 
+-  Trademarks  
+- © Microsoft 2026

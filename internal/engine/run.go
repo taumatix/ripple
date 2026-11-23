@@ -202,6 +202,8 @@ type prPlan struct {
 	branch string
 	group  string
 	items  []item
+	// draft is set by openPR when the PR it opened is a draft (verification failed).
+	draft bool
 }
 
 // plan resolves jobs against current dependencies and groups them into PRs.
@@ -324,6 +326,10 @@ func (r *runner) execute(plans []*prPlan) {
 		}
 		if pr != nil {
 			count++
+			if !p.draft {
+				// A draft that failed verification is no replacement for a PR that may be fine.
+				r.supersede(p, *pr, open)
+			}
 		}
 	}
 }
@@ -399,6 +405,7 @@ func (r *runner) openPR(p *prPlan) (*platform.PR, error) {
 			return nil, err
 		}
 		draft = failure != ""
+		p.draft = draft
 		if draft {
 			what := "The go.mod change was applied but the module does not build"
 			if major {

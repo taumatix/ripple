@@ -102,6 +102,15 @@ func (m *Mux) RequestAutoMerge(ctx context.Context, repo model.Repo, pr PR) erro
 	return RequestAutoMerge(ctx, p, r, pr)
 }
 
+// CloseUntouchedPR returns ErrNoClosePR for a host without the capability.
+func (m *Mux) CloseUntouchedPR(ctx context.Context, repo model.Repo, pr PR, comment string) (bool, error) {
+	p, r, err := m.route(repo)
+	if err != nil {
+		return false, err
+	}
+	return CloseUntouchedPR(ctx, p, r, pr, comment)
+}
+
 func (m *Mux) RateLimitedUntil(repo model.Repo) time.Time {
 	p, r, err := m.route(repo)
 	if err != nil {

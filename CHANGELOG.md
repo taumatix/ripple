@@ -13,6 +13,11 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
   and process limits, only the workspace mounted, killed and removed on timeout), configured with
   `RIPPLE_CONTAINER_CPUS`, `_MEMORY`, `_PULL` and `_NETWORK`. The default (`none`) is unchanged. Apple's runtime is
   tested for real on a Mac; Docker and Podman only against a fake CLI. See docs/sandbox.md.
+- Superseded pull requests are closed: when a newer release of a module gets its own ripple PR, ripple's older
+  untouched PR for that module is closed with a comment pointing at the new one. Never a PR a person touched
+  (commits, reviews, comments, a rename), never on a failed check, branch kept. Opt out with
+  `close-superseded-pull-requests: false` in `.ripple.yaml` (additive key). New optional `platform.PRCloser`
+  capability, implemented by GitHub only; other hosts keep both PRs open. See the README.
 - Release workflow (`.github/workflows/release.yml`): a pushed `vX.Y.Z` tag builds a multi-arch (amd64, arm64)
   image for GHCR with the version tag and digest, attaches static binaries and `SHA256SUMS` to the GitHub
   release, then installs the published artifacts from scratch and runs `ripple version`. The Dockerfile takes a

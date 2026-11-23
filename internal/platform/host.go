@@ -54,6 +54,32 @@ func RequestAutoMerge(ctx context.Context, p Platform, repo model.Repo, pr PR) e
 	return am.RequestAutoMerge(ctx, repo, pr)
 }
 
+// ErrNoClosePR means the host cannot close a pull request through ripple, so a
+// superseded PR stays open for a human. It is not a failure.
+var ErrNoClosePR = errors.New("host cannot close pull requests")
+
+// PRCloser is the optional capability to close a stale ripple PR once a newer one
+// replaces it. The host, not the engine, decides whether the PR is untouched,
+// because what counts as a human touching it (commits, review comments, a rename)
+// is host-specific. A host that cannot answer that reliably does not implement it.
+type PRCloser interface {
+	// CloseUntouchedPR leaves comment on pr and closes it, but only when nobody but
+	// ripple has touched it: every commit on its branch is ripple's own, and it has
+	// no reviews, comments or rename. It returns false, nil, having changed nothing,
+	// when someone has. It never closes on doubt: any failed check is an error and
+	// leaves the PR open. It does not delete the branch.
+	CloseUntouchedPR(ctx context.Context, repo model.Repo, pr PR, comment string) (bool, error)
+}
+
+// CloseUntouchedPR is p's CloseUntouchedPR, or ErrNoClosePR when p has none.
+func CloseUntouchedPR(ctx context.Context, p Platform, repo model.Repo, pr PR, comment string) (bool, error) {
+	c, ok := p.(PRCloser)
+	if !ok {
+		return false, ErrNoClosePR
+	}
+	return c.CloseUntouchedPR(ctx, repo, pr, comment)
+}
+
 // RateLimiter is the optional per-platform rate-limit signal: the time before which
 // the host has asked not to be called for repo (the zero time when it has not). The
 // engine checks it before spending a call, so one limited host or credential scope

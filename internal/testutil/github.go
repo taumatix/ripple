@@ -34,6 +34,13 @@ type PR struct {
 	Number                        int
 	AutoMerge, Draft              bool
 	Labels                        []string
+	// Closed is set when the PR was closed through the API; Comments are the issue
+	// comments left on it (a human's or ripple's), in order; Reviews counts review
+	// comments and reviews a test added; Renamed records a title edit by a human.
+	Closed   bool
+	Comments []string
+	Reviews  int
+	Renamed  bool
 }
 
 // GitHub is a fake GitHub: the REST API for apps, pulls and GraphQL over HTTP, and
@@ -58,6 +65,8 @@ type GitHub struct {
 	TokenTTL time.Duration
 	// RateLimitOnce makes the next pulls POST answer 429 with Retry-After: 1.
 	RateLimitOnce bool
+	// FailPath makes every request whose path ends with it answer 500.
+	FailPath string
 }
 
 func NewGitHub(t *testing.T) *GitHub {
@@ -315,7 +324,7 @@ func (g *GitHub) handleGraphQL(w http.ResponseWriter, r *http.Request) {
 
 func (g *GitHub) handleRepo(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/repos/"), "/")
-	if len(parts) < 3 || (parts[2] != "pulls" && !(len(parts) == 5 && parts[2] == "issues" && parts[4] == "labels")) {
+	if len(parts) < 3 || !(parts[2] == "pulls" || (len(parts) >= 5 && parts[2] == "issues")) {
 		g.fail(w, http.StatusNotFound, "unknown route %s", r.URL.Path)
 		return
 	}
@@ -326,18 +335,23 @@ func (g *GitHub) handleRepo(w http.ResponseWriter, r *http.Request) {
 	}
 	g.mu.Lock()
 	g.calls[repo]++
-	limit := g.RateLimitOnce && r.Method == http.MethodPost
+	limit := g.RateLimitOnce && r.Method == http.MethodPost && len(parts) == 3
 	if limit {
 		g.RateLimitOnce = false
 	}
+	failing := g.FailPath != "" && strings.HasSuffix(r.URL.Path, g.FailPath)
 	g.mu.Unlock()
 	if limit {
 		w.Header().Set("Retry-After", "1")
 		g.fail(w, http.StatusTooManyRequests, "slow down")
 		return
 	}
-	if parts[2] == "issues" {
-		g.handleLabels(w, r, repo, parts[3])
+	if failing {
+		g.fail(w, http.StatusInternalServerError, "injected failure")
+		return
+	}
+	if len(parts) > 3 {
+		g.handleSub(w, r, repo, parts[2:])
 		return
 	}
 	switch r.Method {
@@ -345,7 +359,9 @@ func (g *GitHub) handleRepo(w http.ResponseWriter, r *http.Request) {
 		g.mu.Lock()
 		out := []map[string]any{}
 		for _, p := range g.prs[repo] {
-			out = append(out, prJSON(repo, p))
+			if !p.Closed {
+				out = append(out, prJSON(repo, p))
+			}
 		}
 		g.mu.Unlock()
 		_ = json.NewEncoder(w).Encode(out)
@@ -376,29 +392,162 @@ func (g *GitHub) handleRepo(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (g *GitHub) handleLabels(w http.ResponseWriter, r *http.Request, repo, num string) {
-	var in struct{ Labels []string }
-	n, err := strconv.Atoi(num)
-	if r.Method != http.MethodPost || err != nil || json.NewDecoder(r.Body).Decode(&in) != nil {
-		g.fail(w, http.StatusUnprocessableEntity, "bad labels request")
+// handleSub serves /pulls/{n}[/commits|/reviews|/comments] and
+// /issues/{n}/{labels|comments|events}; sub is the path after /repos/o/r/.
+func (g *GitHub) handleSub(w http.ResponseWriter, r *http.Request, repo string, sub []string) {
+	n, err := strconv.Atoi(sub[1])
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	var pr *PR
+	for _, p := range g.prs[repo] {
+		if err == nil && p.Number == n {
+			pr = p
+		}
+	}
+	if pr == nil {
+		g.fail(w, http.StatusNotFound, "no pull request %s", sub[1])
 		return
 	}
+	page := func(items []any) {
+		per, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
+		pg, _ := strconv.Atoi(r.URL.Query().Get("page"))
+		if per < 1 {
+			per = 30
+		}
+		if pg < 1 {
+			pg = 1
+		}
+		lo, hi := min((pg-1)*per, len(items)), min(pg*per, len(items))
+		_ = json.NewEncoder(w).Encode(append([]any{}, items[lo:hi]...))
+	}
+	what := ""
+	if len(sub) == 3 {
+		what = sub[2]
+	}
+	switch {
+	case sub[0] == "pulls" && what == "" && r.Method == http.MethodGet:
+		_ = json.NewEncoder(w).Encode(prJSON(repo, pr))
+	case sub[0] == "pulls" && what == "" && r.Method == http.MethodPatch:
+		var in struct{ State string }
+		if json.NewDecoder(r.Body).Decode(&in) != nil || in.State != "closed" {
+			g.fail(w, http.StatusUnprocessableEntity, "bad pull request update")
+			return
+		}
+		pr.Closed = true
+		_ = json.NewEncoder(w).Encode(prJSON(repo, pr))
+	case sub[0] == "pulls" && what == "commits" && r.Method == http.MethodGet:
+		var items []any
+		for _, c := range g.branchCommits(repo, pr) {
+			items = append(items, c)
+		}
+		page(items)
+	case sub[0] == "pulls" && (what == "reviews" || what == "comments") && r.Method == http.MethodGet:
+		items := make([]any, pr.Reviews)
+		for i := range items {
+			items[i] = map[string]any{"id": i + 1}
+		}
+		page(items)
+	case sub[0] == "issues" && what == "labels" && r.Method == http.MethodPost:
+		var in struct{ Labels []string }
+		if json.NewDecoder(r.Body).Decode(&in) != nil {
+			g.fail(w, http.StatusUnprocessableEntity, "bad labels request")
+			return
+		}
+		pr.Labels = append(pr.Labels, in.Labels...)
+		_ = json.NewEncoder(w).Encode([]any{})
+	case sub[0] == "issues" && what == "comments" && r.Method == http.MethodGet:
+		var items []any
+		for i, c := range pr.Comments {
+			items = append(items, map[string]any{"id": i + 1, "body": c})
+		}
+		page(items)
+	case sub[0] == "issues" && what == "comments" && r.Method == http.MethodPost:
+		var in struct{ Body string }
+		if json.NewDecoder(r.Body).Decode(&in) != nil || in.Body == "" {
+			g.fail(w, http.StatusUnprocessableEntity, "bad comment")
+			return
+		}
+		pr.Comments = append(pr.Comments, in.Body)
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": len(pr.Comments), "body": in.Body})
+	case sub[0] == "issues" && what == "events" && r.Method == http.MethodGet:
+		items := []any{map[string]any{"event": "labeled"}}
+		if pr.Renamed {
+			items = append(items, map[string]any{"event": "renamed"})
+		}
+		page(items)
+	default:
+		g.fail(w, http.StatusNotFound, "unknown route %s %s", r.Method, r.URL.Path)
+	}
+}
+
+// branchCommits lists the commits the PR's head has beyond its base, oldest first,
+// as the pulls commits API shapes them.
+func (g *GitHub) branchCommits(repo string, pr *PR) []map[string]any {
+	cmd := exec.Command("git", "log", "--reverse", "--format=%an%x09%ae%x09%cn%x09%ce", pr.Base+".."+pr.Head)
+	cmd.Dir = g.bare(repo)
+	cmd.Env = gitEnv()
+	out, _ := cmd.Output()
+	var cs []map[string]any
+	for _, l := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		f := strings.Split(l, "\t")
+		if len(f) != 4 {
+			continue
+		}
+		cs = append(cs, map[string]any{"commit": map[string]any{
+			"author":    map[string]any{"name": f[0], "email": f[1]},
+			"committer": map[string]any{"name": f[2], "email": f[3]}}})
+	}
+	return cs
+}
+
+// HumanComment adds an issue comment to a PR, as a person would.
+func (g *GitHub) HumanComment(repo string, number int, body string) {
+	g.mutatePR(repo, number, func(p *PR) { p.Comments = append(p.Comments, body) })
+}
+
+// HumanReview records a review on a PR.
+func (g *GitHub) HumanReview(repo string, number int) {
+	g.mutatePR(repo, number, func(p *PR) { p.Reviews++ })
+}
+
+// HumanRename changes a PR's title and records the rename event.
+func (g *GitHub) HumanRename(repo string, number int, title string) {
+	g.mutatePR(repo, number, func(p *PR) { p.Title, p.Renamed = title, true })
+}
+
+func (g *GitHub) mutatePR(repo string, number int, f func(*PR)) {
+	g.t.Helper()
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	for _, p := range g.prs[repo] {
-		if p.Number == n {
-			p.Labels = append(p.Labels, in.Labels...)
-			_ = json.NewEncoder(w).Encode([]any{})
+		if p.Number == number {
+			f(p)
 			return
 		}
 	}
-	g.fail(w, http.StatusNotFound, "no pull request %d", n)
+	g.t.Fatalf("no pull request %d in %s", number, repo)
+}
+
+// HumanCommitOnBranch pushes one more commit, authored by a person, onto branch.
+func (g *GitHub) HumanCommitOnBranch(repo, branch string) {
+	g.t.Helper()
+	work := g.t.TempDir()
+	git(g.t, work, "clone", "-q", "--branch", branch, g.bare(repo), "w")
+	w := filepath.Join(work, "w")
+	if err := os.WriteFile(filepath.Join(w, "HUMAN.txt"), []byte("hand edit\n"), 0o644); err != nil {
+		g.t.Fatal(err)
+	}
+	git(g.t, w, "add", "-A")
+	git(g.t, w, "commit", "-q", "-m", "hand edit")
+	git(g.t, w, "push", "-q", "origin", branch)
 }
 
 func prJSON(repo string, p *PR) map[string]any {
 	return map[string]any{
 		"number": p.Number, "html_url": fmt.Sprintf("https://github.example/%s/pull/%d", repo, p.Number),
-		"node_id": fmt.Sprintf("PR_%s#%d", repo, p.Number), "state": "open",
-		"head": map[string]any{"ref": p.Head}, "base": map[string]any{"ref": p.Base},
+		"node_id": fmt.Sprintf("PR_%s#%d", repo, p.Number), "state": map[bool]string{false: "open", true: "closed"}[p.Closed],
+		"title": p.Title, "draft": p.Draft,
+		"head": map[string]any{"ref": p.Head, "repo": map[string]any{"full_name": repo}}, "base": map[string]any{"ref": p.Base},
 	}
 }

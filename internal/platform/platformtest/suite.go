@@ -30,6 +30,11 @@ import (
 type PR struct {
 	Head, Base       string
 	Draft, AutoMerge bool
+	// Closed and Comments are what a host that implements platform.PRCloser reports:
+	// whether ripple closed the PR and the comments it left. A fixture whose host
+	// has no such capability leaves them zero.
+	Closed   bool
+	Comments []string
 }
 
 // Fixture is one host's fake server as the suite drives it. Repository paths are
@@ -50,7 +55,7 @@ type Fixture interface {
 	Register(t *testing.T, webhook string, paths ...string)
 	// Push commits files to main and delivers the host's push event to webhook.
 	Push(t *testing.T, webhook, path string, files map[string]string)
-	// PRs lists the pull requests opened in the repository.
+	// PRs lists the pull requests opened in the repository, closed ones included.
 	PRs(path string) []PR
 	// FileAt is the content of file on branch, ok=false when absent.
 	FileAt(path, branch, file string) (string, bool)
@@ -82,6 +87,7 @@ func Run(t *testing.T, f Fixture) {
 	t.Run("RootConfigFileOnEveryHost", func(t *testing.T) { rootConfig(t, f) })
 	t.Run("LegacyAliasOnlyWhereTheHostReadsIt", func(t *testing.T) { legacyAlias(t, f) })
 	t.Run("AutoMergeRequestedOnlyWhereTheHostCan", func(t *testing.T) { autoMerge(t, f) })
+	t.Run("StalePRClosedOnlyWhereTheHostCan", func(t *testing.T) { supersede(t, f) })
 	t.Run("RateLimitHoldsBackTheHostThenRetries", func(t *testing.T) { rateLimit(t, f) })
 }
 

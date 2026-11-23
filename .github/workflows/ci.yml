@@ -41,6 +41,10 @@ jobs:
           # RIPPLE_REQUIRE_SERVICES already fails a skipped service test; this catches any other skip.
           # The image smoke test skips here by design: the docker job runs it against the built image.
           if grep -E -- '--- SKIP' test.log | grep -v -- 'TestRippleOpensExactlyOnePR'; then echo "tests were skipped"; exit 1; fi
+      - name: dynamofake agrees with DynamoDB Local
+        run: |
+          scripts/check-dynamo-parity.sh --self-test
+          scripts/check-dynamo-parity.sh test.log
   docker:
     runs-on: ubuntu-latest
     steps:

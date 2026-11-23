@@ -3,7 +3,6 @@ package engine
 import (
 	"context"
 	"fmt"
-	"sort"
 	"time"
 
 	"github.com/taumatix/ripple/internal/model"
@@ -25,16 +24,6 @@ const pauseDefer = time.Hour
 // maxRenameHops bounds following a chain of renames (a -> b -> c).
 const maxRenameHops = 8
 
-// lockRepos takes the per-repo locks of two names in a fixed order, so two renames
-// that cross cannot deadlock.
-func (e *Engine) lockRepos(a, b string) func() {
-	names := []string{a, b}
-	sort.Strings(names)
-	u1 := e.lockRepo(names[0])
-	u2 := e.lockRepo(names[1])
-	return func() { u2(); u1() }
-}
-
 // Rename moves the stored identity of a repo from old to now: the repo record with
 // its config and default branch, and its dependency rows. Nothing is cloned. Jobs
 // keyed by the old name follow when they come due (see runRepo): the job key holds
@@ -45,7 +34,11 @@ func (e *Engine) Rename(ctx context.Context, old, now string, scope int64) error
 	if old == now {
 		return nil
 	}
-	defer e.lockRepos(old, now)()
+	ctx, holds, release, err := e.leaseRepos(ctx, old, now)
+	if err != nil {
+		return err
+	}
+	defer release()
 	repo, found, err := e.Store.GetRepo(ctx, old)
 	if err != nil || !found {
 		return err
@@ -107,7 +100,7 @@ func (e *Engine) Rename(ctx context.Context, old, now string, scope int64) error
 					pending = append(pending, j)
 				}
 			}
-			e.moveJobs(ctx, now, pending)
+			e.moveJobs(ctx, holds[old], now, pending)
 		}
 	}
 	e.log().Info("repository renamed", "from", old, "to", now, "dependencies", len(deps))
@@ -163,17 +156,18 @@ func (e *Engine) RegisterFromPush(ctx context.Context, name string, scope int64)
 
 // followRename re-keys jobs of a name that no longer exists to the repo it became,
 // and reports whether it did. The old jobs end as skipped.
-func (e *Engine) followRename(ctx context.Context, name string, jobs []model.Job) (string, bool) {
+func (e *Engine) followRename(ctx context.Context, hold *repoLease, name string, jobs []model.Job) (string, bool) {
 	target, ok := e.renamedTo(ctx, name)
 	if !ok {
 		return "", false
 	}
-	e.moveJobs(ctx, target, jobs)
+	e.moveJobs(ctx, hold, target, jobs)
 	return target, true
 }
 
-// moveJobs re-keys jobs to target; the old rows end as skipped.
-func (e *Engine) moveJobs(ctx context.Context, target string, jobs []model.Job) {
+// moveJobs re-keys jobs to target; the old rows end as skipped. hold is the lease of the
+// repo the jobs came from, which fences those writes.
+func (e *Engine) moveJobs(ctx context.Context, hold *repoLease, target string, jobs []model.Job) {
 	for _, j := range jobs {
 		moved := j
 		moved.Repo = target
@@ -183,7 +177,7 @@ func (e *Engine) moveJobs(ctx context.Context, target string, jobs []model.Job) 
 			continue
 		}
 		j.State, j.Reason = model.JobSkipped, fmt.Sprintf("repository renamed to %s", target)
-		if err := e.Store.UpdateJob(ctx, j); err != nil {
+		if err := e.updateJob(ctx, hold, j); err != nil {
 			e.log().Error("update job", "job", j.Key, "err", err)
 		}
 	}
@@ -265,7 +259,11 @@ func (e *Engine) Paused(ctx context.Context, name string) bool {
 // Pause is what archive means: the repo is read-only, so ripple stops acting on it (no PRs,
 // no dashboard writes) but keeps its index and pending jobs. An unknown repo is ignored.
 func (e *Engine) Pause(ctx context.Context, name string) error {
-	defer e.lockRepo(name)()
+	ctx, _, release, err := e.leaseRepo(ctx, name)
+	if err != nil {
+		return err
+	}
+	defer release()
 	if _, found, err := e.Store.GetRepo(ctx, name); err != nil || !found {
 		return err
 	}
@@ -281,20 +279,24 @@ func (e *Engine) Pause(ctx context.Context, name string) error {
 // is scanned instead, which is what unarchive meant before. It reports whether jobs may
 // be due so the caller can wake the runner.
 func (e *Engine) Resume(ctx context.Context, name string, scope int64) error {
-	unlock := e.lockRepo(name)
-	_, found, err := e.Store.GetRepo(ctx, name)
+	lctx, hold, release, err := e.leaseRepo(ctx, name)
 	if err != nil {
-		unlock()
 		return err
 	}
-	if !found || !e.Paused(ctx, name) {
-		unlock()
+	_, found, err := e.Store.GetRepo(lctx, name)
+	if err != nil {
+		release()
+		return err
+	}
+	if !found || !e.Paused(lctx, name) {
+		release() // Scan takes the lease itself
 		if err := e.ForgetRename(ctx, name); err != nil {
 			return err
 		}
 		return e.Scan(ctx, model.Repo{FullName: name, InstallationID: scope})
 	}
-	defer unlock()
+	defer release()
+	ctx = lctx
 	if err := e.Store.SetCursor(ctx, pausedCursor+name, ""); err != nil {
 		return err
 	}
@@ -309,7 +311,7 @@ func (e *Engine) Resume(ctx context.Context, name string, scope int64) error {
 				continue
 			}
 			j.NotBefore, j.Reason = now, ""
-			if err := e.Store.UpdateJob(ctx, j); err != nil {
+			if err := e.updateJob(ctx, hold, j); err != nil {
 				return err
 			}
 		}

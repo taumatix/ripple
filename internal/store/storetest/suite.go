@@ -3,6 +3,7 @@ package storetest
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"sort"
@@ -657,6 +658,161 @@ func Run(t *testing.T, mk func(t *testing.T) store.Store) {
 		wg.Wait()
 		if wins.Load() != 1 {
 			t.Fatalf("%d replicas acquired the same lease, want 1", wins.Load())
+		}
+	})
+
+	t.Run("older events of a repo", func(t *testing.T) {
+		s := mk(t)
+		ev := func(id string, seq int64, repo string) model.Event {
+			return model.Event{ID: id, Seq: seq, InstallationID: 7, Kind: "push", Repo: repo}
+		}
+		old, mid, api := ev("a", 10, "acme/web"), ev("b", 20, "acme/web"), ev("c", 5, "acme/api")
+		dead := ev("d", 1, "acme/web")
+		for _, e := range []model.Event{old, mid, api, dead} {
+			if _, err := s.EnqueueEvent(ctx, e); err != nil {
+				t.Fatal(err)
+			}
+		}
+		dead.DeadAt = time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC)
+		if err := s.UpdateEvent(ctx, dead); err != nil {
+			t.Fatal(err)
+		}
+		older := func(e model.Event) bool {
+			t.Helper()
+			ok, err := s.HasOlderEvent(ctx, e)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return ok
+		}
+		if !older(mid) {
+			t.Error("acme/web seq 20 has an older live event (seq 10)")
+		}
+		if older(old) {
+			t.Error("a dead-lettered event (seq 1) must not hold back seq 10")
+		}
+		if older(api) || !older(ev("z", 99, "acme/api")) {
+			t.Error("events of another repo must not count, and a later one must see seq 5")
+		}
+		if !older(ev("a0", 10, "acme/web")) {
+			t.Error("same seq: event a is older than a0 by id")
+		}
+		if older(ev("0", 10, "acme/web")) {
+			t.Error("same seq: nothing is older than id 0")
+		}
+		if err := s.DeleteEvent(ctx, old.ID); err != nil {
+			t.Fatal(err)
+		}
+		if older(mid) {
+			t.Error("the older event was handled and deleted")
+		}
+	})
+
+	t.Run("fenced job update", func(t *testing.T) {
+		s := mk(t)
+		const ttl = 400 * time.Millisecond
+		base := time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC)
+		j := model.Job{Key: model.JobKey("acme/web", "go", "example.com/a", "v1.1.0"), Repo: "acme/web", Datasource: "go",
+			Package: "example.com/a", Version: "v1.1.0", ReleasedAt: base, State: model.JobPending, NotBefore: base}
+		if _, err := s.EnqueueJob(ctx, j); err != nil {
+			t.Fatal(err)
+		}
+		a, ok, err := s.AcquireLease(ctx, "repo:acme/web", "A", ttl)
+		if err != nil || !ok {
+			t.Fatalf("acquire: %v %v", ok, err)
+		}
+		j.Attempts, j.Reason = 1, "first"
+		if err := s.UpdateJobFenced(ctx, j, a); err != nil {
+			t.Fatalf("the holder's write: %v", err)
+		}
+		if got, _, _ := s.GetJob(ctx, j.Key); got.Attempts != 1 {
+			t.Fatalf("holder's write lost: %+v", got)
+		}
+		// A stalls past its ttl; B takes over and finishes the job.
+		time.Sleep(ttl + 300*time.Millisecond)
+		b, ok, err := s.AcquireLease(ctx, "repo:acme/web", "B", ttl)
+		if err != nil || !ok {
+			t.Fatalf("takeover: %v %v", ok, err)
+		}
+		done := j
+		done.State, done.PRURL = model.JobDone, "https://example.test/pr/1"
+		if err := s.UpdateJobFenced(ctx, done, b); err != nil {
+			t.Fatalf("the new holder's write: %v", err)
+		}
+		// A wakes up and writes its stale view of the job: refused, and nothing changes.
+		stale := j
+		stale.State, stale.Reason = model.JobFailed, "stale"
+		if err := s.UpdateJobFenced(ctx, stale, a); !errors.Is(err, store.ErrLeaseLost) {
+			t.Fatalf("the displaced holder's write: %v, want ErrLeaseLost", err)
+		}
+		if got, _, _ := s.GetJob(ctx, j.Key); got.State != model.JobDone || got.PRURL != done.PRURL {
+			t.Fatalf("stale write landed: %+v", got)
+		}
+		if lister, ok := s.(store.OpenJobLister); ok {
+			if open, _ := lister.ListOpenJobs(ctx, "acme/web"); len(open) != 0 {
+				t.Fatalf("stale write reopened the job: %+v", open)
+			}
+		}
+		if err := s.ReleaseLease(ctx, b); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.UpdateJobFenced(ctx, stale, b); !errors.Is(err, store.ErrLeaseLost) {
+			t.Fatalf("write under a released lease: %v, want ErrLeaseLost", err)
+		}
+	})
+
+	t.Run("lease contention", func(t *testing.T) {
+		s := mk(t)
+		const racers, rounds = 6, 8
+		base := time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC)
+		j := model.Job{Key: model.JobKey("acme/web", "go", "example.com/a", "v1.1.0"), Repo: "acme/web", Datasource: "go",
+			Package: "example.com/a", Version: "v1.1.0", ReleasedAt: base, State: model.JobPending, NotBefore: base}
+		if _, err := s.EnqueueJob(ctx, j); err != nil {
+			t.Fatal(err)
+		}
+		// Every racer takes the lease, reads the job, bumps Attempts under the fence and
+		// releases: no two are inside at once, and no increment is lost.
+		var inside atomic.Int32
+		var wg sync.WaitGroup
+		for r := 0; r < racers; r++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				owner := fmt.Sprintf("r%d", r)
+				for n := 0; n < rounds; n++ {
+					var l store.Lease
+					for {
+						var ok bool
+						var err error
+						if l, ok, err = s.AcquireLease(ctx, "repo:acme/web", owner, time.Minute); err != nil {
+							t.Error(err)
+							return
+						} else if ok {
+							break
+						}
+						time.Sleep(time.Millisecond)
+					}
+					if inside.Add(1) != 1 {
+						t.Errorf("%s entered while another replica held the lease", owner)
+					}
+					cur, _, err := s.GetJob(ctx, j.Key)
+					if err != nil {
+						t.Error(err)
+					}
+					cur.Attempts++
+					if err := s.UpdateJobFenced(ctx, cur, l); err != nil {
+						t.Errorf("%s: fenced write under its own lease: %v", owner, err)
+					}
+					inside.Add(-1)
+					if err := s.ReleaseLease(ctx, l); err != nil {
+						t.Error(err)
+					}
+				}
+			}()
+		}
+		wg.Wait()
+		if got, _, _ := s.GetJob(ctx, j.Key); got.Attempts != racers*rounds {
+			t.Fatalf("Attempts=%d, want %d: an update was lost", got.Attempts, racers*rounds)
 		}
 	})
 

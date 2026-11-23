@@ -35,6 +35,11 @@ type Store interface {
 	EnqueueJob(ctx context.Context, j model.Job) (bool, error)
 	GetJob(ctx context.Context, key string) (model.Job, bool, error)
 	UpdateJob(ctx context.Context, j model.Job) error
+	// UpdateJobFenced is UpdateJob that applies only while l is still the live lease
+	// (name, owner and fencing token all unchanged), atomically with the write, and
+	// otherwise changes nothing and returns ErrLeaseLost. A replica that lapsed and was
+	// replaced cannot overwrite the job row the new holder owns.
+	UpdateJobFenced(ctx context.Context, j model.Job, l Lease) error
 	// ListDueJobs returns pending jobs with NotBefore <= now, oldest first.
 	ListDueJobs(ctx context.Context, now time.Time, limit int) ([]model.Job, error)
 	// ListDueJobsExcluding is ListDueJobs without the jobs of the named repos, applied
@@ -46,6 +51,10 @@ type Store interface {
 	EnqueueEvent(ctx context.Context, e model.Event) (bool, error)
 	// ListEvents returns every live (not dead) queued event, lowest Seq first (ties by ID).
 	ListEvents(ctx context.Context) ([]model.Event, error)
+	// HasOlderEvent reports whether a live (not dead) event of e.Repo sorts before e by
+	// (Seq, ID). It is how a replica that claimed e learns another replica's older event
+	// for the same repo is still queued, so per-repo order holds across replicas.
+	HasOlderEvent(ctx context.Context, e model.Event) (bool, error)
 	// GetEvent returns one event, live or dead; the bool is false when it does not exist.
 	GetEvent(ctx context.Context, id string) (model.Event, bool, error)
 	// UpdateEvent stores Attempts, NotBefore, LastError, LastAttemptAt and DeadAt for an

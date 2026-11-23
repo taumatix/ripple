@@ -82,6 +82,7 @@ func New(ctx context.Context, s *config.Server, log *slog.Logger) (*App, store.S
 		Actions:   &engine.ActionsWatcher{Engine: eng},
 		Watcher:   &engine.Watcher{Engine: eng, Feed: &feed.GoIndex{BaseURL: s.FeedURL, UserAgent: "ripple (+https://github.com/taumatix/ripple)"}},
 	}
+	wireReplica(eng, a.Queue, s, log)
 	if s.OSV {
 		eng.Advisories = true
 		osvClient := &advisory.Client{APIURL: s.OSVURL, DumpURL: s.OSVDumpURL, HTTP: &http.Client{Timeout: 20 * time.Second}}
@@ -90,4 +91,17 @@ func New(ctx context.Context, s *config.Server, log *slog.Logger) (*App, store.S
 		a.AdvisoryEvery = s.OSVInterval
 	}
 	return a, st, nil
+}
+
+// wireReplica gives the engine and the event queue one identity and lease TTL, so the
+// leases they take on repos and on events name the same replica, and logs it once so the
+// name in other lines (a lease taken over, a fenced-out write) can be matched to a process.
+func wireReplica(eng *engine.Engine, q *Queue, s *config.Server, log *slog.Logger) {
+	id := s.Replica
+	if id == "" {
+		id = engine.NewReplicaID()
+	}
+	eng.Replica, eng.LeaseTTL = id, s.LeaseTTL
+	q.Owner, q.LeaseTTL = id, s.LeaseTTL
+	log.Info("replica", "replica", id, "lease_ttl", s.LeaseTTL.String(), "store", s.Store)
 }

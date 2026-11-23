@@ -128,7 +128,7 @@ type runner struct {
 
 func (r *runner) finish(j model.Job, state model.JobState, reason, pr string) {
 	j.State, j.Reason, j.PRURL = state, reason, pr
-	if err := r.e.Store.UpdateJob(r.ctx, j); err != nil {
+	if err := r.e.updateJob(r.ctx, r.hold, j); err != nil {
 		r.e.log().Error("update job", "job", j.Key, "err", err)
 		return
 	}
@@ -137,7 +137,7 @@ func (r *runner) finish(j model.Job, state model.JobState, reason, pr string) {
 
 func (r *runner) deferJob(j model.Job, until time.Time, reason string) {
 	j.NotBefore, j.Reason = until, reason
-	if err := r.e.Store.UpdateJob(r.ctx, j); err != nil {
+	if err := r.e.updateJob(r.ctx, r.hold, j); err != nil {
 		r.e.log().Error("defer job", "job", j.Key, "err", err)
 	}
 }
@@ -159,7 +159,7 @@ func (r *runner) fail(j model.Job, err error) {
 	default:
 		j.NotBefore = r.e.now().Add(time.Duration(j.Attempts) * 5 * time.Minute)
 	}
-	if uerr := r.e.Store.UpdateJob(r.ctx, j); uerr != nil {
+	if uerr := r.e.updateJob(r.ctx, r.hold, j); uerr != nil {
 		r.e.log().Error("update job", "job", j.Key, "err", uerr)
 	}
 	r.e.log().Warn("job failed", "job", j.Key, "attempt", j.Attempts, "err", err)
@@ -215,7 +215,7 @@ func (e *Engine) runClaimed(ctx context.Context, hold *repoLease, name string, j
 		// Archived: read-only. Keep the jobs and look again later; Resume makes them due.
 		for _, j := range jobs {
 			j.NotBefore, j.Reason = e.now().Add(pauseDefer), pausedReason
-			if err := e.Store.UpdateJob(ctx, j); err != nil {
+			if err := e.updateJob(ctx, hold, j); err != nil {
 				e.log().Error("defer job of archived repo", "job", j.Key, "err", err)
 			}
 		}
@@ -230,7 +230,7 @@ func (e *Engine) runClaimed(ctx context.Context, hold *repoLease, name string, j
 		return 0
 	}
 	if !found {
-		if target, ok := e.followRename(ctx, name, jobs); ok {
+		if target, ok := e.followRename(ctx, hold, name, jobs); ok {
 			e.log().Info("jobs followed a renamed repository", "from", name, "to", target, "jobs", len(jobs))
 			return 0
 		}

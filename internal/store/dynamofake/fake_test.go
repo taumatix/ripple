@@ -341,3 +341,44 @@ func TestUpdateItemAddReturnsNewValue(t *testing.T) {
 		}
 	}
 }
+
+func TestTransactWriteIsAllOrNothing(t *testing.T) {
+	db, _ := client(t)
+	ctx := context.Background()
+	put(t, db, map[string]types.AttributeValue{"PK": sv("L"), "SK": sv("M"), "Owner": sv("a")})
+	check := func(owner string) types.TransactWriteItem {
+		return types.TransactWriteItem{ConditionCheck: &types.ConditionCheck{
+			TableName: aws.String("t"), Key: map[string]types.AttributeValue{"PK": sv("L"), "SK": sv("M")},
+			ConditionExpression:       aws.String("#o = :o"),
+			ExpressionAttributeNames:  map[string]string{"#o": "Owner"},
+			ExpressionAttributeValues: map[string]types.AttributeValue{":o": sv(owner)}}}
+	}
+	write := types.TransactWriteItem{Put: &types.Put{TableName: aws.String("t"),
+		Item: map[string]types.AttributeValue{"PK": sv("J"), "SK": sv("M"), "V": nv("1")}}}
+
+	_, err := db.TransactWriteItems(ctx, &dynamodb.TransactWriteItemsInput{TransactItems: []types.TransactWriteItem{check("b"), write}})
+	var tc *types.TransactionCanceledException
+	if !errors.As(err, &tc) {
+		t.Fatalf("stale condition: err = %v, want TransactionCanceledException", err)
+	}
+	if len(tc.CancellationReasons) != 2 || aws.ToString(tc.CancellationReasons[0].Code) != "ConditionalCheckFailed" || aws.ToString(tc.CancellationReasons[1].Code) != "None" {
+		t.Fatalf("reasons = %+v", tc.CancellationReasons)
+	}
+	got, _ := db.GetItem(ctx, &dynamodb.GetItemInput{TableName: aws.String("t"), Key: map[string]types.AttributeValue{"PK": sv("J"), "SK": sv("M")}})
+	if len(got.Item) != 0 {
+		t.Fatalf("cancelled transaction wrote %v", got.Item)
+	}
+
+	if _, err := db.TransactWriteItems(ctx, &dynamodb.TransactWriteItemsInput{TransactItems: []types.TransactWriteItem{check("a"), write}}); err != nil {
+		t.Fatalf("holding condition: %v", err)
+	}
+	got, _ = db.GetItem(ctx, &dynamodb.GetItemInput{TableName: aws.String("t"), Key: map[string]types.AttributeValue{"PK": sv("J"), "SK": sv("M")}})
+	if len(got.Item) == 0 {
+		t.Fatal("committed transaction wrote nothing")
+	}
+
+	del := types.TransactWriteItem{Delete: &types.Delete{TableName: aws.String("t"), Key: map[string]types.AttributeValue{"PK": sv("J"), "SK": sv("M")}}}
+	if _, err := db.TransactWriteItems(ctx, &dynamodb.TransactWriteItemsInput{TransactItems: []types.TransactWriteItem{write, del}}); apiCode(err) != "ValidationException" {
+		t.Fatalf("two actions on one item: %v", err)
+	}
+}

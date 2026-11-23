@@ -212,3 +212,22 @@ func (d *Dynamo) DeleteEvent(ctx context.Context, id string) error {
 	})
 	return wrapD("delete event", err)
 }
+
+var errFoundOlder = errors.New("found an older event")
+
+// HasOlderEvent is store.Store. It reads gsi1, which is eventually consistent: an older
+// event written a moment ago can be missed, and the next claim of this repo's events
+// (or the 30s rescan) sees it. Postgres and Memory have no such window.
+func (d *Dynamo) HasOlderEvent(ctx context.Context, e model.Event) (bool, error) {
+	err := d.query(ctx, &dynamodb.QueryInput{
+		IndexName:                 aws.String(gsi1),
+		KeyConditionExpression:    aws.String("GSI1PK = :pk AND GSI1SK < :sk"),
+		FilterExpression:          aws.String("#r = :r"),
+		ExpressionAttributeNames:  map[string]string{"#r": "Repo"},
+		ExpressionAttributeValues: map[string]types.AttributeValue{":pk": s("EVENTS"), ":sk": s(fmt.Sprintf("%020d", e.Seq) + sep + e.ID), ":r": s(e.Repo)},
+	}, 0, func(map[string]types.AttributeValue) error { return errFoundOlder })
+	if errors.Is(err, errFoundOlder) {
+		return true, nil
+	}
+	return false, wrapD("has older event", err)
+}

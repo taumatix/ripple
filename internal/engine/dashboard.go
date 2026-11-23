@@ -170,9 +170,7 @@ func (e *Engine) flushDashboards(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		unlock := e.lockRepo(r)
-		e.syncDashboard(ctx, r)
-		unlock()
+		e.flushDashboard(ctx, r)
 	}
 }
 
@@ -314,4 +312,23 @@ func bodyHash(body string) string {
 // taken from the stored value, so nothing but an osv.dev link can reach the issue.
 func safeAdvisoryURL(o openAdvisory) string {
 	return "https://osv.dev/vulnerability/" + url.PathEscape(clean(o.ID))
+}
+
+// flushDashboard syncs one repo's dashboard under its lease, so a replica that is not the
+// holder never writes the issue. A repo another replica holds is skipped: its holder syncs
+// the dashboard when its scan or run ends, from the same stored state.
+func (e *Engine) flushDashboard(ctx context.Context, name string) {
+	defer e.lockRepo(name)()
+	hold, err := e.acquireRepo(ctx, name, false)
+	if err != nil {
+		if ctx.Err() == nil {
+			e.log().Error("claim repo for dashboard", "repo", name, "err", err)
+		}
+		return
+	}
+	if hold == nil {
+		return
+	}
+	defer hold.Release()
+	e.syncDashboard(hold.Ctx, name)
 }

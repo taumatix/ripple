@@ -122,6 +122,6 @@ service.
 
 Where the fake differs from DynamoDB: it is strongly consistent (a GSI is never stale, so the eventual-consistency
 paths are not exercised); it never throttles; the only `UnprocessedItems` it returns are the ones the test hook
-`DropOneFromNextBatch` asks for; it has no Scan, TransactWriteItems or BatchGetItem and rejects other
+`DropOneFromNextBatch` asks for; it implements TransactWriteItems (Put, Delete, ConditionCheck) but has no Scan or BatchGetItem and rejects other
 operations; it does not reject reserved words; item and page sizes are an approximation of the documented
 accounting. Roadmap entry 72 tracks these.

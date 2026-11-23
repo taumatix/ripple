@@ -244,3 +244,22 @@ func TestGitHubURLsAreValidated(t *testing.T) {
 		}
 	}
 }
+
+func TestServerReplicaAndLeaseTTL(t *testing.T) {
+	s, err := LoadServer(env(base))
+	if err != nil || s.Replica != "" || s.LeaseTTL != 30*time.Second {
+		t.Fatalf("defaults: %q %v, %v", s.Replica, s.LeaseTTL, err)
+	}
+	s, err = LoadServer(env(with("RIPPLE_REPLICA", "ripple-1", "RIPPLE_LEASE_TTL", "45s")))
+	if err != nil || s.Replica != "ripple-1" || s.LeaseTTL != 45*time.Second {
+		t.Fatalf("set: %q %v, %v", s.Replica, s.LeaseTTL, err)
+	}
+	for _, v := range []string{"0", "-5s", "soon", "2s"} {
+		if _, err := LoadServer(env(with("RIPPLE_LEASE_TTL", v))); err == nil {
+			t.Errorf("RIPPLE_LEASE_TTL=%s accepted", v)
+		}
+	}
+	if _, err := LoadServer(env(with("RIPPLE_REPLICA", strings.Repeat("x", 65)))); err == nil {
+		t.Error("an over-long RIPPLE_REPLICA was accepted")
+	}
+}

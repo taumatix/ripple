@@ -71,6 +71,40 @@ func (r *replica) kill() {
 type mortalStore struct {
 	store.Store
 	dead atomic.Bool
+
+	// frozen holds every lease renewal of this replica until thaw, as a process stopped for
+	// longer than its lease: it resumes unaware that the lease lapsed.
+	mu      sync.Mutex
+	freeze  chan struct{}
+	granted map[string]store.Lease
+}
+
+func (m *mortalStore) frozen() chan struct{} { m.mu.Lock(); defer m.mu.Unlock(); return m.freeze }
+
+// stall starts holding renewals; thaw lets them through.
+func (m *mortalStore) stall() { m.mu.Lock(); m.freeze = make(chan struct{}); m.mu.Unlock() }
+func (m *mortalStore) thaw() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.freeze != nil {
+		close(m.freeze)
+		m.freeze = nil
+	}
+}
+
+// lastLease is the lease this replica was last granted under name.
+func (m *mortalStore) lastLease(name string) (store.Lease, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	l, ok := m.granted[name]
+	return l, ok
+}
+
+func (m *mortalStore) UpdateJobFenced(ctx context.Context, j model.Job, l store.Lease) error {
+	if m.dead.Load() {
+		return errDead
+	}
+	return m.Store.UpdateJobFenced(ctx, j, l)
 }
 
 var errDead = errors.New("replica is dead")
@@ -86,12 +120,24 @@ func (m *mortalStore) AcquireLease(ctx context.Context, n, o string, ttl time.Du
 	if m.dead.Load() {
 		return store.Lease{}, false, errDead
 	}
-	return m.Store.AcquireLease(ctx, n, o, ttl)
+	l, ok, err := m.Store.AcquireLease(ctx, n, o, ttl)
+	if ok && err == nil {
+		m.mu.Lock()
+		if m.granted == nil {
+			m.granted = map[string]store.Lease{}
+		}
+		m.granted[n] = l
+		m.mu.Unlock()
+	}
+	return l, ok, err
 }
 
 func (m *mortalStore) RenewLease(ctx context.Context, l store.Lease, ttl time.Duration) (store.Lease, bool, error) {
 	if m.dead.Load() {
 		return store.Lease{}, false, errDead
+	}
+	if c := m.frozen(); c != nil {
+		<-c
 	}
 	return m.Store.RenewLease(ctx, l, ttl)
 }
@@ -223,6 +269,54 @@ func TestKilledReplicaIsTakenOverWithOnePullRequest(t *testing.T) {
 		b.stop()
 		if n := len(e.gh.PRs(repo)); n != 1 {
 			t.Fatalf("%d PRs after takeover, want exactly 1", n)
+		}
+	})
+}
+
+// A replica stopped past its lease and then resumed has lost the repo to another replica. It
+// cannot write the job row any more (the fenced update is refused), and when it wakes it
+// opens no second pull request.
+func TestFencedOutReplicaCannotWriteTheJobOrOpenASecondPR(t *testing.T) {
+	testutil.ForEachStoreWithFake(t, func(t *testing.T, st store.Store) {
+		e := newEnv(t, st, defaultLimits())
+		repo := replicaRepos(t, e, 1)[0]
+		lease := engine.LeaseName(repo)
+		a := e.newReplica("a", st, nil)
+		a.plat.Hold(repo) // a is busy on the repo when it stalls
+		a.start()
+		defer a.stop()
+		e.eventually("a holds the repo", func() bool { _, ok := a.st.lastLease(lease); return ok && a.plat.Calls(repo) > 0 })
+		aLease, _ := a.st.lastLease(lease)
+		a.st.stall()
+		defer a.st.thaw()
+
+		b := e.newReplica("b", st, nil)
+		b.start()
+		defer b.stop()
+		e.eventually("b took the repo over and finished the job", func() bool { return e.jobDone(repo) })
+		b.stop()
+		key := model.JobKey(repo, "go", "example.com/lib", "v1.1.0")
+		done, _, _ := st.GetJob(context.Background(), key)
+
+		// a's late write, with the lease it was granted before it stalled.
+		late := done
+		late.State, late.PRURL, late.Reason = model.JobFailed, "", "late write from a fenced-out replica"
+		if err := st.UpdateJobFenced(context.Background(), late, aLease); !errors.Is(err, store.ErrLeaseLost) {
+			t.Fatalf("late UpdateJob by a fenced-out replica: err = %v, want ErrLeaseLost", err)
+		}
+		if got, _, _ := st.GetJob(context.Background(), key); got != done {
+			t.Fatalf("late write changed the job: %+v, was %+v", got, done)
+		}
+
+		// a wakes: its renewal is refused, its run ends, and it opens nothing.
+		a.st.thaw()
+		a.plat.Release(repo)
+		a.stop()
+		if n := len(e.gh.PRs(repo)); n != 1 {
+			t.Fatalf("%d PRs after the fenced-out replica woke, want exactly 1", n)
+		}
+		if got, _, _ := st.GetJob(context.Background(), key); got != done {
+			t.Fatalf("waking replica changed the job: %+v, was %+v", got, done)
 		}
 	})
 }

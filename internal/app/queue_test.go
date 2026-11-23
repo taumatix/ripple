@@ -426,3 +426,36 @@ func TestEventHandledElsewhereIsNotRunAgain(t *testing.T) {
 		t.Fatal("event deleted by another replica was run again")
 	}
 }
+
+// Another replica's older event for a repo is not visible here until the rescan. A newer event
+// of that repo claimed here meanwhile must wait for it: the store is asked, at claim time,
+// whether an older live event of the repo exists.
+func TestNewerEventWaitsForAnOlderOneOnAnotherReplica(t *testing.T) {
+	ctx := context.Background()
+	st, g := store.NewMemory(), newGate()
+	q := &Queue{Store: st, Process: g.process, Workers: 2, PerInstallation: 2, Owner: "a", LeaseTTL: 300 * time.Millisecond, Rescan: time.Hour}
+	startQueue(t, q)
+	// Replica b received "old" first and is handling it; this replica has not loaded it.
+	older := ev(1, "old", "acme/a")
+	older.Seq = 1
+	if _, err := st.EnqueueEvent(ctx, older); err != nil {
+		t.Fatal(err)
+	}
+	bHold, err := store.Hold(ctx, st, nil, eventLease("old"), "b", 300*time.Millisecond)
+	if err != nil || bHold == nil {
+		t.Fatalf("b's claim: %v %v", bHold, err)
+	}
+	if err := q.Add(ctx, ev(1, "new", "acme/a")); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(250 * time.Millisecond)
+	if g.has("new") {
+		t.Fatal("a newer event ran while an older event of the repo was still queued on another replica")
+	}
+	// b finishes: the event is deleted and its lease released.
+	if err := st.DeleteEvent(ctx, "old"); err != nil {
+		t.Fatal(err)
+	}
+	bHold.Release()
+	eventually(t, "newer event runs once the older is gone", func() bool { return g.has("new") })
+}

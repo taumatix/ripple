@@ -59,3 +59,25 @@ func TestSchedule(t *testing.T) {
 }
 
 var lim = Limits{MinimumReleaseAge: 72 * time.Hour, OpenPRLimit: 5, AllowAutomerge: true}
+
+func TestEvaluateSecuritySkipsOnlyTheCooldown(t *testing.T) {
+	cd := &config.Duration{Duration: 5 * 24 * time.Hour}
+	u := &config.Update{Cooldown: cd}
+	l := Limits{MinimumReleaseAge: 72 * time.Hour}
+	if d := EvaluateSecurity(l, u, "example.com/lib", Patch, sun); !d.Enabled || !d.NotBefore.Equal(sun) {
+		t.Fatalf("cooldown not skipped: %+v", d)
+	}
+	if l.MinimumReleaseAge != 72*time.Hour || u.Cooldown != cd {
+		t.Fatal("inputs were modified")
+	}
+	// Ignore rules still win.
+	u = &config.Update{Ignore: []config.Ignore{{Dependency: "example.com/*"}}}
+	if d := EvaluateSecurity(l, u, "example.com/lib", Patch, sun); d.Enabled {
+		t.Fatal("ignored dependency enabled")
+	}
+	// So does the schedule: sun is a Sunday, the window opens Monday.
+	u = &config.Update{Schedule: &config.Schedule{Days: []string{"mon"}}}
+	if d := EvaluateSecurity(l, u, "example.com/lib", Patch, sun); !d.NotBefore.After(sun) {
+		t.Fatalf("schedule ignored: %+v", d)
+	}
+}

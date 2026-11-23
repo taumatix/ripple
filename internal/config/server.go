@@ -33,8 +33,14 @@ type Server struct {
 	// GoReleasesURL serves the Go release list (go-toolchain updates).
 	GoReleasesURL string
 	FeedInterval  time.Duration
-	GoProxy       string
-	Sandbox       string // none, auto, bwrap, seatbelt, container, docker, podman
+	// OSV: advisories as an event source; off unless OSV is true.
+	OSV         bool
+	OSVURL      string
+	OSVDumpURL  string
+	OSVInterval time.Duration
+	OSVMaxFetch int
+	GoProxy     string
+	Sandbox     string // none, auto, bwrap, seatbelt, container, docker, podman
 	// Container* configure the container, docker and podman sandboxes (docs/sandbox.md).
 	ContainerImage, ContainerCPUs, ContainerMemory, ContainerPull, ContainerNetwork string
 	Store                                                                           string // memory, postgres, dynamodb
@@ -77,6 +83,11 @@ RIPPLE_GITHUB_GIT_URL         default https://github.com
 RIPPLE_FEED_URL               default https://index.golang.org
 RIPPLE_FEED_INTERVAL          default 1m
 RIPPLE_GO_RELEASES_URL        Go release list for go-toolchain updates (default https://go.dev/dl/)
+RIPPLE_OSV                    true turns on OSV security advisories as an event source (default false)
+RIPPLE_OSV_URL                OSV API, default https://api.osv.dev
+RIPPLE_OSV_DUMP_URL           OSV bucket, default https://storage.googleapis.com/osv-vulnerabilities
+RIPPLE_OSV_INTERVAL           default 10m
+RIPPLE_OSV_MAX_FETCH          advisory records fetched per poll (default 100)
 RIPPLE_GOPROXY                module proxy used to verify major bumps (default https://proxy.golang.org)
 RIPPLE_STORE                  memory (default), postgres or dynamodb
 RIPPLE_POSTGRES_DSN           required for postgres
@@ -159,6 +170,10 @@ func LoadServer(getenv func(string) string) (*Server, error) {
 		FeedURL:               strings.TrimRight(str("RIPPLE_FEED_URL", "https://index.golang.org"), "/"),
 		GoReleasesURL:         strings.TrimRight(str("RIPPLE_GO_RELEASES_URL", "https://go.dev/dl/"), "/"),
 		FeedInterval:          dur("RIPPLE_FEED_INTERVAL", "1m"),
+		OSVURL:                strings.TrimRight(str("RIPPLE_OSV_URL", "https://api.osv.dev"), "/"),
+		OSVDumpURL:            strings.TrimRight(str("RIPPLE_OSV_DUMP_URL", "https://storage.googleapis.com/osv-vulnerabilities"), "/"),
+		OSVInterval:           dur("RIPPLE_OSV_INTERVAL", "10m"),
+		OSVMaxFetch:           num("RIPPLE_OSV_MAX_FETCH", 100, 1),
 		GoProxy:               strings.TrimRight(str("RIPPLE_GOPROXY", "https://proxy.golang.org"), "/"),
 		Sandbox:               str("RIPPLE_SANDBOX", "none"),
 		ContainerImage:        getenv("RIPPLE_CONTAINER_IMAGE"),
@@ -184,6 +199,23 @@ func LoadServer(getenv func(string) string) (*Server, error) {
 		EventWorkersPerInstallation: num("RIPPLE_EVENT_WORKERS_PER_INSTALLATION", 2, 1),
 		EventBacklog:                num("RIPPLE_EVENT_BACKLOG", 10_000, 1),
 		EventInstallationBacklog:    num("RIPPLE_EVENT_INSTALLATION_BACKLOG", 1_000, 1),
+	}
+	if v := getenv("RIPPLE_OSV"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			errs = append(errs, errors.New("RIPPLE_OSV: want true or false"))
+		}
+		s.OSV = b
+	}
+	if s.OSV {
+		if s.OSVInterval <= 0 {
+			errs = append(errs, errors.New("RIPPLE_OSV_INTERVAL must be positive"))
+		}
+		for k, v := range map[string]string{"RIPPLE_OSV_URL": s.OSVURL, "RIPPLE_OSV_DUMP_URL": s.OSVDumpURL} {
+			if err := checkURL(k, v); err != nil {
+				errs = append(errs, err)
+			}
+		}
 	}
 	if v := getenv("RIPPLE_ALLOW_AUTOMERGE"); v != "" {
 		b, err := strconv.ParseBool(v)

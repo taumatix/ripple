@@ -14,6 +14,8 @@ dependency. ripple inverts that:
 - The feed (index.golang.org) is read **once**, however many repositories you have.
 - A **reverse index** maps package to importing repos. A release for a package nobody imports costs
   nothing; a release for one importer costs one clone, not a scan of the org.
+- Optionally (`RIPPLE_OSV=true`) security advisories from [OSV](https://osv.dev) become PRs for the fixed
+  version that skip the cooldown: [docs/osv.md](docs/osv.md).
 - Result: far fewer API calls and rate-limit pressure, and a PR as soon as the cooldown allows,
   not at the next scheduled run.
 

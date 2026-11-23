@@ -47,6 +47,7 @@ type item struct {
 	automerge bool
 	group     string
 	typ       rules.UpdateType
+	advisory  *advisoryNote // set when the job fixes a published advisory
 }
 
 // migrates reports whether the update renames the package (a Go major bump).
@@ -212,7 +213,7 @@ func (r *runner) plan(jobs []model.Job, deps []model.Dependency) []*prPlan {
 	var order []*prPlan
 	now := r.e.now()
 	for _, j := range jobs {
-		it := item{job: j, automerge: true, typ: rules.Patch}
+		it := item{job: j, automerge: true, typ: rules.Patch, advisory: r.e.advisoryNoteFor(r.ctx, j)}
 		var notBefore time.Time
 		ignored := false
 		for _, d := range deps {
@@ -225,6 +226,9 @@ func (r *runner) plan(jobs []model.Job, deps []model.Dependency) []*prPlan {
 				continue
 			}
 			dec := rules.Evaluate(r.e.Limits, u, d.Package, typ, j.ReleasedAt, now)
+			if it.advisory != nil {
+				dec = rules.EvaluateSecurity(r.e.Limits, u, d.Package, typ, now)
+			}
 			if !dec.Enabled {
 				ignored = true
 				continue
@@ -367,6 +371,7 @@ func (r *runner) openPR(p *prPlan) (*platform.PR, error) {
 		return nil, nil
 	}
 	title, body := describe(p, applied)
+	title, body = securityText(applied, title, body)
 	if err := r.rewriteWorks(); err != nil {
 		return nil, err
 	}
@@ -486,12 +491,14 @@ func (r *runner) apply(it item) (bool, error) {
 }
 
 func labelsFor(items []item) []string {
+	var labels []string
 	for _, it := range items {
 		if it.typ == rules.Major {
-			return []string{"major", "breaking"}
+			labels = []string{"major", "breaking"}
+			break
 		}
 	}
-	return nil
+	return withSecurityLabel(items, labels)
 }
 
 // releaseNotes links to where a human reads what changed: the GitHub release for

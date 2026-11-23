@@ -11,6 +11,7 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 
+	"github.com/taumatix/ripple/internal/advisory"
 	"github.com/taumatix/ripple/internal/config"
 	"github.com/taumatix/ripple/internal/engine"
 	"github.com/taumatix/ripple/internal/feed"
@@ -70,12 +71,19 @@ func New(ctx context.Context, s *config.Server, log *slog.Logger) (*App, store.S
 	eng := &engine.Engine{Store: st, Platform: mux, Log: log, Workers: s.Workers,
 		MaxFiles: s.MaxFiles, MaxDependencies: s.MaxDependencies,
 		Limits: rules.Limits{MinimumReleaseAge: s.MinimumReleaseAge, OpenPRLimit: s.OpenPRLimit, AllowAutomerge: s.AllowAutomerge}}
-	return &App{
+	a := &App{
 		Engine: eng, Log: log, Secret: []byte(s.WebhookSecret), PollEvery: s.FeedInterval,
 		Hosts: hosts, DefaultHost: github.HostName,
 		Queue: &Queue{Workers: s.EventWorkers, PerInstallation: s.EventWorkersPerInstallation,
 			Backlog: s.EventBacklog, InstallationBacklog: s.EventInstallationBacklog},
 		Toolchain: &engine.ToolchainWatcher{Engine: eng, Source: &feed.GoDL{BaseURL: s.GoReleasesURL, UserAgent: "ripple (+https://github.com/taumatix/ripple)"}},
 		Watcher:   &engine.Watcher{Engine: eng, Feed: &feed.GoIndex{BaseURL: s.FeedURL, UserAgent: "ripple (+https://github.com/taumatix/ripple)"}},
-	}, st, nil
+	}
+	if s.OSV {
+		eng.Advisories = true
+		a.Advisories = &engine.AdvisoryWatcher{Engine: eng, MaxFetch: s.OSVMaxFetch,
+			Source: &advisory.Client{APIURL: s.OSVURL, DumpURL: s.OSVDumpURL, HTTP: &http.Client{Timeout: 20 * time.Second}}}
+		a.AdvisoryEvery = s.OSVInterval
+	}
+	return a, st, nil
 }

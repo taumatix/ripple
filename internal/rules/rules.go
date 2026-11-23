@@ -143,6 +143,16 @@ func Evaluate(l Limits, u *config.Update, pkg string, t UpdateType, releasedAt, 
 	return d
 }
 
+// EvaluateSecurity is Evaluate for an update that fixes a published advisory: the
+// cooldown, server minimum and repo cooldown alike, is skipped, and nothing else. The
+// repo's ignore rules, schedule, groups and automerge setting still decide.
+func EvaluateSecurity(l Limits, u *config.Update, pkg string, t UpdateType, now time.Time) Decision {
+	l.MinimumReleaseAge = 0
+	uu := *u
+	uu.Cooldown = nil
+	return Evaluate(l, &uu, pkg, t, now, now)
+}
+
 var weekdays = map[time.Weekday]string{time.Monday: "mon", time.Tuesday: "tue", time.Wednesday: "wed", time.Thursday: "thu", time.Friday: "fri", time.Saturday: "sat", time.Sunday: "sun"}
 
 // InWindow reports whether t falls inside the schedule. The days are matched

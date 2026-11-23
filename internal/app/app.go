@@ -34,6 +34,10 @@ type App struct {
 	Log       *slog.Logger
 	// PollEvery is the feed poll and job run period; zero disables the loop (tests call Tick).
 	PollEvery time.Duration
+	// Advisories polls OSV when set (RIPPLE_OSV). It runs on its own loop every
+	// AdvisoryEvery, so an OSV outage or slowdown never delays the feed poll or the jobs.
+	Advisories    *engine.AdvisoryWatcher
+	AdvisoryEvery time.Duration
 	// Queue holds received events until they are handled; nil means a Queue with
 	// its defaults over Engine.Store. Its Store and Process are filled in when unset.
 	Queue *Queue
@@ -176,6 +180,10 @@ func (a *App) Run(ctx context.Context, ln net.Listener) error {
 		go func() { defer wg.Done(); a.pollLoop(ctx) }()
 		go func() { defer wg.Done(); a.jobs.Run(ctx, a.PollEvery) }()
 	}
+	if a.Advisories != nil && a.AdvisoryEvery > 0 {
+		wg.Add(1)
+		go func() { defer wg.Done(); a.advisoryLoop(ctx) }()
+	}
 	var err error
 	select {
 	case <-ctx.Done():
@@ -201,8 +209,38 @@ func (a *App) Tick(ctx context.Context) {
 		a.Log.Info("feed poll enqueued jobs", "jobs", n)
 	}
 	a.pollToolchain(ctx)
+	a.pollAdvisories(ctx)
 	if _, err := a.Engine.RunDue(ctx); err != nil && ctx.Err() == nil {
 		a.Log.Error("run due jobs", "err", err)
+	}
+}
+
+// pollAdvisories runs one OSV poll when enabled. A failure is logged and nothing else:
+// normal updates never wait on OSV.
+func (a *App) pollAdvisories(ctx context.Context) {
+	if a.Advisories == nil {
+		return
+	}
+	if n, err := a.Advisories.Poll(ctx); err != nil {
+		if ctx.Err() == nil {
+			a.Log.Warn("osv poll", "err", err)
+		}
+	} else if n > 0 {
+		a.Log.Info("osv poll enqueued security jobs", "jobs", n)
+		a.jobs.Wake()
+	}
+}
+
+func (a *App) advisoryLoop(ctx context.Context) {
+	t := time.NewTicker(a.AdvisoryEvery)
+	defer t.Stop()
+	for {
+		a.pollAdvisories(ctx)
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
 	}
 }
 

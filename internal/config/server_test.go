@@ -421,3 +421,22 @@ func TestServerContainerGoImages(t *testing.T) {
 		t.Error("accepted without a container sandbox")
 	}
 }
+
+func TestServerDynamoScanPacingAndDriftCheck(t *testing.T) {
+	s, err := LoadServer(env(base))
+	if err != nil || s.DynamoScanPage != 0 || s.DynamoScanPause != 0 || s.DynamoDriftCheck != 0 {
+		t.Fatalf("defaults: %+v %v", s, err)
+	}
+	s, err = LoadServer(env(with("RIPPLE_STORE", "dynamodb", "RIPPLE_DYNAMODB_SCAN_PAGE", "100", "RIPPLE_DYNAMODB_SCAN_PAUSE_MS", "250", "RIPPLE_DYNAMODB_DRIFT_CHECK_INTERVAL", "6h")))
+	if err != nil || s.DynamoScanPage != 100 || s.DynamoScanPause != 250*time.Millisecond || s.DynamoDriftCheck != 6*time.Hour {
+		t.Fatalf("set: %+v %v", s, err)
+	}
+	for _, kv := range [][2]string{{"RIPPLE_DYNAMODB_SCAN_PAGE", "-1"}, {"RIPPLE_DYNAMODB_SCAN_PAUSE_MS", "x"}, {"RIPPLE_DYNAMODB_DRIFT_CHECK_INTERVAL", "soon"}} {
+		if _, err := LoadServer(env(with("RIPPLE_STORE", "dynamodb", kv[0], kv[1]))); err == nil {
+			t.Errorf("%s=%s accepted", kv[0], kv[1])
+		}
+	}
+	if _, err := LoadServer(env(with("RIPPLE_DYNAMODB_DRIFT_CHECK_INTERVAL", "1h"))); err == nil {
+		t.Error("a drift check on the memory store was accepted")
+	}
+}

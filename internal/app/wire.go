@@ -43,7 +43,7 @@ func OpenStore(ctx context.Context, s *config.Server) (store.Store, error) {
 			}
 		}), s.DynamoTable, store.WithJobShards(s.DynamoJobShards), store.WithDependentShards(s.DynamoDependentShards),
 			store.WithQueryConcurrency(s.DynamoQueryConcurrency), store.WithAdaptiveDependents(s.DynamoAdaptiveDependents),
-			store.WithCounterStripes(s.DynamoCounterStripes))
+			store.WithCounterStripes(s.DynamoCounterStripes), store.WithScanPaging(s.DynamoScanPage, s.DynamoScanPause))
 		if err := d.EnsureTable(ctx); err != nil {
 			return nil, err
 		}
@@ -124,6 +124,7 @@ func New(ctx context.Context, s *config.Server, log *slog.Logger) (a *App, st st
 		a.Advisories = &engine.AdvisoryWatcher{Engine: eng, MaxFetch: s.OSVMaxFetch, SweepBatch: s.OSVSweepBatch, Source: osvClient}
 		a.AdvisoryEvery = s.OSVInterval
 	}
+	a.DriftCheckEvery = s.DynamoDriftCheck
 	return a, st, nil
 }
 

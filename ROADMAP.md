@@ -226,11 +226,6 @@ Everything else:
     would remove each other's, and a killed server's job containers keep the network alive until they exit (the next
     start then fails to recreate it). Name it per `RIPPLE_REPLICA` and remove the labelled job containers of that
     replica at start, then test the kill-and-restart case live.
-145. **DynamoDB: the hygiene commands at scale, and on a schedule.** `ripple dynamodb check-counts`, `recount` and
-    `backfill-failed-jobs` find their work by a Scan of the whole table, which has only run against the in-process fake
-    (the DynamoDB Local run is CI-only, real AWS never). Measure the Scan and the per-package recount on a large table,
-    page them with a rate limit so they cannot starve live traffic, and decide whether the server should run the drift
-    check itself (log the gap) instead of leaving it to an operator.
 148. **npm: regenerate lockfiles offline.** ripple edits package.json and reports the lockfiles it could not refresh
     (`package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, `pnpm-lock.yaml`, bun). The abbreviated metadata carries
     `dist.integrity` and `dist.tarball` per version, so a package-lock v2/v3 entry for a leaf package whose own dependencies did
@@ -347,3 +342,10 @@ Everything else:
     of Gitea/Forgejo, `archived=ARCHIVED` on Data Center 8+) ran only against fakes; also check that GitLab's
     `simple=true` listing under `archived=true` answers what the doc says, and that a Data Center before 8.0 lists no
     archived repo. Folds into entry 92's real-host run.
+176. **DynamoDB hygiene: measure it, and stop scanning for the package list.** Paging and the server's drift check (entry 145)
+    exist but were only run against the in-process fake and DynamoDB Local; nobody has timed a Scan or a per-package recount
+    on a table with millions of items, or on real AWS with provisioned capacity, so the suggested page and pause are
+    arithmetic, not measurement. The check still finds the packages by Scanning every item for `DEP#` keys: keep the set of
+    packages with dependents in a small index item (or a sparse GSI) so the check reads that instead. The server only
+    reports drift; whether it should recount a package it finds drifted on its own (rate-limited, one replica at a time
+    under the lease) is undecided.

@@ -56,6 +56,10 @@ type App struct {
 	// AdvisoryEvery, so an OSV outage or slowdown never delays the feed poll or the jobs.
 	Advisories    *engine.AdvisoryWatcher
 	AdvisoryEvery time.Duration
+	// DriftCheckEvery, when positive and the store is DynamoDB, has Run compare every
+	// package's dependents counter with its index on that period and log the gap
+	// (RIPPLE_DYNAMODB_DRIFT_CHECK_INTERVAL). It is read only; `ripple dynamodb recount` repairs.
+	DriftCheckEvery time.Duration
 	// Queue holds received events until they are handled; nil means a Queue with
 	// its defaults over Engine.Store. Its Store and Process are filled in when unset.
 	Queue *Queue
@@ -269,6 +273,10 @@ func (a *App) Run(ctx context.Context, ln net.Listener) error {
 		wg.Add(1)
 		go func() { defer wg.Done(); a.advisoryLoop(ctx) }()
 	}
+	if d, ok := a.Engine.Store.(*store.Dynamo); ok && a.DriftCheckEvery > 0 {
+		wg.Add(1)
+		go func() { defer wg.Done(); a.driftLoop(ctx, d) }()
+	}
 	var err error
 	select {
 	case <-ctx.Done():
@@ -410,6 +418,38 @@ func (a *App) advisoryLoop(ctx context.Context) {
 			return
 		case <-t.C:
 		}
+	}
+}
+
+// driftLoop checks the DynamoDB dependents counters against their index every
+// DriftCheckEvery, after the first period, so a start is not also a whole-table scan.
+func (a *App) driftLoop(ctx context.Context, d *store.Dynamo) {
+	t := time.NewTicker(a.DriftCheckEvery)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		a.checkDrift(ctx, d)
+	}
+}
+
+// checkDrift logs how many packages' counters disagree with the index (a warning naming
+// the first few) or that none do. A failed check is logged and tried again next period.
+func (a *App) checkDrift(ctx context.Context, d *store.Dynamo) {
+	drift, err := d.CheckDependentCounts(ctx)
+	switch {
+	case ctx.Err() != nil:
+	case err != nil:
+		a.Log.Error("dependent counter check", "err", err)
+	case len(drift) == 0:
+		a.Log.Info("dependent counters match the index")
+	default:
+		first := drift[:min(len(drift), 3)]
+		a.Log.Warn("dependent counters drifted from the index; run `ripple dynamodb recount`",
+			"packages", len(drift), "first", first)
 	}
 }
 

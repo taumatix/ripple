@@ -105,7 +105,16 @@ Billing is on-demand. `Store.EnsureTable` creates both.
       next recount fixes it. `ripple dynamodb check-counts` lists the packages whose counter disagrees with the
       index (`(*Dynamo).CheckDependentCounts`, read only) and `ripple dynamodb recount` recounts every package
       (`RecountAllDependents`, needs the option). Both Scan the table to find the packages, so they are
-      operator commands run by hand or from a scheduler of your own, not something the server runs.
+      operator commands; the server only reads (below), and never recounts on its own.
+      `RIPPLE_DYNAMODB_SCAN_PAGE=<items>` and `RIPPLE_DYNAMODB_SCAN_PAUSE_MS=<ms>` (both default 0, unpaced) pace
+      every such Scan, in the commands and in the server's check: a page reads at most that many items (before the
+      filter, which is what consumes read capacity) and the next is requested the pause later; a recount or check
+      also waits the pause between packages. Pick them from the table's provisioned read capacity: a page of
+      100 items every 100ms is about 1000 items a second. `RIPPLE_DYNAMODB_DRIFT_CHECK_INTERVAL=<duration>`
+      (default 0, off; `6h`, `1d`) has each server replica run the check that often, starting one period after
+      it starts, and log `dependent counters drifted from the index` (a warning with the package count and the
+      first three) or `dependent counters match the index`; it writes nothing, so repairing stays the operator's
+      `ripple dynamodb recount`. Several replicas each run it; set it on one if the scan is dear.
     - **Counter stripes** (`RIPPLE_DYNAMODB_COUNTER_STRIPES=<n>`, default 1, 1-64). With more than one, each
       change ADDs to a random item `PKGCOUNT#<ds>#<line>` / `S#<i>` instead of `META`, so concurrent writers do not
       share an item's write limit. The dependents count is the sum of `Deps` over the partition, `META`

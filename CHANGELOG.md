@@ -78,6 +78,7 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
   `webhook.Handler` gains optional `MaxBody`, `MaxInflight`, `DedupeTTL` and `Now` fields; zero values keep safe defaults.
 
 ### Changed
+- The partial scan fetches the blobs it will read with one `git fetch --stdin` of object ids instead of a non-cone sparse checkout (deprecated in git). Fixed on the way: the batch was never fetching, because the helper dropped git's stdin, so each file cost its own request; a scan now makes one. Needs git 2.35 or later. Verified with real git against the fake GitHub; not against github.com. See [docs/bounds.md](docs/bounds.md).
 - After GitHub answers a rate limit, the other repos of that installation are deferred until the time it gave
   instead of each spending a call to be refused.
 - A repo that lists a Go dependency it never imports now has that requirement dropped by the `go mod tidy`

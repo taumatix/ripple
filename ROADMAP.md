@@ -182,8 +182,6 @@ Everything else:
 89. **Partial scan on other hosts.** The scan without a checkout is verified against GitHub and the fake
     only. GitLab, Bitbucket, Gitea, Azure and the rest may not serve `filter=blob:none` or by-id blob
     fetches; they fall back to a full checkout, unmeasured. Check each and record which saves anything.
-90. **Partial scan relies on non-cone sparse checkout.** Git marks it deprecated. Move the batched blob
-    fetch to `git fetch --stdin` of object ids or `git backfill` once they work on a `--depth 1` clone.
 92. **Supersede against real hosts.** GitHub, GitLab, Gitea/Forgejo, Bitbucket Cloud and Data Center, Gerrit and
     CodeCommit close or abandon a stale PR, written from vendored docs and checked only against fakes. Several
     reads rest on source or assumptions (GitLab and Gitea system-note and timeline wording, CodeCommit commenting

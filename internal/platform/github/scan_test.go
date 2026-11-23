@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math/rand"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/taumatix/ripple/internal/model"
@@ -138,5 +139,47 @@ func TestScanOnlyWorkspaceRefusesWrites(t *testing.T) {
 	}
 	if err := ws.Reset(context.Background()); err == nil {
 		t.Error("Reset on a scan-only workspace succeeded")
+	}
+}
+
+func uploadPacks(remote *testutil.GitHTTP) int {
+	n := 0
+	for _, u := range remote.RequestURLs() {
+		if strings.HasSuffix(u, "/git-upload-pack") {
+			n++
+		}
+	}
+	return n
+}
+
+// Prefetch asks for every blob by object id in one fetch, whatever the path looks
+// like, and the reads that follow are served from the clone with no request.
+func TestScanOnlyPrefetchIsOneFetchByObjectID(t *testing.T) {
+	remote, c := scanRepo(t, map[string]string{
+		"go.mod": "module x\n", "sub/a.txt": "a\n", "a*b[1].txt": "star\n", "#hash.txt": "hash\n", "big.bin": noise(2 << 20),
+	}, nil)
+	ws := scanCheckout(t, c)
+	paths := []string{"go.mod", "sub/a.txt", "a*b[1].txt", "#hash.txt"}
+	if _, err := ws.ReadFile("go.mod"); err != nil { // the config read before the walk
+		t.Fatal(err)
+	}
+	before := uploadPacks(remote)
+	if err := ws.(platform.Prefetcher).Prefetch(context.Background(), paths); err != nil {
+		t.Fatal(err)
+	}
+	if got := uploadPacks(remote) - before; got != 1 {
+		t.Errorf("Prefetch of %d paths made %d fetches, want 1", len(paths), got)
+	}
+	before = uploadPacks(remote)
+	for _, p := range paths {
+		if _, err := ws.ReadFile(p); err != nil {
+			t.Errorf("ReadFile(%s): %v", p, err)
+		}
+	}
+	if got := uploadPacks(remote) - before; got != 0 {
+		t.Errorf("reads after Prefetch made %d fetches, want 0", got)
+	}
+	if n := remote.BytesServed(); n > 300<<10 {
+		t.Errorf("server sent %d bytes; the 2 MiB file nothing reads must not be downloaded", n)
 	}
 }

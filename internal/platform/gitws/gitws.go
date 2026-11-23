@@ -228,7 +228,7 @@ func (w *workspace) gitNetIO(ctx context.Context, dir string, gio gitIO, args ..
 			)
 		}
 	}
-	return w.runGit(ctx, dir, env, false, args...)
+	return w.runGitIO(ctx, dir, env, false, gio, args...)
 }
 
 func (w *workspace) runGit(ctx context.Context, dir string, env []string, confined bool, args ...string) (string, error) {

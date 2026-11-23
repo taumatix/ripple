@@ -3,15 +3,14 @@ package gitws
 // A scan-only workspace (platform.WithScanOnly) is a partial clone with no working
 // tree: `--filter=blob:none --no-checkout`. It holds the commit and its trees, so
 // Walk lists every path from `git ls-tree`, and a blob is fetched only when it is
-// read. Prefetch loads the paths a scan will read in one request, through a
-// sparse checkout of exactly those files, and ReadFile then reads them from disk.
+// read. Prefetch loads the paths a scan will read in one request, by object id, and
+// ReadFile then reads them from the object database.
 //
 // Anything the host cannot do (no partial clone, a refused fetch by object id)
 // surfaces as platform.ErrScanFallback and the engine scans a full checkout.
 // See docs/bounds.md for what this saves.
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -117,7 +116,10 @@ func (w *workspace) readBlob(p string) ([]byte, error) {
 }
 
 // Prefetch implements platform.Prefetcher: it fetches every path's blob in one
-// request by checking out just those files. A full checkout has them already.
+// request, asking the remote for the blobs by object id (`git fetch --stdin`, the
+// command git itself runs for a lazy fetch, with the same arguments), so no sparse
+// checkout and no working tree is involved and any path spelling works. ReadFile
+// then reads the blobs from the object database. A full checkout has them already.
 func (w *workspace) Prefetch(ctx context.Context, paths []string) error {
 	if !w.light {
 		return nil
@@ -126,26 +128,26 @@ func (w *workspace) Prefetch(ctx context.Context, paths []string) error {
 	if err != nil {
 		return err
 	}
-	var pat bytes.Buffer
+	var ids strings.Builder
+	seen := map[string]bool{}
 	for _, p := range paths {
-		if _, ok := entries[p]; ok && sparseSafe(p) {
-			pat.WriteString("/" + p + "\n")
+		e, ok := entries[p]
+		if !ok || (e.mode != "100644" && e.mode != "100755") || seen[e.oid] {
+			continue
 		}
+		seen[e.oid] = true
+		ids.WriteString(e.oid + "\n")
 	}
-	if pat.Len() == 0 {
+	if ids.Len() == 0 {
 		return nil
 	}
-	if _, err := w.gitNetIO(ctx, w.repoDir, gitIO{stdin: pat.String()}, "sparse-checkout", "set", "--no-cone", "--stdin"); err != nil {
-		return fmt.Errorf("%w: %v", platform.ErrScanFallback, err)
-	}
-	if _, err := w.gitNet(ctx, w.repoDir, "checkout", "-q", "HEAD"); err != nil {
+	// negotiationAlgorithm=noop: the wants are blobs, there is nothing to negotiate
+	// from, and the default negotiation fails on a blob tip.
+	_, err = w.gitNetIO(ctx, w.repoDir, gitIO{stdin: ids.String()},
+		"-c", "fetch.negotiationAlgorithm=noop", "fetch", "origin", "--no-tags", "--no-write-fetch-head",
+		"--recurse-submodules=no", "--filter=blob:none", "--stdin")
+	if err != nil {
 		return fmt.Errorf("%w: %v", platform.ErrScanFallback, err)
 	}
 	return nil
-}
-
-// sparseSafe reports whether a path can be written as a sparse-checkout pattern
-// that matches only itself. Others are read one blob at a time.
-func sparseSafe(p string) bool {
-	return !strings.ContainsAny(p, "*?[]\\\n\r") && !strings.HasSuffix(p, " ")
 }

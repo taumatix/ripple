@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -79,4 +80,88 @@ func TestReplicaStatusEndpoint(t *testing.T) {
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("POST /replica = %d", rec.Code)
 	}
+}
+
+// Two replicas on one store each beat; either answers GET /replica with the count of both and
+// the takeovers of both, and a replica that retires (clean shutdown) drops out at once.
+func TestReplicaStatusCountsLiveReplicas(t *testing.T) {
+	ctx := context.Background()
+	st := store.NewMemory()
+	a, b := feedApp(st, "a", &fetchCounter{}), feedApp(st, "b", &fetchCounter{})
+	a.pollFeed(ctx) // a becomes the feed poller
+	b.pollFeed(ctx)
+	a.beat(ctx)
+	b.beat(ctx)
+	read := func(x *App) (out struct {
+		Replicas       int   `json:"replicas_live"`
+		TakeoversTotal int64 `json:"lease_takeovers_all_replicas"`
+		Pollers        int   `json:"feed_pollers"`
+	}) {
+		rec := httptest.NewRecorder()
+		x.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/replica", nil))
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatalf("%v: %s", err, rec.Body.String())
+		}
+		return out
+	}
+	if got := read(b); got.Replicas != 2 || got.Pollers != 1 {
+		t.Fatalf("status from b = %+v, want 2 replicas and 1 poller", got)
+	}
+	a.retire(ctx)
+	if got := read(b); got.Replicas != 1 || got.Pollers != 0 {
+		t.Fatalf("after a retired = %+v, want 1 replica and no poller", got)
+	}
+}
+
+// The same over real sockets and Run: two replicas serve HTTP on one store, each beats from
+// Run, and when one is stopped the other soon reports one.
+func TestRunBeatsAndRetiresOverHTTP(t *testing.T) {
+	st := store.NewMemory()
+	type srv struct {
+		url  string
+		stop context.CancelFunc
+		done chan struct{}
+	}
+	start := func(id string) srv {
+		a := feedApp(st, id, &fetchCounter{})
+		a.PollEvery = 0
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		go func() { defer close(done); _ = a.Run(ctx, ln) }()
+		t.Cleanup(func() { cancel(); <-done })
+		return srv{"http://" + ln.Addr().String(), cancel, done}
+	}
+	live := func(s srv) int {
+		resp, err := http.Get(s.url + "/replica")
+		if err != nil {
+			return -1
+		}
+		defer resp.Body.Close()
+		var out struct {
+			Replicas *int `json:"replicas_live"`
+		}
+		if json.NewDecoder(resp.Body).Decode(&out) != nil || out.Replicas == nil {
+			return -1
+		}
+		return *out.Replicas
+	}
+	a, b := start("a"), start("b")
+	waitFor := func(s srv, want int) {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for live(s) != want {
+			if time.Now().After(deadline) {
+				t.Fatalf("replicas_live = %d, want %d", live(s), want)
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+	waitFor(b, 2)
+	a.stop()
+	<-a.done
+	waitFor(b, 1)
 }

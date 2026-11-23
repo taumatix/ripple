@@ -20,6 +20,7 @@ type Memory struct {
 	cursors    map[string]string
 	events     map[string]model.Event
 	leases     map[string]Lease
+	replicas   map[string]memReplica
 	deliveries map[string]time.Time
 }
 

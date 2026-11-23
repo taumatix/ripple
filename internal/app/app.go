@@ -325,6 +325,11 @@ func (a *App) push(ctx context.Context, name string, ev model.Event) error {
 	if err != nil || !ok {
 		return err
 	}
+	// The payload's default_branch is only a hint that the stored one may be stale (a
+	// missed repository.edited); the engine confirms it with the host before storing.
+	if healed, err := a.Engine.HealDefaultBranch(ctx, repo, ev.DefaultBranch, ev.InstallationID); healed || err != nil {
+		return err
+	}
 	if repo.DefaultBranch == "" || ev.Ref != "refs/heads/"+repo.DefaultBranch {
 		return nil
 	}

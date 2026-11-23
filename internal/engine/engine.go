@@ -77,6 +77,8 @@ type Engine struct {
 	// repos whose issues could not be written until a time; both see dashboard.go.
 	dirty   map[string]bool
 	dashOff map[string]time.Time
+	// falseClaims remembers default-branch claims the host contradicted (HealDefaultBranch).
+	falseClaims map[string]time.Time
 }
 
 func (e *Engine) now() time.Time {

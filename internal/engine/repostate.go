@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/taumatix/ripple/internal/model"
 )
@@ -134,4 +135,54 @@ func (e *Engine) SetDefaultBranch(ctx context.Context, name, branch string, scop
 		repo.InstallationID = scope
 	}
 	return e.Scan(ctx, repo)
+}
+
+// falseClaimTTL is how long a default-branch claim the host contradicted is not
+// examined again, and maxFalseClaims bounds the table that remembers them.
+const (
+	falseClaimTTL  = time.Hour
+	maxFalseClaims = 4096
+)
+
+// HealDefaultBranch is the repair for a missed default-branch change. claimed is the
+// branch a verified push payload says is the default. It is only a reason to look: when
+// it differs from the stored branch the repo is re-scanned with the branch left for the
+// host to name, and what is stored is what the host reports, never the payload's text.
+// So a stale redelivery or a false claim can cost one scan but cannot point ripple at
+// another branch, and the same contradicted claim is not examined again for an hour. It
+// reports whether it examined the repo; the scan then covers whatever the push changed.
+func (e *Engine) HealDefaultBranch(ctx context.Context, repo model.Repo, claimed string, scope int64) (bool, error) {
+	if claimed == "" || claimed == repo.DefaultBranch {
+		return false, nil
+	}
+	key := repo.FullName + "|" + claimed
+	e.mu.Lock()
+	until, seen := e.falseClaims[key]
+	e.mu.Unlock()
+	if seen && e.now().Before(until) {
+		return false, nil
+	}
+	repo.DefaultBranch = ""
+	if scope != 0 {
+		repo.InstallationID = scope
+	}
+	if err := e.Scan(ctx, repo); err != nil {
+		return true, err
+	}
+	now, found, err := e.Store.GetRepo(ctx, repo.FullName)
+	if err != nil {
+		return true, err
+	}
+	if found && now.DefaultBranch != claimed {
+		e.mu.Lock()
+		if e.falseClaims == nil || len(e.falseClaims) >= maxFalseClaims {
+			e.falseClaims = map[string]time.Time{}
+		}
+		e.falseClaims[key] = e.now().Add(falseClaimTTL)
+		e.mu.Unlock()
+		e.log().Warn("push claimed a default branch the host does not report", "repo", repo.FullName, "claimed", claimed, "host", now.DefaultBranch)
+	} else if found {
+		e.log().Info("default branch healed from a push", "repo", repo.FullName, "branch", claimed)
+	}
+	return true, nil
 }

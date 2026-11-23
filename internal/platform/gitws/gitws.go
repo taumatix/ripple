@@ -441,11 +441,19 @@ func (w *workspace) RunGo(ctx context.Context, dir string, args ...string) (stri
 	if err := checkGoSafe(root); err != nil {
 		return "", err
 	}
-	gobin, err := exec.LookPath("go")
-	if err != nil {
+	gv := platform.GoVerifyFrom(ctx)
+	gobin := gv.GoBinary
+	if no, ok := w.o.Sandbox.(sandbox.NetworkOwner); ok && no.OwnsNetwork() {
+		gobin = "" // a container runs the Go its image carries, never a host path
+	}
+	if gobin == "" {
+		var err error
+		if gobin, err = exec.LookPath("go"); err != nil {
+			return "", platform.ErrNoToolchain
+		}
+	} else if !filepath.IsAbs(gobin) || !isExecutable(gobin) {
 		return "", platform.ErrNoToolchain
 	}
-	gv := platform.GoVerifyFrom(ctx)
 	var cgoReadOnly string
 	// Only a step that executes no repository code may carry the proxy credential;
 	// build and vet run the repository's own cgo and generated code.

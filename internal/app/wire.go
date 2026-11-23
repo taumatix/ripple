@@ -72,7 +72,7 @@ func New(ctx context.Context, s *config.Server, log *slog.Logger) (*App, store.S
 	}
 	eng := &engine.Engine{Store: st, Platform: mux, Log: log, Workers: s.Workers,
 		MaxFiles: s.MaxFiles, MaxDependencies: s.MaxDependencies,
-		GoCC: s.GoCC, GoProxyUser: s.GoProxyUser, GoProxyToken: s.GoProxyToken,
+		GoCC: s.GoCC, GoToolchainDir: s.GoToolchainDir, GoProxyUser: s.GoProxyUser, GoProxyToken: s.GoProxyToken,
 		Limits: rules.Limits{MinimumReleaseAge: s.MinimumReleaseAge, OpenPRLimit: s.OpenPRLimit, AllowAutomerge: s.AllowAutomerge}}
 	a := &App{
 		Engine: eng, Log: log, Secret: []byte(s.WebhookSecret), PollEvery: s.FeedInterval,

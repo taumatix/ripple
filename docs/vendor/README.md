@@ -23,3 +23,11 @@ Not found in either project's docs, so **assumed, unverified**: any API rate lim
 (Codeberg's proxy shows IETF `RateLimit` headers; ripple also honours `Retry-After`); the response
 code of a scheduled (not immediate) auto-merge; whether Forgejo also sends `X-Hub-Signature-256`
 or `X-Gitea-Signature` (the receiver accepts all three); the git basic-auth username a token needs.
+
+## mockgen
+
+`mockgen/README.md` is go.uber.org/mock's README (fetched 2026-11-23), the only grammar source for the
+`directives: extended` mockgen rewrite: package and archive mode take `<import path> <symbols>`, `-imports` takes
+`foo=bar/baz` elements. **Assumed, unverified**: behaviour of flags the README does not list (`-exec_only`,
+`-prog_only` exist in the tool's source), `github.com/golang/mock`'s older mockgen (same grammar here, not read),
+and what mockgen does with a `-source` file and positionals together (the rewrite leaves that line alone).

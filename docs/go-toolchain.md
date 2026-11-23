@@ -56,11 +56,19 @@ Other tools reading other files (`.mise.toml`, `devcontainer.json`) are not touc
   candidates are ignored.
 - **No release dates.** That feed has none, so the cooldown (`minimum-release-age`) runs from the
   first poll that saw the release, and a replay never moves it.
-- **Verification uses the server's Go.** The sandbox runs `go` with `GOTOOLCHAIN=local` and never
-  downloads a toolchain ([sandbox.md](sandbox.md)). `go mod tidy`, `build` and `vet` therefore check
-  the code against the Go installed on the server, which may differ from the version in the PR.
-  A directive above the server's Go fails verification and the PR opens as a draft; a toolchain
-  line above it does not fail (Go ignores it under `GOTOOLCHAIN=local`). Each PR body says CI is
-  the real check.
+- **Verification uses the server's Go, or the release the go.mod names.** The sandbox runs `go` with
+  `GOTOOLCHAIN=local` and never downloads a toolchain ([sandbox.md](sandbox.md)). By default `go mod tidy`,
+  `build` and `vet` therefore check the code against the Go installed on the server, which may differ from the
+  version in the PR. A directive above the server's Go fails verification and the PR opens as a draft; a toolchain
+  line above it does not fail (Go ignores it under `GOTOOLCHAIN=local`). Each PR body says CI is the real check.
+- **A toolchain directory removes that gap.** Set `RIPPLE_GO_TOOLCHAIN_DIR` to a directory holding releases the
+  operator installed, one per directory in the layout a go.dev download unpacks to (`go1.25.3/bin/go`,
+  `go1.26.1/bin/go`; a directory named only for a minor, `go1.26`, counts as `.0`). Verification then runs the
+  release the module's go.mod names: the `toolchain` line exactly, else the newest installed patch of the `go`
+  line's minor that is not older than the line. For a bump PR that is the go.mod as the bump left it, so a
+  directive moved above the server's Go is checked by that Go and no longer opens a draft. A module with no
+  matching release, or no directory set, uses the server's Go as before. Still `GOTOOLCHAIN=local`: ripple
+  downloads nothing and the PR body says which release ran. Not available with the container sandboxes, whose
+  image carries its own Go; the server refuses to start with both.
 
 The release list is fetched only while some repo has opted in.

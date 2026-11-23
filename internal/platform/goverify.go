@@ -25,6 +25,10 @@ type GoVerify struct {
 	// when Credentialed is true: a step that executes no repository code.
 	Username, Token string
 	Credentialed    bool
+	// GoBinary, when set, is the go command to run instead of the one on PATH: the
+	// release the module's go.mod names, found by FindGo. It is still run with
+	// GOTOOLCHAIN=local, so nothing is downloaded.
+	GoBinary string
 }
 
 type goVerifyKey struct{}

@@ -120,9 +120,6 @@ Everything else:
     repository's build can reach anything that network can. Ship a recipe, then a built-in option, that creates an
     internal network holding only a proxy sidecar; also run `git` and `go` together in one image with a
     documented, pinned Go version so `GOTOOLCHAIN=local` always satisfies the repo's `go` line.
-43. **Verify a Go bump with the Go it names.** Verification runs with the server's installed Go
-    (`GOTOOLCHAIN=local`), so a directive above it opens a draft and a toolchain bump is checked
-    against a different Go. Offer a toolchain image per supported minor; CI stays the real check until then.
 51. **OSV: should a security PR bypass the open-PR limit and the schedule?** Today only the cooldown is skipped.
     Needs a decision from real use. Trade-offs: bypassing the limit makes a security fix arrive even when a repo
     is at its cap of open PRs (the case where it matters most) but lets one advisory affecting many modules open
@@ -182,21 +179,6 @@ Everything else:
 76. **Remove the `Ref` overload on `model.Event`.** `Ref` is still populated beside the typed fields and marked
     deprecated. Remove the fallback in the minor release after the one that introduced it, once no queue holds old
     rows (`ripple:deprecated event-ref-overload` in MIGRATION.md).
-77. **Generators that take an import path.** `directives: extended` rewrites `go run pkg[@version]` and
-    `go tool pkg`; `mockgen`, `stringer -type` and the like name the module in their own flag grammar
-    (`-source`, `-imports`, `reflect` mode packages) and stay reported in the PR body. Each needs its own
-    grammar, so add them one tool at a time, behind `directives: extended`, from the tool's documented flags.
-78. **Workspace-only graphs: what is still a draft.** A module that requires a go.work sibling without a
-    `replace` is now tidied with temporary local replaces and built in workspace mode, and `go work vendor`
-    refreshes a workspace `vendor/`. Not handled: `go work sync` is skipped for such a workspace (it fails on
-    them), a member's own `vendor/` is not refreshed (ripple says so in the PR body), and a requirement on a
-    sibling at a version no proxy serves cannot be built by Go itself, so those repos stay drafts. Verify
-    against a real multi-module repo, and consider a `replace`-free `go work vendor` for members.
-79. **`tidy: minimal`: make it the default, or say why not.** The option keeps every original go.mod
-    requirement and go.sum line and adds what `go mod tidy` added or raised; it prunes only go.sum lines
-    below the version go.mod selects. It is verified by a build and vet, but a kept requirement whose go.sum
-    lines are missing opens a draft. Look at real PR diffs, then decide whether to flip the default
-    (a behaviour change, so a minor release with a note) or document it as permanently opt-in.
 89. **Partial scan on other hosts.** The scan without a checkout is verified against GitHub and the fake
     only. GitLab, Bitbucket, Gitea, Azure and the rest may not serve `filter=blob:none` or by-id blob
     fetches; they fall back to a full checkout, unmeasured. Check each and record which saves anything.
@@ -279,3 +261,19 @@ Everything else:
     do not touch the counters, so turning it on later starts from a stale count until the lazy recount or an
     explicit one. Either keep counting with the option off (cheap, one ADD per package per scan) or document that
     `RecountDependents` is the step to run after turning it on.
+116. **Container image per Go minor, and downloads.** `RIPPLE_GO_TOOLCHAIN_DIR` runs an operator-installed release
+    on the host sandbox only; a container sandbox ignores it, and `GOTOOLCHAIN` downloads through the module proxy
+    stay off. Offer an image per minor, or a proxy-fed download with a checksum check, so a bump above the
+    installed Go does not stay a draft there. Verified only with a fake `go` script.
+117. **Generators: stringer, `-self_package`, golang/mock.** `directives: extended` rewrites mockgen's documented
+    flags only. `stringer -type` takes no import path, `mockgen -self_package` and the older
+    `github.com/golang/mock` grammar are not read, and stay reported in the PR body. Add one at a time from the
+    tool's documented flags.
+118. **Workspace-only graphs against a real repo.** A requirement on a sibling at a version no proxy serves
+    still opens a draft: with the workspace on, Go reads the sibling's `.mod` at the required version and gets a 404
+    (reproduced against the fake proxy). `go work sync` is skipped for such workspaces and a member's own `vendor/`
+    is not refreshed (its `modules.txt` would record the temporary replace). Verify against a real multi-module
+    repo and consider a `replace`-free `go work vendor` per member.
+119. **`tidy: minimal` evidence.** It stays opt-in: no real PR diffs exist to show the default would lose less
+    than it risks (a kept requirement with missing go.sum lines opens a draft; the default `go mod tidy` result is
+    what a maintainer reproduces by hand). Collect the diffs of repos that opted in and revisit.

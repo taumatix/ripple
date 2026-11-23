@@ -277,3 +277,21 @@ func TestServerReplicaAndLeaseTTL(t *testing.T) {
 		t.Error("an over-long RIPPLE_REPLICA was accepted")
 	}
 }
+
+func TestServerGoToolchainDir(t *testing.T) {
+	if s, err := LoadServer(env(base)); err != nil || s.GoToolchainDir != "" {
+		t.Fatalf("default: %+v, %v", s, err)
+	}
+	dir := t.TempDir()
+	if s, err := LoadServer(env(with("RIPPLE_GO_TOOLCHAIN_DIR", dir))); err != nil || s.GoToolchainDir != dir {
+		t.Fatalf("%+v, %v", s, err)
+	}
+	if _, err := LoadServer(env(with("RIPPLE_GO_TOOLCHAIN_DIR", dir, "RIPPLE_SANDBOX", "container", "RIPPLE_CONTAINER_IMAGE", "img"))); err == nil {
+		t.Error("accepted beside a container sandbox, which would ignore it")
+	}
+	for name, v := range map[string]string{"relative": "toolchains", "missing": dir + "/nope"} {
+		if _, err := LoadServer(env(with("RIPPLE_GO_TOOLCHAIN_DIR", v))); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}

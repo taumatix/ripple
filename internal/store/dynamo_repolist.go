@@ -44,10 +44,15 @@ func (d *Dynamo) ListRepos(ctx context.Context, after string, limit int) ([]stri
 		return nil, nil
 	}
 	var out []string
+	// DynamoDB refuses an empty key value, so the first page has no SK bound.
+	cond, vals := "PK = :pk", map[string]types.AttributeValue{":pk": s(repoIndexPK)}
+	if after != "" {
+		cond, vals[":after"] = cond+" AND SK > :after", s(after)
+	}
 	err := d.query(ctx, &dynamodb.QueryInput{
 		ConsistentRead:            aws.Bool(true),
-		KeyConditionExpression:    aws.String("PK = :pk AND SK > :after"),
-		ExpressionAttributeValues: map[string]types.AttributeValue{":pk": s(repoIndexPK), ":after": s(after)},
+		KeyConditionExpression:    aws.String(cond),
+		ExpressionAttributeValues: vals,
 		Limit:                     aws.Int32(int32(limit)),
 	}, limit, func(it map[string]types.AttributeValue) error {
 		out = append(out, it["SK"].(*types.AttributeValueMemberS).Value)

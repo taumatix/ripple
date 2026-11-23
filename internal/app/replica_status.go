@@ -27,6 +27,11 @@ func (a *App) replicaStatus(w http.ResponseWriter, r *http.Request) {
 		Pollers         []string `json:"pollers"`
 		LeaseTakeovers  int64    `json:"lease_takeovers"`
 		LeaseTTLSeconds int      `json:"lease_ttl_seconds"`
+		// EventsDeadLettered counts events this process gave up on since it started; EventsDead is
+		// how many dead events the store holds now (every replica's, until requeued or purged),
+		// left out when listing them fails.
+		EventsDeadLettered int64 `json:"events_dead_lettered"`
+		EventsDead         *int  `json:"events_dead,omitempty"`
 		// The next three come from the replicas' heartbeats and are absent when the store has
 		// no replica table. The takeover total adds up the live replicas only: a replica that
 		// died takes its count with it.
@@ -39,6 +44,17 @@ func (a *App) replicaStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	if a.Watcher != nil {
 		out.FeedPoller = a.Watcher.Elected()
+	}
+	if a.Queue != nil {
+		out.EventsDeadLettered = a.Queue.DeadLettered()
+	}
+	if a.Engine != nil && a.Engine.Store != nil {
+		if dead, err := a.Engine.Store.ListDeadEvents(r.Context()); err == nil {
+			n := len(dead)
+			out.EventsDead = &n
+		} else {
+			a.Log.Warn("list dead events", "err", err)
+		}
 	}
 	out.Pollers = a.electedNames()
 	if out.Pollers == nil {

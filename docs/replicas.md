@@ -77,7 +77,7 @@ DynamoDB under real contention, or real clock skew.
 The service has no metrics endpoint. `GET /replica` on the webhook port answers one replica as JSON:
 `replica` (its name), `feed_poller` (whether it holds the feed election), `pollers` (every source it polls now: `feed`, `go-toolchain`, `github-actions`, `docker`, `npm`, `cargo`, `pip`; only configured ones), `lease_takeovers` (leases this
 process took over from a holder that died or stalled since it started; also logged as `lease taken over`) and
-`lease_ttl_seconds`.
+`lease_ttl_seconds`; and the dead letters: `events_dead_lettered` (events this process gave up on since it started, a counter to alert a rise of; also logged as `event failed; dead-lettered`) and `events_dead` (how many dead events the store holds now, every replica's, falling when one is requeued or purged; left out when listing them fails, and it lists them, so scrape it at minutes, not seconds).
 
 Every replica also beats on a row of its own in the store (`store.ReplicaTable`: a Postgres `replicas` table,
 migration 008; DynamoDB items `PK=REPLICAS`, `SK=R#<id>`), every third of the lease TTL, and the row lapses after

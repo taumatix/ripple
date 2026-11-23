@@ -112,12 +112,11 @@ Everything else:
 59. **Private modules without a proxy.** Modules reachable only by direct VCS fetch are not supported, because
     `GOVCS=*:off` forbids it. Consider `GOAUTH`, or a ripple-run caching proxy fed from the repo's own credentials,
     and make `build`/`vet` stop asking the proxy for `.info` so a proxy that rejects it cannot fail verification.
-60. **Dead-letter residuals.** There is no metric for dead events (the service has none yet; the log line
-    `event failed; dead-lettered` is all there is). A rescan lists the whole live event set every 30s: on
+60. **Dead-letter residuals.** The only metrics are the two `GET /replica` fields (`events_dead_lettered`, `events_dead`); there is
+    no Prometheus-format endpoint or latency histogram. A rescan lists the whole live event set every 30s: on
     DynamoDB use a stream or a narrower index, and on Postgres LISTEN/NOTIFY. DynamoDB's due-job exclusion
-    is a filter applied after the read, so it still reads the excluded repo's items. A failed *job* is not
-    requeueable from `ripple events`. If persisting the dead state fails the event stays live and is retried
-    after a restart rather than looping.
+    is a filter applied after the read, so it still reads the excluded repo's items. If persisting the dead state
+    fails the event stays live and is retried after a restart rather than looping.
 61. **Run the GHES support against a real GHES.** It is written from the docs and a fake. Check on a real instance (a trial
     licence or a sponsored one): the first release that accepts `2026-03-10`, whether `enablePullRequestAutoMerge` exists
     and what an absent one answers, a disabled GraphQL/REST status, and the webhook payloads; then record the facts in

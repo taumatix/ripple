@@ -102,10 +102,13 @@ func TestBackfillIsBoundedPerScan(t *testing.T) {
 		if got := len(e.gh.PRs(backfillApp)); got != 2 {
 			t.Fatalf("5 new dependencies behind with MaxBackfill 2: want 2 PRs, got %d", got)
 		}
-		e.rescan(mods...)
-		e.tick()
-		if got := len(e.gh.PRs(backfillApp)); got != 2 {
-			t.Fatalf("a rescan backfilled the rest: %d PRs", got)
+		// The remainder is carried to the next scans, two at a time, and then it is done.
+		for _, want := range []int{4, 5, 5} {
+			e.rescan(mods...)
+			e.tick()
+			if got := len(e.gh.PRs(backfillApp)); got != want {
+				t.Fatalf("after a rescan want %d PRs, got %d", want, got)
+			}
 		}
 	})
 }

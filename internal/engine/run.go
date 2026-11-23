@@ -745,7 +745,7 @@ func (r *runner) followGoVersion(d model.Dependency, target string) error {
 	dirs := map[string]bool{".": true, path.Dir(d.File): true}
 	var files []string
 	err := r.ws.Walk(func(p string) error {
-		if manager.HoldsGoVersion(p) && (dirs[path.Dir(p)] || strings.HasPrefix(p, ".github/workflows/")) {
+		if manager.HoldsGoVersion(p) && (dirs[path.Dir(p)] || manager.HoldsGoVersionRepoWide(p)) {
 			files = append(files, p)
 		}
 		return nil

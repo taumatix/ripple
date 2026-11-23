@@ -109,11 +109,14 @@ updates:
   A closed dashboard keeps being updated and is never reopened. GitHub only.
 - `backfill-new-dependencies` (default `true`): a repo that starts importing a module only hears about
   releases published afterwards, so when a scan finds a dependency the repo did not have, ripple compares it
-  with the newest release of that exact module path already stored from the feed and opens a normal job when
-  the repo is behind. The job obeys the same cooldown, schedule, ignore rules, PR limit and verification as any
-  other. It never asks a feed: a release ripple has not stored is not found. At most 10 jobs are created per
-  scan (a repo registering 5000 dependencies gets 10, the rest wait for their next release), and a rescan
-  with no new dependency creates none. Set it to `false` to turn it off.
+  with the newest release already stored from the feed, for its own module path and for the next three majors
+  on the same line (so a repo that starts on `m` is brought to `m/v2` when that exists), and opens a normal job
+  when the repo is behind. A module nobody else imports has no stored release; for those ripple asks the
+  module proxy (`RIPPLE_GOPROXY`) for its latest, at most 20 requests per scan. The job obeys the same
+  cooldown, schedule, ignore rules, PR limit and verification as any other. At most 10 jobs are created per
+  scan (server setting `RIPPLE_MAX_BACKFILL`); the dependencies a scan could not serve are carried to the
+  repo's next scan, which also happens on any push. A scan with nothing new and nothing carried creates none.
+  Set it to `false` to turn it off.
 - `cooldown` can only **raise** the server's minimum release age; `open-pull-requests-limit` can
   only **lower** the server's limit; `automerge` works only if the server allows it.
 - Unknown keys are errors that name the key and line. `ripple config validate [FILE]` checks a file

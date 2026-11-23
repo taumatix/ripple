@@ -28,6 +28,14 @@ If the release feed already queued the same bump behind its cooldown, the adviso
   pseudo-version, ripple proposes the newest stored release of that module above the current one, on the same major
   line, and the PR says the fix is a pseudo-version and must be checked. Such a PR is never automerged. Without the
   opt-in nothing is proposed.
+- **Dependency at a pseudo-version, fixed by a release.** A pseudo-version is a commit someone chose, so ripple does
+  not move it by default and the dashboard lists the advisory. Opt in with `security-from-pseudo-versions: true` on a
+  `gomod` entry: ripple then proposes the lowest fixing release above the commit, on the same major, never automerged,
+  and the PR says it leaves a pseudo-version. A release that is not an advisory fix still never replaces a
+  pseudo-version.
+- **Toolchain precedence.** A security `toolchain` job and a `go` directive job both rewrite the toolchain line of one
+  go.mod. The security job goes first (the higher fixed version first); the other waits, with a reason naming the PR,
+  until it is merged or closed. A PR already open is not closed for this: whoever merges second resolves the conflict.
 - **No fix at all, or none ripple can propose.** With `dependency-dashboard: true` the dashboard gains a section
   "Advisories without a fix ripple can propose", linking the advisory. Entries disappear when a fix is proposed, the
   record is withdrawn, or the repo stops using that version. At most 100 per repo are kept. Without the dashboard

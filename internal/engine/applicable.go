@@ -73,3 +73,24 @@ func applicablePseudoFix(d model.Dependency, pkg, version string) (rules.UpdateT
 	}
 	return rules.Patch, true
 }
+
+// applicablePseudoCurrent judges a security job that moves a dependency required at a
+// pseudo-version to the release that fixes its advisory: the same module path and major,
+// a release (neither prerelease nor pseudo-version) above the commit. Classify refuses a
+// pseudo-version as the current version, so this is the one place such a move is
+// accepted, and only when the repo opted in with security-from-pseudo-versions.
+func applicablePseudoCurrent(d model.Dependency, pkg, fixed string) (rules.UpdateType, bool) {
+	if d.Datasource != model.DatasourceGo || d.Package != pkg || !module.IsPseudoVersion(d.Version) {
+		return "", false
+	}
+	if !semver.IsValid(fixed) || module.IsPseudoVersion(fixed) || semver.Prerelease(fixed) != "" {
+		return "", false
+	}
+	if semver.Major(d.Version) != semver.Major(fixed) || semver.Compare(fixed, d.Version) <= 0 {
+		return "", false
+	}
+	if semver.MajorMinor(fixed) != semver.MajorMinor(d.Version) {
+		return rules.Minor, true
+	}
+	return rules.Patch, true
+}

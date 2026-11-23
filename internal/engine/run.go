@@ -294,6 +294,11 @@ func (r *runner) plan(jobs []model.Job, deps []model.Dependency) []*prPlan {
 				typ, ok = applicablePseudoFix(d, j.Package, j.Version)
 				pseudo = pseudo || ok
 			}
+			if !ok && it.advisory != nil && haveU && u.SecurityFromPseudoVersions {
+				// The dependency is at a pseudo-version and a release fixes its advisory.
+				typ, ok = applicablePseudoCurrent(d, j.Package, j.Version)
+				pseudo = pseudo || ok
+			}
 			if !ok || !haveU {
 				continue
 			}
@@ -370,6 +375,7 @@ func (r *runner) execute(plans []*prPlan, deps []model.Dependency) {
 	if closed := r.sweepSuperseded(deps, open); len(closed) > 0 {
 		open = without(open, closed)
 	}
+	plans = r.holdForSecurity(plans, deps, open)
 	heads := map[string]platform.PR{}
 	for _, pr := range open {
 		heads[pr.Head] = pr

@@ -10,7 +10,7 @@ import (
 )
 
 // replicaStatus is GET /replica: the answering replica's name, whether it is the feed
-// poller, and how many leases this process has taken over from a holder that died or stalled.
+// poller (and which other sources it polls), and how many leases this process has taken over from a holder that died or stalled.
 // The service has no metrics endpoint; this is the one thing an operator can scrape. The
 // count of replicas comes from their heartbeats (see beat).
 func (a *App) replicaStatus(w http.ResponseWriter, r *http.Request) {
@@ -20,10 +20,13 @@ func (a *App) replicaStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := struct {
-		Replica         string `json:"replica"`
-		FeedPoller      bool   `json:"feed_poller"`
-		LeaseTakeovers  int64  `json:"lease_takeovers"`
-		LeaseTTLSeconds int    `json:"lease_ttl_seconds"`
+		Replica    string `json:"replica"`
+		FeedPoller bool   `json:"feed_poller"`
+		// Pollers names the elected sources this replica polls now: feed, go-toolchain,
+		// github-actions, docker, npm, cargo (only those configured).
+		Pollers         []string `json:"pollers"`
+		LeaseTakeovers  int64    `json:"lease_takeovers"`
+		LeaseTTLSeconds int      `json:"lease_ttl_seconds"`
 		// The next three come from the replicas' heartbeats and are absent when the store has
 		// no replica table. The takeover total adds up the live replicas only: a replica that
 		// died takes its count with it.
@@ -36,6 +39,10 @@ func (a *App) replicaStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	if a.Watcher != nil {
 		out.FeedPoller = a.Watcher.Elected()
+	}
+	out.Pollers = a.electedNames()
+	if out.Pollers == nil {
+		out.Pollers = []string{}
 	}
 	if t, ok := a.replicaTable(); ok {
 		if live, err := t.LiveReplicas(r.Context()); err == nil {
@@ -71,9 +78,9 @@ func (a *App) beat(ctx context.Context) {
 		return
 	}
 	info := store.ReplicaInfo{ID: a.Engine.ReplicaID(), Takeovers: store.LeaseTakeovers()}
-	if a.Watcher != nil {
-		info.FeedPoller = a.Watcher.Elected()
-	}
+	// FeedPoller is true for a replica that polls any source, so feed_pollers counts the
+	// replicas doing the polling.
+	info.FeedPoller = len(a.electedNames()) > 0
 	if err := t.Heartbeat(ctx, info, a.Engine.LeaseDuration()); err != nil && ctx.Err() == nil {
 		a.Log.Warn("replica heartbeat", "err", err)
 	}

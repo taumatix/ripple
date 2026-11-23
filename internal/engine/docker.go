@@ -42,6 +42,8 @@ func applicableImage(d model.Dependency, pkg, version string) (rules.UpdateType,
 // Engine.Registry and enqueues one job per (repo, image, target tag).
 type DockerWatcher struct {
 	Engine *Engine
+
+	elect election // PollElected's claim
 }
 
 // Poll returns how many jobs were new. It makes no request while no repo uses an

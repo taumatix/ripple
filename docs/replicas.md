@@ -57,7 +57,7 @@ local clock.
 | Clock skew | Postgres: none (store time). DynamoDB: absorbed up to the skew margin; beyond it a lease may be taken early, which is safe by the idempotent PR but wasteful. |
 | Same event delivered to two replicas | The second fails to take `event:<id>` and holds the entry for ttl/3, then finds it gone and drops it. |
 | Stale listing of due jobs | Re-read under the lease; finished jobs are skipped. |
-| Two replicas poll the release feed | One replica is elected (lease `feed:<name>`, ttl twice the poll interval) and polls; the others skip and take over once its claim lapses or it steps down on shutdown. Safe even if two poll: enqueueing a job is insert-if-absent. Only the Go module feed is elected; the toolchain, Actions and Docker pollers still run on every replica. |
+| Two replicas poll the release feed | One replica is elected (lease `feed:<name>`, ttl twice the poll interval) and polls; the others skip and take over once its claim lapses or it steps down on shutdown. Safe even if two poll: enqueueing a job is insert-if-absent. The toolchain, GitHub Actions, Docker, npm and Cargo pollers are elected the same way, each on its own lease (`feed:go-toolchain`, `feed:github-actions`, `feed:docker`, `feed:npm`, `feed:cargo`), so two replicas starting together may split the sources between them. The OSV advisory poll still runs on every replica. |
 | Events of one repo on different replicas | A claimed event asks the store (`HasOlderEvent`) for an older live event of the same repo and, if there is one, is released and held for ttl/3. `Seq` is numbered by the store (`store.EventSequencer`: a one-row counter in Postgres, updated in the insert's own statement; a counter item moved by the same transaction as the event put in DynamoDB; a counter in memory), so replica clocks do not matter; events stored before the counter existed keep their clock `Seq` and sort first. On DynamoDB the check is a consistent Query of the repo's marker items (`REPOEVENTS#<repo>`, one per live event, written and removed in the same transaction as the event; see [store-dynamodb.md](store-dynamodb.md)), so it does not lag the index. Markers for events from before are written by one backfill on the first check, which reads the index; roll every replica to this version before relying on the check, and a marker left by an older replica is removed when its event is found gone. |
 | Stale writer after a lost lease | The runner's job writes go through `UpdateJobFenced`: the write applies only while the lease name, owner and token are unchanged, and is refused with `ErrLeaseLost` otherwise. The advisory pass's job advance, a queue replica's event update and delete (`UpdateEventFenced`, `DeleteEventFenced`, on the `event:<id>` lease) and the cursor writes of pause, resume, remove and rename (`SetCursorFenced`, on the repo lease) are fenced the same way, one atomic statement or transaction per store. Not fenced, because idempotent: `ForgetRename`, `AdoptRepoID` and the sweep memo cursors, which write the same value whoever runs them. |
 | Rename, pause, resume, remove, dashboard writes | Take the repo lease (rename takes two, in sorted order) and wait for a holder to finish. The dashboard flush skips a repo another replica holds; the holder syncs it when its run ends. |
@@ -75,7 +75,7 @@ DynamoDB under real contention, or real clock skew.
 ## Observing replicas
 
 The service has no metrics endpoint. `GET /replica` on the webhook port answers one replica as JSON:
-`replica` (its name), `feed_poller` (whether it holds the feed election), `lease_takeovers` (leases this
+`replica` (its name), `feed_poller` (whether it holds the feed election), `pollers` (every source it polls now: `feed`, `go-toolchain`, `github-actions`, `docker`, `npm`, `cargo`; only configured ones), `lease_takeovers` (leases this
 process took over from a holder that died or stalled since it started; also logged as `lease taken over`) and
 `lease_ttl_seconds`.
 
@@ -83,8 +83,7 @@ Every replica also beats on a row of its own in the store (`store.ReplicaTable`:
 migration 008; DynamoDB items `PK=REPLICAS`, `SK=R#<id>`), every third of the lease TTL, and the row lapses after
 one TTL, so a replica that died drops out by itself and one that shuts down cleanly removes its row. From those
 rows `GET /replica` adds `replicas_live` (replicas whose beat has not lapsed), `feed_pollers` (how many of them
-say they hold the feed election; more than one for a moment is normal at a hand-over, a persistent 0 means the
-feed is not polled) and `lease_takeovers_all_replicas` (the sum of the live replicas' takeover counts; a replica
+poll at least one source; more than one is normal at a hand-over and when replicas split the sources, a persistent 0 means nothing is polled) and `lease_takeovers_all_replicas` (the sum of the live replicas' takeover counts; a replica
 that died takes its count with it, so alert on a rise rather than on the absolute number). The three fields are
 left out when the store has no replica table. Rows lapsed over an hour are deleted when replicas are listed.
 Postgres judges liveness by the database clock; DynamoDB by the replicas' wall clocks, as for leases.

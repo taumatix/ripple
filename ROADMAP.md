@@ -48,8 +48,13 @@ exactly the importing repos, and zero API calls for the rest). Every platform en
 fetching and vendoring that platform's own documentation (webhook events and signatures, PR API,
 auth model, rate limits); the notes below are what I expect, **unverified** until then.
 
-11. **GitLab** (gitlab.com and self-managed). Merge requests, project/group webhooks, `Private-Token` or
-   OAuth, merge-when-pipeline-succeeds. Subgroups and per-project tokens are the awkward part.
+11. **GitLab, verified against a real instance.** The host is written from the vendored docs and has never
+   run against gitlab.com or a self-managed instance ([docs/platform-gitlab.md](docs/platform-gitlab.md) lists
+   what is unverified). Run a pass against a real project with a project token and with a group token, record
+   one real push webhook, one 429 and one auto-merge answer, and replace the fake's guesses.
+   Residuals: discover repos by system-hook `project_create`/`project_destroy` instead of the periodic
+   membership listing (needs admin and is not in the vendored docs); rate-limit headers other than
+   `Retry-After`/`RateLimit-Reset`; `merge_request` events to close ripple MRs; GitLab labels with commas.
 12. **Gitea/Forgejo against real instances.** The host shipped from vendored docs and a fake only
     (docs/platform-gitea.md "Unverified"). Run the conformance flow against a real Gitea and a real Forgejo
     (no containers on the agent host: use codeberg.org or a CI service container), recording the real rate-limit

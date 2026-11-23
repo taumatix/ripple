@@ -69,6 +69,17 @@ upstream:
     auth: "Authorization: Bearer <access or API token>; git basic auth x-token-auth"
     unverified: "429 headers; queued-merge 202 and Location; x-token-auth with API tokens; merge-commit diffstat; the fake is written from docs, not recorded"
     checked: 2026-11-23
+  - name: azure-devops-rest-api
+    kind: http-api
+    reference: https://learn.microsoft.com/en-us/rest/api/azure/devops/
+    api-version: "7.1"
+    vendored: docs/vendor/azuredevops
+    used: [GET /{org}/_apis/projects, GET /{org}/{project}/_apis/git/repositories, GET and POST /{org}/{project}/_apis/git/repositories/{repo}/pullrequests, PATCH .../pullrequests/{id} (autoCompleteSetBy, completionOptions), POST .../pullrequests/{id}/labels, GET .../commits/{commitId}/changes]
+    auth: "personal access token as HTTP Basic with an empty user name (REST and git); Entra ID tokens not supported"
+    webhooks: [service hook git.push (resourceVersion 2.0 sample), authenticated by HTTP Basic basicAuthCredentials; no HMAC exists; payload lists commits but no changed files, resolved through the commit changes API]
+    rate-limits: "429 TF400733 with Retry-After; Retry-After may arrive on a 200 and is honoured"
+    unverified: "a repo name accepted as repositoryId; autoCompleteSetBy.id taken from the creator's id; the labels endpoint; commit changes for merge commits and paging; exact service-hook delivery headers; the fake Azure DevOps in tests is written from the docs, not recorded; names with spaces unsupported"
+    checked: 2026-11-23
 ```
 
 Not pinned, because they are not wire contracts: `git` (any version with `GIT_CONFIG_COUNT`,

@@ -26,6 +26,8 @@ const usage = `usage:
   ripple config example                 print a valid example file
   ripple events list                    list events that failed 3 times and were kept (dead letters)
   ripple events requeue ID|--all        make a dead event (or every one) live again; a running server picks it up
+  ripple events jobs REPO               list REPO's failed jobs (the ones ripple gave up on) with their keys
+  ripple events requeue-job KEY         make a failed job pending again with a fresh attempt budget
   ripple events purge [AGE]             delete dead events older than AGE (default: the retention, 30d; "0" deletes all)
   ripple version                        print the module version this binary was built from
 `
@@ -144,8 +146,8 @@ func serve(getenv func(string) string, errw io.Writer) error {
 // server uses, named by the same RIPPLE_STORE variables, so it needs no HTTP endpoint and
 // no credentials beyond those of the store.
 func events(args []string, out, errw io.Writer, getenv func(string) string) int {
-	if len(args) == 0 || (args[0] != "list" && args[0] != "requeue" && args[0] != "purge") ||
-		(args[0] == "list" && len(args) != 1) || (args[0] == "requeue" && len(args) != 2) || len(args) > 2 {
+	if len(args) == 0 || (args[0] != "list" && args[0] != "requeue" && args[0] != "purge" && args[0] != "jobs" && args[0] != "requeue-job") ||
+		(args[0] == "list" && len(args) != 1) || ((args[0] == "requeue" || args[0] == "jobs" || args[0] == "requeue-job") && len(args) != 2) || len(args) > 2 {
 		fmt.Fprint(errw, usage)
 		return 2
 	}
@@ -183,6 +185,10 @@ func events(args []string, out, errw io.Writer, getenv func(string) string) int 
 	switch {
 	case args[0] == "list":
 		err = app.EventsList(ctx, st, out)
+	case args[0] == "jobs":
+		err = app.EventsFailedJobs(ctx, st, args[1], out)
+	case args[0] == "requeue-job":
+		err = app.EventsRequeueJob(ctx, st, time.Now(), args[1], out)
 	case args[0] == "requeue" && args[1] == "--all":
 		err = app.EventsRequeueAll(ctx, st, out)
 	case args[0] == "requeue":

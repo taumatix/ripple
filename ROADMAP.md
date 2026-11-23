@@ -142,8 +142,6 @@ Everything else:
 34. **Presets, org-level defaults and packageRules-like matching.** Later and strictly opt-in: a repo
     file must opt into a preset by name, and none of these may ever change the meaning of a plain
     per-repo `.ripple.yaml`. No implicit inheritance, no rule precedence.
-35. **MIGRATION notes policy.** Rules for config-schema and API changes: additive first, deprecate
-    across a minor release, `MIGRATION.md` for any break.
 36. **Remove the `.github/ripple.yml` alias.** Deprecated in the release after v0.1.0 in favour of the
     root `.ripple.yaml`; remove it no earlier than v0.3.0 (the minor release after next), with a
     `MIGRATION.md` and a last warning release, per the deprecate-then-remove rule.

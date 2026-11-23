@@ -34,6 +34,7 @@ jobs:
       - run: go build ./...
       - run: go vet ./...
       - run: test -z "$(gofmt -l .)"
+      - run: scripts/check-migration.sh
       - name: test (fails if the service-backed tests were skipped)
         run: go test -race -count=1 -v ./... | tee test.log
       - run: |

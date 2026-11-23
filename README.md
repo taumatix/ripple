@@ -177,6 +177,8 @@ process; the id is an unsigned header, so this stops redelivery and naive replay
 
 ## Upstream contracts
 
+How config and API changes are deprecated and removed, and what is deprecated now: [MIGRATION.md](MIGRATION.md).
+
 The feed format and GitHub API version ripple was built against, with check dates: [UPSTREAM.md](UPSTREAM.md).
 
 ## Development

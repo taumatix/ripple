@@ -1,4 +1,4 @@
-.PHONY: build vet test test-gomod test-services test-smoke test-smoke-binary
+.PHONY: build vet test test-gomod test-services test-smoke test-smoke-binary check-migration
 build:
 	go build ./...
 vet:
@@ -22,3 +22,6 @@ test-smoke:
 test-smoke-binary:
 	go build -o bin/ripple ./cmd/ripple
 	RIPPLE_SMOKE_BINARY=$(CURDIR)/bin/ripple go test -count=1 -v ./internal/smoke/
+
+check-migration:
+	scripts/check-migration.sh

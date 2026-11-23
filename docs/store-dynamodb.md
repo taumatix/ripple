@@ -86,9 +86,22 @@ Billing is on-demand. `Store.EnsureTable` creates both.
       walks a legacy table through 1, 2, 4 and 8 shards and turns the option off, checking every dependent
       is listed once at each step.
     - **The counter only steers growth.** It is not transactional with the item writes, so a crash can leave it
-      off by one; dependents that existed before the option was turned on are not counted until rewritten, and
-      the counter is a single hot item per package. Roadmap entries 70 and 71 cover recount and striping.
-      None of this affects what a read returns.
+      off by one, and it drifts while the option is off. None of this affects what a read returns.
+    - **Recount.** `(*Dynamo).RecountDependents(ctx, ds, pkg)` reads every shard of the package from the index,
+      sets `Deps` to the count, raises `Shards` if the count calls for it (never lowers it), and moves each
+      dependent to the shard its repo hashes to (a conditional write per item, applied only to an item still
+      where it was read). It is also run once, lazily, by the first change to a package whose counter item does
+      not exist, so dependents written before the option was on, or before the counter was lost, are counted
+      then. The index is eventually consistent, so a recount straight after a write can miss that write; the
+      next recount fixes it. Nothing calls `RecountDependents` on a schedule or from the CLI yet.
+    - **Counter stripes** (`RIPPLE_DYNAMODB_COUNTER_STRIPES=<n>`, default 1, 1-64). With more than one, each
+      change ADDs to a random item `PKGCOUNT#<ds>#<line>` / `S#<i>` instead of `META`, so concurrent writers do not
+      share an item's write limit. The dependents count is the sum of `Deps` over the partition, `META`
+      included, so the option can be turned on or off on a live table. A stripe's own value times `n` is a cheap
+      estimate; the partition is summed only when that estimate says the package may need more shards, and every
+      later write re-checks, so growth can be delayed but not lost. A recount puts the truth in `META` and zeroes
+      the stripes. Whether the default is too low, or `n` right for a given package, has not been measured on
+      a real table.
     - A small package keeps one Query per `ListDependents`, plus one strongly consistent GetItem for its shard
       record.
   - **Concurrent shard queries.** A read runs its shard Queries at most `RIPPLE_DYNAMODB_QUERY_CONCURRENCY`
@@ -97,6 +110,13 @@ Billing is on-demand. `Store.EnsureTable` creates both.
     cancelled context, cancels the Queries still running and the read returns without waiting out the rest.
   - The test `TestDynamoPendingQueueIsSpread` counts items per index partition and fails if one holds
     more than 1.5x its share.
+- **Per-repo open-job copies.** `ListOpenJobs` reads `REPO#<repo>` / `OPENJOB#<key>` items instead of scanning
+  the job index. They are written after the job write (a Put while the job is pending or failed, a Delete otherwise),
+  not atomically with it, so `EnsureTable` backfills them on every start from the pending index (each shard of the queue is read, existing copies are checked with BatchGetItem, and only missing ones are
+  written, each with `attribute_not_exists`), and `ListOpenJobs` reconciles on
+  read: it batch-reads the job behind each copy, drops a copy whose job is gone or no longer open, and deletes it
+  (best effort). A job that failed before the copies existed is in no index and is not backfilled; see the
+  roadmap.
 - **Sparse index.** Only dependency and pending-job items carry `GSI1` attributes, so the index
   stays small and finished jobs drop out of it.
 - **Releases are stored only for packages that have dependents.** The feed carries every
@@ -106,7 +126,8 @@ Billing is on-demand. `Store.EnsureTable` creates both.
 
 `internal/store/dynamofake` is an HTTP server speaking DynamoDB's JSON 1.0 protocol that the real AWS SDK
 client talks to, so the store runs unchanged. It implements what the store uses: CreateTable, DescribeTable,
-DeleteTable, PutItem, GetItem, DeleteItem, UpdateItem (`SET`, `ADD`), BatchWriteItem, Query on the table and on
+DeleteTable, PutItem, GetItem, DeleteItem, UpdateItem (`SET`, `ADD`, return values `UPDATED_NEW` and
+`UPDATED_OLD`), BatchWriteItem, BatchGetItem (100 keys, `UnprocessedKeys`), Scan of the base table, Query on the table and on
 `gsi1`, with key-condition, filter, condition and projection expressions. It is written from the API
 documentation, and follows the rules the store depends on: `Limit` counts items before the filter; a page
 stops at 1 MB; `LastEvaluatedKey` is returned whenever `Limit` stopped the read, even when nothing remains;
@@ -120,8 +141,16 @@ plain `go test ./...` covers the sharding, concurrency and adaptive code. Dynamo
 source of truth: a fake that passes proves the code agrees with the documentation as read, not with the
 service.
 
-Where the fake differs from DynamoDB: it is strongly consistent (a GSI is never stale, so the eventual-consistency
-paths are not exercised); it never throttles; the only `UnprocessedItems` it returns are the ones the test hook
-`DropOneFromNextBatch` asks for; it implements TransactWriteItems (Put, Delete, ConditionCheck) but has no Scan or BatchGetItem and rejects other
-operations; it does not reject reserved words; item and page sizes are an approximation of the documented
-accounting. Roadmap entry 72 tracks these.
+Where the fake differs from DynamoDB: it is strongly consistent unless a test calls `HoldIndex`, which freezes
+what `gsi1` returns until `ReleaseIndex` (a model of index lag, not of its timing); it throttles only when a test
+calls `ThrottleNext(op, n)` (the SDK's own retries then apply, and the error surfaces when they run out);
+the only `UnprocessedItems` and `UnprocessedKeys` it returns are the ones `DropOneFromNextBatch` and
+`DropOneFromNextBatchGet` ask for; it implements TransactWriteItems (Put, Delete, ConditionCheck), but no
+Scan of an index and rejects other operations; it rejects only a subset of DynamoDB's reserved words as unaliased
+attribute names (the list is incomplete on purpose: it never rejects a name DynamoDB accepts); item and page sizes
+are an approximation of the documented accounting.
+
+**Parity check.** CI runs `scripts/check-dynamo-parity.sh test.log`, which compares the `fake` and
+`dynamodb-local` subtest of every Dynamo test and fails when one passes and the other fails, skips or is missing.
+That is how a gap in the fake becomes a visible failure instead of a silent one. It only compares
+what the tests exercise, and it cannot run locally without DynamoDB Local (every `dynamodb-local` subtest skips).

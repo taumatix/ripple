@@ -227,8 +227,6 @@ Everything else:
     older run than the security job is only held, never closed, unless the security PR opens in a later run with it open.
     A plain, non-advisory release move off a pseudo-version is still not implemented; rule to use: the first release above
     the pseudo-version and released after its timestamp, opt-in.
-128. **Docker: private registries.** Only anonymous pulls work; a private image answers 401/403 and is skipped.
-    Add per-registry credentials (a token or `config.json`-style auth) kept out of logs and PR bodies.
 130. **Docker: verify against real registries.** The client and the fake were written from the spec excerpts
     (`docs/vendor/registry`); run it against Docker Hub and GHCR once (host, `library/` prefix, index digest
     `Accept` types, 429 handling, the `created` read through an index and a blob redirect) and record the result in UPSTREAM.md.
@@ -328,3 +326,9 @@ Everything else:
 165. **Docker: Helm values, Kustomize and per-stage ARGs.** Compose files, Kubernetes manifests, `COPY --from` and global
     `ARG` tags are read (docs/docker.md). Not read: Helm `values.yaml` (`repository:`/`tag:` pairs), Kustomize `images:`,
     `ARG` declared after a `FROM`, an ARG that is only part of a tag, and `RUN --mount=from=`.
+166. **Docker: credential helpers, identity tokens, per-repo logins.** `RIPPLE_REGISTRY_AUTH_FILE` reads inline `auths` only
+    (docs/docker.md). Left: `credsStore`/`credHelpers` (run `docker-credential-*`; needs the sandbox's care, since the helper
+    is a program), `identitytoken` (the OAuth2 refresh-token grant against the token endpoint, for Azure and some Docker Hub
+    setups), a login limited to the repos that name it in `.ripple.yaml` (today one login serves every repo the server reads, so
+    a repo can make ripple present it to a registry only by naming that registry's images), reloading the file without a restart,
+    and a real private registry run (see 130).

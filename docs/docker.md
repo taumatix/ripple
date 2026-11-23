@@ -38,11 +38,31 @@ cannot be read fails the job rather than guessing one.
 
 ## Registries
 
-Docker Hub, GHCR and any registry speaking the Docker Registry HTTP API v2, **anonymously** (the Bearer challenge
-is answered with an anonymous token). Credentials are not supported: a private image answers 401/403 or 404, is
+Docker Hub, GHCR and any registry speaking the Docker Registry HTTP API v2. By default the client is
+**anonymous** (the Bearer challenge is answered with an anonymous token): a private image answers 401/403 or 404, is
 logged and left alone, and the others in the repo still move. The registry host comes from the repo's Dockerfile,
 so the client refuses hosts that resolve to non-public addresses and plain-http realms or redirects. The
-cooldown counts from the image's `created` time (read from its config: the index, the linux/amd64 manifest, then the config blob); when the registry cannot say, it counts from when ripple first saw the tag.
+cooldown counts from the image's `created` time (read from its config: the index, the linux/amd64 manifest, then the
+config blob); when the registry cannot say, it counts from when ripple first saw the tag.
+
+## Private registries
+
+`RIPPLE_REGISTRY_AUTH_FILE` names a Docker `config.json` (what `docker login` writes; a Kubernetes
+`.dockerconfigjson` pull secret mounted as a file works as is):
+
+```json
+{"auths": {"ghcr.io": {"auth": "<base64 user:token>"}, "registry.example.com:5000": {"username": "u", "password": "p"}}}
+```
+
+It is read once at start; an unreadable file stops the server. A login is sent only to the registry it is saved for:
+to its Basic challenge, or to the token endpoint a Bearer challenge names (Docker Hub's `auths` key
+`https://index.docker.io/v1/` is `docker.io`). A host without an entry stays anonymous, so a Dockerfile naming another
+registry never receives one. Not read: `credsStore` and `credHelpers` (external helper programs) and
+`identitytoken` (OAuth refresh tokens); the server logs a warning and those registries stay anonymous. The logins are
+never logged, never put in a PR body and never printed (`registry.Credentials` redacts itself); a refused login is
+reported as "denied" with the registry's name, not its value. One login serves every repo the server reads, so use
+a token with read-only pull scope. Verified against a fake registry (token and Basic challenges); no real private
+registry has been tried (ROADMAP 130).
 
 Only images some repo uses are polled, once per poll, never a whole registry. Branches are `ripple/docker/...`.
 See [UPSTREAM.md](../UPSTREAM.md) for what was not verified against a real registry.

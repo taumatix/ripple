@@ -30,6 +30,9 @@ type Registry struct {
 	pageSize int                          // tags per page; 0 serves all in one
 	denied   map[string]bool              // repos whose token request is refused
 	created  map[string]time.Time         // "repo:tag" -> image config creation time
+	logins   map[string][2]string         // repo -> user, password the token endpoint demands
+	basic    *[2]string                   // when set, /v2/ wants HTTP Basic instead of a token
+	tokenReq []string                     // "scope basic=true|false" per token request
 	reqs     []string
 }
 
@@ -37,7 +40,7 @@ const registryToken = "anon-token"
 
 func NewRegistry(t testing.TB) *Registry {
 	t.Helper()
-	r := &Registry{repos: map[string]map[string]string{}, denied: map[string]bool{}, created: map[string]time.Time{}}
+	r := &Registry{repos: map[string]map[string]string{}, denied: map[string]bool{}, created: map[string]time.Time{}, logins: map[string][2]string{}}
 	r.srv = httptest.NewServer(http.HandlerFunc(r.serve))
 	r.URL = r.srv.URL
 	t.Cleanup(r.srv.Close)
@@ -112,6 +115,32 @@ func (r *Registry) PageSize(n int) { r.mu.Lock(); r.pageSize = n; r.mu.Unlock() 
 // DenyToken refuses the anonymous token for repo (a private image).
 func (r *Registry) DenyToken(repo string) { r.mu.Lock(); r.denied[repo] = true; r.mu.Unlock() }
 
+// RequireLogin makes the token endpoint answer 401 for repo unless the request carries
+// HTTP Basic credentials for user and password (a private image on a token registry).
+func (r *Registry) RequireLogin(repo, user, pass string) {
+	r.mu.Lock()
+	r.logins[repo] = [2]string{user, pass}
+	r.mu.Unlock()
+}
+
+// RequireBasic makes every /v2/ request need HTTP Basic credentials for user and
+// password, challenged with `WWW-Authenticate: Basic`, like a registry without a token
+// service.
+func (r *Registry) RequireBasic(user, pass string) {
+	r.mu.Lock()
+	r.basic = &[2]string{user, pass}
+	r.mu.Unlock()
+}
+
+// TokenRequests lists one line per token request: its scope and whether it carried
+// Basic credentials ("repository:org/img:pull basic=true"). Credentials themselves are
+// never recorded.
+func (r *Registry) TokenRequests() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.tokenReq...)
+}
+
 // Requests lists "METHOD path" of every request seen, token requests included.
 func (r *Registry) Requests() []string {
 	r.mu.Lock()
@@ -126,8 +155,13 @@ func (r *Registry) serve(w http.ResponseWriter, req *http.Request) {
 	if req.URL.Path == "/token" {
 		scope := req.URL.Query().Get("scope") // repository:<repo>:pull
 		parts := strings.Split(scope, ":")
+		u, p, hasBasic := req.BasicAuth()
 		r.mu.Lock()
+		r.tokenReq = append(r.tokenReq, fmt.Sprintf("%s basic=%v", scope, hasBasic))
 		deny := len(parts) == 3 && r.denied[parts[1]]
+		if want, ok := r.logins[strings.Join(parts[1:len(parts)-1], ":")]; ok && len(parts) == 3 {
+			deny = deny || !hasBasic || u != want[0] || p != want[1]
+		}
 		r.mu.Unlock()
 		if deny {
 			http.Error(w, `{"errors":[{"code":"DENIED"}]}`, http.StatusUnauthorized)
@@ -156,7 +190,16 @@ func (r *Registry) serve(w http.ResponseWriter, req *http.Request) {
 		http.NotFound(w, req)
 		return
 	}
-	if req.Header.Get("Authorization") != "Bearer "+registryToken {
+	r.mu.Lock()
+	basic := r.basic
+	r.mu.Unlock()
+	if basic != nil {
+		if u, p, ok := req.BasicAuth(); !ok || u != basic[0] || p != basic[1] {
+			w.Header().Set("WWW-Authenticate", `Basic realm="fake.registry"`)
+			http.Error(w, `{"errors":[{"code":"UNAUTHORIZED"}]}`, http.StatusUnauthorized)
+			return
+		}
+	} else if req.Header.Get("Authorization") != "Bearer "+registryToken {
 		w.Header().Set("WWW-Authenticate", fmt.Sprintf(`Bearer realm="%s/token",service="fake.registry",scope="repository:%s:pull"`, r.URL, repo))
 		http.Error(w, `{"errors":[{"code":"UNAUTHORIZED"}]}`, http.StatusUnauthorized)
 		return

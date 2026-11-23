@@ -395,3 +395,13 @@ func TestActionsUpstream(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadServerRegistryAuthFile(t *testing.T) {
+	s, err := LoadServer(env(with("RIPPLE_REGISTRY_AUTH_FILE", "/etc/ripple/registry.json")))
+	if err != nil || s.RegistryAuthFile != "/etc/ripple/registry.json" {
+		t.Fatalf("%q %v", s.RegistryAuthFile, err)
+	}
+	if s, err = LoadServer(env(with())); err != nil || s.RegistryAuthFile != "" {
+		t.Errorf("default is anonymous: %q %v", s.RegistryAuthFile, err)
+	}
+}

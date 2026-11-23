@@ -88,7 +88,17 @@ func New(ctx context.Context, s *config.Server, log *slog.Logger) (a *App, st st
 		Limits: rules.Limits{MinimumReleaseAge: s.MinimumReleaseAge, OpenPRLimit: s.OpenPRLimit, AllowAutomerge: s.AllowAutomerge}}
 	eng.Lookup = &feed.GoProxyLookup{BaseURL: s.GoProxy, User: s.GoProxyUser, Token: s.GoProxyToken,
 		UserAgent: "ripple (+https://github.com/taumatix/ripple)"}
-	eng.Registry = &registry.Client{UserAgent: "ripple (+https://github.com/taumatix/ripple)"}
+	rc := &registry.Client{UserAgent: "ripple (+https://github.com/taumatix/ripple)"}
+	if s.RegistryAuthFile != "" {
+		if rc.Auth, err = registry.LoadDockerConfig(s.RegistryAuthFile); err != nil {
+			return nil, nil, fmt.Errorf("RIPPLE_REGISTRY_AUTH_FILE: %w", err)
+		}
+		for _, w := range rc.Auth.Warnings {
+			log.Warn("registry auth file", "note", w)
+		}
+		log.Info("registry logins loaded", "registries", rc.Auth.Hosts())
+	}
+	eng.Registry = rc
 	eng.Crates = &cratesindex.Client{UserAgent: "ripple (+https://github.com/taumatix/ripple)"}
 	eng.PyPI = &pypi.Client{UserAgent: "ripple (+https://github.com/taumatix/ripple)"}
 	eng.Npm = &npmreg.Client{UserAgent: "ripple (+https://github.com/taumatix/ripple)"}

@@ -1,11 +1,15 @@
 package e2e
 
 import (
+	"encoding/base64"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/taumatix/ripple/internal/model"
+	"github.com/taumatix/ripple/internal/registry"
 	"github.com/taumatix/ripple/internal/store"
 	"github.com/taumatix/ripple/internal/testutil"
 )
@@ -200,6 +204,57 @@ func TestDockerCooldownCountsFromTheImageCreationTime(t *testing.T) {
 		e.tick()
 		if n := len(e.gh.PRs("acme/app")); n != 2 {
 			t.Errorf("the redis PR opens once its cooldown, counted from creation, passed: %d PRs", n)
+		}
+	})
+}
+
+func TestDockerPrivateImageMovesWithALoginFromAConfigFile(t *testing.T) {
+	forEach(t, func(t *testing.T, st store.Store) {
+		reg := testutil.NewRegistry(t)
+		reg.AddTag("library/redis", "7.0")
+		reg.AddTag("corp/secret", "1.0")
+		reg.RequireLogin("corp/secret", "bot", "s3cret-pass")
+		reg.AddTag("corp/other", "1.0")
+		reg.RequireLogin("corp/other", "someone", "else") // a private image with no login configured
+
+		cfgPath := filepath.Join(t.TempDir(), "config.json")
+		raw := base64.StdEncoding.EncodeToString([]byte("bot:s3cret-pass"))
+		if err := os.WriteFile(cfgPath, []byte(`{"auths":{"ghcr.io":{"auth":"`+raw+`"}}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		creds, err := registry.LoadDockerConfig(cfgPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		e := newEnvOpts(t, st, defaultLimits(), opts{registry: reg, registryAuth: creds})
+		e.gh.AddRepo("acme/app", map[string]string{".ripple.yaml": dockerConfig,
+			"Dockerfile": "FROM redis:7.0\nFROM ghcr.io/corp/secret:1.0\nFROM ghcr.io/corp/other:1.0\n"})
+		start(t, e, "acme/app")
+		e.clock.Advance(time.Minute)
+		reg.AddTag("library/redis", "7.2")
+		reg.AddTag("corp/secret", "1.1")
+		reg.AddTag("corp/other", "1.1")
+		e.tick()
+		e.tick()
+
+		prs := e.gh.PRs("acme/app")
+		moved := map[string]bool{}
+		for _, pr := range prs {
+			got, _ := e.gh.FileAt("acme/app", pr.Head, "Dockerfile")
+			moved["redis"] = moved["redis"] || strings.Contains(got, "redis:7.2")
+			moved["secret"] = moved["secret"] || strings.Contains(got, "ghcr.io/corp/secret:1.1")
+			moved["other"] = moved["other"] || strings.Contains(got, "corp/other:1.1")
+			if strings.Contains(got+pr.Body+pr.Title, "s3cret-pass") || strings.Contains(got+pr.Body+pr.Title, raw) {
+				t.Errorf("a credential reached a PR: %+v", pr)
+			}
+		}
+		if !moved["redis"] || !moved["secret"] || moved["other"] {
+			t.Errorf("public and logged-in images move, the one without a login stays: %v", moved)
+		}
+		for _, r := range reg.TokenRequests() {
+			if strings.Contains(r, "library/redis") && strings.HasSuffix(r, "basic=true") {
+				t.Errorf("the ghcr.io login was sent for a Docker Hub image: %s", r)
+			}
 		}
 	})
 }

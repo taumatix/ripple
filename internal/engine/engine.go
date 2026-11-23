@@ -150,7 +150,7 @@ func (e *Engine) Scan(ctx context.Context, repo model.Repo) error {
 	defer hold.Release()
 	ctx = hold.Ctx
 	defer func() { e.syncDashboard(ctx, repo.FullName) }()
-	err := e.scan(platform.WithScanOnly(ctx), repo)
+	err = e.scan(platform.WithScanOnly(ctx), repo)
 	if errors.Is(err, platform.ErrScanFallback) {
 		e.log().Info("partial scan unavailable; scanning a full checkout", "repo", repo.FullName, "reason", err)
 		err = e.scan(ctx, repo)

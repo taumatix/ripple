@@ -250,3 +250,11 @@ Everything else:
 88. **Replicas: configuration and metrics.** Expose `Replica` and `LeaseTTL` as `RIPPLE_REPLICA` and
     `RIPPLE_LEASE_TTL`, a replica-count and lease-takeover metric, and elect one replica for the feed poll
     (two polling is safe, since job enqueue is insert-if-absent, but wasteful).
+||||||| parent of 89b39d4 (Roadmap residuals for the partial scan and Go version files)
+89. **Partial scan on other hosts.** The scan without a checkout is verified against GitHub and the fake
+    only. GitLab, Bitbucket, Gitea, Azure and the rest may not serve `filter=blob:none` or by-id blob
+    fetches; they fall back to a full checkout, unmeasured. Check each and record which saves anything.
+90. **Partial scan relies on non-cone sparse checkout.** Git marks it deprecated. Move the batched blob
+    fetch to `git fetch --stdin` of object ids or `git backfill` once they work on a `--depth 1` clone.
+91. **Go version in more files.** `.mise.toml`, `.devcontainer/devcontainer.json`, `go.work`, `Makefile`
+    variables and workflows in a module subdirectory are not followed by a toolchain bump.

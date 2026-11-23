@@ -280,12 +280,12 @@ Everything else:
     older run than the security job is only held, never closed, unless the security PR opens in a later run with it open.
     A plain, non-advisory release move off a pseudo-version is still not implemented; rule to use: the first release above
     the pseudo-version and released after its timestamp, opt-in.
-124. **Docker: private registries.** Only anonymous pulls work; a private image answers 401/403 and is skipped.
+128. **Docker: private registries.** Only anonymous pulls work; a private image answers 401/403 and is skipped.
     Add per-registry credentials (a token or `config.json`-style auth) kept out of logs and PR bodies.
-125. **Docker: compose files, Kubernetes manifests and `ARG` tags.** `image:` keys in compose files, `ARG
+129. **Docker: compose files, Kubernetes manifests and `ARG` tags.** `image:` keys in compose files, `ARG
     VERSION=...` used in `FROM image:${VERSION}`, and `COPY --from=image:tag` are not read.
-126. **Docker: verify against real registries.** The client and the fake were written from the spec excerpts
+130. **Docker: verify against real registries.** The client and the fake were written from the spec excerpts
     (`docs/vendor/registry`); run it against Docker Hub and GHCR once (host, `library/` prefix, index digest
     `Accept` types, 429 handling) and record the result in UPSTREAM.md.
-127. **Docker: package cursor and release dates.** `docker:packages` is one read-modify-write cursor (see 96) and the
+131. **Docker: package cursor and release dates.** `docker:packages` is one read-modify-write cursor (see 96) and the
     cooldown counts from first sight because tags carry no date; read the image config `created` time instead.

@@ -1,8 +1,10 @@
 package engine
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"golang.org/x/mod/semver"
@@ -63,9 +65,14 @@ func (r *runner) closeStale(by supersededBy, exceptHead string, open []platform.
 	if !r.cfg.ClosesSuperseded() || !semver.IsValid(by.version) || semver.Prerelease(by.version) != "" {
 		return closed
 	}
+	touched := r.touchedPRs()
 	for _, old := range open {
 		oldVersion, ok := staleVersion(old.Head, by.pkg)
 		if !ok || old.Head == exceptHead || semver.Compare(oldVersion, by.version) >= 0 || !r.ownedByRipple(by.pkg, oldVersion, old) {
+			continue
+		}
+		if touched[old.URL] {
+			r.e.log().Debug("stale pull request left open: remembered as touched", "repo", r.repo.FullName, "pr", old.URL)
 			continue
 		}
 		done, err := platform.CloseUntouchedPR(r.ctx, r.e.Platform, r.repo, old, supersededComment(by, oldVersion))
@@ -81,6 +88,8 @@ func (r *runner) closeStale(by supersededBy, exceptHead string, open []platform.
 			}
 		case !done:
 			r.e.log().Info("stale pull request left open: it was touched by someone else", "repo", r.repo.FullName, "pr", old.URL)
+			touched[old.URL] = true
+			r.saveTouchedPRs(touched)
 		default:
 			closed[old.Head] = true
 			r.e.log().Info("closed superseded pull request", "repo", r.repo.FullName, "pr", old.URL, "by", by.url, "version", by.version)
@@ -105,6 +114,7 @@ func (r *runner) sweepSuperseded(deps []model.Dependency, open []platform.PR) ma
 	if !r.cfg.ClosesSuperseded() {
 		return closed
 	}
+	r.forgetClosedTouchedPRs(open)
 	seen := map[string]bool{}
 	for _, d := range deps {
 		if d.Datasource != model.DatasourceGo || seen[d.Package] {
@@ -145,4 +155,57 @@ func supersededComment(by supersededBy, oldVersion string) string {
 		"ripple is closing it because nobody but ripple has touched it; reopen it if you still want this version. "+
 		"To keep ripple from closing superseded pull requests, set `close-superseded-pull-requests: false` in `.ripple.yaml`.",
 		lead, by.pkg, by.version, oldVersion)
+}
+
+// touchedCursor holds, per repo, the URLs of open ripple PRs a host reported as
+// touched by a person. Touched is sticky: a comment, review or commit does not
+// un-happen, so the PR is not read again (about six requests) on every run, only
+// remembered until it leaves the open list. The repo's lease serializes writers.
+func (r *runner) touchedCursor() string { return "supersede-touched:" + r.repo.FullName }
+
+func (r *runner) touchedPRs() map[string]bool {
+	set := map[string]bool{}
+	raw, err := r.e.Store.GetCursor(r.ctx, r.touchedCursor())
+	if err != nil {
+		r.e.log().Warn("touched pull requests not read; checking them again", "repo", r.repo.FullName, "err", err)
+		return set
+	}
+	var urls []string
+	if raw != "" && json.Unmarshal([]byte(raw), &urls) != nil {
+		return set
+	}
+	for _, u := range urls {
+		set[u] = true
+	}
+	return set
+}
+
+func (r *runner) saveTouchedPRs(set map[string]bool) {
+	urls := make([]string, 0, len(set))
+	for u := range set {
+		urls = append(urls, u)
+	}
+	sort.Strings(urls)
+	b, _ := json.Marshal(urls)
+	if err := r.e.Store.SetCursor(r.ctx, r.touchedCursor(), string(b)); err != nil {
+		r.e.log().Warn("touched pull requests not remembered", "repo", r.repo.FullName, "err", err)
+	}
+}
+
+// forgetClosedTouchedPRs drops what is remembered of a PR no longer open, so the
+// memory cannot outlive the PR it describes.
+func (r *runner) forgetClosedTouchedPRs(open []platform.PR) {
+	set := r.touchedPRs()
+	if len(set) == 0 {
+		return
+	}
+	still := map[string]bool{}
+	for _, pr := range open {
+		if set[pr.URL] {
+			still[pr.URL] = true
+		}
+	}
+	if len(still) != len(set) {
+		r.saveTouchedPRs(still)
+	}
 }

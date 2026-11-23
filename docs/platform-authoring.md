@@ -102,8 +102,12 @@ Cloud `X-Request-UUID`, Bitbucket Server `X-Request-Id`, CodeCommit SNS `Message
 Two more kinds are optional, for a host that reports them: `RepoRenamed` (`Repos` holds the old path,
 `NewRepo` the new one; the stored repo, its dependencies and its pending jobs follow, no scan) and
 `DefaultBranchChanged` (`DefaultBranch` is the new branch; one re-scan, future PRs target it, open PRs are
-untouched). A host that cannot report them sends neither and behaves as before. Archive and delete map to
-`ReposRemoved`, unarchive to `ReposAdded`. A fixture that can deliver a rename implements the suite's
+untouched). A host that cannot report them sends neither and behaves as before. Delete maps to
+`ReposRemoved`. `RepoArchived` and `RepoUnarchived` are optional too: ripple keeps the archived repo's index
+and pending jobs, does nothing to it while it is read-only, and resumes the jobs on unarchive with no scan. A
+host that sends `ReposRemoved` for archive still has the repo forgotten, as before. A push event may carry
+`RepoID`, the host's immutable repository id; a host that sets it vouches for the repo, and ripple registers a
+repo it does not know from a verified push carrying one. A fixture that can deliver a rename implements the suite's
 `ReportsRenames` marker and is then held to it; others skip it.
 
 The receiver is served at `POST /webhook/<host>`.

@@ -149,8 +149,12 @@ func (a *App) enqueue(ctx context.Context, host string, ev platform.Event) error
 			}
 			ref = "refs/heads/" + ev.DefaultBranch
 		}
-		evs = append(evs, model.Event{ID: fmt.Sprintf("%s/%d", prefix, i), InstallationID: ev.Scope,
-			Kind: string(ev.Kind), Repo: a.repoName(host, repo), Ref: ref, Files: ev.Files})
+		me := model.Event{ID: fmt.Sprintf("%s/%d", prefix, i), InstallationID: ev.Scope,
+			Kind: string(ev.Kind), Repo: a.repoName(host, repo), Ref: ref, Files: ev.Files, DefaultBranch: ev.DefaultBranch, RepoID: ev.RepoID}
+		if ev.Kind == platform.RepoRenamed {
+			me.NewRepo = ref
+		}
+		evs = append(evs, me)
 	}
 	return a.Queue.Add(ctx, evs...)
 }
@@ -294,22 +298,47 @@ func (a *App) process(ctx context.Context, ev model.Event) error {
 		return a.Engine.Scan(ctx, model.Repo{FullName: ev.Repo, InstallationID: ev.InstallationID})
 	case "repos_removed":
 		return a.Engine.Remove(ctx, ev.Repo)
+	case string(platform.RepoArchived):
+		return a.Engine.Pause(ctx, ev.Repo)
+	case string(platform.RepoUnarchived):
+		err := a.Engine.Resume(ctx, ev.Repo, ev.InstallationID)
+		if err == nil {
+			a.jobs.Wake()
+		}
+		return err
 	case "push":
 		return a.push(ctx, ev.Repo, ev)
 	case string(platform.RepoRenamed):
-		return a.Engine.Rename(ctx, ev.Repo, ev.Ref, ev.InstallationID)
+		return a.Engine.Rename(ctx, ev.Repo, firstNonEmpty(ev.NewRepo, ev.Ref), ev.InstallationID)
 	case string(platform.DefaultBranchChanged):
-		return a.Engine.SetDefaultBranch(ctx, ev.Repo, strings.TrimPrefix(ev.Ref, "refs/heads/"), ev.InstallationID)
+		return a.Engine.SetDefaultBranch(ctx, ev.Repo, firstNonEmpty(ev.DefaultBranch, strings.TrimPrefix(ev.Ref, "refs/heads/")), ev.InstallationID)
 	}
 	a.Log.Warn("unknown queued event kind; dropped", "kind", ev.Kind, "event", ev.ID)
 	return nil
+}
+
+// firstNonEmpty picks the typed event field, falling back to the deprecated overloaded
+// Ref for events queued before the typed fields existed (ripple:deprecated event-ref-overload).
+func firstNonEmpty(typed, legacy string) string {
+	if typed != "" {
+		return typed
+	}
+	return legacy
 }
 
 // push re-scans a registered repo when its default branch changed a file a manager
 // or the config cares about.
 func (a *App) push(ctx context.Context, name string, ev model.Event) error {
 	repo, ok, err := a.Engine.Store.GetRepo(ctx, name)
-	if err != nil || !ok {
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return a.pushUnknown(ctx, name, ev)
+	}
+	// The payload's default_branch is only a hint that the stored one may be stale (a
+	// missed repository.edited); the engine confirms it with the host before storing.
+	if healed, err := a.Engine.HealDefaultBranch(ctx, repo, ev.DefaultBranch, ev.InstallationID); healed || err != nil {
 		return err
 	}
 	if repo.DefaultBranch == "" || ev.Ref != "refs/heads/"+repo.DefaultBranch {
@@ -335,6 +364,21 @@ func (a *App) push(ctx context.Context, name string, ev model.Event) error {
 	}
 	repo.InstallationID = ev.InstallationID
 	return a.Engine.Scan(ctx, repo)
+}
+
+// pushUnknown handles a verified push for a name ripple does not have. A name that was
+// renamed away from (a late delivery under the old name) is the renamed repo's push. For a
+// host that gave an immutable repository id the push beat the event that registers or
+// renames the repo, so it is registered under the name the push carries; for any other
+// host an unknown repo is ignored, as before.
+func (a *App) pushUnknown(ctx context.Context, name string, ev model.Event) error {
+	if target, ok := a.Engine.RenamedTo(ctx, name); ok {
+		return a.push(ctx, target, ev)
+	}
+	if ev.RepoID == 0 || ev.InstallationID == 0 {
+		return nil
+	}
+	return a.Engine.RegisterFromPush(ctx, name, ev.InstallationID)
 }
 
 // pollToolchain polls the Go release list and returns how many jobs it enqueued.

@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/taumatix/ripple/internal/model"
+	"github.com/taumatix/ripple/internal/store"
 )
 
 // Repo-state events: a host that can say a repository was renamed, moved or changed
@@ -13,6 +15,12 @@ import (
 // one (default branch). Hosts that cannot say so never reach this code.
 
 const renamedCursor = "renamed|"
+
+// pausedCursor marks a repo the host archived: read-only, so nothing may be done to it.
+const pausedCursor = "paused|"
+
+// pauseDefer is how far a due job of a paused repo is pushed back each time it comes up.
+const pauseDefer = time.Hour
 
 // maxRenameHops bounds following a chain of renames (a -> b -> c).
 const maxRenameHops = 8
@@ -42,6 +50,20 @@ func (e *Engine) Rename(ctx context.Context, old, now string, scope int64) error
 	if err != nil || !found {
 		return err
 	}
+	if _, there, err := e.Store.GetRepo(ctx, now); err != nil {
+		return err
+	} else if there {
+		// A push under the new name registered it before this event arrived. Its record is
+		// the fresher one, so it stays; the old one goes and the alias carries the old jobs.
+		if err := e.Store.SetCursor(ctx, renamedCursor+old, now); err != nil {
+			return err
+		}
+		if err := e.Store.DeleteRepo(ctx, old); err != nil {
+			return err
+		}
+		e.log().Info("repository renamed; the new name was already registered", "from", old, "to", now)
+		return nil
+	}
 	deps, err := e.Store.ListRepoDependencies(ctx, old)
 	if err != nil {
 		return err
@@ -66,6 +88,27 @@ func (e *Engine) Rename(ctx context.Context, old, now string, scope int64) error
 	}
 	if err := e.Store.DeleteRepo(ctx, old); err != nil {
 		return err
+	}
+	if v, _ := e.Store.GetCursor(ctx, pausedCursor+old); v != "" {
+		if err := e.Store.SetCursor(ctx, pausedCursor+now, v); err != nil {
+			return err
+		}
+		if err := e.Store.SetCursor(ctx, pausedCursor+old, ""); err != nil {
+			return err
+		}
+	}
+	// Re-key the pending jobs now, so a new repository that takes the freed name cannot be
+	// handed them; followRename stays for jobs a retried event or an older version left behind.
+	if lister, ok := e.Store.(store.OpenJobLister); ok {
+		if jobs, err := lister.ListOpenJobs(ctx, old); err == nil {
+			var pending []model.Job
+			for _, j := range jobs {
+				if j.State == model.JobPending {
+					pending = append(pending, j)
+				}
+			}
+			e.moveJobs(ctx, now, pending)
+		}
 	}
 	e.log().Info("repository renamed", "from", old, "to", now, "dependencies", len(deps))
 	return nil
@@ -96,6 +139,28 @@ func (e *Engine) renamedTo(ctx context.Context, name string) (string, bool) {
 	return "", false
 }
 
+// RenamedTo reports the registered repo that name was renamed to, following the alias
+// chain (bounded by maxRenameHops).
+func (e *Engine) RenamedTo(ctx context.Context, name string) (string, bool) {
+	return e.renamedTo(ctx, name)
+}
+
+// RegisterFromPush registers a repo the first time a verified push names it, when the
+// host vouched for the repo with an immutable id (the push beat the installation or rename
+// event that would have registered it). It is idempotent: a registered repo is left alone.
+// The branch is left for the host to name and the scan is the same one a repos_added does,
+// so a repo the credential cannot reach fails the scan and the queue's retry bound applies.
+func (e *Engine) RegisterFromPush(ctx context.Context, name string, scope int64) error {
+	if _, found, err := e.Store.GetRepo(ctx, name); err != nil || found {
+		return err
+	}
+	if err := e.ForgetRename(ctx, name); err != nil {
+		return err
+	}
+	e.log().Info("repository registered from a push", "repo", name)
+	return e.Scan(ctx, model.Repo{FullName: name, InstallationID: scope})
+}
+
 // followRename re-keys jobs of a name that no longer exists to the repo it became,
 // and reports whether it did. The old jobs end as skipped.
 func (e *Engine) followRename(ctx context.Context, name string, jobs []model.Job) (string, bool) {
@@ -103,6 +168,12 @@ func (e *Engine) followRename(ctx context.Context, name string, jobs []model.Job
 	if !ok {
 		return "", false
 	}
+	e.moveJobs(ctx, target, jobs)
+	return target, true
+}
+
+// moveJobs re-keys jobs to target; the old rows end as skipped.
+func (e *Engine) moveJobs(ctx context.Context, target string, jobs []model.Job) {
 	for _, j := range jobs {
 		moved := j
 		moved.Repo = target
@@ -116,7 +187,6 @@ func (e *Engine) followRename(ctx context.Context, name string, jobs []model.Job
 			e.log().Error("update job", "job", j.Key, "err", err)
 		}
 	}
-	return target, true
 }
 
 // SetDefaultBranch re-scans a registered repo against branch, which becomes the
@@ -135,3 +205,117 @@ func (e *Engine) SetDefaultBranch(ctx context.Context, name, branch string, scop
 	}
 	return e.Scan(ctx, repo)
 }
+
+// falseClaimTTL is how long a default-branch claim the host contradicted is not
+// examined again, and maxFalseClaims bounds the table that remembers them.
+const (
+	falseClaimTTL  = time.Hour
+	maxFalseClaims = 4096
+)
+
+// HealDefaultBranch is the repair for a missed default-branch change. claimed is the
+// branch a verified push payload says is the default. It is only a reason to look: when
+// it differs from the stored branch the repo is re-scanned with the branch left for the
+// host to name, and what is stored is what the host reports, never the payload's text.
+// So a stale redelivery or a false claim can cost one scan but cannot point ripple at
+// another branch, and the same contradicted claim is not examined again for an hour. It
+// reports whether it examined the repo; the scan then covers whatever the push changed.
+func (e *Engine) HealDefaultBranch(ctx context.Context, repo model.Repo, claimed string, scope int64) (bool, error) {
+	if claimed == "" || claimed == repo.DefaultBranch {
+		return false, nil
+	}
+	key := repo.FullName + "|" + claimed
+	e.mu.Lock()
+	until, seen := e.falseClaims[key]
+	e.mu.Unlock()
+	if seen && e.now().Before(until) {
+		return false, nil
+	}
+	repo.DefaultBranch = ""
+	if scope != 0 {
+		repo.InstallationID = scope
+	}
+	if err := e.Scan(ctx, repo); err != nil {
+		return true, err
+	}
+	now, found, err := e.Store.GetRepo(ctx, repo.FullName)
+	if err != nil {
+		return true, err
+	}
+	if found && now.DefaultBranch != claimed {
+		e.mu.Lock()
+		if e.falseClaims == nil || len(e.falseClaims) >= maxFalseClaims {
+			e.falseClaims = map[string]time.Time{}
+		}
+		e.falseClaims[key] = e.now().Add(falseClaimTTL)
+		e.mu.Unlock()
+		e.log().Warn("push claimed a default branch the host does not report", "repo", repo.FullName, "claimed", claimed, "host", now.DefaultBranch)
+	} else if found {
+		e.log().Info("default branch healed from a push", "repo", repo.FullName, "branch", claimed)
+	}
+	return true, nil
+}
+
+// Paused reports whether name was archived and not yet unarchived.
+func (e *Engine) Paused(ctx context.Context, name string) bool {
+	v, err := e.Store.GetCursor(ctx, pausedCursor+name)
+	return err == nil && v != ""
+}
+
+// Pause is what archive means: the repo is read-only, so ripple stops acting on it (no PRs,
+// no dashboard writes) but keeps its index and pending jobs. An unknown repo is ignored.
+func (e *Engine) Pause(ctx context.Context, name string) error {
+	defer e.lockRepo(name)()
+	if _, found, err := e.Store.GetRepo(ctx, name); err != nil || !found {
+		return err
+	}
+	if err := e.Store.SetCursor(ctx, pausedCursor+name, "1"); err != nil {
+		return err
+	}
+	e.log().Info("repository archived; paused", "repo", name)
+	return nil
+}
+
+// Resume undoes Pause: the jobs deferred meanwhile become due, with no scan. A repo that
+// is not registered, or was not paused (the archive was never seen, or predates pausing),
+// is scanned instead, which is what unarchive meant before. It reports whether jobs may
+// be due so the caller can wake the runner.
+func (e *Engine) Resume(ctx context.Context, name string, scope int64) error {
+	unlock := e.lockRepo(name)
+	_, found, err := e.Store.GetRepo(ctx, name)
+	if err != nil {
+		unlock()
+		return err
+	}
+	if !found || !e.Paused(ctx, name) {
+		unlock()
+		if err := e.ForgetRename(ctx, name); err != nil {
+			return err
+		}
+		return e.Scan(ctx, model.Repo{FullName: name, InstallationID: scope})
+	}
+	defer unlock()
+	if err := e.Store.SetCursor(ctx, pausedCursor+name, ""); err != nil {
+		return err
+	}
+	if lister, ok := e.Store.(store.OpenJobLister); ok {
+		jobs, err := lister.ListOpenJobs(ctx, name)
+		if err != nil {
+			return err
+		}
+		now := e.now()
+		for _, j := range jobs {
+			if j.State != model.JobPending || !j.NotBefore.After(now) || j.Reason != pausedReason {
+				continue
+			}
+			j.NotBefore, j.Reason = now, ""
+			if err := e.Store.UpdateJob(ctx, j); err != nil {
+				return err
+			}
+		}
+	}
+	e.log().Info("repository unarchived; resumed", "repo", name)
+	return nil
+}
+
+const pausedReason = "repository archived"

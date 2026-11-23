@@ -436,6 +436,41 @@ func Run(t *testing.T, mk func(t *testing.T) store.Store) {
 		}
 	})
 
+	t.Run("event typed fields", func(t *testing.T) {
+		s := mk(t)
+		ctx := context.Background()
+		at := time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC)
+		rename := model.Event{ID: "r/0", Seq: 1, InstallationID: 7, Kind: "repo_renamed", Repo: "acme/old", Ref: "acme/new", NewRepo: "acme/new", RepoID: 99}
+		branch := model.Event{ID: "b/0", Seq: 2, InstallationID: 7, Kind: "default_branch_changed", Repo: "acme/web", Ref: "refs/heads/trunk", DefaultBranch: "trunk"}
+		push := model.Event{ID: "p/0", Seq: 3, InstallationID: 7, Kind: "push", Repo: "acme/web", Ref: "refs/heads/main", DefaultBranch: "main", RepoID: 5, Files: []string{"go.mod"}}
+		for _, ev := range []model.Event{rename, branch, push} {
+			if ok, err := s.EnqueueEvent(ctx, ev); err != nil || !ok {
+				t.Fatalf("EnqueueEvent %s: %v %v", ev.ID, ok, err)
+			}
+		}
+		check := func(got []model.Event, want ...model.Event) {
+			t.Helper()
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("got %+v\nwant %+v", got, want)
+			}
+		}
+		live, err := s.ListEvents(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		check(live, rename, branch, push)
+		// A failed attempt and dead-lettering keep the typed fields.
+		rename.Attempts, rename.DeadAt, rename.LastAttemptAt, rename.LastError = 3, at, at, "boom"
+		if err := s.UpdateEvent(ctx, rename); err != nil {
+			t.Fatal(err)
+		}
+		dead, err := s.ListDeadEvents(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		check(dead, rename)
+	})
+
 	t.Run("dead events", func(t *testing.T) {
 		s := mk(t)
 		at := time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC)

@@ -161,6 +161,9 @@ func (e *Engine) flushDashboards(ctx context.Context) {
 // syncDashboard brings repo's dashboard issue up to date. The caller holds the repo
 // lock. Every failure is logged and swallowed: the dashboard never fails a job or a scan.
 func (e *Engine) syncDashboard(ctx context.Context, name string) {
+	if e.Paused(ctx, name) {
+		return // archived: the issue tracker is read-only too
+	}
 	lister, ok := e.Store.(store.OpenJobLister)
 	if !ok {
 		return

@@ -157,15 +157,6 @@ Everything else:
     nobody else imports has none stored) with a bounded index lookup. Also ListDependents is still an
     eventually consistent GSI read on DynamoDB, so a release fanned out in that window can still miss a repo
     that registered a moment before.
-54. **Self-heal the default branch from pushes.** A push payload carries `default_branch`; use it to correct a
-    stored branch when an `edited` delivery was missed (the receiver parses it, `enqueue` drops it for pushes).
-55. **Pushes for a renamed repo that beat the rename event.** A push under the new name arrives for an unknown
-    repo and is ignored; register unknown repos from a push, or replay after the rename is processed.
-56. **Typed rename and branch fields on `model.Event`.** `Ref` carries the new stored name for `repo_renamed` and
-    `refs/heads/<name>` for `default_branch_changed`; give them real fields when the store schemas are next changed.
-57. **Pause rather than skip on archive.** Archive drops the repo's index and skips its pending jobs; unarchive
-    rescans, but jobs skipped meanwhile are not restored. Also: a repo name reused after a rename drops the old
-    repo's pending jobs.
 58. **Prove the credentialed container path live.** `RIPPLE_GOPROXY_TOKEN` under a container backend (GOPROXY
     userinfo over https) is covered by argv and refusal tests only, not run against a real container and an
     https proxy. Also offer an image with a C toolchain and headers, and a preflight that checks it for `cgo: true`.
@@ -227,3 +218,15 @@ Everything else:
     size. Add what the store starts to use as it does, a stale-GSI mode to test the eventual-consistency
     paths, and a CI step that runs the whole suite against both and diffs the results, since DynamoDB Local
     stays the source of truth.
+73. **Store the repository id on `model.Repo`.** GitHub's OpenAPI has no lookup of a repo by id, so ripple cannot
+    ask the host who owns an id, and a push for an unknown name is trusted on its signed payload alone. Storing
+    the id (additive column or attribute, all three stores) would tie a push under a new name to the old record
+    and make a stale or replayed push detectable. Postgres and DynamoDB paths are covered only by CI.
+74. **Other hosts: archive as pause.** Only GitHub reports `RepoArchived` and `RepoUnarchived`; GitLab, Gitea,
+    Bitbucket and Azure DevOps archive events still forget the repo. Map them once each host's payload is checked.
+75. **A late push after `repos_removed` re-registers the repo.** A signed push carrying a repo id registers an
+    unknown name, so a delivery that arrives after a delete brings the repo back. Needs a tombstone (see 73) or a
+    delete that is remembered for a short while.
+76. **Remove the `Ref` overload on `model.Event`.** `ref` still carries the new name or `refs/heads/<name>` for
+    events queued before the typed fields; drop the fallback after a minor release and when no queue holds
+    old rows (`ripple:deprecated event-ref-overload` in MIGRATION.md).

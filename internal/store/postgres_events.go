@@ -12,13 +12,13 @@ func (p *Postgres) EnqueueEvent(ctx context.Context, e model.Event) (bool, error
 	if files == nil {
 		files = []string{}
 	}
-	tag, err := p.pool.Exec(ctx, `INSERT INTO events(id,seq,installation_id,kind,repo,ref,files,attempts,not_before)
-VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (id) DO NOTHING`,
-		e.ID, e.Seq, e.InstallationID, e.Kind, e.Repo, e.Ref, files, e.Attempts, e.NotBefore)
+	tag, err := p.pool.Exec(ctx, `INSERT INTO events(id,seq,installation_id,kind,repo,ref,files,attempts,not_before,new_repo,default_branch,repo_id)
+VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT (id) DO NOTHING`,
+		e.ID, e.Seq, e.InstallationID, e.Kind, e.Repo, e.Ref, files, e.Attempts, e.NotBefore, e.NewRepo, e.DefaultBranch, e.RepoID)
 	return tag.RowsAffected() == 1, wrap("enqueue event", err)
 }
 
-const eventCols = `id,seq,installation_id,kind,repo,ref,files,attempts,not_before,last_error,last_attempt_at,dead_at`
+const eventCols = `id,seq,installation_id,kind,repo,ref,files,attempts,not_before,last_error,last_attempt_at,dead_at,new_repo,default_branch,repo_id`
 
 func (p *Postgres) queryEvents(ctx context.Context, op, query string, args ...any) ([]model.Event, error) {
 	rows, err := p.pool.Query(ctx, query, args...)
@@ -30,7 +30,7 @@ func (p *Postgres) queryEvents(ctx context.Context, op, query string, args ...an
 	for rows.Next() {
 		var e model.Event
 		var last, dead *time.Time
-		if err := rows.Scan(&e.ID, &e.Seq, &e.InstallationID, &e.Kind, &e.Repo, &e.Ref, &e.Files, &e.Attempts, &e.NotBefore, &e.LastError, &last, &dead); err != nil {
+		if err := rows.Scan(&e.ID, &e.Seq, &e.InstallationID, &e.Kind, &e.Repo, &e.Ref, &e.Files, &e.Attempts, &e.NotBefore, &e.LastError, &last, &dead, &e.NewRepo, &e.DefaultBranch, &e.RepoID); err != nil {
 			return nil, wrap(op, err)
 		}
 		if len(e.Files) == 0 {

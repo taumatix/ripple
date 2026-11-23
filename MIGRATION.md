@@ -49,6 +49,19 @@ marker in the code. Deprecations of third-party names (for example GitLab's
   and a warning says so.
 - **To migrate:** `git mv .github/ripple.yml .ripple.yaml`.
 
+### `Event.Ref` carrying a rename or a default branch
+
+- **Marker:** `event-ref-overload`
+- **Introduced in:** the release after v0.2.0 (ROADMAP entry 56)
+- **Removal not before:** the minor release after that one
+- **Replacement:** the typed `model.Event` fields `NewRepo` (a `repo_renamed` event's new name) and `DefaultBranch`
+  (a `default_branch_changed` event's new branch), persisted by all three stores.
+- **Behaviour now:** new events carry both the typed field and the old `Ref` use; a handler prefers the typed
+  field and falls back to `Ref` for events queued before upgrading, so a rolling upgrade or a downgrade loses nothing.
+  Internal packages only: no config key, flag or public Go API changes.
+- **To migrate:** nothing to do. The queued-event schema grows by columns/attributes with empty defaults
+  (Postgres migration `004_event_typed_fields.sql`).
+
 ## Removed
 
 Nothing has been removed yet.

@@ -36,6 +36,9 @@ type eventAttrs struct {
 	LastError           string `dynamodbav:",omitempty"`
 	LastAttemptAt       string `dynamodbav:",omitempty"`
 	DeadAt              string `dynamodbav:",omitempty"`
+	NewRepo             string `dynamodbav:",omitempty"`
+	DefaultBranch       string `dynamodbav:",omitempty"`
+	RepoID              int64  `dynamodbav:",omitempty"`
 }
 
 const deadEventsPK = "EVENTS#dead"
@@ -59,7 +62,8 @@ func tsOrEmpty(t time.Time) string {
 func fromEventAttrs(a eventAttrs) model.Event {
 	return model.Event{ID: a.ID, Seq: a.Seq, InstallationID: a.InstallationID, Kind: a.Kind, Repo: a.Repo,
 		Ref: a.Ref, Files: a.Files, Attempts: a.Attempts, NotBefore: parseTS(a.NotBefore),
-		LastError: a.LastError, LastAttemptAt: parseTS(a.LastAttemptAt), DeadAt: parseTS(a.DeadAt)}
+		LastError: a.LastError, LastAttemptAt: parseTS(a.LastAttemptAt), DeadAt: parseTS(a.DeadAt),
+		NewRepo: a.NewRepo, DefaultBranch: a.DefaultBranch, RepoID: a.RepoID}
 }
 
 func eventItem(e model.Event) eventAttrs {
@@ -69,6 +73,7 @@ func eventItem(e model.Event) eventAttrs {
 		ID:   e.ID, Kind: e.Kind, Repo: e.Repo, Ref: e.Ref, Seq: e.Seq, InstallationID: e.InstallationID,
 		Files: e.Files, Attempts: e.Attempts, NotBefore: ts(e.NotBefore),
 		LastError: e.LastError, LastAttemptAt: tsOrEmpty(e.LastAttemptAt), DeadAt: tsOrEmpty(e.DeadAt),
+		NewRepo: e.NewRepo, DefaultBranch: e.DefaultBranch, RepoID: e.RepoID,
 	}
 }
 

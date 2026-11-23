@@ -83,11 +83,19 @@ type Event struct {
 	InstallationID int64
 	Kind           string // "repos_added", "repos_removed", "push", "repo_renamed", "default_branch_changed"
 	Repo           string
-	// Ref is a push's ref. The two repo-state kinds reuse it, so the persisted event
-	// schema stays as it is: repo_renamed carries the new stored repo name, and
-	// default_branch_changed the new default branch as refs/heads/<name>.
+	// Ref is a push's ref. The two repo-state kinds also carry it, for events queued
+	// before the typed fields below existed and for a rolling upgrade: repo_renamed the
+	// new stored repo name, default_branch_changed the new default branch as
+	// refs/heads/<name>. ripple:deprecated event-ref-overload
 	Ref   string
 	Files []string
+	// NewRepo is the new stored repo name of a repo_renamed event (Repo is the old one).
+	NewRepo string
+	// DefaultBranch is the default branch name (no refs/heads/ prefix) the host reported:
+	// the new one for default_branch_changed, and the one a push payload claimed.
+	DefaultBranch string
+	// RepoID is the host's immutable repository id when the host provides one, else 0.
+	RepoID int64
 	// Attempts counts failed handling attempts; NotBefore delays the next one.
 	Attempts  int
 	NotBefore time.Time

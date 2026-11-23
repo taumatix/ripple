@@ -64,6 +64,9 @@ type Engine struct {
 	// MaxBackfill bounds the jobs one scan creates for dependencies new to the repo; zero
 	// means DefaultMaxBackfill.
 	MaxBackfill int
+	// Lookup, when set, finds the latest release of a module with no stored release, so
+	// backfill reaches a module nobody else imports. Nil asks nothing (see ReleaseLookup).
+	Lookup ReleaseLookup
 	// Replica names this process among the replicas sharing the Store; empty picks a random
 	// id, which is right unless logs should carry a stable name. LeaseTTL is how long a
 	// repo claim survives without renewal (zero means DefaultLeaseTTL). See docs/replicas.md.

@@ -8,6 +8,7 @@ One repo must not be able to cost the server unbounded memory or time.
 |---|---|---|
 | `RIPPLE_MAX_FILES` | 100000 | regular files walked in one scan (`.git`, `vendor` and `node_modules` are not walked) |
 | `RIPPLE_MAX_DEPENDENCIES` | 5000 | dependencies extracted from one repo; a repo at exactly the cap is fine |
+| `RIPPLE_MAX_BACKFILL` | 10 | jobs one scan creates for dependencies new to a repo; the unserved rest carries to the repo's next scan (not a skip: nothing is lost). Each scan also asks the module proxy at most 20 times for a module with no stored release |
 
 A repo over either cap is **skipped, not truncated**: it is registered with no dependencies (so no
 update PRs, exactly like an invalid `.ripple.yaml`) and the engine logs a warning

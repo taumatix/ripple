@@ -81,6 +81,9 @@ type Server struct {
 	// MaxFiles and MaxDependencies cap one repo scan; a repo over either is skipped.
 	MaxFiles        int
 	MaxDependencies int
+	// MaxBackfill bounds the jobs one scan creates for dependencies new to a repo; zero
+	// means the engine's DefaultMaxBackfill. The unserved remainder carries to the next scan.
+	MaxBackfill int
 	// Event queue: workers overall and per installation, and the persisted backlog
 	// overall and per installation (past either cap the receiver answers 503).
 	EventWorkers                int
@@ -147,6 +150,7 @@ RIPPLE_ALLOW_AUTOMERGE        default true; false forbids automerge everywhere
 RIPPLE_WORKERS                default 4
 RIPPLE_MAX_FILES              default 100000; a repo with more files is skipped with a warning
 RIPPLE_MAX_DEPENDENCIES       default 5000; a repo with more dependencies is skipped with a warning
+RIPPLE_MAX_BACKFILL           default 10; jobs one scan creates for dependencies new to a repo, the rest carry to the next scan
 RIPPLE_WORK_DIR               checkout directory (default: OS temp dir)
 RIPPLE_EVENT_WORKERS          webhook events handled at once (default 4)
 RIPPLE_EVENT_WORKERS_PER_INSTALLATION  of which one installation may use (default 2)
@@ -201,6 +205,13 @@ func LoadServer(getenv func(string) string) (*Server, error) {
 			return def
 		}
 		return n
+	}
+	// numOpt is num for a setting whose absence means "the engine's default" (zero).
+	numOpt := func(key string, lo int) int {
+		if getenv(key) == "" {
+			return 0
+		}
+		return num(key, lo, lo)
 	}
 	shards := func(key string, def int) int {
 		n := num(key, def, 1)
@@ -258,6 +269,7 @@ func LoadServer(getenv func(string) string) (*Server, error) {
 		WorkDir:                  getenv("RIPPLE_WORK_DIR"),
 		MaxFiles:                 num("RIPPLE_MAX_FILES", DefaultMaxFiles, 1),
 		MaxDependencies:          num("RIPPLE_MAX_DEPENDENCIES", DefaultMaxDependencies, 1),
+		MaxBackfill:              numOpt("RIPPLE_MAX_BACKFILL", 1),
 
 		EventWorkers:                num("RIPPLE_EVENT_WORKERS", 4, 1),
 		EventWorkersPerInstallation: num("RIPPLE_EVENT_WORKERS_PER_INSTALLATION", 2, 1),

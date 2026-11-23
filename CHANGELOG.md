@@ -31,6 +31,10 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
 - Fan-out loads and parses a repo's config once per release instead of once per dependency row.
 
 ### Added
+- AWS CodeCommit host (`RIPPLE_CODECOMMIT_REGIONS`, `RIPPLE_CODECOMMIT_SNS_TOPIC_ARNS`): SigV4-signed API and
+  git password, events through EventBridge and an SNS HTTPS subscription at `/webhook/codecommit`, repositories
+  discovered by listing per region. Built from the docs and a fake only; unverified against real AWS. See
+  [docs/platform-codecommit.md](docs/platform-codecommit.md).
 - Gitea and Forgejo host (`RIPPLE_GITEA_*`): one client, flavour detected from `/api/v1/version`, repo discovery by listing plus push webhooks, "merge when checks succeed". Written from vendored docs and a fake, not a real instance; see [docs/platform-gitea.md](docs/platform-gitea.md).
 - GitLab (gitlab.com and self-managed) as a host, enabled by `RIPPLE_GITLAB_TOKEN` and/or `RIPPLE_GITLAB_TOKENS`
   (per-group and per-project access tokens, longest scope wins, each with its own rate limit). Merge requests

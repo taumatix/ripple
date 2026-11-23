@@ -80,6 +80,17 @@ upstream:
     rate-limits: "429 TF400733 with Retry-After; Retry-After may arrive on a 200 and is honoured"
     unverified: "a repo name accepted as repositoryId; autoCompleteSetBy.id taken from the creator's id; the labels endpoint; commit changes for merge commits and paging; exact service-hook delivery headers; the fake Azure DevOps in tests is written from the docs, not recorded; names with spaces unsupported"
     checked: 2026-11-23
+  - name: aws-codecommit
+    kind: http-api
+    reference: https://docs.aws.amazon.com/codecommit/latest/APIReference/
+    api-version: "2015-04-13"
+    docs: https://docs.aws.amazon.com/codecommit/latest/userguide/
+    vendored: docs/vendor/codecommit/
+    used: [ListRepositories, ListPullRequests, GetPullRequest, CreatePullRequest, GetDifferences, "git over HTTPS with the SigV4 git password (git-remote-codecommit algorithm)"]
+    auth: "SigV4, service codecommit, JSON 1.1 with X-Amz-Target CodeCommit_20150413.<Op>; git user AK[%token] and password <timestamp>Z<signature>"
+    events: [EventBridge referenceCreated and referenceUpdated via an SNS HTTPS subscription, "SNS signature SignatureVersion 1 (SHA1) and 2 (SHA256), RSA PKCS1v15"]
+    unverified: "everything against real AWS: signature acceptance, cn and eusc endpoints, SNS certificate chain, title limit (100 or 150), EventBridge input shape through SNS, clock-skew rejection; the fake is written from the docs, not recorded"
+    checked: 2026-11-23
 ```
 
 Not pinned, because they are not wire contracts: `git` (any version with `GIT_CONFIG_COUNT`,

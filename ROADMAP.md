@@ -76,9 +76,12 @@ auth model, rate limits); the notes below are what I expect, **unverified** unti
     one page of changes) is unverified against a real organisation.
 15. **Bitbucket Server / Data Center.** A different REST API from Bitbucket Cloud; webhooks per
     repo or project; HTTP access tokens.
-16. **AWS CodeCommit.** No webhooks: repository events arrive through EventBridge or SNS, so this needs an
-    inbound adapter (SQS or an HTTPS subscription) in front of the same event path. PRs have no
-    auto-merge. IAM credentials per account and region.
+16. **AWS CodeCommit: verify against real AWS.** Built from the vendored docs and a fake
+    ([docs/platform-codecommit.md](docs/platform-codecommit.md)); no AWS account has run it. Needs a
+    sandbox account: confirm SigV4 API calls and the git password are accepted, the title limit
+    (100 or 150), the EventBridge input shape through SNS, the cn and eusc endpoints. Residuals: one
+    AWS account per ripple, labels and auto-merge do not exist on the service, the SNS certificate
+    chain is not validated beyond the signature.
 17. **Gerrit.** Changes, not pull requests: push to `refs/for/<branch>`, one change per update with a
     stable Change-Id so a re-push amends it, labels and submit rules instead of auto-merge. Events from the webhooks
     plugin or `stream-events`; the project listing and ACLs are per instance.

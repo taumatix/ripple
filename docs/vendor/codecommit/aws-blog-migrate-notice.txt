@@ -1,0 +1,4 @@
+<!-- source: https://aws.amazon.com/blogs/devops/how-to-migrate-your-aws-codecommit-repository-to-another-git-provider/ ; fetched 2026-11-23; first paragraph only -->
+
+      How to migrate your AWS CodeCommit repository to another Git provider
+       by Rodney Bozo on 25 JUL 2024 in Advanced (300), AWS CodeCommit, Developer Tools, Technical How-to Permalink  Share

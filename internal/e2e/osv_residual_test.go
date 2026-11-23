@@ -78,8 +78,10 @@ func TestRescanChecksANewlyVulnerableVersion(t *testing.T) {
 		t.Fatalf("a fixed repo got %d PRs", n)
 	}
 	e.pushGoMod("acme/clean", gomod("example.com/clean", "example.com/lib v1.0.0"))
-	e.tick()
-	e.tick()
+	e.eventually("a security PR after the rescan", func() bool {
+		e.tick()
+		return len(e.gh.PRs("acme/clean")) > 0
+	})
 	if prs := e.gh.PRs("acme/clean"); len(prs) != 1 || !strings.HasPrefix(prs[0].Title, "[security] ") {
 		t.Fatalf("PRs %+v", prs)
 	}

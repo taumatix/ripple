@@ -86,7 +86,7 @@ func pushBody(repo, branch, old, head string) map[string]any {
 func (f *bbFixture) PRs(path string) []platformtest.PR {
 	var out []platformtest.PR
 	for _, p := range f.fake.PRs(path) {
-		out = append(out, platformtest.PR{Head: p.Head, Base: p.Base, Draft: p.Draft, AutoMerge: p.Queued})
+		out = append(out, platformtest.PR{Head: p.Head, Base: p.Base, Draft: p.Draft, AutoMerge: p.Queued, Closed: p.state() == "DECLINED", Comments: p.Comments})
 	}
 	return out
 }

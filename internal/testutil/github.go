@@ -62,9 +62,11 @@ type GitHub struct {
 	prs   map[string][]*PR
 	// issueState holds the issues API's records; see github_issues.go.
 	issueState *issueState
-	graphql    int
-	tokens     int
-	issued     map[string]*issuedToken
+	// refState holds the tags and releases API's records; see github_refs.go.
+	refState *refState
+	graphql  int
+	tokens   int
+	issued   map[string]*issuedToken
 	// TokenTTL, when set, is how long a minted installation token lives. It is
 	// reported to the client as expires_at and enforced by the git HTTP server.
 	TokenTTL time.Duration
@@ -396,7 +398,7 @@ func (g *GitHub) handleGraphQL(w http.ResponseWriter, r *http.Request) {
 
 func (g *GitHub) handleRepo(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/repos/"), "/")
-	if len(parts) < 3 || !(parts[2] == "pulls" || parts[2] == "issues" || parts[2] == "labels") {
+	if len(parts) < 3 || !(parts[2] == "pulls" || parts[2] == "issues" || parts[2] == "labels" || parts[2] == "tags" || parts[2] == "git" || parts[2] == "releases") {
 		g.fail(w, http.StatusNotFound, "unknown route %s", r.URL.Path)
 		return
 	}
@@ -428,6 +430,10 @@ func (g *GitHub) handleRepo(w http.ResponseWriter, r *http.Request) {
 	}
 	if parts[2] == "issues" && len(parts) < 5 {
 		g.handleIssues(w, r, repo, parts)
+		return
+	}
+	if parts[2] == "tags" || parts[2] == "git" || parts[2] == "releases" {
+		g.handleRefs(w, r, repo, parts)
 		return
 	}
 	if len(parts) > 3 {

@@ -31,3 +31,11 @@ or `X-Gitea-Signature` (the receiver accepts all three); the git basic-auth user
 `foo=bar/baz` elements. **Assumed, unverified**: behaviour of flags the README does not list (`-exec_only`,
 `-prog_only` exist in the tool's source), `github.com/golang/mock`'s older mockgen (same grammar here, not read),
 and what mockgen does with a `-source` file and positionals together (the rewrite leaves that line alone).
+
+## DynamoDB
+
+`dynamodb/reserved-words.md` is the developer guide's "Reserved words in DynamoDB" page (fetched 2026-11-23), the
+source of the 573 words `internal/store/dynamofake` rejects unaliased. A test parses the file and compares it with the
+fake's list, so the two cannot drift. **Assumed, unverified**: that the match ignores case, and in which expression
+clauses the service applies the check (the fake applies it to condition, filter, key-condition, projection and update
+expressions); DynamoDB Local is the check on both.

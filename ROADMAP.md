@@ -189,19 +189,6 @@ Everything else:
     or map an event once a host documents one; Forgejo and Bitbucket Data Center were not checked.
 109. **Repo ids from install events.** `repos_added` events carry no repository id, so a repo added that way adopts it
     only on its first signed push; a push with a mismatched id is ignored, not resolved by a lookup on the host.
-110. **DynamoDB: failed jobs from before the open-job copies.** The backfill reads the sparse pending index, so a job
-    that failed before the copies existed is in no index and stays off its repo's dashboard until its next write.
-    Finding it takes a Scan of the table (`dynamofake` now has a base-table Scan). Run one as an explicit one-off,
-    not on every start.
-111. **DynamoDB: recount all packages, and a trigger for it.** `RecountDependents` repairs one package and runs lazily
-    only when a counter item is missing. Nothing recounts a counter that drifted (crash between the item writes and
-    the ADD, or while the option was off), and nothing calls it. Add a recount over every package (a Scan for
-    `PKGCOUNT#` items), a CLI command or maintenance hook, and a drift check that compares the counter to a
-    `Select=COUNT` Query and logs the gap.
-112. **DynamoDB: the fake's reserved-word list is a subset.** `dynamofake` rejects only the reserved words the store
-    could plausibly use as an unaliased name. Take the full list from the documentation, and add the same check for
-    key-condition and projection expressions if the real service applies it there. The parity check will say
-    where it matters.
 113. **DynamoDB: throttling and index lag against a real table.** `ThrottleNext` and `HoldIndex` model the errors and
     the stale reads, not their timing or frequency, and DynamoDB Local throttles and lags neither. Run the sharded
     and striped paths against a real on-demand table once (a throwaway account, a bounded run) and record the
@@ -211,10 +198,6 @@ Everything else:
     estimate that avoids summing the stripes on every write is a heuristic. Measure write throttling on one hot
     package with and without stripes, choose a default or document how to size `n` from the dependent count, and
     consider batching the counter per scan (already one ADD per package per scan) before striping.
-115. **DynamoDB: adaptive counters while the option is off.** With `RIPPLE_DYNAMODB_ADAPTIVE_DEPENDENTS` unset, writes
-    do not touch the counters, so turning it on later starts from a stale count until the lazy recount or an
-    explicit one. Either keep counting with the option off (cheap, one ADD per package per scan) or document that
-    `RecountDependents` is the step to run after turning it on.
 116. **Container image per Go minor, and downloads.** `RIPPLE_GO_TOOLCHAIN_DIR` runs an operator-installed release
     on the host sandbox only; a container sandbox ignores it, and `GOTOOLCHAIN` downloads through the module proxy
     stay off. Offer an image per minor, or a proxy-fed download with a checksum check, so a bump above the
@@ -280,13 +263,6 @@ Everything else:
 134. **Delivery dedupe: hosts without a delivery id, and the DynamoDB cursor Scan.** The persistent claim covers events
     whose host sets `Delivery`; others rely on the in-memory table. `Dynamo.PurgeCursors` is a filtered Scan of the
     table (run at most daily) and is unmeasured on a large table; move tombstones to an indexed prefix if it hurts.
-139. **Direct `waitRepo` callers in `internal/e2e` can still act before the first scan ends.** Entry 138 found that
-    `env.install` returned once the repo row existed, while its scan and dependency backfill were still running, so tests
-    polling right after saw no dependents (fixed: `install` now waits for the event queue to drain). About fifteen tests
-    call `waitRepo` directly after a webhook and then act on dependencies; none failed in a green run on every store, but
-    each has the same window. Audit them (wait for the scan log line or `e.deps`), and make the e2e suite run with
-    `-count=2` in CI once the container-runtimes job is not the long pole. The earlier podman fake-runtime container
-    failure that CI missed on PR #53 was not reproduced; with `pipefail` the `container-runtimes` jobs are green.
 140. **Credentialed private proxy under a confined container network.** `RIPPLE_CONTAINER_CONFINE` is refused with
     `RIPPLE_GOPROXY_TOKEN`: go sends GOPROXY userinfo only over https and the sidecar speaks http. Give the sidecar
     TLS (a per-start certificate the image trusts) or have it add the Authorization header for the steps that may carry
@@ -305,3 +281,11 @@ Everything else:
 144. **Replicas: elect the other pollers.** Only the Go module feed poll is elected; the toolchain, Actions and Docker
     pollers still run on every replica (safe, wasteful). Give each its own `feed:<name>` lease the way `PollElected`
     does.
+145. **DynamoDB: the hygiene commands at scale, and on a schedule.** `ripple dynamodb check-counts`, `recount` and
+    `backfill-failed-jobs` find their work by a Scan of the whole table, which has only run against the in-process fake
+    (the DynamoDB Local run is CI-only, real AWS never). Measure the Scan and the per-package recount on a large table,
+    page them with a rate limit so they cannot starve live traffic, and decide whether the server should run the drift
+    check itself (log the gap) instead of leaving it to an operator.
+146. **e2e: run the suite with `-count=2` in CI.** Entry 139 made `waitRepo` wait for the first scan; repeating the suite
+    would show any test that still depends on a run order or leftover state. Do it once the container-runtimes job is not
+    the long pole. The podman fake-runtime container failure that CI missed on PR #53 was not reproduced.

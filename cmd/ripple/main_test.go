@@ -120,3 +120,20 @@ func TestEventsCommand(t *testing.T) {
 		t.Fatalf("requeue-job missing: exit %d, stderr %q", code, errw.String())
 	}
 }
+
+func TestDynamodbCommand(t *testing.T) {
+	noenv := func(string) string { return "" }
+	var out, errw bytes.Buffer
+	for _, args := range [][]string{{"dynamodb"}, {"dynamodb", "frob"}, {"dynamodb", "recount", "x"}} {
+		errw.Reset()
+		if code := run(args, &out, &errw, noenv); code != 2 {
+			t.Errorf("%v: exit %d, want 2 (%q)", args, code, errw.String())
+		}
+	}
+	for _, sub := range []string{"check-counts", "recount", "backfill-failed-jobs"} {
+		errw.Reset()
+		if code := run([]string{"dynamodb", sub}, &out, &errw, noenv); code != 1 || !strings.Contains(errw.String(), "RIPPLE_STORE=dynamodb") {
+			t.Errorf("%s on the default store: exit %d, stderr %q", sub, code, errw.String())
+		}
+	}
+}

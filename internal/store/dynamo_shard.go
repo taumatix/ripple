@@ -300,9 +300,12 @@ func (d *Dynamo) recountBase(ctx context.Context, base string) (int, error) {
 }
 
 // adjustCounts applies per-package dependent-count deltas and grows a package's recorded
-// shard count when the rule asks for more. It only runs with the option on.
+// shard count when the rule asks for more. It runs once the table has ever had the option
+// on, including while it is off: the counters keep moving (the rule gives no growth with
+// no per-shard size), so switching it back on starts from counts that are still true.
+// A table that never had it on keeps none.
 func (d *Dynamo) adjustCounts(ctx context.Context, delta map[string]int) error {
-	if d.adaptive <= 0 {
+	if !d.adaptiveOn() {
 		return nil
 	}
 	for base, dl := range delta {

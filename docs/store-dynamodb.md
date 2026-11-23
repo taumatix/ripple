@@ -89,14 +89,20 @@ Billing is on-demand. `Store.EnsureTable` creates both.
       walks a legacy table through 1, 2, 4 and 8 shards and turns the option off, checking every dependent
       is listed once at each step.
     - **The counter only steers growth.** It is not transactional with the item writes, so a crash can leave it
-      off by one, and it drifts while the option is off. None of this affects what a read returns.
+      off by one. None of this affects what a read returns. Once a table has had the option on, the counters keep
+      following writes with it off (no growth, since the rule needs a per-shard size), so turning it back on
+      starts from true counts; a table that never had it on keeps none. Counters that drifted while earlier
+      versions left them untouched need one recount.
     - **Recount.** `(*Dynamo).RecountDependents(ctx, ds, pkg)` reads every shard of the package from the index,
       sets `Deps` to the count, raises `Shards` if the count calls for it (never lowers it), and moves each
       dependent to the shard its repo hashes to (a conditional write per item, applied only to an item still
       where it was read). It is also run once, lazily, by the first change to a package whose counter item does
       not exist, so dependents written before the option was on, or before the counter was lost, are counted
       then. The index is eventually consistent, so a recount straight after a write can miss that write; the
-      next recount fixes it. Nothing calls `RecountDependents` on a schedule or from the CLI yet.
+      next recount fixes it. `ripple dynamodb check-counts` lists the packages whose counter disagrees with the
+      index (`(*Dynamo).CheckDependentCounts`, read only) and `ripple dynamodb recount` recounts every package
+      (`RecountAllDependents`, needs the option). Both Scan the table to find the packages, so they are
+      operator commands run by hand or from a scheduler of your own, not something the server runs.
     - **Counter stripes** (`RIPPLE_DYNAMODB_COUNTER_STRIPES=<n>`, default 1, 1-64). With more than one, each
       change ADDs to a random item `PKGCOUNT#<ds>#<line>` / `S#<i>` instead of `META`, so concurrent writers do not
       share an item's write limit. The dependents count is the sum of `Deps` over the partition, `META`
@@ -118,8 +124,9 @@ Billing is on-demand. `Store.EnsureTable` creates both.
   not atomically with it, so `EnsureTable` backfills them on every start from the pending index (each shard of the queue is read, existing copies are checked with BatchGetItem, and only missing ones are
   written, each with `attribute_not_exists`), and `ListOpenJobs` reconciles on
   read: it batch-reads the job behind each copy, drops a copy whose job is gone or no longer open, and deletes it
-  (best effort). A job that failed before the copies existed is in no index and is not backfilled; see the
-  roadmap.
+  (best effort). A job that failed before the copies existed is in no index, so start does not find it:
+  `ripple dynamodb backfill-failed-jobs` (`BackfillFailedJobs`) finds failed jobs with one filtered Scan and
+  writes their missing copies. Run it once on a table from before the copies; repeating it writes nothing.
 - **Sparse index.** Only dependency and pending-job items carry `GSI1` attributes, so the index
   stays small and finished jobs drop out of it.
 - **Releases are stored only for packages that have dependents.** The feed carries every
@@ -149,9 +156,11 @@ what `gsi1` returns until `ReleaseIndex` (a model of index lag, not of its timin
 calls `ThrottleNext(op, n)` (the SDK's own retries then apply, and the error surfaces when they run out);
 the only `UnprocessedItems` and `UnprocessedKeys` it returns are the ones `DropOneFromNextBatch` and
 `DropOneFromNextBatchGet` ask for; it implements TransactWriteItems (Put, Delete, ConditionCheck), but no
-Scan of an index and rejects other operations; it rejects only a subset of DynamoDB's reserved words as unaliased
-attribute names (the list is incomplete on purpose: it never rejects a name DynamoDB accepts); item and page sizes
-are an approximation of the documented accounting.
+Scan of an index and rejects other operations; it rejects every word on DynamoDB's reserved-word list as an
+unaliased attribute name (the list is vendored in `docs/vendor/dynamodb/reserved-words.md`; that the match is
+case-insensitive is assumed, not documented); like Local it rejects an empty string as a key condition's
+partition value or sort-key bound, which an older fake accepted; item and page sizes are an approximation of
+the documented accounting.
 
 **Parity check.** CI runs `scripts/check-dynamo-parity.sh test.log`, which compares the `fake` and
 `dynamodb-local` subtest of every Dynamo test and fails when one passes and the other fails, skips or is missing.

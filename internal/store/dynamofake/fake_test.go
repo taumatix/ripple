@@ -227,6 +227,24 @@ func TestRejectionsMatchDynamoDB(t *testing.T) {
 			_, err := db.PutItem(ctx, &dynamodb.PutItemInput{TableName: tn, Item: map[string]types.AttributeValue{"PK": sv("a"), "SK": sv("b"), "GSI1PK": sv("")}})
 			return err
 		}},
+		// DynamoDB Local answers "The AttributeValue for a key attribute cannot contain an empty string
+		// value" for an empty key value in a key condition; the fake used to accept an empty SK bound.
+		"empty sort key bound": {"ValidationException", func() error {
+			_, err := db.Query(ctx, &dynamodb.QueryInput{TableName: tn, KeyConditionExpression: aws.String("PK = :p AND SK > :s"),
+				ExpressionAttributeValues: map[string]types.AttributeValue{":p": sv("p"), ":s": sv("")}})
+			return err
+		}},
+		"empty partition key value": {"ValidationException", func() error {
+			_, err := db.Query(ctx, &dynamodb.QueryInput{TableName: tn, KeyConditionExpression: aws.String("PK = :p"),
+				ExpressionAttributeValues: map[string]types.AttributeValue{":p": sv("")}})
+			return err
+		}},
+		"empty index sort key bound": {"ValidationException", func() error {
+			_, err := db.Query(ctx, &dynamodb.QueryInput{TableName: tn, IndexName: aws.String("gsi1"),
+				KeyConditionExpression:    aws.String("GSI1PK = :g AND begins_with(GSI1SK, :s)"),
+				ExpressionAttributeValues: map[string]types.AttributeValue{":g": sv("g"), ":s": sv("")}})
+			return err
+		}},
 		"oversized item": {"ValidationException", func() error {
 			_, err := db.PutItem(ctx, &dynamodb.PutItemInput{TableName: tn, Item: map[string]types.AttributeValue{"PK": sv("a"), "SK": sv("b"), "X": sv(strings.Repeat("x", 401<<10))}})
 			return err
@@ -262,7 +280,7 @@ func TestConditionalPutAndDelete(t *testing.T) {
 	}{
 		{"#n <= :v", true}, {"#n < :v", false}, {"#n > :v OR (#n = :v AND attribute_exists(PK))", true},
 		{"NOT #n = :v", false}, {"#n BETWEEN :v AND :w", true}, {"begins_with(PK, :p)", true},
-		{"missing <> :v", true}, {"missing = :v", false},
+		{"absent <> :v", true}, {"absent = :v", false},
 	} {
 		vals := map[string]types.AttributeValue{}
 		for k, v := range all {

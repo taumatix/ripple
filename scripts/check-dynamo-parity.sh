@@ -49,6 +49,10 @@ LOG
   sed 's#PASS: TestDynamo/dynamodb-local/Suite#FAIL: TestDynamo/dynamodb-local/Suite#' "$tmp/ok.log" >"$tmp/diff.log"
   out=$(compare "$tmp/diff.log") && { echo "self-test: differing status accepted" >&2; exit 1; }
   grep -q 'TestDynamo/@/Suite: fake PASS, dynamodb-local FAIL' <<<"$out" || { echo "self-test: wrong report: $out" >&2; exit 1; }
+  # A Local run that skipped (no endpoint) against a fake pass is not parity either.
+  sed 's#PASS: TestDynamo/dynamodb-local/Suite#SKIP: TestDynamo/dynamodb-local/Suite#' "$tmp/ok.log" >"$tmp/skip.log"
+  out=$(compare "$tmp/skip.log") && { echo "self-test: skipped Local accepted" >&2; exit 1; }
+  grep -q 'fake PASS, dynamodb-local SKIP' <<<"$out" || { echo "self-test: wrong report: $out" >&2; exit 1; }
   grep -v 'dynamodb-local' "$tmp/ok.log" >"$tmp/missing.log"
   out=$(compare "$tmp/missing.log") && { echo "self-test: missing side accepted" >&2; exit 1; }
   grep -q 'only run on fake' <<<"$out" || { echo "self-test: wrong report: $out" >&2; exit 1; }

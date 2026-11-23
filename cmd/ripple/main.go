@@ -29,6 +29,9 @@ const usage = `usage:
   ripple events jobs REPO               list REPO's failed jobs (the ones ripple gave up on) with their keys
   ripple events requeue-job KEY         make a failed job pending again with a fresh attempt budget
   ripple events purge [AGE]             delete dead events older than AGE (default: the retention, 30d; "0" deletes all)
+  ripple dynamodb check-counts          report packages whose dependents counter disagrees with the index (scans the table)
+  ripple dynamodb recount               recount every package's dependents (needs RIPPLE_DYNAMODB_ADAPTIVE_DEPENDENTS)
+  ripple dynamodb backfill-failed-jobs  write the open-job copies old failed jobs lack (scans the table)
   ripple version                        print the module version this binary was built from
 `
 
@@ -48,6 +51,8 @@ func run(args []string, out, errw io.Writer, getenv func(string) string) int {
 		return validate(args[2:], out, errw, getenv)
 	case len(args) >= 1 && args[0] == "events":
 		return events(args[1:], out, errw, getenv)
+	case len(args) >= 1 && args[0] == "dynamodb":
+		return dynamoAdmin(args[1:], out, errw, getenv)
 	case len(args) == 1 && args[0] == "version":
 		fmt.Fprintln(out, "ripple", buildVersion())
 		return 0
@@ -152,18 +157,7 @@ func events(args []string, out, errw io.Writer, getenv func(string) string) int 
 		fmt.Fprint(errw, usage)
 		return 2
 	}
-	// The store settings are the server's; the secrets that only serve() needs are not
-	// required here.
-	s, err := config.LoadServer(func(k string) string {
-		if v := getenv(k); v != "" {
-			return v
-		}
-		switch k {
-		case "RIPPLE_WEBHOOK_SECRET", "RIPPLE_GITHUB_APP_ID", "RIPPLE_GITHUB_KEY_FILE":
-			return "-"
-		}
-		return ""
-	})
+	s, err := adminConfig(getenv)
 	if err != nil {
 		fmt.Fprintln(errw, "invalid server configuration:\n"+err.Error()+"\n\nVariables:\n"+config.ServerEnv)
 		return 1
@@ -196,6 +190,56 @@ func events(args []string, out, errw io.Writer, getenv func(string) string) int 
 		err = app.EventsRequeue(ctx, st, args[1], out)
 	default:
 		err = app.EventsPurge(ctx, st, time.Now(), retention, out)
+	}
+	if err != nil {
+		fmt.Fprintln(errw, "ripple:", err)
+		return 1
+	}
+	return 0
+}
+
+// adminConfig loads the server settings for an operator command. The store settings are
+// the server's; the secrets that only serve() needs are not required here.
+func adminConfig(getenv func(string) string) (*config.Server, error) {
+	return config.LoadServer(func(k string) string {
+		if v := getenv(k); v != "" {
+			return v
+		}
+		switch k {
+		case "RIPPLE_WEBHOOK_SECRET", "RIPPLE_GITHUB_APP_ID", "RIPPLE_GITHUB_KEY_FILE":
+			return "-"
+		}
+		return ""
+	})
+}
+
+// dynamoAdmin holds the one-off DynamoDB maintenance commands, run by an operator against
+// the table the server uses.
+func dynamoAdmin(args []string, out, errw io.Writer, getenv func(string) string) int {
+	if len(args) != 1 || (args[0] != "check-counts" && args[0] != "recount" && args[0] != "backfill-failed-jobs") {
+		fmt.Fprint(errw, usage)
+		return 2
+	}
+	s, err := adminConfig(getenv)
+	if err != nil {
+		fmt.Fprintln(errw, "invalid server configuration:\n"+err.Error()+"\n\nVariables:\n"+config.ServerEnv)
+		return 1
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	st, err := app.OpenStore(ctx, s)
+	if err != nil {
+		fmt.Fprintln(errw, "ripple:", err)
+		return 1
+	}
+	defer st.Close()
+	switch args[0] {
+	case "check-counts":
+		err = app.DynamoCheckCounts(ctx, st, out)
+	case "recount":
+		err = app.DynamoRecount(ctx, st, out)
+	default:
+		err = app.DynamoBackfillFailedJobs(ctx, st, out)
 	}
 	if err != nil {
 		fmt.Fprintln(errw, "ripple:", err)

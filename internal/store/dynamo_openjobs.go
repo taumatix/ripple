@@ -146,21 +146,23 @@ func (d *Dynamo) backfillOpenJobs(ctx context.Context) error {
 		return wrapD("backfill open jobs", err)
 	}
 	for _, part := range parts {
-		if err := d.backfillCopies(ctx, part); err != nil {
+		if _, err := d.backfillCopies(ctx, part); err != nil {
 			return wrapD("backfill open jobs", err)
 		}
 	}
 	return nil
 }
 
-// backfillCopies puts the copies of jobs that lack one, 100 existence checks at a time.
-func (d *Dynamo) backfillCopies(ctx context.Context, jobs []jobAttrs) error {
+// backfillCopies puts the copies of jobs that lack one, 100 existence checks at a time,
+// and returns how many it wrote.
+func (d *Dynamo) backfillCopies(ctx context.Context, jobs []jobAttrs) (int, error) {
+	wrote := 0
 	for len(jobs) > 0 {
 		chunk := jobs[:min(batchGetMax, len(jobs))]
 		jobs = jobs[len(chunk):]
 		have, err := d.existingCopies(ctx, chunk)
 		if err != nil {
-			return err
+			return wrote, err
 		}
 		for _, a := range chunk {
 			if have[a.Key] {
@@ -174,11 +176,12 @@ func (d *Dynamo) backfillCopies(ctx context.Context, jobs []jobAttrs) error {
 				if errors.As(err, &cc) {
 					continue // a live write got there first
 				}
-				return err
+				return wrote, err
 			}
+			wrote++
 		}
 	}
-	return nil
+	return wrote, nil
 }
 
 // existingCopies reports which of the jobs already have an open-job copy.

@@ -26,11 +26,14 @@ or `X-Gitea-Signature` (the receiver accepts all three); the git basic-auth user
 
 ## mockgen
 
-`mockgen/README.md` is go.uber.org/mock's README (fetched 2026-11-23), the only grammar source for the
+`mockgen/README.md` is go.uber.org/mock's README (fetched 2026-11-23), the grammar source for the
 `directives: extended` mockgen rewrite: package and archive mode take `<import path> <symbols>`, `-imports` takes
-`foo=bar/baz` elements. **Assumed, unverified**: behaviour of flags the README does not list (`-exec_only`,
-`-prog_only` exist in the tool's source), `github.com/golang/mock`'s older mockgen (same grammar here, not read),
-and what mockgen does with a `-source` file and positionals together (the rewrite leaves that line alone).
+`foo=bar/baz` elements, `-self_package` is the generated package's import path. `golang-mock/README.md` is
+github.com/golang/mock v1.6.0's README, which lists `-self_package`, `-exec_only`, `-prog_only` and the rest of
+the older flag set the rewrite now reads. `stringer/flags.txt` is the flag set of `golang.org/x/tools/cmd/stringer`
+v0.20.0: none takes an import path, so there is nothing to rewrite. **Assumed, unverified**: behaviour of flags
+neither README lists, and what mockgen does with a `-source` file and positionals together (the rewrite leaves that
+line alone).
 
 ## DynamoDB
 

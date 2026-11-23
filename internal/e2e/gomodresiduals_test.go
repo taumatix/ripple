@@ -27,10 +27,12 @@ const (
 		"//go:generate go tool gen\n"
 	residualMock = "package main\n\n" +
 		"//go:generate mockgen -destination=mock_lib.go example.com/lib Getter\n" +
-		"//go:generate go run go.uber.org/mock/mockgen -source=lib.go -imports=l=example.com/lib,o=other/pkg\n"
+		"//go:generate go run go.uber.org/mock/mockgen -source=lib.go -imports=l=example.com/lib,o=other/pkg\n" +
+		"//go:generate go run github.com/golang/mock/mockgen -prog_only -self_package=example.com/lib example.com/lib Getter\n"
 	residualMockWant = "package main\n\n" +
 		"//go:generate mockgen -destination=mock_lib.go example.com/lib/v2 Getter\n" +
-		"//go:generate go run go.uber.org/mock/mockgen -source=lib.go -imports=l=example.com/lib/v2,o=other/pkg\n"
+		"//go:generate go run go.uber.org/mock/mockgen -source=lib.go -imports=l=example.com/lib/v2,o=other/pkg\n" +
+		"//go:generate go run github.com/golang/mock/mockgen -prog_only -self_package=example.com/lib/v2 example.com/lib/v2 Getter\n"
 	residualBroken     = "//go:build ignore\n\npackage main\n\n//go:generate go run example.com/lib/cmd/gen@v1.0.0\nfunc ( {\n"
 	residualBrokenWant = "//go:build ignore\n\npackage main\n\n//go:generate go run example.com/lib/v2/cmd/gen@v2.0.0\nfunc ( {\n"
 )

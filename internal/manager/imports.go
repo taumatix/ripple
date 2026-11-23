@@ -517,16 +517,22 @@ var mockgenValueFlags = map[string]bool{
 	"archive": true, "source": true, "destination": true, "package": true, "imports": true,
 	"aux_files": true, "build_flags": true, "mock_names": true, "self_package": true,
 	"copyright_file": true, "exclude_interfaces": true,
+	// github.com/golang/mock's own: -exec_only (README, reflect mode).
+	"exec_only": true,
 }
 var mockgenBoolFlags = map[string]bool{
 	"debug_parser": true, "write_package_comment": true, "write_generate_directive": true,
 	"write_source_comment": true, "typed": true,
+	// github.com/golang/mock's own: -prog_only, -version (README, mockgen.go).
+	"prog_only": true, "version": true,
 }
 
 // mockgenArgs is what mockgen's command line holds for an import path.
 type mockgenArgs struct {
 	imports     []int // index of the word whose value is -imports, and where in it: see importsValue
 	importsAt   []int // offset of the value inside that word
+	selfPkg     []int // the word whose value is -self_package, an import path
+	selfPkgAt   []int // offset of the value inside that word
 	positionals []int // words from the first non-flag argument on
 	hasSource   bool  // -source given: source mode takes no import path
 	ok          bool  // the line was read to the end with documented flags only
@@ -568,6 +574,10 @@ func readMockgen(ws []word) (a mockgenArgs) {
 			switch name {
 			case "source":
 				a.hasSource = true
+			case "self_package":
+				if ws[vi].plain {
+					a.selfPkg, a.selfPkgAt = append(a.selfPkg, vi), append(a.selfPkgAt, off)
+				}
 			case "imports":
 				if ws[vi].plain {
 					a.imports, a.importsAt = append(a.imports, vi), append(a.importsAt, off)
@@ -583,7 +593,8 @@ func readMockgen(ws []word) (a mockgenArgs) {
 
 // mockgenEdits are the edits for the import paths on a mockgen command line: the
 // package of package and archive mode (the first of exactly two non-flag arguments,
-// the second being the symbols) and the package of each foo=bar/baz element of -imports.
+// the second being the symbols), the import path of -self_package and the package of each
+// foo=bar/baz element of -imports.
 // It also returns the words it rewrote, which the caller does not report as left alone.
 func mockgenEdits(ws []word, rewrite func(string) (string, bool)) (edits []edit, handled []int) {
 	a := readMockgen(ws)
@@ -595,6 +606,13 @@ func mockgenEdits(ws []word, rewrite func(string) (string, bool)) (edits []edit,
 		if nv, ok := rewrite(w.text); ok {
 			edits = append(edits, edit{w.start, w.end, nv})
 			handled = append(handled, a.positionals[0])
+		}
+	}
+	for k, vi := range a.selfPkg {
+		w, off := ws[vi], a.selfPkgAt[k]
+		if nv, ok := rewrite(w.text[off:]); ok {
+			edits = append(edits, edit{w.start + off, w.end, nv})
+			handled = append(handled, vi)
 		}
 	}
 	for k, vi := range a.imports {

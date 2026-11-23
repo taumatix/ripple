@@ -80,7 +80,7 @@ type Workspace interface {
 	// or (only with WithWorkspaceMode) `go work sync` in dir
 	// (relative to the repo root) and returns its combined output, trimmed to the
 	// tail. Nothing else is allowed: the checkout is untrusted, so the environment is
-	// stripped, cgo and toolchain downloads are off, and modules come only from the
+	// stripped, cgo (unless `cgo: true`) and toolchain downloads are off, and modules come only from the
 	// configured proxy. ErrNoToolchain when go is not installed.
 	RunGo(ctx context.Context, dir string, args ...string) (string, error)
 	// Reset discards local changes and returns to the default branch so the next

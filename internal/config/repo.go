@@ -108,6 +108,13 @@ type Update struct {
 	// line alone, "toolchain" moves the toolchain line to the newest patch of its Go
 	// release, "directive" also moves the go directive once its release is out of support.
 	GoToolchain string `yaml:"go-toolchain"`
+	// CGO is gomod only: verification compiles cgo files (CGO_ENABLED=1), which needs a C
+	// compiler where ripple runs go. The default, false, builds with cgo off.
+	CGO bool `yaml:"cgo"`
+	// PrivateModules is gomod only: module path patterns (GONOSUMDB syntax) that the
+	// server's module proxy serves and the public checksum database does not know. Only a
+	// repo that lists them is given the server's proxy credential.
+	PrivateModules []string `yaml:"private-modules"`
 	// regex ecosystem only
 	Files    []string `yaml:"files"`
 	Patterns []string `yaml:"patterns"`
@@ -255,7 +262,7 @@ func (c *checker) add(n *yaml.Node, format string, a ...any) {
 
 var (
 	rootKeys     = []string{"version", "open-pull-requests-limit", "close-superseded-pull-requests", "backfill-new-dependencies", "updates"}
-	updateKeys   = []string{"ecosystem", "directory", "schedule", "cooldown", "ignore", "groups", "automerge", "go-toolchain", "files", "patterns", "package"}
+	updateKeys   = []string{"ecosystem", "directory", "schedule", "cooldown", "ignore", "groups", "automerge", "go-toolchain", "cgo", "private-modules", "files", "patterns", "package"}
 	scheduleKeys = []string{"days", "from", "to", "timezone"}
 	ignoreKeys   = []string{"dependency", "update-types"}
 	groupKeys    = []string{"patterns", "update-types"}
@@ -417,12 +424,18 @@ func (c *checker) update(n *yaml.Node, u *Update, where string) {
 		default:
 			c.add(f["go-toolchain"], "%s.go-toolchain must be toolchain or directive (omit it to leave the go directive and toolchain line alone)", where)
 		}
+		c.privateModules(f["private-modules"], u.PrivateModules, where)
 		if d := f["directory"]; d != nil {
 			if !strings.HasPrefix(u.Directory, "/") || strings.Contains(u.Directory, "..") || path.Clean(u.Directory) != strings.TrimRight(u.Directory, "/") && u.Directory != "/" {
 				c.add(d, "%s.directory must be an absolute path inside the repo such as / or /services/api", where)
 			}
 		}
 	case "regex":
+		for _, k := range []string{"cgo", "private-modules"} {
+			if v := f[k]; v != nil {
+				c.add(v, "%s.%s is only valid with ecosystem: gomod", where, k)
+			}
+		}
 		if v := f["go-toolchain"]; v != nil {
 			c.add(v, "%s.go-toolchain is only valid with ecosystem: gomod", where)
 		}
@@ -599,4 +612,46 @@ func Resolve(read func(name string) ([]byte, error)) (Source, error) {
 		return Source{}, nil
 	}
 	return Source{}, err
+}
+
+// MaxPrivateModules caps the patterns one update entry may list.
+const MaxPrivateModules = 20
+
+// modulePattern is the characters a GONOSUMDB glob may use (path.Match syntax).
+var modulePattern = regexp.MustCompile(`^[A-Za-z0-9._~/*?\[\]-]+$`)
+
+// privateModules checks the patterns handed to GONOSUMDB. A pattern must name a host:
+// "*" or "*.*" would switch checksum verification off for every module the repo uses.
+func (c *checker) privateModules(n *yaml.Node, pats []string, where string) {
+	if n == nil {
+		return
+	}
+	if n.Kind != yaml.SequenceNode {
+		c.add(n, "%s.private-modules must be a list of module path patterns", where)
+		return
+	}
+	if len(pats) > MaxPrivateModules {
+		c.add(n, "%s.private-modules lists %d patterns; the most allowed is %d", where, len(pats), MaxPrivateModules)
+		return
+	}
+	for _, p := range pats {
+		first, _, _ := strings.Cut(p, "/")
+		switch {
+		case len(p) > 200 || !modulePattern.MatchString(p) || strings.HasPrefix(p, "/") || strings.Contains(p, ".."):
+			c.add(n, "%s.private-modules: %q is not a module path pattern (letters, digits and . _ ~ / - with * ? [ ] globs)", where, p)
+		case literalLabels(first) < 2:
+			c.add(n, "%s.private-modules: %q must name a host such as example.com/team/* or *.corp.example.com, not a bare wildcard", where, p)
+		}
+	}
+}
+
+// literalLabels counts the dot-separated labels of a host pattern that hold a literal character.
+func literalLabels(host string) int {
+	n := 0
+	for _, l := range strings.Split(host, ".") {
+		if strings.Trim(l, "*?") != "" {
+			n++
+		}
+	}
+	return n
 }

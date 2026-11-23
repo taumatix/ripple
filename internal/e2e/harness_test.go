@@ -112,6 +112,8 @@ type opts struct {
 	goDL *testutil.GoDL
 	// tweak edits each App newApp builds, a restart included, before it runs.
 	tweak func(a *app.App)
+	// engine adjusts the engine before it runs (server-side go settings).
+	engine func(e *engine.Engine)
 }
 
 func newEnv(t *testing.T, st store.Store, lim rules.Limits) *env {
@@ -127,6 +129,9 @@ func newEnvOpts(t *testing.T, st store.Store, lim rules.Limits, o opts) *env {
 		Log: slog.New(slog.NewTextHandler(testWriter{t}, nil))}
 	e.plat = &testutil.CountingPlatform{Inner: gh}
 	eng := &engine.Engine{Store: st, Platform: e.plat, Limits: lim, Now: e.clock.Now, Workers: 2, Log: slog.New(slog.NewTextHandler(io.MultiWriter(testWriter{t}, e.logs), nil))}
+	if o.engine != nil {
+		o.engine(eng)
+	}
 	e.newApp = func() *app.App {
 		a := &app.App{Engine: eng, Secret: []byte(secret), Log: slog.New(slog.NewTextHandler(testWriter{t}, nil)),
 			PollEvery: o.pollEvery, Queue: &app.Queue{},

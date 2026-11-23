@@ -40,7 +40,11 @@ type Server struct {
 	OSVInterval time.Duration
 	OSVMaxFetch int
 	GoProxy     string
-	Sandbox     string // none, auto, bwrap, seatbelt, container, docker, podman
+	// GoProxyUser and GoProxyToken are the credential for GoProxy (HTTP basic auth). They
+	// reach only the go commands that run no repository code. GoCC is the C compiler cgo
+	// verification uses; empty is cc.
+	GoProxyUser, GoProxyToken, GoCC string
+	Sandbox                         string // none, auto, bwrap, seatbelt, container, docker, podman
 	// Container* configure the container, docker and podman sandboxes (docs/sandbox.md).
 	ContainerImage, ContainerCPUs, ContainerMemory, ContainerPull, ContainerNetwork string
 	Store                                                                           string // memory, postgres, dynamodb
@@ -89,6 +93,9 @@ RIPPLE_OSV_DUMP_URL           OSV bucket, default https://storage.googleapis.com
 RIPPLE_OSV_INTERVAL           default 10m
 RIPPLE_OSV_MAX_FETCH          advisory records fetched per poll (default 100)
 RIPPLE_GOPROXY                module proxy used to verify major bumps (default https://proxy.golang.org)
+RIPPLE_GOPROXY_USER           user for RIPPLE_GOPROXY (HTTP basic auth); with RIPPLE_GOPROXY_TOKEN, sent only to repos listing private-modules
+RIPPLE_GOPROXY_TOKEN          password or token for RIPPLE_GOPROXY; needs an https proxy
+RIPPLE_GO_CC                  C compiler for repos with cgo: true (default: go's own, gcc or clang)
 RIPPLE_STORE                  memory (default), postgres or dynamodb
 RIPPLE_POSTGRES_DSN           required for postgres
 RIPPLE_DYNAMODB_TABLE         default ripple (dynamodb)
@@ -175,6 +182,9 @@ func LoadServer(getenv func(string) string) (*Server, error) {
 		OSVInterval:           dur("RIPPLE_OSV_INTERVAL", "10m"),
 		OSVMaxFetch:           num("RIPPLE_OSV_MAX_FETCH", 100, 1),
 		GoProxy:               strings.TrimRight(str("RIPPLE_GOPROXY", "https://proxy.golang.org"), "/"),
+		GoProxyUser:           getenv("RIPPLE_GOPROXY_USER"),
+		GoProxyToken:          getenv("RIPPLE_GOPROXY_TOKEN"),
+		GoCC:                  getenv("RIPPLE_GO_CC"),
 		Sandbox:               str("RIPPLE_SANDBOX", "none"),
 		ContainerImage:        getenv("RIPPLE_CONTAINER_IMAGE"),
 		ContainerCPUs:         getenv("RIPPLE_CONTAINER_CPUS"),
@@ -236,6 +246,9 @@ func LoadServer(getenv func(string) string) (*Server, error) {
 		if err := checkURL(k, v); err != nil {
 			errs = append(errs, err)
 		}
+	}
+	if u, err := url.Parse(s.GoProxy); s.GoProxyToken != "" && err == nil && u.Scheme != "https" {
+		errs = append(errs, errors.New("RIPPLE_GOPROXY_TOKEN: the go command sends a credential only over https, so RIPPLE_GOPROXY must be an https URL"))
 	}
 	switch s.Store {
 	case "memory", "dynamodb":

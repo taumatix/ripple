@@ -116,6 +116,8 @@ type runner struct {
 	// ambiguous holds "file:line" of references to the old path in //go:generate lines
 	// that were left alone; the PR body lists them.
 	ambiguous []string
+	// notes are lines the PR body gets after verification, e.g. what verification did not cover.
+	notes []string
 }
 
 func (r *runner) finish(j model.Job, state model.JobState, reason, pr string) {
@@ -406,6 +408,11 @@ func (r *runner) openPR(p *prPlan) (*platform.PR, error) {
 		switch {
 		case errors.Is(err, platform.ErrNoToolchain) && major:
 			failure, err = "ripple could not verify this update: the go toolchain is not installed on the server.", nil
+		case errors.Is(err, platform.ErrNoCompiler) && major:
+			failure, err = "ripple could not verify this update: this module needs cgo (`cgo: true`) and no C compiler is available on the server.", nil
+		case errors.Is(err, platform.ErrNoCompiler):
+			body += "\n_ripple could not verify this update: this module needs cgo (`cgo: true`) and no C compiler is available on the server. go.sum was refreshed; the code was not built._\n"
+			failure, err = "", nil
 		case errors.Is(err, platform.ErrNoToolchain):
 			body += "\n_ripple could not refresh go.sum or verify this update: the go toolchain is not installed on the server._\n"
 			failure, err = "", nil
@@ -415,6 +422,11 @@ func (r *runner) openPR(p *prPlan) (*platform.PR, error) {
 		}
 		draft = failure != ""
 		p.draft = draft
+		if !draft {
+			for _, n := range r.notes {
+				body += "\n" + n + "\n"
+			}
+		}
 		if draft {
 			what := "The go.mod change was applied but the module does not build"
 			if major {

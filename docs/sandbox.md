@@ -85,3 +85,25 @@ Bwrap is covered only by argv unit tests; it has never run.
 
 macOS notes: `/usr/bin/git` is an `xcrun` shim that writes a cache outside the workspace, so ripple runs the
 Command Line Tools' own `git` under the sandbox. Temporary files go to the workspace (`TMPDIR`).
+
+## cgo and private modules
+
+Both are opt-in; with neither set nothing above changes.
+
+- **cgo.** `cgo: true` on a `gomod` entry sets `CGO_ENABLED=1` for `go build` and `go vet` (the compiler is
+  `RIPPLE_GO_CC`, else `cc`). The host's compiler is looked up first; when it is missing the step returns
+  `ErrNoCompiler`, which the engine treats like a missing toolchain: a draft for a major bump, a "could not
+  verify" line in the PR body otherwise. Under a container backend the image must carry the compiler (the host
+  cannot know), so a missing one is an ordinary build failure there. A compiler runs code from the checkout, so
+  these steps are confined by the same backend as everything else, and carry no credential. Without `cgo: true`,
+  a module containing `import "C"` gets a line in the PR saying its C was not compiled.
+- **Private modules.** `private-modules:` becomes `GONOSUMDB` (the checksum database is neither asked about
+  nor told these names). `GONOPROXY` is deliberately not set: `GOPRIVATE` would imply a direct VCS fetch, which
+  `GOVCS=*:off` forbids, so private modules must be served by `RIPPLE_GOPROXY` (an Athens, Artifactory or similar).
+- **Credentials.** `RIPPLE_GOPROXY_USER` and `RIPPLE_GOPROXY_TOKEN` go only to `mod tidy`, `mod vendor` and
+  `work sync`, which execute no repository code. With no sandbox or a seatbelt/bwrap one, the gate holds them and
+  adds basic auth to each upstream request, so go's environment has no secret and the gate refuses plain http to
+  a non-loopback host. With a container backend, go needs them itself: they go in `GOPROXY` userinfo through the
+  client's environment (`-e GOPROXY`, never argv), and ripple refuses a non-https proxy because go would. Output
+  is scrubbed of the token and its base64 forms. `build` and `vet` make unauthenticated requests, so a proxy that
+  answers 401 to `.info` is tolerated by go but one that makes it fatal would fail verification.

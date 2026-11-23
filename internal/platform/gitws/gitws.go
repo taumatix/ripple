@@ -158,6 +158,12 @@ type workspace struct {
 
 func (w *workspace) DefaultBranch() string { return w.branch }
 
+func (w *workspace) addSecrets(s ...string) {
+	w.mu.Lock()
+	w.secrets = append(w.secrets, s...)
+	w.mu.Unlock()
+}
+
 func (w *workspace) redact(s string) string {
 	w.mu.Lock()
 	secrets := append([]string(nil), w.secrets...)
@@ -370,6 +376,12 @@ func (w *workspace) RunGo(ctx context.Context, dir string, args ...string) (stri
 	if err != nil {
 		return "", platform.ErrNoToolchain
 	}
+	gv := platform.GoVerifyFrom(ctx)
+	var cgoReadOnly string
+	// Only a step that executes no repository code may carry the proxy credential;
+	// build and vet run the repository's own cgo and generated code.
+	netStep := args[0] == "mod" || args[0] == "work"
+	credentialed := gv.Credentialed && gv.Token != "" && netStep
 	proxy := w.o.GoProxy
 	if proxy == "" {
 		proxy = "https://proxy.golang.org"
@@ -398,11 +410,57 @@ func (w *workspace) RunGo(ctx context.Context, dir string, args ...string) (stri
 	if inWork {
 		env = slices.DeleteFunc(env, func(kv string) bool { return kv == "GOWORK=off" })
 	}
+	if len(gv.Private) > 0 {
+		// The checksum database is never asked about these paths (it would leak their
+		// names and cannot know them). GONOPROXY stays unset: GOPRIVATE would imply a
+		// direct VCS fetch, which GOVCS=*:off forbids; the proxy serves them instead.
+		env = append(env, "GONOSUMDB="+strings.Join(gv.Private, ","))
+	}
+	if gv.CGO && !netStep {
+		// A container brings its own compiler (the image decides; a missing one is a
+		// real build failure there). Otherwise the host's must exist, or we say so.
+		if no, ok := w.o.Sandbox.(sandbox.NetworkOwner); !ok || !no.OwnsNetwork() {
+			cc := gv.CC
+			if cc == "" {
+				cc = "cc"
+			}
+			if fields := strings.Fields(cc); len(fields) == 0 {
+				return "", platform.ErrNoCompiler
+			} else if _, err := exec.LookPath(fields[0]); err != nil {
+				return "", platform.ErrNoCompiler
+			}
+		}
+		env = slices.DeleteFunc(env, func(kv string) bool { return kv == "CGO_ENABLED=0" })
+		env = append(env, "CGO_ENABLED=1")
+		if gv.CC != "" {
+			env = append(env, "CC="+gv.CC)
+		}
+		if dev := developerBin(); dev != "" {
+			// /usr/bin/cc and dsymutil are shims that ask xcrun, which writes a cache
+			// outside the workspace and so fails under the sandbox; the toolchain's own
+			// binaries do not (as for git, see gitBinary).
+			for i, kv := range env {
+				if strings.HasPrefix(kv, "PATH=") {
+					env[i] = "PATH=" + dev + string(os.PathListSeparator) + strings.TrimPrefix(kv, "PATH=")
+				}
+			}
+			if gv.CC == "" {
+				env = append(env, "CC="+filepath.Join(dev, "clang"))
+			}
+			cgoReadOnly = filepath.Dir(filepath.Dir(dev))
+			if sdk := filepath.Join(cgoReadOnly, "SDKs", "MacOSX.sdk"); isDir(sdk) {
+				env = append(env, "SDKROOT="+sdk) // the shim would have passed -isysroot
+			}
+		}
+	}
 	ctx, cancel := context.WithTimeout(ctx, goTimeout)
 	defer cancel()
 	pol := sandbox.Policy{Workdir: abs, Writable: w.dirOutside(abs), Env: env}
 	if cache != "" && !strings.HasPrefix(cache, w.dir+string(filepath.Separator)) {
 		pol.Writable = append(pol.Writable, cache)
+	}
+	if cgoReadOnly != "" {
+		pol.ReadOnly = append(pol.ReadOnly, cgoReadOnly)
 	}
 	if real, err := filepath.EvalSymlinks(gobin); err == nil {
 		pol.ReadOnly = append(pol.ReadOnly, filepath.Dir(filepath.Dir(real)))
@@ -410,8 +468,34 @@ func (w *workspace) RunGo(ctx context.Context, dir string, args ...string) (stri
 	if no, ok := w.o.Sandbox.(sandbox.NetworkOwner); ok && no.OwnsNetwork() {
 		// A container cannot reach a loopback gate: the backend decides the network.
 		pol.Proxy = proxy
-	} else if w.sandboxed() {
-		gate, err := sandbox.NewGate(proxy)
+		if credentialed {
+			// The container has to authenticate itself, so the credential is go's own
+			// GOPROXY userinfo; it reaches the container through the client's
+			// environment (-e GOPROXY), never argv. go refuses it over plain http.
+			u, err := url.Parse(proxy)
+			if err != nil || u.Scheme != "https" {
+				return "", fmt.Errorf("go %s: refusing to send the proxy credential over a non-https proxy", strings.Join(args, " "))
+			}
+			u.User = url.UserPassword(gv.Username, gv.Token)
+			w.addSecrets(gv.Token, u.User.String(), url.QueryEscape(gv.Token), base64.StdEncoding.EncodeToString([]byte(gv.Username+":"+gv.Token)))
+			for i, e := range env {
+				if strings.HasPrefix(e, "GOPROXY=") {
+					env[i] = "GOPROXY=" + u.String()
+				}
+			}
+			w.addSecrets(u.String())
+		}
+	} else if w.sandboxed() || credentialed {
+		// The gate holds the credential and adds it to each upstream request, so the
+		// go command (and any code it could run) never has it.
+		var gate *sandbox.Gate
+		var err error
+		if credentialed {
+			w.addSecrets(gv.Token, base64.StdEncoding.EncodeToString([]byte(gv.Username+":"+gv.Token)))
+			gate, err = sandbox.NewGateAuth(proxy, gv.Username, gv.Token)
+		} else {
+			gate, err = sandbox.NewGate(proxy)
+		}
 		if err != nil {
 			return "", err
 		}
@@ -463,6 +547,27 @@ func gitBinary() string {
 		}
 	}
 	return "git"
+}
+
+// developerBin is the macOS developer toolchain's bin directory when it has a clang, else "".
+func developerBin() string {
+	if runtime.GOOS != "darwin" {
+		return ""
+	}
+	d := os.Getenv("DEVELOPER_DIR")
+	if d == "" {
+		d = "/Library/Developer/CommandLineTools"
+	}
+	bin := filepath.Join(d, "usr", "bin")
+	if isExecutable(filepath.Join(bin, "clang")) {
+		return bin
+	}
+	return ""
+}
+
+func isDir(p string) bool {
+	fi, err := os.Stat(p)
+	return err == nil && fi.IsDir()
 }
 
 func isExecutable(p string) bool {

@@ -27,6 +27,30 @@ type GoProxy struct {
 	srv *httptest.Server
 	mu  sync.Mutex
 	mod map[string]map[string]map[string]string // path -> version -> file -> content
+
+	user, pass string       // when set, every request must carry this basic auth
+	reqs       []GoProxyReq // every request, for tests that assert who authenticated
+}
+
+// GoProxyReq is one request the proxy saw.
+type GoProxyReq struct {
+	Path       string
+	Authorized bool // carried the required basic auth (true when none is required)
+	HasAuth    bool // carried any Authorization header
+}
+
+// RequireAuth makes the proxy answer 401 unless a request carries user:pass basic auth.
+func (p *GoProxy) RequireAuth(user, pass string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.user, p.pass = user, pass
+}
+
+// Requests returns a copy of every request seen so far.
+func (p *GoProxy) Requests() []GoProxyReq {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]GoProxyReq(nil), p.reqs...)
 }
 
 func NewGoProxy(t testing.TB) *GoProxy {
@@ -56,6 +80,16 @@ func (p *GoProxy) Publish(path, version string, files map[string]string) {
 }
 
 func (p *GoProxy) serve(w http.ResponseWriter, r *http.Request) {
+	u, pw, has := r.BasicAuth()
+	p.mu.Lock()
+	authorized := p.user == "" || (has && u == p.user && pw == p.pass)
+	p.reqs = append(p.reqs, GoProxyReq{Path: r.URL.Path, Authorized: authorized, HasAuth: r.Header.Get("Authorization") != ""})
+	p.mu.Unlock()
+	if !authorized {
+		w.Header().Set("WWW-Authenticate", `Basic realm="proxy"`)
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
 	escPath, rest, ok := strings.Cut(strings.TrimPrefix(r.URL.Path, "/"), "/@v/")
 	if !ok {
 		http.NotFound(w, r)

@@ -74,3 +74,43 @@ func TestGatePort(t *testing.T) {
 		t.Errorf("Port %d vs URL %s", g.Port(), g.URL)
 	}
 }
+
+func TestGateWithCredentialAuthenticatesUpstreamRequests(t *testing.T) {
+	var user, pass string
+	var ok bool
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user, pass, ok = r.BasicAuth()
+		io.WriteString(w, "ok")
+	}))
+	defer up.Close()
+	g, err := NewGateAuth(up.URL, "ripple", "s3cret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer g.Close()
+	if strings.Contains(g.URL, "s3cret") || strings.Contains(g.URL, "ripple@") {
+		t.Fatalf("the gate URL (what the sandboxed command sees) carries the credential: %s", g.URL)
+	}
+	// The command's own Authorization header must not override or leak the credential.
+	req, _ := http.NewRequest("GET", g.URL+"/m/@v/list", nil)
+	req.Header.Set("Authorization", "Basic attacker")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if !ok || user != "ripple" || pass != "s3cret" {
+		t.Errorf("upstream saw basic auth %v %q %q", ok, user, pass)
+	}
+}
+
+func TestGateWithCredentialRefusesPlainHTTPToARemoteHost(t *testing.T) {
+	if _, err := NewGateAuth("http://proxy.corp.example.com", "u", "t"); err == nil {
+		t.Error("a credential would travel over plain http to a remote host")
+	}
+	if g, err := NewGateAuth("https://proxy.corp.example.com", "u", "t"); err != nil {
+		t.Errorf("https: %v", err)
+	} else {
+		g.Close()
+	}
+}

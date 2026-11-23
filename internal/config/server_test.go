@@ -156,3 +156,23 @@ func TestServerOSV(t *testing.T) {
 		}
 	}
 }
+
+
+func TestServerGoVerifySettings(t *testing.T) {
+	s, err := LoadServer(env(base))
+	if err != nil || s.GoProxyUser != "" || s.GoProxyToken != "" || s.GoCC != "" {
+		t.Fatalf("defaults: %+v, %v", s, err)
+	}
+	s, err = LoadServer(env(with("RIPPLE_GOPROXY", "https://proxy.corp.example.com", "RIPPLE_GOPROXY_USER", "ripple", "RIPPLE_GOPROXY_TOKEN", "tok", "RIPPLE_GO_CC", "gcc")))
+	if err != nil || s.GoProxyUser != "ripple" || s.GoProxyToken != "tok" || s.GoCC != "gcc" {
+		t.Fatalf("%+v, %v", s, err)
+	}
+	// A credential is only ever sent to an https proxy (or a loopback one in tests): go
+	// itself refuses to pass credentials over plain http, so fail at start-up instead.
+	if _, err := LoadServer(env(with("RIPPLE_GOPROXY", "http://proxy.corp.example.com", "RIPPLE_GOPROXY_TOKEN", "tok"))); err == nil {
+		t.Error("a token with a plain-http proxy was accepted")
+	}
+	if _, err := LoadServer(env(with("RIPPLE_GOPROXY_TOKEN", "tok"))); err != nil {
+		t.Errorf("a token with the default https proxy: %v", err)
+	}
+}

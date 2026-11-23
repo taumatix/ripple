@@ -53,3 +53,7 @@ need it.
 - Superseding follows the Go modules' rules (`close-superseded-pull-requests`, on by default): a PR for a newer
   tag closes the open older ripple PR of the same action and the same tag shape, unless a person touched it.
   PRs of different shapes (`v5` and `v5.1.0`) are separate dependencies and never close each other.
+
+## The polled set
+
+The actions the watcher reads tags for are recorded by each scan. An action no repository uses any more is dropped from that set on the next poll, so its tags stop being read. A repo that starts using it again adds it back at its next scan.

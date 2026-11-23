@@ -130,8 +130,10 @@ Everything else:
     that is most often wanted at once, but merges ripple would not otherwise open out of hours. Options:
     bypass only the limit; bypass both for severity HIGH or CRITICAL; or per-repo opt-in. Not decided here.
 52. **OSV: finish the live run.** Four read-only requests on 2026-11-23 settled the querybatch version
-    format and the stdlib and toolchain names (UPSTREAM.md `verified-live`). Still open: a ripple run pointed
-    at real OSV end to end, pagination of a real querybatch, rate limits, CSV ordering, and the 404 delay.
+    format and the stdlib and toolchain names (UPSTREAM.md `verified-live`). Two more
+    requests (2026-11-23): stdlib and toolchain 1.21.0 gave disjoint id sets and no next_page_token. Still open: a
+    ripple run pointed at real OSV end to end, a querybatch result large enough to paginate, rate limits, CSV
+    ordering, and the 404 delay.
 53. **Backfill residuals.** A new dependency beyond `DefaultMaxBackfill` (10 per scan) is never backfilled, and
     only a release of the exact module path is found: a newer major path on the same line is not. Make the
     bound a server setting (`RIPPLE_MAX_BACKFILL`), carry the unserved remainder to the next scan instead of
@@ -227,18 +229,6 @@ Everything else:
     below the version go.mod selects. It is verified by a build and vet, but a kept requirement whose go.sum
     lines are missing opens a draft. Look at real PR diffs, then decide whether to flip the default
     (a behaviour change, so a minor release with a note) or document it as permanently opt-in.
-80. **OSV: sweep repos after a gap.** The history check covers only a version newly seen in a repo. An advisory
-    modified during an outage longer than the poll's 20000-line cap is still missed for repos whose `go.mod`
-    has not changed. Needs a repo lister on the Store (it has none), then re-check every repo's dependencies in
-    bounded batches.
-81. **OSV: conflicting toolchain PRs.** An advisory PR and a `go-toolchain: directive` PR can both edit the
-    same `go.mod` line. Make the directive job lift past a pending security toolchain bump, or the reverse.
-82. **OSV: open advisories go stale on corrected records.** A record corrected so the version is no longer
-    affected is dropped only when the repo's version changes or the record is withdrawn. Re-evaluate the stored entry
-    when the record is modified.
-83. **OSV: a pseudo-version dependency is never moved.** A repo on a pseudo-version of a module gets no
-    advisory PR. Decide whether to propose the module's first release above that commit.
-||||||| parent of 89b39d4 (Roadmap residuals for the partial scan and Go version files)
 89. **Partial scan on other hosts.** The scan without a checkout is verified against GitHub and the fake
     only. GitLab, Bitbucket, Gitea, Azure and the rest may not serve `filter=blob:none` or by-id blob
     fetches; they fall back to a full checkout, unmeasured. Check each and record which saves anything.
@@ -277,3 +267,15 @@ Everything else:
 103. **Replicas: metrics and one feed poller.** Expose a replica-count and lease-takeover metric (today only the
     `replica` start-up and `lease taken over` log lines exist) and elect one replica for the release-feed poll
     (two polling is safe, since job enqueue is insert-if-absent, but wasteful).
+104. **OSV: sweep DynamoDB repos and large repos.** The post-gap sweep needs `store.RepoLister`, which memory and
+    Postgres have; DynamoDB has no cheap listing (needs a repo index item) so it is not swept. The batch (10) is
+    not configurable, and a huge repo is still bound by `maxHistoryQueries` and `maxHistoryFetch`. Postgres
+    `ListRepos` is verified only in CI.
+105. **OSV: reconcile older and busy cases.** Corrections only reach jobs indexed under `osv-jobs` (made after this
+    release); a repo busy for over 2s keeps its stale job or PR until the next record change; a PR body is not
+    rewritten when a record is corrected; a record shared by twin GHSA and GO notes is reconciled per note.
+106. **OSV: conflict and pseudo-version residuals.** An already-open non-security toolchain PR is not closed when a
+    security one arrives (whoever merges second resolves it). A plain, non-advisory release move off a pseudo-
+    version is not implemented; rule to use: the first release above the pseudo-version and released after its
+    timestamp, opt-in. Decision recorded: `security-from-pseudo-versions` is opt-in and never automerged until real
+    PR diffs show otherwise.

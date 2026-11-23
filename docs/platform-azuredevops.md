@@ -27,7 +27,9 @@ repositories on every discovery pass and watches what appears. Create one servic
 for **Code pushed** (`git.push`) with the Web Hooks consumer: URL `https://<ripple>/webhook/azuredevops`,
 **basic authentication** with the user and password above. Service hooks have no HMAC signature, so serve ripple
 over HTTPS only, and use a password used nowhere else. The push payload lists commits but no changed files, so
-every push to a repository's default branch re-scans it (one clone and one pull request listing).
+ripple asks the commit changes API for each pushed commit on the default branch (up to 20 commits) and
+re-scans only when a changed file matters. If that lookup fails, is truncated, or the push is larger, the
+repository is re-scanned instead.
 
 ## Behaviour
 
@@ -40,6 +42,6 @@ every push to a repository's default branch re-scans it (one clone and one pull 
 ## Unverified
 
 Not confirmed against a real organisation: that a repository name is accepted where the docs name a repository id;
-that `autoCompleteSetBy.id` may be the pull request creator's id; the labels endpoint; the service hook's
+that `autoCompleteSetBy.id` may be the pull request creator's id; the labels endpoint; the commit changes lookup (merge commits, paging); the service hook's
 delivery headers; page-size behaviour; and the fake in `internal/testutil/azuredevops.go` itself, which is
 written from the docs, not recorded. Entra ID bearer tokens are not supported (ROADMAP).

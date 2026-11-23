@@ -1,6 +1,7 @@
 package azuredevops
 
 import (
+	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
@@ -28,7 +29,15 @@ type Receiver struct {
 	Org  string
 	Auth BasicAuth
 	Sink platform.Sink
-	Log  *slog.Logger
+	// Files resolves the files a push changed; nil, or an error, leaves Files empty
+	// and the engine re-scans the repository.
+	Files FileResolver
+	Log   *slog.Logger
+}
+
+// FileResolver looks up what commits changed in a repository (Client does).
+type FileResolver interface {
+	ChangedFiles(ctx context.Context, fullName string, commitIDs []string) ([]string, error)
 }
 
 func eq(a, b string) bool {
@@ -50,6 +59,9 @@ type pushPayload struct {
 	ID        string `json:"id"`
 	EventType string `json:"eventType"`
 	Resource  struct {
+		Commits []struct {
+			CommitID string `json:"commitId"`
+		} `json:"commits"`
 		RefUpdates []struct {
 			Name string `json:"name"`
 		} `json:"refUpdates"`
@@ -101,9 +113,23 @@ func (h *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasPrefix(u.Name, "refs/heads/") {
 			continue
 		}
-		// The payload lists no changed files (service-hooks-events.md, git.push), so
-		// Files stays empty and the engine re-scans the repository.
+		// The payload lists commits but no changed files (service-hooks-events.md,
+		// git.push). For the default branch, the only ref the engine acts on, ask the
+		// commits' changes; when that is unavailable Files stays empty and the engine
+		// re-scans the repository.
 		e := platform.Event{Kind: platform.Push, Repos: []string{full}, Ref: u.Name, DefaultBranch: def}
+		if h.Files != nil && def != "" && u.Name == "refs/heads/"+def {
+			var ids []string
+			for _, c := range p.Resource.Commits {
+				ids = append(ids, c.CommitID)
+			}
+			files, err := h.Files.ChangedFiles(r.Context(), full, ids)
+			if err != nil {
+				h.log().Warn("azure devops push files not resolved; the repository will be re-scanned", "repo", full, "err", err)
+			} else if len(files) > 0 {
+				e.Files = files
+			}
+		}
 		if p.ID != "" {
 			e.Delivery = p.ID + "#" + u.Name
 		}

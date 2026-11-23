@@ -220,3 +220,47 @@ func TestUnsafeRepoNamesAreRefusedBeforeAnyRequest(t *testing.T) {
 		t.Errorf("%d requests sent for unsafe names", n)
 	}
 }
+
+const sha1 = "1111111111111111111111111111111111111111"
+const sha2 = "2222222222222222222222222222222222222222"
+
+// rest-commits-get-changes.md: GET .../repositories/{repo}/commits/{commitId}/changes?api-version=7.1;
+// items carry a leading-slash path, folders are items with isFolder, a rename has originalPath.
+func TestChangedFilesWireFormat(t *testing.T) {
+	c, reqs := server(t, func(r *http.Request, w http.ResponseWriter) {
+		if strings.Contains(r.URL.Path, sha1) {
+			io.WriteString(w, `{"changeCounts":{"Add":1,"Edit":1},"changes":[{"item":{"path":"/go.mod"},"changeType":"edit"},{"item":{"path":"/src","isFolder":true},"changeType":"edit"},{"item":{"path":"/src/a.go"},"changeType":"add"}]}`)
+			return
+		}
+		io.WriteString(w, `{"changeCounts":{"Rename":1},"changes":[{"item":{"path":"/new.txt"},"originalPath":"/old.txt","changeType":"rename"},{"item":{"path":"/go.mod"},"changeType":"edit"}]}`)
+	})
+	got, err := c.ChangedFiles(context.Background(), "fabrikam/Fiber/web", []string{sha1, sha2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "go.mod,src/a.go,new.txt,old.txt"; strings.Join(got, ",") != want {
+		t.Errorf("files = %v, want %s", got, want)
+	}
+	r := reqs()
+	if len(r) != 2 || r[0].Method != "GET" || r[0].Auth != patAuth ||
+		r[0].URI != "/fabrikam/Fiber/_apis/git/repositories/web/commits/"+sha1+"/changes?api-version=7.1" {
+		t.Errorf("requests = %+v", r)
+	}
+}
+
+// A truncated answer, an unknown commit or a huge push must not yield a partial file list.
+func TestChangedFilesRefusesIncompleteAnswers(t *testing.T) {
+	c, _ := server(t, reply(200, `{"changeCounts":{"Edit":2},"changes":[{"item":{"path":"/a"},"changeType":"edit"}]}`))
+	if _, err := c.ChangedFiles(context.Background(), "fabrikam/Fiber/web", []string{sha1}); err == nil {
+		t.Error("truncated changes accepted")
+	}
+	if _, err := c.ChangedFiles(context.Background(), "fabrikam/Fiber/web", nil); err == nil {
+		t.Error("no commits accepted")
+	}
+	if _, err := c.ChangedFiles(context.Background(), "fabrikam/Fiber/web", make([]string, maxPushCommits+1)); err == nil {
+		t.Error("oversized push accepted")
+	}
+	if _, err := c.ChangedFiles(context.Background(), "fabrikam/Fiber/web", []string{"../x"}); err == nil {
+		t.Error("bad commit id accepted")
+	}
+}

@@ -72,8 +72,8 @@ auth model, rate limits); the notes below are what I expect, **unverified** unti
     bearer tokens, which need a `gitws` scheme for sending `Authorization: Bearer` to git as `http.extraHeader`;
     names with spaces (projects and repos often have them: escape path segments in REST and clone URLs); register
     a repo on `git.repo.created` and forget it on `git.repo.deleted` / `git.repo.renamed` instead of waiting for
-    the next listing; re-scan on a changed `.ripple.yaml` without a full re-scan once a push lists files (it
-    does not today, so every push to a default branch costs a scan).
+    the next listing; the commit-changes lookup (merge commits, paging past
+    one page of changes) is unverified against a real organisation.
 15. **Bitbucket Server / Data Center.** A different REST API from Bitbucket Cloud; webhooks per
     repo or project; HTTP access tokens.
 16. **AWS CodeCommit.** No webhooks: repository events arrive through EventBridge or SNS, so this needs an

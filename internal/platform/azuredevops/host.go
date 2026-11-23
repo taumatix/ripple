@@ -18,7 +18,7 @@ func NewHost(c *Client, auth BasicAuth, log *slog.Logger) *platform.Host {
 		Name:     HostName,
 		Platform: c,
 		Receiver: func(sink platform.Sink) http.Handler {
-			return &Receiver{Org: c.Org, Auth: auth, Sink: sink, Log: log}
+			return &Receiver{Org: c.Org, Auth: auth, Sink: sink, Files: c, Log: log}
 		},
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -125,8 +126,8 @@ func (a *AzureDevOps) AddRepo(path string, files map[string]string) {
 	a.Commit(path, files)
 }
 
-// Commit adds a commit on main (a human pushing to the default branch).
-func (a *AzureDevOps) Commit(path string, files map[string]string) {
+// Commit adds a commit on main (a human pushing to the default branch) and returns its id.
+func (a *AzureDevOps) Commit(path string, files map[string]string) string {
 	a.t.Helper()
 	work := a.t.TempDir()
 	git(a.t, work, "clone", "-q", a.bare(path), "w")
@@ -144,6 +145,7 @@ func (a *AzureDevOps) Commit(path string, files map[string]string) {
 	git(a.t, w, "add", "-A")
 	git(a.t, w, "commit", "-q", "-m", "test commit")
 	git(a.t, w, "push", "-q", "origin", "main")
+	return strings.TrimSpace(git(a.t, w, "rev-parse", "HEAD"))
 }
 
 // FileAt is the content of file on branch, ok=false when absent.
@@ -302,6 +304,10 @@ func (a *AzureDevOps) serveGit(w http.ResponseWriter, r *http.Request, project s
 		a.fail(w, http.StatusTooManyRequests, "TF400733: The request has been canceled: Request was blocked due to exceeding usage of resource Git in namespace 1.")
 		return
 	}
+	if len(rest) == 4 && rest[1] == "commits" && rest[3] == "changes" && r.Method == http.MethodGet {
+		a.commitChanges(w, path, rest[2])
+		return
+	}
 	if len(rest) < 2 || strings.ToLower(rest[1]) != "pullrequests" {
 		a.fail(w, http.StatusNotFound, "unknown route %s", r.URL.Path)
 		return
@@ -440,4 +446,33 @@ func (a *AzureDevOps) labelPR(w http.ResponseWriter, r *http.Request, path, id s
 	}
 	p.Labels = append(p.Labels, in.Name)
 	writeJSON(w, http.StatusCreated, map[string]any{"id": "tag-" + in.Name, "name": in.Name, "active": true})
+}
+
+// commitChanges is "Commits - Get Changes" (rest-commits-get-changes.md): the files
+// the commit touched, as items with a leading-slash path.
+func (a *AzureDevOps) commitChanges(w http.ResponseWriter, path, sha string) {
+	if !regexp.MustCompile(`^[0-9a-f]{40}$`).MatchString(sha) {
+		a.fail(w, http.StatusNotFound, "TF401019: commit %q not found", sha)
+		return
+	}
+	cmd := exec.Command("git", "show", "--no-renames", "--name-status", "--format=", sha)
+	cmd.Dir = a.bare(path)
+	cmd.Env = gitEnv()
+	out, err := cmd.Output()
+	if err != nil {
+		a.fail(w, http.StatusNotFound, "TF401019: commit %s not found", sha)
+		return
+	}
+	var changes []map[string]any
+	counts := map[string]int{}
+	for _, l := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		st, file, ok := strings.Cut(l, "\t")
+		if !ok {
+			continue
+		}
+		kind := map[string]string{"A": "add", "M": "edit", "D": "delete"}[st]
+		counts[strings.ToUpper(kind[:1])+kind[1:]]++
+		changes = append(changes, map[string]any{"changeType": kind, "item": map[string]any{"gitObjectType": "blob", "path": "/" + file}})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"changeCounts": counts, "changes": changes})
 }

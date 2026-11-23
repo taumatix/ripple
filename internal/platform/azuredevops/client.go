@@ -384,3 +384,64 @@ func (c *Client) Checkout(ctx context.Context, repo model.Repo) (platform.Worksp
 		return c.Credentials.Credential(ctx, repo)
 	})
 }
+
+// maxPushCommits bounds the commits whose changes a push looks up; a larger push
+// is re-scanned instead.
+const maxPushCommits = 20
+
+// ChangedFiles is the union of the paths the commits touched, from "Commits - Get
+// Changes" (rest-commits-get-changes.md), without the leading slash and without
+// folders. A rename counts its old path too. It returns an error when the answer
+// may be incomplete (more commits than maxPushCommits, or fewer changes returned
+// than changeCounts reports), and the caller then lets the engine re-scan.
+func (c *Client) ChangedFiles(ctx context.Context, fullName string, commits []string) ([]string, error) {
+	org, project, name, err := split(fullName)
+	if err != nil {
+		return nil, err
+	}
+	if len(commits) == 0 || len(commits) > maxPushCommits {
+		return nil, fmt.Errorf("push has %d commits; changed files not resolved", len(commits))
+	}
+	repo := model.Repo{FullName: fullName}
+	seen := map[string]bool{}
+	var files []string
+	for _, id := range commits {
+		if !commitID.MatchString(id) {
+			return nil, fmt.Errorf("unsupported commit id %q", id)
+		}
+		var res struct {
+			ChangeCounts map[string]int `json:"changeCounts"`
+			Changes      []struct {
+				Item struct {
+					Path     string `json:"path"`
+					IsFolder bool   `json:"isFolder"`
+				} `json:"item"`
+				OriginalPath string `json:"originalPath"`
+			} `json:"changes"`
+		}
+		u := fmt.Sprintf("%s/%s/%s/_apis/git/repositories/%s/commits/%s/changes?api-version=%s", c.base(), org, project, name, id, APIVersion)
+		if err := c.do(ctx, repo, http.MethodGet, u, nil, &res); err != nil {
+			return nil, err
+		}
+		total := 0
+		for _, n := range res.ChangeCounts {
+			total += n
+		}
+		if total > len(res.Changes) {
+			return nil, fmt.Errorf("commit %s: %d of %d changes returned", id, len(res.Changes), total)
+		}
+		for _, ch := range res.Changes {
+			for _, p := range []string{ch.Item.Path, ch.OriginalPath} {
+				p = strings.TrimPrefix(p, "/")
+				if p == "" || ch.Item.IsFolder || seen[p] {
+					continue
+				}
+				seen[p] = true
+				files = append(files, p)
+			}
+		}
+	}
+	return files, nil
+}
+
+var commitID = regexp.MustCompile(`^[0-9a-f]{40,64}$`)

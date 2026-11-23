@@ -49,8 +49,8 @@ func (f *adoFixture) Register(*testing.T, string, ...string) {}
 
 func (f *adoFixture) Push(t *testing.T, hook, path string, files map[string]string) {
 	t.Helper()
-	f.az.Commit(path, files)
-	body, _ := json.Marshal(pushPayload(project, path[len(org)+len(project)+2:], "refs/heads/main", "refs/heads/main"))
+	sha := f.az.Commit(path, files)
+	body, _ := json.Marshal(pushPayload(project, path[len(org)+len(project)+2:], "refs/heads/main", "refs/heads/main", sha))
 	req, _ := http.NewRequest(http.MethodPost, hook, bytes.NewReader(body))
 	req.SetBasicAuth(hookUser, hookSecret)
 	req.Header.Set("Content-Type", "application/json; charset=utf-8")
@@ -80,10 +80,11 @@ func (f *adoFixture) RateLimitNextPR() bool { f.az.RateLimitOnce = true; return 
 
 // pushPayload is the git.push body of service-hooks-events.md ("git.push", sample
 // payload), trimmed to the fields the receiver reads.
-func pushPayload(project, repo, updated, defaultBranch string) map[string]any {
+func pushPayload(project, repo, updated, defaultBranch, sha string) map[string]any {
 	return map[string]any{
 		"id": "a0a0a0a0-bbbb-cccc-dddd-e1e1e1e1e1e1", "eventType": "git.push", "publisherId": "tfs",
 		"resource": map[string]any{
+			"commits":    []map[string]any{{"commitId": sha}},
 			"refUpdates": []map[string]any{{"name": updated, "oldObjectId": "d3d3", "newObjectId": "e4e4"}},
 			"repository": map[string]any{"id": "f5f5", "name": repo, "defaultBranch": defaultBranch,
 				"project": map[string]any{"id": "a6a6", "name": project}},
@@ -91,6 +92,7 @@ func pushPayload(project, repo, updated, defaultBranch string) map[string]any {
 	}
 }
 
-// PushHasNoFileList: git.push lists commits but no changed files
-// (service-hooks-events.md), so every push to the default branch re-scans.
-func (f *adoFixture) PushHasNoFileList() bool { return true }
+// FilelessPushes: git.push lists commits but no changed files
+// (service-hooks-events.md), so the receiver asks the commit changes API; see
+// platformtest.FilelessPushes.
+func (f *adoFixture) FilelessPushes() {}

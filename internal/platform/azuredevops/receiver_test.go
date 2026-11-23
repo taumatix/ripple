@@ -107,3 +107,39 @@ func TestSinkFailureAsksForRedelivery(t *testing.T) {
 		t.Errorf("status %d", w.Code)
 	}
 }
+
+type fakeFiles struct {
+	files []string
+	err   error
+	ids   []string
+}
+
+func (f *fakeFiles) ChangedFiles(_ context.Context, _ string, ids []string) ([]string, error) {
+	f.ids = ids
+	return f.files, f.err
+}
+
+// service-hooks-events.md git.push: resource.commits[].commitId names the pushed commits.
+const pushWithCommits = `{"id":"a0a0","eventType":"git.push","resource":{"commits":[{"commitId":"c1"},{"commitId":"c2"}],
+"refUpdates":[{"name":"refs/heads/main"},{"name":"refs/heads/topic"}],
+"repository":{"name":"r","defaultBranch":"refs/heads/main","project":{"name":"P"}}}}`
+
+func TestPushFilesAreResolvedForTheDefaultBranchOnly(t *testing.T) {
+	s, f := &sink{}, &fakeFiles{files: []string{"go.mod"}}
+	rc := newReceiver(s)
+	rc.Files = f
+	post(rc, "ripple", "s3cret", pushWithCommits)
+	if len(s.events) != 2 || strings.Join(s.events[0].Files, ",") != "go.mod" || len(s.events[1].Files) != 0 ||
+		strings.Join(f.ids, ",") != "c1,c2" {
+		t.Errorf("events = %+v ids=%v", s.events, f.ids)
+	}
+}
+
+func TestPushFilesFailureLeavesFilesEmptyForARescan(t *testing.T) {
+	s := &sink{}
+	rc := newReceiver(s)
+	rc.Files = &fakeFiles{err: context.DeadlineExceeded}
+	if w := post(rc, "ripple", "s3cret", pushWithCommits); w.Code != http.StatusAccepted || len(s.events) != 2 || len(s.events[0].Files) != 0 {
+		t.Errorf("code %d events %+v", w.Code, s.events)
+	}
+}

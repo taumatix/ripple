@@ -114,6 +114,17 @@ upstream:
     auth: "Basic user:token (x-token-auth for project and repository tokens)"
     unverified: "Retry-After on 429; merge response and merger for autoMerge; draft support by release; path.toString; Basic vs Bearer for project tokens; the fake is written from docs, not recorded"
     checked: 2026-11-23
+  - name: gerrit-rest-api
+    kind: http-api
+    reference: https://gerrit-review.googlesource.com/Documentation/
+    api-version: "documentation snapshot 2026-11-23, no version number published"
+    vendored: docs/vendor/gerrit
+    used: [GET /a/projects/ (type=CODE, state=ACTIVE, n, S, p), GET /a/changes/ (q=status:open project:X), GET /a/changes/{project}~{branch}~{Change-Id}, POST .../wip, POST .../revisions/current/review, POST .../hashtags, GET /a/projects/{p}/commits/{c}/files/, git push refs/for/<branch>%topic=<t>]
+    auth: "HTTP Basic with the account's HTTP password under /a/ (REST and git)"
+    webhooks: [webhooks plugin ref-updated, batch-ref-updated and project-created; no signature is documented, so ripple requires a secret in the hook URL query]
+    rate-limits: "429 with no documented Retry-After; one minute assumed"
+    unverified: "everything against a real Gerrit; webhook payload shape and URL token; clone URL /a/<project>; change URL /c/<project>/+/<n>; WIP and hashtag permissions; no-new-changes on identical re-push; merge-commit file lists; the fake is written from the docs, not recorded"
+    checked: 2026-11-23
 ```
 
 Not pinned, because they are not wire contracts: `git` (any version with `GIT_CONFIG_COUNT`,

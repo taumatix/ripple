@@ -85,9 +85,10 @@ auth model, rate limits); the notes below are what I expect, **unverified** unti
     (100 or 150), the EventBridge input shape through SNS, the cn and eusc endpoints. Residuals: one
     AWS account per ripple, labels and auto-merge do not exist on the service, the SNS certificate
     chain is not validated beyond the signature.
-17. **Gerrit.** Changes, not pull requests: push to `refs/for/<branch>`, one change per update with a
-    stable Change-Id so a re-push amends it, labels and submit rules instead of auto-merge. Events from the webhooks
-    plugin or `stream-events`; the project listing and ACLs are per instance.
+17. **Gerrit: verify against a real instance.** Built from the docs and a fake ([docs/platform-gerrit.md](docs/platform-gerrit.md)),
+    never run for real. Check the webhooks payload and URL token, 429 headers, clone and change URLs, WIP and hashtag
+    permissions, "no new changes" on identical re-push. Residuals: auto-merge through submit-on-label if the docs
+    ever support it, `stream-events` as an alternative to webhooks, learning default branches at discovery.
 18. **SCM-Manager against a real instance.** The host shipped from vendored docs, the plugins' source and a
     fake only (see [docs/platform-scmmanager.md](docs/platform-scmmanager.md)). Verify on a real SCM-Manager 3.x
     with the Review and Webhook plugins: `Authorization: Bearer <api key>` on the REST API, git basic auth with

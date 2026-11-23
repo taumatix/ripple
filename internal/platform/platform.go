@@ -77,7 +77,7 @@ type Workspace interface {
 	// (branches under the ripple/ prefix are ours). false means nothing changed.
 	CommitAndPush(ctx context.Context, branch, message string) (bool, error)
 	// RunGo runs one of `go mod tidy`, `go mod vendor`, `go build ./...`, `go vet ./...`
-	// or (only with WithWorkspaceMode) `go work sync` in dir
+	// or (only with WithWorkspaceMode) `go work sync` or `go work vendor` in dir
 	// (relative to the repo root) and returns its combined output, trimmed to the
 	// tail. Nothing else is allowed: the checkout is untrusted, so the environment is
 	// stripped, cgo (unless `cgo: true`) and toolchain downloads are off, and modules come only from the

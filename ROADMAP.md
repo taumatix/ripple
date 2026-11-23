@@ -88,15 +88,6 @@ Everything else:
 - **Listing state outside a single cursor.** `App.Discover` keeps a host's previous listing as one JSON
   store cursor, which DynamoDB caps at 400 KB (roughly 10k repo names). Store it per repo before a host
   with larger installations ships.
-19. **`go work vendor` and workspace-only module graphs.** A workspace-level `vendor/` is not refreshed,
-   and modules that reach each other only through `go.work` (no `replace`) fail the per-module
-   `go mod tidy`, which ignores the workspace, so those PRs open as drafts.
-20. **Tidy only what the update needs.** `go mod tidy` also drops requirements the repo never imports and
-   rewrites unrelated lines; consider limiting the PR to the dependency's own `go.sum` entries.
-22. **Directive residuals on a major bump.** `go:generate` lines are rewritten only for a plain
-   `go run <package>`; the rest is reported in the PR body, not changed. Handle `go run pkg@vX` (pick a
-   version of the new major), other generators that take import paths (`mockgen`, `stringer -type`), and
-   `go tool`; examine directives in files whose body does not parse.
 29. **More datasources and feeds, as many ecosystems as Renovate has.** npm replicate, PyPI, crates.io
    sparse index, Maven, NuGet, RubyGems, Packagist, Docker/OCI tags, GitHub releases/tags, Helm, Terraform
    registry. Where a registry has a changes feed, use it; where it has none (OCI registries), fall back to polling
@@ -230,3 +221,18 @@ Everything else:
 76. **Remove the `Ref` overload on `model.Event`.** `ref` still carries the new name or `refs/heads/<name>` for
     events queued before the typed fields; drop the fallback after a minor release and when no queue holds
     old rows (`ripple:deprecated event-ref-overload` in MIGRATION.md).
+77. **Generators that take an import path.** `directives: extended` rewrites `go run pkg[@version]` and
+    `go tool pkg`; `mockgen`, `stringer -type` and the like name the module in their own flag grammar
+    (`-source`, `-imports`, `reflect` mode packages) and stay reported in the PR body. Each needs its own
+    grammar, so add them one tool at a time, behind `directives: extended`, from the tool's documented flags.
+78. **Workspace-only graphs: what is still a draft.** A module that requires a go.work sibling without a
+    `replace` is now tidied with temporary local replaces and built in workspace mode, and `go work vendor`
+    refreshes a workspace `vendor/`. Not handled: `go work sync` is skipped for such a workspace (it fails on
+    them), a member's own `vendor/` is not refreshed (ripple says so in the PR body), and a requirement on a
+    sibling at a version no proxy serves cannot be built by Go itself, so those repos stay drafts. Verify
+    against a real multi-module repo, and consider a `replace`-free `go work vendor` for members.
+79. **`tidy: minimal`: make it the default, or say why not.** The option keeps every original go.mod
+    requirement and go.sum line and adds what `go mod tidy` added or raised; it prunes only go.sum lines
+    below the version go.mod selects. It is verified by a build and vet, but a kept requirement whose go.sum
+    lines are missing opens a draft. Look at real PR diffs, then decide whether to flip the default
+    (a behaviour change, so a minor release with a note) or document it as permanently opt-in.

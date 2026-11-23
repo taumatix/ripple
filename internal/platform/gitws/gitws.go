@@ -343,7 +343,7 @@ func (w *workspace) CommitAndPush(ctx context.Context, branch, message string) (
 	return true, nil
 }
 
-var goCommands = map[string]bool{"mod tidy": true, "mod vendor": true, "build ./...": true, "vet ./...": true, "work sync": true}
+var goCommands = map[string]bool{"mod tidy": true, "mod vendor": true, "build ./...": true, "vet ./...": true, "work sync": true, "work vendor": true}
 
 const goTimeout = 10 * time.Minute
 

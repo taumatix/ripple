@@ -60,6 +60,27 @@ paths are validated before they reach a URL, and the API id is the path URL-enco
   the job's log and the merge request stays open.
 - The legacy `.github/ripple.yml` alias is not read.
 
+## Superseded pull requests
+
+When a newer release replaces ripple's own merge request for an older version of the same module, ripple closes the
+older one (`state_event=close`) and leaves one note naming the new version, unless `close-superseded-pull-requests:
+false`. The branch is kept. Ripple closes only a merge request nobody else has touched, and never on doubt: if any
+read fails it is left open and the error is logged. Touched means any of:
+
+- the source branch is not in this project, or the merge request does not have exactly one commit, or that commit's
+  author or committer is not ripple's commit identity;
+- more than one diff version (a push after it opened, a force-push included);
+- an approval;
+- a note a person wrote, or a system note other than ripple's own auto-merge notes ("enabled an automatic merge",
+  "aborted the automatic merge"). GitLab reports a changed title and an edited description only as system notes, so
+  any other system note counts as a touch.
+
+Not detected: a changed label, assignee or reviewer (GitLab records those as resource events, which are not read), a
+branch rewritten and force-pushed without changing the diff version count, and a system note worded like ripple's
+own. The wording of system notes is from GitLab's source, not its API documentation, so a change there makes ripple
+close less, never more. All of this is verified only against the fake GitLab; the excerpts it relies on are in
+`docs/vendor/gitlab/supersede-excerpts.md`.
+
 ## What is unverified
 
 No GitLab instance was available when this was written. Everything below is from the vendored docs and is

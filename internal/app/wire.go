@@ -75,6 +75,7 @@ func New(ctx context.Context, s *config.Server, log *slog.Logger) (*App, store.S
 		Hosts: hosts, DefaultHost: github.HostName,
 		Queue: &Queue{Workers: s.EventWorkers, PerInstallation: s.EventWorkersPerInstallation,
 			Backlog: s.EventBacklog, InstallationBacklog: s.EventInstallationBacklog},
-		Watcher: &engine.Watcher{Engine: eng, Feed: &feed.GoIndex{BaseURL: s.FeedURL, UserAgent: "ripple (+https://github.com/taumatix/ripple)"}},
+		Toolchain: &engine.ToolchainWatcher{Engine: eng, Source: &feed.GoDL{BaseURL: s.GoReleasesURL, UserAgent: "ripple (+https://github.com/taumatix/ripple)"}},
+		Watcher:   &engine.Watcher{Engine: eng, Feed: &feed.GoIndex{BaseURL: s.FeedURL, UserAgent: "ripple (+https://github.com/taumatix/ripple)"}},
 	}, st, nil
 }

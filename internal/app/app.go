@@ -27,8 +27,11 @@ import (
 type App struct {
 	Engine  *engine.Engine
 	Watcher *engine.Watcher
-	Secret  []byte
-	Log     *slog.Logger
+	// Toolchain polls the Go release list for repos that opted into go-toolchain
+	// updates; nil leaves the feature out.
+	Toolchain *engine.ToolchainWatcher
+	Secret    []byte
+	Log       *slog.Logger
 	// PollEvery is the feed poll and job run period; zero disables the loop (tests call Tick).
 	PollEvery time.Duration
 	// Queue holds received events until they are handled; nil means a Queue with
@@ -197,6 +200,7 @@ func (a *App) Tick(ctx context.Context) {
 	} else if n > 0 {
 		a.Log.Info("feed poll enqueued jobs", "jobs", n)
 	}
+	a.pollToolchain(ctx)
 	if _, err := a.Engine.RunDue(ctx); err != nil && ctx.Err() == nil {
 		a.Log.Error("run due jobs", "err", err)
 	}
@@ -215,6 +219,9 @@ func (a *App) pollLoop(ctx context.Context) {
 			}
 		} else if n > 0 {
 			a.Log.Info("feed poll enqueued jobs", "jobs", n)
+			a.jobs.Wake()
+		}
+		if a.pollToolchain(ctx) > 0 {
 			a.jobs.Wake()
 		}
 		select {
@@ -269,4 +276,19 @@ func (a *App) push(ctx context.Context, name string, ev model.Event) error {
 	}
 	repo.InstallationID = ev.InstallationID
 	return a.Engine.Scan(ctx, repo)
+}
+
+// pollToolchain polls the Go release list and returns how many jobs it enqueued.
+func (a *App) pollToolchain(ctx context.Context) int {
+	if a.Toolchain == nil {
+		return 0
+	}
+	n, err := a.Toolchain.Poll(ctx)
+	switch {
+	case err != nil && ctx.Err() == nil:
+		a.Log.Error("go release poll", "err", err)
+	case n > 0:
+		a.Log.Info("go release poll enqueued jobs", "jobs", n)
+	}
+	return n
 }

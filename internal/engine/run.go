@@ -505,9 +505,14 @@ func describe(p *prPlan, items []item) (title, body string) {
 	b.WriteString("| Package | From | To | Released | File |\n|---|---|---|---|---|\n")
 	for _, it := range items {
 		for _, d := range it.deps {
-			fmt.Fprintf(&b, "| `%s` | `%s` | `%s` | %s | `%s` |\n", d.Package, d.Version, it.job.Version, it.job.ReleasedAt.UTC().Format("2006-01-02 15:04 MST"), d.File)
+			name, from, to := d.Package, d.Version, it.job.Version
+			if d.Datasource == model.DatasourceGoToolchain {
+				name, from, to = toolchainRow(d, it.job.Version)
+			}
+			fmt.Fprintf(&b, "| `%s` | `%s` | `%s` | %s | `%s` |\n", name, from, to, it.job.ReleasedAt.UTC().Format("2006-01-02 15:04 MST"), d.File)
 		}
 	}
+	b.WriteString(toolchainNotes(items))
 	for _, it := range items {
 		if it.typ == rules.Major {
 			fmt.Fprintf(&b, "\n**Breaking: major version update.** `%s` moves to `%s`; go.mod and the import paths in the Go files were rewritten. Release notes: %s\n", it.deps[0].Package, it.job.Package, releaseNotes(it.job.Package, it.job.Version))
@@ -515,6 +520,13 @@ func describe(p *prPlan, items []item) (title, body string) {
 	}
 	b.WriteString("\nOpened by [ripple](https://github.com/taumatix/ripple) when the new version appeared in the module index. Configure it in `.ripple.yaml`.\n")
 	if len(items) == 1 && p.group == "" {
+		if items[0].job.Datasource == model.DatasourceGoToolchain {
+			_, _, to := toolchainRow(items[0].deps[0], items[0].job.Version)
+			if items[0].job.Package == model.PackageGoDirective {
+				return "Update the go directive to " + to, b.String()
+			}
+			return "Update the Go toolchain to " + to, b.String()
+		}
 		if items[0].typ == rules.Major {
 			return fmt.Sprintf("[major] Update %s to %s", items[0].job.Package, items[0].job.Version), b.String()
 		}
@@ -522,4 +534,37 @@ func describe(p *prPlan, items []item) (title, body string) {
 	}
 	name := p.group
 	return fmt.Sprintf("Update %s dependencies (%d)", name, len(items)), b.String()
+}
+
+// toolchainRow is how a go directive or toolchain line update reads in the PR table:
+// what changes, from what, to what, spelled as go.mod spells them.
+func toolchainRow(d model.Dependency, target string) (name, from, to string) {
+	if d.Package == model.PackageGoDirective {
+		return "go directive", strings.TrimPrefix(d.Version, "v"), manager.GoDirective(d.Version, target)
+	}
+	return "toolchain line", "go" + strings.TrimPrefix(d.Version, "v"), "go" + strings.TrimPrefix(target, "v")
+}
+
+// toolchainNotes explains, for a PR that moves the go directive or toolchain line,
+// what the change asks of others and what verification did and did not cover.
+func toolchainNotes(items []item) string {
+	var directive, toolchain bool
+	for _, it := range items {
+		if it.job.Datasource != model.DatasourceGoToolchain {
+			continue
+		}
+		directive = directive || it.job.Package == model.PackageGoDirective
+		toolchain = toolchain || it.job.Package == model.PackageGoToolchain
+	}
+	var b strings.Builder
+	if directive {
+		b.WriteString("\n**The go directive is the least Go version this module needs.** Raising it raises the Go version needed by every module that depends on this one. ripple proposes it only because the old release is no longer supported by the Go project, and moves to the oldest release that still is.\n")
+	}
+	if toolchain {
+		b.WriteString("\nThe toolchain line only selects the Go used to build this module; dependants do not read it.\n")
+	}
+	if directive || toolchain {
+		b.WriteString("\nripple checked `go mod tidy`, `go build ./...` and `go vet ./...` with the Go installed on its server (toolchain downloads are off), which need not be the version named above; CI on this pull request is the check against that version.\n")
+	}
+	return b.String()
 }

@@ -101,8 +101,6 @@ Everything else:
    `go mod tidy`, which ignores the workspace, so those PRs open as drafts.
 20. **Tidy only what the update needs.** `go mod tidy` also drops requirements the repo never imports and
    rewrites unrelated lines; consider limiting the PR to the dependency's own `go.sum` entries.
-21. **Go toolchain and `go` directive bumps.** Propose `toolchain` and `go` line updates as their own
-   update type, from the Go release feed.
 22. **Directive residuals on a major bump.** `go:generate` lines are rewritten only for a plain
    `go run <package>`; the rest is reported in the PR body, not changed. Handle `go run pkg@vX` (pick a
    version of the new major), other generators that take import paths (`mockgen`, `stringer -type`), and
@@ -155,3 +153,8 @@ Everything else:
 42. **A DynamoDB test double that runs without a container.** The Dynamo store is exercised only against
     DynamoDB Local in CI; an in-process fake of the few operations used would let the sharding code run in
     every local `go test`.
+43. **Verify a Go bump with the Go it names.** Verification runs with the server's installed Go
+    (`GOTOOLCHAIN=local`), so a directive above it opens a draft and a toolchain bump is checked
+    against a different Go. Offer a toolchain image per supported minor; CI stays the real check until then.
+44. **Go version in other places.** The same bump leaves `.go-version`, `.tool-versions`, `go-version:`
+    in workflows and `FROM golang:` in Dockerfiles behind; propose them in the same PR, off the same list.

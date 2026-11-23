@@ -15,6 +15,9 @@ import (
 // version in Go, so this is how a major bump is discovered at all. Only the gomod
 // manager can rewrite a name; the path never moves backwards.
 func applicable(d model.Dependency, ds, pkg, version string) (rules.UpdateType, bool) {
+	if ds == model.DatasourceGoToolchain {
+		return applicableToolchain(d, pkg, version)
+	}
 	if d.Datasource != ds || model.Line(ds, d.Package) != model.Line(ds, pkg) {
 		return "", false
 	}
@@ -32,4 +35,17 @@ func applicable(d model.Dependency, ds, pkg, version string) (rules.UpdateType, 
 		return "", false // a release must carry the major its path claims
 	}
 	return rules.Major, true
+}
+
+// applicableToolchain judges a job that ToolchainWatcher already chose a target for:
+// it must be newer, and a go directive moves only to another minor, never to a patch.
+func applicableToolchain(d model.Dependency, pkg, version string) (rules.UpdateType, bool) {
+	if d.Datasource != model.DatasourceGoToolchain || d.Package != pkg {
+		return "", false
+	}
+	typ, ok := rules.Classify(d.Version, version)
+	if !ok || (pkg == model.PackageGoDirective && typ == rules.Patch) {
+		return "", false
+	}
+	return typ, true
 }

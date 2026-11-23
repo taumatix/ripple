@@ -16,6 +16,9 @@ import (
 type GoMod struct {
 	// Dir limits the manager to this directory and below; "" means the whole repo.
 	Dir string
+	// Toolchain is "", GoToolchainLine or GoToolchainDirective: whether the go
+	// directive and toolchain line are dependencies too. Off unless asked for.
+	Toolchain string
 }
 
 func (GoMod) Name() string { return "gomod" }
@@ -24,12 +27,12 @@ func (g GoMod) Matches(p string) bool {
 	return path.Base(p) == "go.mod" && config.InDirectory(g.Dir, p)
 }
 
-func (GoMod) Extract(p string, content []byte) ([]model.Dependency, error) {
+func (g GoMod) Extract(p string, content []byte) ([]model.Dependency, error) {
 	f, err := modfile.ParseLax(p, content, nil)
 	if err != nil {
 		return nil, fmt.Errorf("parse %s: %w", p, err)
 	}
-	var out []model.Dependency
+	out := g.extractToolchain(p, content)
 	for _, r := range f.Require {
 		if r.Indirect {
 			continue
@@ -43,6 +46,9 @@ func (GoMod) Apply(content []byte, dep model.Dependency, newPackage, newVersion 
 	f, err := modfile.ParseLax(dep.File, content, nil)
 	if err != nil {
 		return nil, fmt.Errorf("parse %s: %w", dep.File, err)
+	}
+	if dep.Datasource == model.DatasourceGoToolchain {
+		return applyToolchain(dep, content, newVersion)
 	}
 	found := false
 	for _, r := range f.Require {

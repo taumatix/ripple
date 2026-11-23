@@ -8,6 +8,15 @@ import (
 
 const DatasourceGo = "go"
 
+// DatasourceGoToolchain is the Go release train itself: the `go` directive
+// (package PackageGoDirective) and the `toolchain` line (PackageGoToolchain) of a
+// go.mod. They are dependencies of the module on the language, not on a module.
+const (
+	DatasourceGoToolchain = "go-toolchain"
+	PackageGoDirective    = "go"
+	PackageGoToolchain    = "toolchain"
+)
+
 type Repo struct {
 	FullName       string
 	InstallationID int64

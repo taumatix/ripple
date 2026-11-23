@@ -81,12 +81,12 @@ Everything else:
 - **Listing state outside a single cursor.** `App.Discover` keeps a host's previous listing as one JSON
   store cursor, which DynamoDB caps at 400 KB (roughly 10k repo names). Store it per repo before a host
   with larger installations ships.
-29. **More datasources and feeds, as many ecosystems as Renovate has.** ~~npm registry~~ (shipped with 30c, polled per package; the replicate feed is not used), PyPI, crates.io
-   sparse index, Maven, NuGet, RubyGems, Packagist, ~~Docker/OCI tags~~ (shipped with 30b, polled per image), GitHub releases/tags, Helm, Terraform
+29. **More datasources and feeds, as many ecosystems as Renovate has.** ~~npm registry~~ (shipped with 30c, polled per package; the replicate feed is not used), PyPI, ~~crates.io
+   sparse index~~ (shipped with 30d, polled per crate), Maven, NuGet, RubyGems, Packagist, ~~Docker/OCI tags~~ (shipped with 30b, polled per image), GitHub releases/tags, Helm, Terraform
    registry. Where a registry has a changes feed, use it; where it has none (OCI registries), fall back to polling
    only the packages the reverse index says someone imports, never every repo. Each datasource says which of the two it is.
 30. **More managers, toward Renovate parity.** ~~GitHub Actions~~ shipped ([docs/github-actions.md](docs/github-actions.md)).
-   ~~30b Dockerfile~~ shipped ([docs/docker.md](docs/docker.md)). ~~30c npm~~ shipped ([docs/npm.md](docs/npm.md)). Remaining, by value, each its own entry: 30d Cargo, 30e pip, 30f Helm, and the long tail.
+   ~~30b Dockerfile~~ shipped ([docs/docker.md](docs/docker.md)). ~~30c npm~~ shipped ([docs/npm.md](docs/npm.md)). ~~30d Cargo~~ shipped ([docs/cargo.md](docs/cargo.md)). Remaining, by value, each its own entry: 30e pip, 30f Helm, and the long tail.
 33. **Plugin mechanism** for out-of-tree managers, datasources and platforms.
 34. **Presets, org-level defaults and packageRules-like matching.** Later and strictly opt-in: a repo
     file must opt into a preset by name, and none of these may ever change the meaning of a plain
@@ -298,3 +298,19 @@ Everything else:
     (`RIPPLE_ACTIONS_UPSTREAM_URL`, 404 on the host then the configured upstream) and superseding of stale actions PRs were
     written against the fake; none ran against github.com or a GHES (see 61). The supersede sweep and closing of beaten PRs
     for actions rely on the branch name `ripple/actions/<slug>-<tag>`.
+154. **Cargo: requirements beyond `x.y.z`, and 0.x semantics.** Only a full version with no operator, `=`, `^` or `~`
+    is moved. Partial requirements (`1.2`), comparators, wildcards, multi-part requirements, multi-line inline tables,
+    dotted keys and workspace-inherited dependencies (`workspace = true`, resolved through `[workspace.dependencies]`) are
+    left alone; the manager is a line scanner, not a TOML parser, so a real parser is the way to widen it safely. Also
+    `^0.2.3` -> `0.3.0` is breaking for cargo but classified "minor" by the shared rules; classify 0.x the way cargo does.
+155. **Cargo: refresh Cargo.lock.** ripple edits Cargo.toml and reports the lock files it left stale (docs/cargo.md);
+    a lock entry needs the checksum and dependency edges of the new version, which only cargo's resolver knows. The sparse
+    index line carries `cksum` and `deps`, so a lock edit for a leaf crate whose dependencies did not change may be
+    possible offline; start there and say what remains.
+156. **Cargo: other registries, MSRV, and verify against the real index.** A `registry =` dependency and a repo with
+    `replace-with` are skipped, not read from their own index (needs `.cargo/config.toml` parsing and per-registry
+    credentials). `rust_version` in the index is ignored, so a bump may need a newer compiler than the repo's
+    `rust-version`. Nothing here has run against index.crates.io: the client and fake come from the vendored excerpts
+    (mixed-case names, 404 for a missing crate, large files, conditional requests are assumed; see UPSTREAM.md). Also:
+    `cargo:packages` is one read-modify-write cursor (see 96), versions carry no publication date, and the PR footer
+    still says "module index" (see 99).

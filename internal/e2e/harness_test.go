@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/taumatix/ripple/internal/app"
+	"github.com/taumatix/ripple/internal/cratesindex"
 	"github.com/taumatix/ripple/internal/engine"
 	"github.com/taumatix/ripple/internal/feed"
 	"github.com/taumatix/ripple/internal/model"
@@ -132,6 +133,8 @@ type opts struct {
 	registry *testutil.Registry
 	// npm, when set, is the fake npm registry the engine reads package versions from.
 	npm *testutil.NpmRegistry
+	// crates, when set, is the fake Cargo sparse index the engine reads crate versions from.
+	crates *testutil.CratesIndex
 	// engine adjusts the engine before it runs (server-side go settings).
 	engine func(e *engine.Engine)
 }
@@ -171,6 +174,9 @@ func newEnvOpts(t *testing.T, st store.Store, lim rules.Limits, o opts) *env {
 	if o.engine != nil {
 		o.engine(eng)
 	}
+	if o.crates != nil {
+		eng.Crates = &cratesindex.Client{BaseURL: o.crates.URL}
+	}
 	if o.npm != nil {
 		eng.Npm = &npmreg.Client{BaseURL: o.npm.URL}
 	}
@@ -181,7 +187,7 @@ func newEnvOpts(t *testing.T, st store.Store, lim rules.Limits, o opts) *env {
 		a := &app.App{Engine: eng, Secret: []byte(secret), Log: slog.New(slog.NewTextHandler(io.MultiWriter(testWriter{t}, e.logs), nil)),
 			PollEvery: o.pollEvery, Queue: &app.Queue{},
 			Watcher: &engine.Watcher{Engine: eng, Feed: &feed.GoIndex{BaseURL: e.idx.URL}},
-			Actions: &engine.ActionsWatcher{Engine: eng}, Docker: &engine.DockerWatcher{Engine: eng}, Npm: &engine.NpmWatcher{Engine: eng}}
+			Actions: &engine.ActionsWatcher{Engine: eng}, Docker: &engine.DockerWatcher{Engine: eng}, Npm: &engine.NpmWatcher{Engine: eng}, Cargo: &engine.CargoWatcher{Engine: eng}}
 		if o.goDL != nil {
 			a.Toolchain = &engine.ToolchainWatcher{Engine: eng, Source: &feed.GoDL{BaseURL: o.goDL.URL}}
 		}

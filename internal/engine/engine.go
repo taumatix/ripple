@@ -77,6 +77,9 @@ type Engine struct {
 	// Npm reads package versions from the npm registry for ecosystem: npm. Nil leaves
 	// npm dependencies without updates (see NpmWatcher).
 	Npm NpmRegistry
+	// Crates reads crate versions from the Cargo sparse index for ecosystem: cargo. Nil
+	// leaves Cargo dependencies without updates (see CargoWatcher).
+	Crates CratesIndex
 	// Replica names this process among the replicas sharing the Store; empty picks a random
 	// id, which is right unless logs should carry a stable name. LeaseTTL is how long a
 	// repo claim survives without renewal (zero means DefaultLeaseTTL). See docs/replicas.md.
@@ -341,6 +344,9 @@ func (e *Engine) scan(ctx context.Context, repo model.Repo) error {
 		return err
 	}
 	if err := e.notePackages(ctx, model.DatasourceNpm, npmPackagesCursor, deps); err != nil {
+		return err
+	}
+	if err := e.notePackages(ctx, model.DatasourceCargo, cargoPackagesCursor, deps); err != nil {
 		return err
 	}
 	if err := e.Store.ReplaceDependencies(ctx, repo.FullName, deps); err != nil {

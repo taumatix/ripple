@@ -60,6 +60,7 @@ that, add `.ripple.yaml` at the repository root. This is the whole schema:
 ```yaml
 version: 1
 open-pull-requests-limit: 3        # at most this many ripple PRs open at once
+close-superseded-pull-requests: true  # close ripple's own untouched PR when a newer version gets one (default: true)
 updates:
   - ecosystem: gomod               # gomod, or regex (see README)
     directory: /                   # this directory and everything below it
@@ -82,6 +83,14 @@ updates:
 
 - `automerge: major` is the only way a major update is ever merged automatically; `patch` and
   `minor` never include one.
+- `close-superseded-pull-requests` (default `true`): when a newer release of the same module gets its own
+  ripple PR, ripple closes its older PR for that module with a comment pointing at the new one. It never
+  closes a PR for another module, for an equal or newer version, a group PR, or one whose replacement is a
+  draft. It never closes a PR a person touched: a commit by anyone but ripple, a review, a review comment, a
+  comment, or a rename. Each of those is checked on every close, and a check that fails closes nothing. It
+  does not delete the branch (turn on "automatically delete head branches" in the repository settings), and
+  it does not notice an edited description. Only the GitHub host can close pull requests so far; on the
+  others both PRs stay open. Set it to `false` to keep every PR.
 - `cooldown` can only **raise** the server's minimum release age; `open-pull-requests-limit` can
   only **lower** the server's limit; `automerge` works only if the server allows it.
 - Unknown keys are errors that name the key and line. `ripple config validate [FILE]` checks a file

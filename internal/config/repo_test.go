@@ -222,3 +222,21 @@ func TestGoToolchainKey(t *testing.T) {
 		}
 	}
 }
+
+func TestCloseSupersededDefaultsOnAndCanBeSwitchedOff(t *testing.T) {
+	for _, c := range []struct {
+		file string
+		want bool
+	}{{"", true}, {"version: 1\n", true}, {"close-superseded-pull-requests: true\n", true}, {"close-superseded-pull-requests: false\n", false}} {
+		r, err := Parse([]byte(c.file))
+		if err != nil {
+			t.Fatalf("%q: %v", c.file, err)
+		}
+		if got := r.ClosesSuperseded(); got != c.want {
+			t.Errorf("%q: ClosesSuperseded = %v, want %v", c.file, got, c.want)
+		}
+	}
+	if _, err := Parse([]byte("close-superseded-pull-requests: maybe\n")); err == nil {
+		t.Error("a non-boolean value must be an error")
+	}
+}

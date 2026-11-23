@@ -58,9 +58,19 @@ Optional, each a separate interface in `internal/platform/host.go`; implement it
 | Interface | Implement when | If absent |
 |---|---|---|
 | `AutoMerger` | the host can merge on green (GitLab MWPS, Azure auto-complete, Gitea/Forgejo auto-merge) | PRs stay open for review; the job still succeeds |
+| `PRCloser` | the host can tell whether a person touched a PR, comment on it and close it (see below) | a superseded PR stays open next to the new one; the job still succeeds |
 | `RateLimiter` | always, if the host rate-limits. Record the last `Until` per credential scope | one limited host keeps getting calls until each one fails |
 | `Lister` | the host has no install event (CodeCommit, Gerrit, SCM-Manager, a PAT-only setup) | repos register only through the receiver |
 | `LegacyConfig` | never: `.github/ripple.yml` is GitHub's alone | only `.ripple.yaml` at the repo root is read |
+
+`PRCloser.CloseUntouchedPR(repo, pr, comment)` is how ripple closes its own PR when a newer version of the
+same module gets one (ROADMAP entry 24). The engine decides *which* PR is stale (a ripple branch of the same
+module, strictly older version) and the host decides whether it is *safe*: close only when every commit on the
+branch is ripple's (`gitws.AuthorEmail`), and there is no review, comment or rename; return `false, nil` and
+change nothing otherwise, and return an error, with the PR left open, when any of those reads fails. Comment
+first, then close; do not delete the branch. A host that cannot answer "did a person touch it" reliably should
+not implement it. The conformance suite closes only where the interface is implemented, so a fixture whose
+host implements it must report `Closed` and `Comments` in `PRs`.
 
 Credentials: implement `platform.Credentials`, or use `platform.StaticCredential{Username, Secret}`
 for a fixed token. Git sends it as HTTP basic auth (`oauth2:<token>` on GitLab, `x-token-auth` on

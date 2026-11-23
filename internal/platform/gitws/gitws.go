@@ -308,13 +308,7 @@ func (w *workspace) CommitAndPush(ctx context.Context, branch, message string) (
 	if strings.TrimSpace(st) == "" {
 		return false, nil
 	}
-	name, email := w.o.AuthorName, w.o.AuthorEmail
-	if name == "" {
-		name = "ripple[bot]"
-	}
-	if email == "" {
-		email = "ripple@users.noreply.invalid"
-	}
+	name, email := AuthorName(w.o), AuthorEmail(w.o)
 	push := []string{"push", "--force", "origin", "HEAD:refs/heads/" + branch}
 	if p := w.o.Proposal; p != nil {
 		ref, err := p.Ref(branch, w.branch)
@@ -639,4 +633,21 @@ func snippet(b []byte) string {
 		s = s[:300] + "..."
 	}
 	return s
+}
+
+// AuthorName is the name ripple's commits carry under o.
+func AuthorName(o Options) string {
+	if o.AuthorName == "" {
+		return "ripple[bot]"
+	}
+	return o.AuthorName
+}
+
+// AuthorEmail is the email ripple's commits carry under o. A host compares it with
+// the commits on a PR branch to tell ripple's own commits from a person's.
+func AuthorEmail(o Options) string {
+	if o.AuthorEmail == "" {
+		return "ripple@users.noreply.invalid"
+	}
+	return o.AuthorEmail
 }

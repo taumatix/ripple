@@ -108,7 +108,6 @@ Everything else:
 23. **Verify with cgo and private modules.** The sandbox builds with `CGO_ENABLED=0` (cgo files are
    rewritten but not compiled) and only from `RIPPLE_GOPROXY`; support a toolchain image with C
    headers and credentials for private proxies, without exposing the App token to the build.
-24. **Supersede and close stale PRs.** A newer release leaves the older ripple PR open next to it.
 25. **Backfill for newly registered dependencies.** A repo that starts importing a package only hears
    about releases published afterwards; compare against the latest stored release on registration.
    This also closes the DynamoDB GSI eventual-consistency window.
@@ -158,3 +157,12 @@ Everything else:
     against a different Go. Offer a toolchain image per supported minor; CI stays the real check until then.
 44. **Go version in other places.** The same bump leaves `.go-version`, `.tool-versions`, `go-version:`
     in workflows and `FROM golang:` in Dockerfiles behind; propose them in the same PR, off the same list.
+45. **Stale PRs count toward the open-PR limit.** At the limit, a superseded PR holds the slot the newer PR
+    needs, so the newer one is deferred and never supersedes it. Close (or recycle) the stale PR before the
+    limit check when its replacement is the pending plan.
+46. **Close superseded PRs on the other hosts.** Only GitHub implements `platform.PRCloser`; each host needs
+    its own "touched by a person" read (commits, comments, rename) and a conformance fixture reporting `Closed`
+    and `Comments`. Also delete the stale branch once a host's seam does that safely.
+47. **Retry a failed supersede and cover edits.** A close that failed is retried only by the next newer
+    release; a PR that was already open for the new version is never revisited. GitHub's check also misses
+    an edited description and a force-push using ripple's commit identity.

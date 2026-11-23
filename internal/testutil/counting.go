@@ -94,6 +94,16 @@ func (c *CountingPlatform) RequestAutoMerge(ctx context.Context, r model.Repo, p
 	return platform.RequestAutoMerge(ctx, c.Inner, r, pr)
 }
 
+// CloseUntouchedPR forwards to Inner, or answers platform.ErrNoClosePR (without
+// counting a call) when Inner cannot close pull requests.
+func (c *CountingPlatform) CloseUntouchedPR(ctx context.Context, r model.Repo, pr platform.PR, comment string) (bool, error) {
+	if _, ok := c.Inner.(platform.PRCloser); !ok {
+		return false, platform.ErrNoClosePR
+	}
+	c.hit(r.FullName)
+	return platform.CloseUntouchedPR(ctx, c.Inner, r, pr, comment)
+}
+
 // RateLimitedUntil and ReadsLegacyConfig pass Inner's answers through; they make no call.
 func (c *CountingPlatform) RateLimitedUntil(r model.Repo) time.Time {
 	return platform.RateLimitedUntil(c.Inner, r)

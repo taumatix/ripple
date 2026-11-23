@@ -64,6 +64,7 @@ type Client struct {
 var (
 	_ platform.Platform     = (*Client)(nil)
 	_ platform.AutoMerger   = (*Client)(nil)
+	_ platform.PRCloser     = (*Client)(nil)
 	_ platform.RateLimiter  = (*Client)(nil)
 	_ platform.LegacyConfig = (*Client)(nil)
 )
@@ -242,6 +243,91 @@ func (c *Client) CreatePR(ctx context.Context, repo model.Repo, s platform.PRSpe
 		}
 	}
 	return pr, nil
+}
+
+// maxEventPages bounds the issue-events scan; a PR with more events than that is
+// busy enough that it is treated as touched.
+const maxEventPages = 5
+
+// CloseUntouchedPR comments on pr and closes it unless a person touched it. Touched
+// means: the head branch is not in this repository; the PR has other than exactly
+// one commit, or that commit's author or committer is not ripple's identity (a
+// person pushed to the branch); it has any review, review comment or issue comment;
+// or its issue events hold a rename. Every read must succeed and nothing is
+// closed on a failed one. Not detected: an edit of the PR description, a changed
+// label or assignee, or a force-push by someone using ripple's commit identity.
+func (c *Client) CloseUntouchedPR(ctx context.Context, repo model.Repo, pr platform.PR, comment string) (bool, error) {
+	if err := checkRepo(repo); err != nil {
+		return false, err
+	}
+	base := fmt.Sprintf("%s/repos/%s", strings.TrimRight(c.APIBase, "/"), repo.FullName)
+	get := func(path string, out any) error {
+		_, err := c.do(ctx, repo, http.MethodGet, base+path, nil, out)
+		return err
+	}
+	var cur struct {
+		State string `json:"state"`
+		Head  struct {
+			Ref  string `json:"ref"`
+			Repo struct {
+				FullName string `json:"full_name"`
+			} `json:"repo"`
+		} `json:"head"`
+	}
+	if err := get(fmt.Sprintf("/pulls/%d", pr.Number), &cur); err != nil {
+		return false, err
+	}
+	if cur.State != "open" || cur.Head.Ref != pr.Head || !strings.EqualFold(cur.Head.Repo.FullName, repo.FullName) {
+		return false, nil
+	}
+	var commits []struct {
+		Commit struct {
+			Author    struct{ Email string } `json:"author"`
+			Committer struct{ Email string } `json:"committer"`
+		} `json:"commit"`
+	}
+	if err := get(fmt.Sprintf("/pulls/%d/commits?per_page=2", pr.Number), &commits); err != nil {
+		return false, err
+	}
+	ours := gitws.AuthorEmail(gitws.Options{AuthorEmail: c.AuthorEmail})
+	if len(commits) != 1 || commits[0].Commit.Author.Email != ours || commits[0].Commit.Committer.Email != ours {
+		return false, nil
+	}
+	for _, kind := range []string{"/pulls/%d/reviews", "/pulls/%d/comments", "/issues/%d/comments"} {
+		var found []json.RawMessage
+		if err := get(fmt.Sprintf(kind+"?per_page=1", pr.Number), &found); err != nil {
+			return false, err
+		}
+		if len(found) > 0 {
+			return false, nil
+		}
+	}
+	for page := 1; ; page++ {
+		if page > maxEventPages {
+			return false, nil
+		}
+		var events []struct {
+			Event string `json:"event"`
+		}
+		if err := get(fmt.Sprintf("/issues/%d/events?per_page=100&page=%d", pr.Number, page), &events); err != nil {
+			return false, err
+		}
+		for _, e := range events {
+			if e.Event == "renamed" {
+				return false, nil
+			}
+		}
+		if len(events) < 100 {
+			break
+		}
+	}
+	if _, err := c.do(ctx, repo, http.MethodPost, fmt.Sprintf("%s/issues/%d/comments", base, pr.Number), map[string]string{"body": comment}, nil); err != nil {
+		return false, err
+	}
+	if _, err := c.do(ctx, repo, http.MethodPatch, fmt.Sprintf("%s/pulls/%d", base, pr.Number), map[string]string{"state": "closed"}, nil); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 const automergeMutation = `mutation($id: ID!) { enablePullRequestAutoMerge(input: {pullRequestId: $id, mergeMethod: SQUASH}) { pullRequest { number } } }`

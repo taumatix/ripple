@@ -199,3 +199,41 @@ func rateLimit(t *testing.T, f Fixture) {
 		}
 	}
 }
+
+// A newer release's PR replaces ripple's own untouched PR for an older version of
+// the module, with a comment, where the host implements platform.PRCloser. A host
+// that does not keeps both PRs open and still finishes both jobs: absent means
+// reported absent, not an error.
+func supersede(t *testing.T, f Fixture) {
+	e := newEnv(t, f, opts{})
+	e.stub("example.com/lib", "v1.0.0", "v1.1.0", "v1.2.0")
+	e.addRepo("sup", libRepo("example.com/sup", nil))
+	e.register("sup")
+	e.publish("example.com/lib", "v1.1.0")
+	e.tick()
+	e.publish("example.com/lib", "v1.2.0")
+	e.tick()
+	prs := e.prs("sup")
+	if len(prs) != 2 {
+		t.Fatalf("want a PR for each release, got %d", len(prs))
+	}
+	_, can := e.host.Platform.(platform.PRCloser)
+	old, cur := prs[0], prs[1]
+	if cur.Closed || len(cur.Comments) != 0 {
+		t.Errorf("the newest PR must stay open and uncommented: %+v", cur)
+	}
+	if old.Closed != can {
+		t.Errorf("host can close pull requests: %v; stale PR closed = %v", can, old.Closed)
+	}
+	if can && (len(old.Comments) != 1 || !strings.Contains(old.Comments[0], "v1.2.0")) {
+		t.Errorf("the stale PR needs one comment naming the new version: %q", old.Comments)
+	}
+	if !can && len(old.Comments) != 0 {
+		t.Errorf("a host that cannot close must not be commented on: %q", old.Comments)
+	}
+	for _, v := range []string{"v1.1.0", "v1.2.0"} {
+		if j := e.job("sup", "example.com/lib", v); j.State != model.JobDone {
+			t.Errorf("job %s is %s, want done", v, j.State)
+		}
+	}
+}

@@ -120,7 +120,6 @@ Everything else:
    only the packages the reverse index says someone imports, never every repo. Each datasource says which of the two it is.
 30. **More managers, toward Renovate parity.** Dockerfile, GitHub Actions, npm, Cargo, pip, Helm,
    and the long tail; each manager and datasource pair is its own entry once the first few exist.
-31. **OSV advisories as an event source.** A security advisory becomes a job that bypasses the cooldown.
 32. **GHES GraphQL** differences and per-host API base handling.
 33. **Plugin mechanism** for out-of-tree managers, datasources and platforms.
 34. **Presets, org-level defaults and packageRules-like matching.** Later and strictly opt-in: a repo
@@ -166,3 +165,14 @@ Everything else:
 47. **Retry a failed supersede and cover edits.** A close that failed is retried only by the next newer
     release; a PR that was already open for the new version is never revisited. GitHub's check also misses
     an edited description and a force-push using ripple's commit identity.
+48. **OSV: advisories with no usable fix.** About 9% of recorded Go `fixed` values are pseudo-versions and many
+    advisories have no fix; both produce nothing today. Decide whether to open a tracking issue, or to propose
+    the pseudo-version for repos that opt in.
+49. **OSV: `stdlib` and `toolchain` advisories** are ignored as go.mod modules; they belong to the Go toolchain
+    bump work (entry 21), which can read the same records.
+50. **OSV: history for new registrations and gaps.** A repo registered after an advisory was published, or an
+    advisory modified while ripple was down for longer than one poll's line cap, is never examined. On
+    registration, check the repo's dependencies with `POST /v1/querybatch` (entry 25 is the same shape for releases).
+51. **OSV: should a security PR bypass the open-PR limit and the schedule?** Today only the cooldown is skipped.
+    Needs a decision from real use.
+52. **OSV: a run against real OSV** to turn the `unverified` list in `UPSTREAM.md` into recorded fact.

@@ -142,6 +142,17 @@ upstream:
     rate-limits: "429 with no documented Retry-After; one minute assumed"
     unverified: "everything against a real Gerrit; webhook payload shape and URL token; clone URL /a/<project>; change URL /c/<project>/+/<n>; WIP and hashtag permissions; no-new-changes on identical re-push; merge-commit file lists; the fake is written from the docs, not recorded"
     checked: 2026-11-23
+  - name: osv
+    kind: http-api
+    reference: https://ossf.github.io/osv-schema/
+    docs: https://google.github.io/osv.dev/api/
+    api-version: "OSV schema 1.9.2 (records seen on 2026-11-23); API v1"
+    vendored: docs/vendor/osv/
+    used: [GET https://storage.googleapis.com/osv-vulnerabilities/Go/modified_id.csv (newest first, read until the stored position), "GET https://api.osv.dev/v1/vulns/{id}"]
+    unused: [POST /v1/query, POST /v1/querybatch, all.zip]
+    rate-limits: "none documented; ripple makes one list request and at most RIPPLE_OSV_MAX_FETCH record requests per RIPPLE_OSV_INTERVAL"
+    unverified: "tested against a fake serving recorded payloads, never against a running ripple pointed at real OSV; any rate limit or abuse blocking of api.osv.dev; whether modified_id.csv is ever rewritten out of order; the delay between an id appearing in the CSV and /v1/vulns/{id} serving it (a 404 is skipped, so an advisory could be missed); database_specific.severity is a GitHub field outside the OSV schema; an 'introduced' only range that carries a 'limit'; SEMVER ranges of records that mix ecosystems"
+    checked: 2026-11-23
 ```
 
 Not pinned, because they are not wire contracts: `git` (any version with `GIT_CONFIG_COUNT`,

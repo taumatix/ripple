@@ -135,3 +135,24 @@ func TestServerDynamoShards(t *testing.T) {
 		}
 	}
 }
+
+func TestServerOSV(t *testing.T) {
+	s, err := LoadServer(env(base))
+	if err != nil || s.OSV || s.OSVInterval != 10*time.Minute || s.OSVMaxFetch != 100 || s.OSVURL != "https://api.osv.dev" {
+		t.Fatalf("defaults: %+v %v", s, err)
+	}
+	if s, err = LoadServer(env(with("RIPPLE_OSV", "true"))); err != nil || !s.OSV {
+		t.Fatalf("enable: %+v %v", s, err)
+	}
+	for name, m := range map[string]map[string]string{
+		"bad bool":      with("RIPPLE_OSV", "yes please"),
+		"http api":      with("RIPPLE_OSV", "true", "RIPPLE_OSV_URL", "http://osv.example.com"),
+		"http dump":     with("RIPPLE_OSV", "true", "RIPPLE_OSV_DUMP_URL", "http://osv.example.com"),
+		"zero interval": with("RIPPLE_OSV", "true", "RIPPLE_OSV_INTERVAL", "0"),
+		"bad max":       with("RIPPLE_OSV_MAX_FETCH", "0"),
+	} {
+		if _, err := LoadServer(env(m)); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}

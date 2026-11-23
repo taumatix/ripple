@@ -47,6 +47,9 @@ type Engine struct {
 	// and DefaultMaxDependencies. A repo over either cap is registered with no
 	// dependencies and a logged warning rather than scanned partially.
 	MaxFiles, MaxDependencies int
+	// Advisories is set when OSV is enabled: the runner then looks up the advisory
+	// note of each job (see FanOutAdvisory) to label the PR and skip the cooldown.
+	Advisories bool
 
 	// parseConfig is a test seam counting repo-file parses; nil means RepoConfig.
 	parseConfig func([]byte) (*config.Repo, error)

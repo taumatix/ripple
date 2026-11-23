@@ -110,6 +110,8 @@ type opts struct {
 	sandbox sandbox.Backend
 	// goDL, when set, is the Go release list the app polls for go-toolchain updates.
 	goDL *testutil.GoDL
+	// tweak edits each App newApp builds, a restart included, before it runs.
+	tweak func(a *app.App)
 }
 
 func newEnv(t *testing.T, st store.Store, lim rules.Limits) *env {
@@ -134,6 +136,9 @@ func newEnvOpts(t *testing.T, st store.Store, lim rules.Limits, o opts) *env {
 		}
 		if o.queue != nil {
 			o.queue(a.Queue)
+		}
+		if o.tweak != nil {
+			o.tweak(a)
 		}
 		return a
 	}

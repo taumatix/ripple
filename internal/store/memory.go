@@ -57,7 +57,15 @@ func (m *Memory) DeleteRepo(_ context.Context, n string) error {
 func (m *Memory) ReplaceDependencies(_ context.Context, repo string, deps []model.Dependency) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.deps[repo] = append([]model.Dependency(nil), deps...)
+	m.deps[repo] = nil
+	seen := map[model.Dependency]bool{}
+	for _, d := range deps {
+		d.Repo = repo
+		if !seen[d] {
+			seen[d] = true
+			m.deps[repo] = append(m.deps[repo], d)
+		}
+	}
 	return nil
 }
 
@@ -187,7 +195,7 @@ func (m *Memory) SetCursor(_ context.Context, n, v string) error {
 
 func (m *Memory) Close() error { return nil }
 
-// SortDependencies orders by repo, file, datasource, package for stable output.
+// SortDependencies orders by repo, file, datasource, package, version for stable output.
 func SortDependencies(d []model.Dependency) {
 	sort.Slice(d, func(i, j int) bool {
 		a, b := d[i], d[j]
@@ -200,7 +208,10 @@ func SortDependencies(d []model.Dependency) {
 		if a.Datasource != b.Datasource {
 			return a.Datasource < b.Datasource
 		}
-		return a.Package < b.Package
+		if a.Package != b.Package {
+			return a.Package < b.Package
+		}
+		return a.Version < b.Version
 	})
 }
 

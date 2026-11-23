@@ -126,6 +126,47 @@ func Run(t *testing.T, mk func(t *testing.T) store.Store) {
 		}
 	})
 
+	t.Run("one package at two versions in one file", func(t *testing.T) {
+		// `actions/checkout@v4` and `actions/checkout@v5.0.0` in one workflow, two FROM lines
+		// naming one image, a dependency repeated in devDependencies: each is its own row.
+		s := mk(t)
+		v4 := dep("acme/web", "ci.yml", "actions/checkout", "v4")
+		v5 := dep("acme/web", "ci.yml", "actions/checkout", "v5.0.0")
+		other := dep("acme/web", "ci.yml", "actions/cache", "v4")
+		for _, d := range []*model.Dependency{&v4, &v5, &other} {
+			d.Datasource = "github-tags"
+		}
+		if err := s.ReplaceDependencies(ctx, "acme/web", []model.Dependency{v5, v4, other, v4}); err != nil {
+			t.Fatal(err)
+		}
+		want := []model.Dependency{other, v4, v5}
+		own, err := s.ListRepoDependencies(ctx, "acme/web")
+		if err != nil || !sameDeps(own, want) {
+			t.Fatalf("repo deps %v (%v), want %v", own, err, want)
+		}
+		got, err := s.ListDependents(ctx, "github-tags", "actions/checkout")
+		if err != nil || !sameDeps(got, []model.Dependency{v4, v5}) {
+			t.Fatalf("dependents %v (%v), want v4 and v5.0.0", got, err)
+		}
+		// Moving one of them leaves the other alone; dropping one drops only it.
+		v4b := v4
+		v4b.Version = "v4.1"
+		_ = s.ReplaceDependencies(ctx, "acme/web", []model.Dependency{v5, v4b})
+		got, _ = s.ListDependents(ctx, "github-tags", "actions/checkout")
+		if !sameDeps(got, []model.Dependency{v4b, v5}) {
+			t.Fatalf("after a move: %v", got)
+		}
+		_ = s.ReplaceDependencies(ctx, "acme/web", []model.Dependency{v5})
+		got, _ = s.ListDependents(ctx, "github-tags", "actions/checkout")
+		if !sameDeps(got, []model.Dependency{v5}) {
+			t.Fatalf("after a drop: %v", got)
+		}
+		_ = s.ReplaceDependencies(ctx, "acme/web", nil)
+		if got, _ = s.ListDependents(ctx, "github-tags", "actions/checkout"); len(got) != 0 {
+			t.Fatalf("after clearing: %v", got)
+		}
+	})
+
 	t.Run("many dependencies", func(t *testing.T) {
 		s := mk(t)
 		var deps []model.Dependency
@@ -1129,4 +1170,25 @@ func Run(t *testing.T, mk func(t *testing.T) store.Store) {
 		}
 	})
 
+}
+
+// sameDeps compares two dependency sets regardless of order.
+func sameDeps(a, b []model.Dependency) bool {
+	key := func(d model.Dependency) string { return d.File + "|" + d.Package + "|" + d.Version }
+	if len(a) != len(b) {
+		return false
+	}
+	m := map[string]int{}
+	for _, d := range a {
+		m[key(d)]++
+	}
+	for _, d := range b {
+		m[key(d)]--
+	}
+	for _, n := range m {
+		if n != 0 {
+			return false
+		}
+	}
+	return true
 }

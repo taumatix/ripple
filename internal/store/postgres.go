@@ -151,7 +151,7 @@ func (p *Postgres) ReplaceDependencies(ctx context.Context, repo string, deps []
 	b := &pgx.Batch{}
 	for _, d := range deps {
 		b.Queue(`INSERT INTO dependencies(repo,file,manager,datasource,package,version,line) VALUES($1,$2,$3,$4,$5,$6,$7)
-ON CONFLICT (repo,file,datasource,package) DO UPDATE SET manager=$3, version=$6, line=$7`,
+ON CONFLICT (repo,file,datasource,package,version) DO UPDATE SET manager=$3, line=$7`,
 			repo, d.File, d.Manager, d.Datasource, d.Package, d.Version, model.Line(d.Datasource, d.Package))
 	}
 	br := tx.SendBatch(ctx, b)

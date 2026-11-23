@@ -170,6 +170,7 @@ func pkgCountPK(base string) string { return "PKGCOUNT#" + base }
 
 // depBaseOf recovers PKG#<ds>#<line> from a dependency sort key DEP#<file>\x1f<ds>\x1f<pkg>.
 func depBaseOf(sk string) string {
+	sk, _, _ = strings.Cut(sk, depVersionSep)
 	parts := strings.Split(sk, sep)
 	if len(parts) < 3 {
 		return ""

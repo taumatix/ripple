@@ -31,6 +31,8 @@ const DefaultProxyImage = "docker.io/library/nginx:1.27-alpine"
 
 const proxyPort = 3128
 
+const sidecarScript = `printf '%s' "$RIPPLE_NGINX_CONF" > /etc/nginx/nginx.conf && exec nginx -g 'daemon off;'`
+
 // Confinement is an internal runtime network plus the proxy sidecar that is its only
 // way out. Set ContainerOptions.Network to Network and give the commands GOPROXY
 // (Policy.Proxy and the policy's environment) ProxyURL; Close removes both.
@@ -103,14 +105,19 @@ func confine(ctx context.Context, fl Flavour, o ConfineOptions, run runFn) (*Con
 	if _, err := run(ctx, "network", "create", "--internal", "--label", "ripple.job=1", name); err != nil {
 		return nil, err
 	}
-	steps := [][]string{
-		// default network first, so the sidecar can reach the upstream; then join the internal one
-		{"run", "-d", "--name", side, "--label", "ripple.job=1", "-e", "RIPPLE_NGINX_CONF=" + conf, "--entrypoint", "sh", image,
-			"-c", `printf '%s' "$RIPPLE_NGINX_CONF" > /etc/nginx/nginx.conf && exec nginx -g 'daemon off;'`},
-		{"network", "connect", name, side},
+	runArgs := []string{"run", "-d", "--name", side, "--label", "ripple.job=1", "-e", "RIPPLE_NGINX_CONF=" + conf, "--entrypoint", "sh"}
+	steps := [][]string{}
+	if fl == FlavourPodman {
+		// Rootless podman's default is pasta, which cannot be joined to a second network
+		// afterwards ("pasta is not supported: invalid network mode", seen in CI): name the
+		// default bridge network and the internal one together at run time.
+		steps = append(steps, append(append(runArgs, "--network", "podman,"+name), image, "-c", sidecarScript))
+	} else {
+		// Docker: start on the default network (so the sidecar can reach the upstream), then join the internal one.
+		steps = append(steps, append(runArgs, image, "-c", sidecarScript), []string{"network", "connect", name, side})
 	}
-	for _, s := range steps {
-		if _, err := run(ctx, s...); err != nil {
+	for _, st := range steps {
+		if _, err := run(ctx, st...); err != nil {
 			remove()
 			return nil, err
 		}

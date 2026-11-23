@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -34,7 +35,7 @@ func runLive(t *testing.T, b Backend, p Policy, timeout time.Duration, argv ...s
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, w[0], w[1:]...)
-	cmd.Env = append(os.Environ(), p.Env...)
+	cmd.Env = append(os.Environ(), clientEnv(p.Env)...)
 	cmd.WaitDelay = 5 * time.Second
 	out, err := cmd.CombinedOutput()
 	if ctx.Err() != nil {
@@ -133,4 +134,21 @@ func slicesIndex(s []string, v string) int {
 		}
 	}
 	return -1
+}
+
+// clientEnv is the environment the container client runs with. The runner's own HOME stays: the
+// engine's policy sets HOME to the job directory, and rootless Podman keeps its image storage
+// under $HOME, so it would pull the image into (and then fail to remove) the job directory.
+// That the engine itself runs the client with HOME set to the job directory is a ROADMAP residual.
+func clientEnv(env []string) []string {
+	if runtime.GOOS != "linux" {
+		return env
+	}
+	var out []string
+	for _, e := range env {
+		if !strings.HasPrefix(e, "HOME=") && !strings.HasPrefix(e, "TMPDIR=") {
+			out = append(out, e)
+		}
+	}
+	return out
 }

@@ -68,6 +68,16 @@ func indexOfCall(r *recorded, words ...string) int {
 	return -1
 }
 
+func TestConfinePodmanJoinsBothNetworksAtRun(t *testing.T) {
+	r := &recorded{}
+	if _, err := confine(context.Background(), FlavourPodman, confineOpts(), r.run); err != nil {
+		t.Fatal(err)
+	}
+	if !r.has("run", "-d", "--name", "rn-proxy") || !r.has("--network", "podman,rn") || r.has("network", "connect") {
+		t.Errorf("podman calls: %v", r.calls)
+	}
+}
+
 func TestConfineConfigCarriesUpstreamHost(t *testing.T) {
 	r := &recorded{}
 	if _, err := confine(context.Background(), FlavourPodman, confineOpts(), r.run); err != nil {

@@ -238,20 +238,6 @@ Everything else:
     when the record is modified.
 83. **OSV: a pseudo-version dependency is never moved.** A repo on a pseudo-version of a module gets no
     advisory PR. Decide whether to propose the module's first release above that commit.
-84. **Replicas: fence the job row.** `UpdateJob` is not store-fenced: a replica that lost its repo lease while
-    stalled can still write a stale job state. Benign today (the PR is idempotent by branch), but a fenced
-    write (Postgres `WHERE` on the lease token, Dynamo condition on the lease item) would close it
-    ([docs/replicas.md](docs/replicas.md)).
-85. **Replicas: take the lease on every repo mutation.** Rename, pause and the dashboard write path use only the
-    in-process `lockRepo`, so two replicas can interleave them with a running job.
-86. **Replicas: per-repo event order across replicas.** Events of one repo stay ordered within a replica only;
-    claim the oldest event of a repo (or the repo lease) before a later one if ordering turns out to matter.
-87. **Replicas: Postgres and DynamoDB under real contention.** The lease SQL and conditions are proven by the
-    shared store suite and the two-replica e2e, never against a real multi-node database under load or a real
-    clock skew. Run a soak with three replicas and a skewed clock.
-88. **Replicas: configuration and metrics.** Expose `Replica` and `LeaseTTL` as `RIPPLE_REPLICA` and
-    `RIPPLE_LEASE_TTL`, a replica-count and lease-takeover metric, and elect one replica for the feed poll
-    (two polling is safe, since job enqueue is insert-if-absent, but wasteful).
 ||||||| parent of 89b39d4 (Roadmap residuals for the partial scan and Go version files)
 89. **Partial scan on other hosts.** The scan without a checkout is verified against GitHub and the fake
     only. GitLab, Bitbucket, Gitea, Azure and the rest may not serve `filter=blob:none` or by-id blob
@@ -275,3 +261,19 @@ Everything else:
 95. **Supersede re-reads touched PRs every run.** A stale PR a person touched is checked again (about six
     reads) each time ripple works on the repo, because the retry cannot tell it from a failed close. Remember
     "touched" on the job, cleared when the PR changes.
+96. **Replicas: a store-assigned event sequence.** Event order across replicas now holds only as far as
+    each replica's clock does: `Seq` is the receiving replica's `UnixNano`, so skewed clocks can order two events
+    of a repo wrongly, and the claim-time `HasOlderEvent` check trusts that order. On DynamoDB the check reads the
+    eventually consistent `gsi1`, so an older event written a moment ago can be missed; Postgres and the memory
+    store have no such window. Assign `Seq` in the store (a Postgres sequence, a DynamoDB counter item) and make
+    the DynamoDB check consistent.
+97. **Replicas: soak against real databases.** The shared suite races goroutines on one store handle and the
+    e2e runs two replicas; neither is a real multi-node Postgres or DynamoDB under load, or with a skewed clock.
+    Run three replicas against both with a clock offset and check one PR per job and ordered events.
+98. **Replicas: the remaining unfenced writes.** The job rows the runner writes are fenced on the repo lease;
+    the advisory pass's `UpdateJob` (`advisory.go`), event `UpdateEvent`/`DeleteEvent` by a replica whose event
+    lease lapsed, and the cursor writes of pause, remove and rename run under a lease but are not fenced by the
+    store. Extend fencing to them, or show each is idempotent.
+99. **Replicas: metrics and one feed poller.** Expose a replica-count and lease-takeover metric (today only the
+    `replica` start-up and `lease taken over` log lines exist) and elect one replica for the release-feed poll
+    (two polling is safe, since job enqueue is insert-if-absent, but wasteful).

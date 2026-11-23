@@ -58,14 +58,16 @@ local clock.
 | Same event delivered to two replicas | The second fails to take `event:<id>` and holds the entry for ttl/3, then finds it gone and drops it. |
 | Stale listing of due jobs | Re-read under the lease; finished jobs are skipped. |
 | Two replicas poll the release feed | Safe: enqueueing a job is insert-if-absent. |
-| Events of one repo on different replicas | Order is not preserved across replicas (see ROADMAP). |
-| Stale writer after a lost lease | `UpdateJob` is not fenced by the store; benign because the PR is idempotent by branch (see ROADMAP). |
-| Rename, pause, dashboard writes | Use the in-process lock only (see ROADMAP). |
+| Events of one repo on different replicas | A claimed event asks the store (`HasOlderEvent`) for an older live event of the same repo and, if there is one, is released and held for ttl/3. Holds as far as replica clocks agree (`Seq` is the receiver's clock) and, on DynamoDB, as far as `gsi1` is current (see ROADMAP). |
+| Stale writer after a lost lease | The runner's job writes go through `UpdateJobFenced`: the write applies only while the lease name, owner and token are unchanged, and is refused with `ErrLeaseLost` otherwise. The advisory pass and event writes are not fenced yet (see ROADMAP). |
+| Rename, pause, resume, remove, dashboard writes | Take the repo lease (rename takes two, in sorted order) and wait for a holder to finish. The dashboard flush skips a repo another replica holds; the holder syncs it when its run ends. |
 
 ## Verification
 
 The shared store suite (`internal/store/storetest`) covers exclusion, renewal, takeover and an 8-way race on
-every store; `internal/e2e/replicas_test.go` runs two engines on one store and one fake GitHub, asserts one PR
-per repo, and kills a replica between push and PR to assert takeover with exactly one PR. Those run on the
+every store, plus the fenced job update, the older-event query and a contention race (6 goroutines, 8 rounds,
+exactly one holder at a time and no lost update); `internal/e2e/replicas_test.go` runs two engines on one store
+and one fake GitHub, asserts one PR per repo, kills a replica between push and PR to assert takeover with exactly
+one PR, and stalls a replica past its lease to assert its late job write is refused and it opens no second PR. Those run on the
 memory store and the in-process DynamoDB locally; Postgres runs in CI. Not verified: a real Postgres or
 DynamoDB under real contention, or real clock skew.

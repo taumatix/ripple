@@ -112,8 +112,6 @@ Everything else:
 43. **Verify a Go bump with the Go it names.** Verification runs with the server's installed Go
     (`GOTOOLCHAIN=local`), so a directive above it opens a draft and a toolchain bump is checked
     against a different Go. Offer a toolchain image per supported minor; CI stays the real check until then.
-44. **Go version in other places.** The same bump leaves `.go-version`, `.tool-versions`, `go-version:`
-    in workflows and `FROM golang:` in Dockerfiles behind; propose them in the same PR, off the same list.
 45. **Stale PRs count toward the open-PR limit.** At the limit, a superseded PR holds the slot the newer PR
     needs, so the newer one is deferred and never supersedes it. Close (or recycle) the stale PR before the
     limit check when its replacement is the pending plan.

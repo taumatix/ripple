@@ -20,6 +20,23 @@ With OSV on ([osv.md](osv.md)), an advisory for `stdlib` or `toolchain` moves th
 fixed Go release, skipping the cooldown, only in a repo that opted in with `go-toolchain:`. A repo with only a `go`
 directive is not touched. If a directive PR would lift the same file's toolchain line, the two can conflict (ROADMAP).
 
+## The same version elsewhere
+
+A toolchain or directive PR also moves the Go version named next to go.mod, so CI and
+local tooling do not stay on the old release. Only these exact line shapes are rewritten,
+in the repo root, the module's directory, and `.github/workflows/` at the root:
+
+- `.go-version`: a file holding just a version.
+- `.tool-versions`: a `golang <version>` line (a trailing comment is kept).
+- workflows: `go-version: 1.24.1`, quoted or not, alone or as a list item.
+- Dockerfiles (`Dockerfile`, `Dockerfile.*`, `*.Dockerfile`): `FROM golang:<version>[-suffix] [AS name]`.
+
+A file moves only if it names the same minor go.mod had and an older release than the
+target. A version written without a patch (`1.24`) keeps that spelling and moves only when
+the minor does. Matrix expressions, `stable`, `go-version-file`, image digests, version
+lists, `ARG`-driven tags and comments are left alone. The PR body lists the files moved.
+Other tools reading other files (`.mise.toml`, `devcontainer.json`) are not touched.
+
 ## Choices, and why
 
 - **The two lines mean different things.** `go` is the least Go version the module needs: a

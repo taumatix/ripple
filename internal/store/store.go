@@ -85,3 +85,11 @@ type Store interface {
 type OpenJobLister interface {
 	ListOpenJobs(ctx context.Context, repo string) ([]model.Job, error)
 }
+
+// RepoLister is the optional paged listing of registered repos, by name. ListRepos returns
+// up to limit names greater than after, in ascending order; an empty after starts at the
+// beginning, and fewer than limit names means the end. The advisory sweep reads it. The
+// memory and Postgres stores implement it; DynamoDB has no cheap listing and does not.
+type RepoLister interface {
+	ListRepos(ctx context.Context, after string, limit int) ([]string, error)
+}

@@ -597,6 +597,12 @@ func (g *GitHub) HumanComment(repo string, number int, body string) {
 	g.mutatePR(repo, number, func(p *PR) { p.Comments = append(p.Comments, body) })
 }
 
+// HumanClosePR closes a PR as a merge or a person's decision would, without an API call
+// from ripple, so ripple sees it only as no longer open.
+func (g *GitHub) HumanClosePR(repo string, number int) {
+	g.mutatePR(repo, number, func(p *PR) { p.Closed = true })
+}
+
 // HumanReview records a review on a PR.
 func (g *GitHub) HumanReview(repo string, number int) {
 	g.mutatePR(repo, number, func(p *PR) { p.Reviews++ })

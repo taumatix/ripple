@@ -28,6 +28,20 @@ If the release feed already queued the same bump behind its cooldown, the adviso
   pseudo-version, ripple proposes the newest stored release of that module above the current one, on the same major
   line, and the PR says the fix is a pseudo-version and must be checked. Such a PR is never automerged. Without the
   opt-in nothing is proposed.
+- **Dependency at a pseudo-version, fixed by a release.** A pseudo-version is a commit someone chose, so ripple does
+  not move it by default and the dashboard lists the advisory. Opt in with `security-from-pseudo-versions: true` on a
+  `gomod` entry: ripple then proposes the lowest fixing release above the commit, on the same major, never automerged,
+  and the PR says it leaves a pseudo-version. A release that is not an advisory fix still never replaces a
+  pseudo-version.
+- **Corrected records.** When OSV corrects a record so that it no longer affects the version a repo uses (or withdraws
+  it), ripple finishes the job that was waiting for it as skipped, closes the PR it opened for it with a comment saying
+  why, and drops its dashboard entry. A PR a person touched stays open, and so does every PR when
+  `close-superseded-pull-requests: false`. A dependency that already reached the fix is not "corrected": that work was
+  done. Jobs made before this release are not found, and a PR body is not rewritten. A record whose fix was raised is
+  handled by the superseded-PR flow, which replaces the old PR when the new one opens.
+- **Toolchain precedence.** A security `toolchain` job and a `go` directive job both rewrite the toolchain line of one
+  go.mod. The security job goes first (the higher fixed version first); the other waits, with a reason naming the PR,
+  until it is merged or closed. A PR already open is not closed for this: whoever merges second resolves the conflict.
 - **No fix at all, or none ripple can propose.** With `dependency-dashboard: true` the dashboard gains a section
   "Advisories without a fix ripple can propose", linking the advisory. Entries disappear when a fix is proposed, the
   record is withdrawn, or the repo stops using that version. At most 100 per repo are kept. Without the dashboard
@@ -44,7 +58,13 @@ When a scan finds a dependency (module, or the toolchain line) this repo has not
 repo only, as the poller would. Checked pairs are stored per repo, only after the batch succeeded: an outage is
 retried by the next scan, and an unchanged `go.mod` costs no request. A failure is logged (`advisory history not
 checked`) and never fails the scan. This also covers an advisory missed during a long outage, but only for a version
-newly seen in a repo (the ROADMAP names the sweep that is left).
+newly seen in a repo, and by the sweep below.
+
+When the poll reads the whole line cap (`truncated`, 20000 lines) an outage may have outrun it, so ripple sweeps: it
+lists repos in pages (`RepoLister`: memory and Postgres; DynamoDB has no cheap listing and is not swept), and each poll
+re-checks 10 repos (a fixed batch, not configurable yet) with a fresh history check, the position kept in the
+`osv-sweep` cursor until every repo was visited. A repo busy with a run is retried next poll. A huge repo is still bound
+by the per-scan query and fetch caps above.
 
 ## Failure behaviour
 

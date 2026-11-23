@@ -115,6 +115,12 @@ type Update struct {
 	// pseudo-version (a commit, no release), open a security PR for it. The default,
 	// false, proposes nothing and lists the advisory on the dependency dashboard.
 	SecurityPseudoVersions bool `yaml:"security-pseudo-versions"`
+	// SecurityFromPseudoVersions is gomod only: when a module is required at a
+	// pseudo-version that an OSV advisory covers and a release fixes it, open a security
+	// PR that moves to that release. The default, false, leaves the dependency alone (a
+	// pseudo-version is a commit someone chose on purpose) and lists the advisory on the
+	// dependency dashboard. The PR is never automerged.
+	SecurityFromPseudoVersions bool `yaml:"security-from-pseudo-versions"`
 	// PrivateModules is gomod only: module path patterns (GONOSUMDB syntax) that the
 	// server's module proxy serves and the public checksum database does not know. Only a
 	// repo that lists them is given the server's proxy credential.
@@ -276,7 +282,7 @@ func (c *checker) add(n *yaml.Node, format string, a ...any) {
 
 var (
 	rootKeys     = []string{"version", "open-pull-requests-limit", "close-superseded-pull-requests", "backfill-new-dependencies", "dependency-dashboard", "updates"}
-	updateKeys   = []string{"ecosystem", "directory", "schedule", "cooldown", "ignore", "groups", "automerge", "go-toolchain", "cgo", "security-pseudo-versions", "private-modules", "directives", "tidy", "files", "patterns", "package"}
+	updateKeys   = []string{"ecosystem", "directory", "schedule", "cooldown", "ignore", "groups", "automerge", "go-toolchain", "cgo", "security-pseudo-versions", "security-from-pseudo-versions", "private-modules", "directives", "tidy", "files", "patterns", "package"}
 	scheduleKeys = []string{"days", "from", "to", "timezone"}
 	ignoreKeys   = []string{"dependency", "update-types"}
 	groupKeys    = []string{"patterns", "update-types"}
@@ -455,7 +461,7 @@ func (c *checker) update(n *yaml.Node, u *Update, where string) {
 			}
 		}
 	case "regex":
-		for _, k := range []string{"cgo", "security-pseudo-versions", "private-modules", "directives", "tidy"} {
+		for _, k := range []string{"cgo", "security-pseudo-versions", "security-from-pseudo-versions", "private-modules", "directives", "tidy"} {
 			if v := f[k]; v != nil {
 				c.add(v, "%s.%s is only valid with ecosystem: gomod", where, k)
 			}

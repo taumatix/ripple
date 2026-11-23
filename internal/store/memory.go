@@ -211,3 +211,20 @@ func (m *Memory) UpdateJobFenced(_ context.Context, j model.Job, l Lease) error 
 	m.jobs[j.Key] = j
 	return nil
 }
+
+// ListRepos is store.RepoLister.
+func (m *Memory) ListRepos(_ context.Context, after string, limit int) ([]string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []string
+	for n := range m.repos {
+		if n > after {
+			out = append(out, n)
+		}
+	}
+	sort.Strings(out)
+	if limit >= 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 
+	"golang.org/x/mod/module"
+
 	"github.com/taumatix/ripple/internal/advisory"
 	"github.com/taumatix/ripple/internal/model"
 	"github.com/taumatix/ripple/internal/rules"
@@ -83,6 +85,9 @@ func (e *Engine) advisoryNoteFor(ctx context.Context, j model.Job) *advisoryNote
 // jobs were newly enqueued or made due.
 func (e *Engine) FanOutAdvisory(ctx context.Context, v *advisory.Vuln) (int, error) {
 	repos := map[string]*repoState{}
+	// Once the fan-out is done, what an earlier text of the record made is reconciled
+	// with what it says now (entry 82).
+	defer e.reconcileCorrected(ctx, v)
 	if v.Withdrawn() {
 		return 0, e.forgetOpenAdvisories(ctx, v)
 	}
@@ -159,7 +164,7 @@ func (e *Engine) applyAdvisory(ctx context.Context, v *advisory.Vuln, note advis
 			if ver.Pseudo != "" {
 				why = "only a pseudo-version fixes it (" + ver.Pseudo + "); set security-pseudo-versions to propose it"
 			}
-			if err := e.recordOpenAdvisory(ctx, rs, d, openAdvisory{ID: v.ID, Datasource: d.Datasource, Package: d.Package, Version: d.Version, Why: why}); err != nil {
+			if err := e.listOpenAdvisory(ctx, rs, d, openAdvisory{ID: v.ID, Datasource: d.Datasource, Package: d.Package, Version: d.Version, Why: why}); err != nil {
 				return n, err
 			}
 			continue
@@ -169,6 +174,20 @@ func (e *Engine) applyAdvisory(ctx context.Context, v *advisory.Vuln, note advis
 			typ, ok = applicablePseudoFix(d, d.Package, fixed)
 		} else {
 			typ, ok = applicable(d, d.Datasource, d.Package, fixed)
+			if !ok {
+				// A dependency at a pseudo-version is a commit someone chose: it moves to the
+				// release that fixes it only where the entry opted in.
+				if pt, can := applicablePseudoCurrent(d, d.Package, fixed); can {
+					if !u.SecurityFromPseudoVersions {
+						why := "the dependency is at a pseudo-version and " + fixed + " fixes it; set security-from-pseudo-versions to propose the move"
+						if err := e.listOpenAdvisory(ctx, rs, d, openAdvisory{ID: v.ID, Datasource: d.Datasource, Package: d.Package, Version: d.Version, Why: why}); err != nil {
+							return n, err
+						}
+						continue
+					}
+					typ, ok = pt, true
+				}
+			}
 		}
 		if !ok {
 			continue
@@ -187,6 +206,9 @@ func (e *Engine) applyAdvisory(ctx context.Context, v *advisory.Vuln, note advis
 		// The note goes first: a job must never be due without it. A GHSA record and
 		// its Go-database twin both arrive; the one that carries a severity is kept.
 		if err := e.keepNote(ctx, key, v, string(raw)); err != nil {
+			return n, err
+		}
+		if err := e.indexAdd(ctx, advisoryJobsPrefix+v.ID, key); err != nil {
 			return n, err
 		}
 		if err := e.clearOpenAdvisory(ctx, d.Repo, v.ID, d.Datasource, d.Package); err != nil {
@@ -237,6 +259,9 @@ type AdvisoryWatcher struct {
 	Engine   *Engine
 	Source   AdvisorySource
 	MaxFetch int // record requests per poll; zero means DefaultAdvisoryMaxFetch
+	// SweepBatch is how many repos a poll re-checks while a sweep runs (see
+	// advisory_sweep.go); zero means DefaultSweepBatch.
+	SweepBatch int
 
 	failID string
 	failN  int
@@ -265,6 +290,9 @@ func (w *AdvisoryWatcher) Poll(ctx context.Context) (int, error) {
 	}
 	if truncated {
 		e.log().Warn("osv: more changed records than one poll reads; the oldest were skipped", "after", raw)
+		if err := w.beginSweep(ctx); err != nil {
+			return 0, err
+		}
 	}
 	max := w.MaxFetch
 	if max <= 0 {
@@ -301,7 +329,7 @@ func (w *AdvisoryWatcher) Poll(ctx context.Context) (int, error) {
 			return jobs, err
 		}
 	}
-	return jobs, nil
+	return jobs, w.sweepStep(ctx)
 }
 
 // withSecurityLabel adds the "security" label when any item fixes an advisory.
@@ -329,6 +357,12 @@ func securityText(items []item, title, body string) (string, string) {
 		}
 		seen[a.ID] = true
 		fmt.Fprintf(&b, "- [%s](%s) in `%s`, fixed in `%s`", a.ID, a.URL, it.job.Package, it.job.Version)
+		for _, d := range it.deps {
+			if module.IsPseudoVersion(d.Version) && !module.IsPseudoVersion(it.job.Version) {
+				fmt.Fprintf(&b, " (moves off the pseudo-version `%s` the module is required at; check that the commit's changes are in the release)", d.Version)
+				break
+			}
+		}
 		if a.Pseudo {
 			b.WriteString(" (a pseudo-version: no release fixes this advisory, so this pins a commit; review it)")
 		}

@@ -60,3 +60,17 @@ func TestSecurityPseudoVersionsIsGomodOnlyAndOffByDefault(t *testing.T) {
 		t.Errorf("with regex: %v", err)
 	}
 }
+
+func TestSecurityFromPseudoVersionsIsGomodOnlyAndOffByDefault(t *testing.T) {
+	c, err := Parse([]byte("updates:\n  - ecosystem: gomod\n    security-from-pseudo-versions: true\n"))
+	if err != nil || !c.Updates[0].SecurityFromPseudoVersions {
+		t.Fatalf("err=%v %+v", err, c)
+	}
+	c, err = Parse([]byte("updates:\n  - ecosystem: gomod\n"))
+	if err != nil || c.Updates[0].SecurityFromPseudoVersions {
+		t.Fatalf("default: err=%v", err)
+	}
+	if _, err := Parse([]byte("updates:\n  - ecosystem: regex\n    security-from-pseudo-versions: true\n    files: [Makefile]\n    patterns: ['(?P<name>a) (?P<version>b)']\n")); err == nil || !strings.Contains(err.Error(), "security-from-pseudo-versions") {
+		t.Errorf("with regex: %v", err)
+	}
+}

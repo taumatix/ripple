@@ -72,6 +72,7 @@ updates:
     directives: extended           # optional, off by default: also rewrite `go run pkg@version` and `go tool pkg` on a major bump
     tidy: minimal                  # optional, off by default: keep unrelated go.mod requirements and go.sum lines (see below)
     security-pseudo-versions: false  # optional: propose a release when an advisory's only fix is a pseudo-version (docs/osv.md)
+    security-from-pseudo-versions: false  # optional: move a pseudo-version dependency to the release that fixes its advisory (docs/osv.md)
     cooldown: 7d                   # wait this long after a release (never less than the server minimum)
     schedule:
       days: [mon, tue]

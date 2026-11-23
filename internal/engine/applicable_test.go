@@ -49,3 +49,32 @@ func TestReleaseNotes(t *testing.T) {
 		}
 	}
 }
+
+func TestApplicablePseudoCurrent(t *testing.T) {
+	const pseudo = "v1.2.4-0.20240101000000-abcdefabcdef"
+	dep := func(v string) model.Dependency {
+		return model.Dependency{Manager: "gomod", Datasource: "go", Package: "example.com/m", Version: v}
+	}
+	for _, tc := range []struct {
+		name string
+		d    model.Dependency
+		pkg  string
+		fix  string
+		want rules.UpdateType
+		ok   bool
+	}{
+		{"patch release above the commit", dep(pseudo), "example.com/m", "v1.2.4", rules.Patch, true},
+		{"minor release above", dep(pseudo), "example.com/m", "v1.3.0", rules.Minor, true},
+		{"release at or below the commit is no move", dep(pseudo), "example.com/m", "v1.2.3", "", false},
+		{"another major is never proposed", dep(pseudo), "example.com/m", "v2.0.0", "", false},
+		{"another module", dep(pseudo), "example.com/other", "v1.2.4", "", false},
+		{"a pseudo-version target is the other opt-in", dep(pseudo), "example.com/m", "v1.2.5-0.20240201000000-123456abcdef", "", false},
+		{"a prerelease target", dep(pseudo), "example.com/m", "v1.3.0-rc.1", "", false},
+		{"a released dependency is not this case", dep("v1.2.0"), "example.com/m", "v1.2.4", "", false},
+	} {
+		typ, ok := applicablePseudoCurrent(tc.d, tc.pkg, tc.fix)
+		if typ != tc.want || ok != tc.ok {
+			t.Errorf("%s: got %q %v, want %q %v", tc.name, typ, ok, tc.want, tc.ok)
+		}
+	}
+}

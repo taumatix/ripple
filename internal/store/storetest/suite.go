@@ -243,6 +243,36 @@ func Run(t *testing.T, mk func(t *testing.T) store.Store) {
 		}
 	})
 
+	t.Run("repos in pages", func(t *testing.T) {
+		s := mk(t)
+		rl, ok := s.(store.RepoLister)
+		if !ok {
+			t.Log("store has no repo listing")
+			return
+		}
+		for _, n := range []string{"acme/c", "acme/a", "acme/b", "beta/z"} {
+			if err := s.UpsertRepo(ctx, model.Repo{FullName: n, DefaultBranch: "main"}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		var all []string
+		after := ""
+		for i := 0; i < 5; i++ {
+			page, err := rl.ListRepos(ctx, after, 3)
+			if err != nil {
+				t.Fatal(err)
+			}
+			all = append(all, page...)
+			if len(page) < 3 {
+				break
+			}
+			after = page[len(page)-1]
+		}
+		if !reflect.DeepEqual(all, []string{"acme/a", "acme/b", "acme/c", "beta/z"}) {
+			t.Fatalf("repos: %v", all)
+		}
+	})
+
 	t.Run("open jobs of a repo", func(t *testing.T) {
 		s := mk(t)
 		ol, ok := s.(store.OpenJobLister)

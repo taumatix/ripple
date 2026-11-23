@@ -21,6 +21,7 @@ type Memory struct {
 	events     map[string]model.Event
 	leases     map[string]Lease
 	replicas   map[string]memReplica
+	eventSeq   int64
 	deliveries map[string]time.Time
 }
 

@@ -2,7 +2,10 @@ package store
 
 import (
 	"context"
+	"errors"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/taumatix/ripple/internal/model"
 )
@@ -91,4 +94,23 @@ func (p *Postgres) HasOlderEvent(ctx context.Context, e model.Event) (bool, erro
 	err := p.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE repo=$1 AND dead_at IS NULL AND (seq,id) < ($2,$3))`,
 		e.Repo, e.Seq, e.ID).Scan(&ok)
 	return ok, wrap("has older event", err)
+}
+
+// EnqueueSequenced is store.EventSequencer. The number comes from the one-row event_seq
+// table in the same statement as the insert, so its row lock is held until the insert
+// commits: a higher number is never visible before a lower one, which a Postgres sequence
+// does not promise. A duplicate ID burns one number.
+func (p *Postgres) EnqueueSequenced(ctx context.Context, e model.Event) (model.Event, bool, error) {
+	files := e.Files
+	if files == nil {
+		files = []string{}
+	}
+	err := p.pool.QueryRow(ctx, `WITH n AS (UPDATE event_seq SET n = n + 1 RETURNING n)
+INSERT INTO events(id,seq,installation_id,kind,repo,ref,files,attempts,not_before,new_repo,default_branch,repo_id)
+SELECT $1,n.n,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11 FROM n ON CONFLICT (id) DO NOTHING RETURNING seq`,
+		e.ID, e.InstallationID, e.Kind, e.Repo, e.Ref, files, e.Attempts, e.NotBefore, e.NewRepo, e.DefaultBranch, e.RepoID).Scan(&e.Seq)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return e, false, nil
+	}
+	return e, err == nil, wrap("enqueue sequenced event", err)
 }

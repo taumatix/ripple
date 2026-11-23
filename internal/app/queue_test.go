@@ -537,3 +537,26 @@ func TestRetryDoesNotLoseItsLeaseToThePreviousAttemptsRelease(t *testing.T) {
 		t.Fatalf("dead event counts %d attempts, want 3", d.Attempts)
 	}
 }
+
+// Replicas whose clocks disagree still number events in the order the store received them:
+// the replica a minute ahead adds first and the one behind second, and the later event must
+// not sort before the earlier one.
+func TestEventSeqIgnoresReplicaClocks(t *testing.T) {
+	ctx := context.Background()
+	st := store.NewMemory()
+	ahead := &Queue{Store: st, Process: newGate().process, Now: func() time.Time { return time.Now().Add(time.Hour) }}
+	behind := &Queue{Store: st, Process: newGate().process, Now: func() time.Time { return time.Now().Add(-time.Hour) }}
+	if err := ahead.Add(ctx, ev(1, "first", "acme/a")); err != nil {
+		t.Fatal(err)
+	}
+	if err := behind.Add(ctx, ev(1, "second", "acme/a")); err != nil {
+		t.Fatal(err)
+	}
+	evs, err := st.ListEvents(ctx)
+	if err != nil || len(evs) != 2 || evs[0].ID != "first" || evs[1].ID != "second" || evs[0].Seq >= evs[1].Seq {
+		t.Fatalf("events = %+v, err=%v; want first then second by Seq", evs, err)
+	}
+	if older, _ := st.HasOlderEvent(ctx, evs[1]); !older {
+		t.Fatal("the later event does not see the earlier one as older")
+	}
+}

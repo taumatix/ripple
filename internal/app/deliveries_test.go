@@ -70,6 +70,13 @@ func (f *flakyStore) EnqueueEvent(ctx context.Context, e model.Event) (bool, err
 	return f.Memory.EnqueueEvent(ctx, e)
 }
 
+func (f *flakyStore) EnqueueSequenced(ctx context.Context, e model.Event) (model.Event, bool, error) {
+	if f.down {
+		return e, false, errors.New("store unavailable")
+	}
+	return f.Memory.EnqueueSequenced(ctx, e)
+}
+
 // A delivery that could not be queued is forgotten, so the host's retry is handled.
 func TestRefusedDeliveryCanBeRetried(t *testing.T) {
 	st := &flakyStore{Memory: store.NewMemory(), down: true}

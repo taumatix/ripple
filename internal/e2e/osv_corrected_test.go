@@ -1,11 +1,13 @@
 package e2e
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/taumatix/ripple/internal/engine"
 	"github.com/taumatix/ripple/internal/model"
 	"github.com/taumatix/ripple/internal/store"
 	"github.com/taumatix/ripple/internal/testutil"
@@ -130,4 +132,47 @@ func TestACorrectedAdvisoryLeavesTheDashboard(t *testing.T) {
 	if len(is) != 1 || strings.Contains(is[0].Body, "GO-2026-7402") {
 		t.Fatalf("the corrected advisory is still listed: %+v", is)
 	}
+}
+
+// Entry 105: a repo that stays busy while its record is corrected keeps the stale job and
+// PR only until the repo is free, not until the record changes again.
+func TestACorrectionWaitsForABusyRepoAndIsAppliedWhenItIsFree(t *testing.T) {
+	forEachFake(t, func(t *testing.T, st store.Store) {
+		leases, ok := st.(store.Leases)
+		if !ok {
+			t.Fatal("store has no leases")
+		}
+		e, osv := correctedEnv(t, st, limitOne)
+		prs := e.gh.PRs("acme/app")
+		if len(prs) != 1 {
+			t.Fatalf("want one PR and one waiting job: %+v", prs)
+		}
+		waiting := "example.com/two"
+		if strings.Contains(prs[0].Title, "two") {
+			waiting = "example.com/one"
+		}
+		// Another replica is running the repo.
+		other, held, err := leases.AcquireLease(context.Background(), engine.LeaseName("acme/app"), "another-replica", time.Hour)
+		if err != nil || !held {
+			t.Fatalf("lease: %v %v", held, err)
+		}
+		e.clock.Advance(time.Minute)
+		osv.Publish("GO-2026-7400", e.clock.Now(), osvRange("GO-2026-7400", "example.com/one", "1.0.5", "1.1.0"))
+		osv.Publish("GO-2026-7401", e.clock.Now(), osvRange("GO-2026-7401", "example.com/two", "1.0.5", "1.1.0"))
+		e.tick()
+		if j := e.job("acme/app", waiting, "v1.1.0"); j.State != model.JobPending {
+			t.Fatalf("the job moved while the repo was busy: %+v", j)
+		}
+		if err := leases.ReleaseLease(context.Background(), other); err != nil {
+			t.Fatal(err)
+		}
+		e.clock.Advance(time.Minute)
+		e.tick() // the record did not change again
+		if j := e.job("acme/app", waiting, "v1.1.0"); j.State != model.JobSkipped {
+			t.Errorf("the correction was not applied once the repo was free: %+v", j)
+		}
+		if pr := e.gh.PRs("acme/app")[0]; !pr.Closed {
+			t.Errorf("the PR of the corrected record is still open")
+		}
+	})
 }

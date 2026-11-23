@@ -119,3 +119,65 @@ func (e *env) toolchainJob(repo, pkg, version string) model.Job {
 	}
 	return j
 }
+
+// Entry 106: a directive PR that is already open when a security toolchain PR arrives is
+// closed (untouched, with a reason) and its job waits for the security PR, so the two never
+// conflict on the toolchain line; once the security PR is merged the directive PR returns.
+func TestASecurityToolchainPRClosesAnOpenDirectivePR(t *testing.T) {
+	forEachFake(t, func(t *testing.T, st store.Store) {
+		e, _, osv, n := conflictEnv(t, st)
+		start(t, e, "acme/app")
+		e.tick()
+		prs := e.gh.PRs("acme/app")
+		if len(prs) != 1 || strings.HasPrefix(prs[0].Title, "[security]") {
+			t.Fatalf("precondition: want the directive PR open: %+v", prs)
+		}
+		directive := prs[0]
+
+		e.clock.Advance(time.Minute)
+		osv.Publish("GO-2026-7200", e.clock.Now(), toolchainFix(n))
+		e.tick()
+		e.tick()
+
+		var security int
+		for _, p := range e.gh.PRs("acme/app") {
+			if strings.HasPrefix(p.Title, "[security] Update the Go toolchain") && !p.Closed {
+				security++
+			}
+		}
+		if security != 1 {
+			t.Fatalf("want the security PR open: %+v", e.gh.PRs("acme/app"))
+		}
+		var got testutil.PR
+		for _, p := range e.gh.PRs("acme/app") {
+			if p.Number == directive.Number {
+				got = p
+			}
+		}
+		if !got.Closed || !strings.Contains(strings.Join(got.Comments, "\n"), "security") {
+			t.Fatalf("the directive PR must be closed with a reason: %+v", got)
+		}
+		dj := e.toolchainJob("acme/app", "go", fmt.Sprintf("v1.%d.9", n-1))
+		if dj.State != model.JobPending || !strings.Contains(dj.Reason, "security") {
+			t.Fatalf("the directive job must wait for the security PR: %+v", dj)
+		}
+	})
+}
+
+// A directive PR a person touched is theirs: the security PR still opens, beside it.
+func TestASecurityToolchainPRLeavesATouchedDirectivePRAlone(t *testing.T) {
+	e, _, osv, n := conflictEnv(t, store.NewMemory())
+	start(t, e, "acme/app")
+	e.tick()
+	directive := e.gh.PRs("acme/app")[0]
+	e.gh.HumanCommitOnBranch("acme/app", directive.Head)
+	e.clock.Advance(time.Minute)
+	osv.Publish("GO-2026-7200", e.clock.Now(), toolchainFix(n))
+	e.tick()
+	e.tick()
+	for _, p := range e.gh.PRs("acme/app") {
+		if p.Number == directive.Number && p.Closed {
+			t.Fatalf("a touched PR was closed: %+v", p)
+		}
+	}
+}

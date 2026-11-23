@@ -58,10 +58,18 @@ func pairKey(d model.Dependency) string {
 // retries. The caller holds the repo lock and has already stored the repo and its
 // config; deps are the repo's dependencies as just scanned.
 func (e *Engine) checkAdvisoryHistory(ctx context.Context, repo string, cfg *config.Repo, deps []model.Dependency) error {
+	_, err := e.checkAdvisoryHistoryMore(ctx, repo, cfg, deps)
+	return err
+}
+
+// checkAdvisoryHistoryMore is one round of the check. It reports whether pairs are still
+// unchecked because the round's query or fetch budget ran out (the sweep runs more rounds).
+func (e *Engine) checkAdvisoryHistoryMore(ctx context.Context, repo string, cfg *config.Repo, deps []model.Dependency) (more bool, err error) {
 	q := e.AdvisoryHistory
 	if q == nil {
-		return nil
+		return false, nil
 	}
+	maxQueries, maxFetch := e.historyCaps()
 	var cands []model.Dependency
 	seen := map[string]bool{}
 	for _, d := range deps {
@@ -80,7 +88,7 @@ func (e *Engine) checkAdvisoryHistory(ctx context.Context, repo string, cfg *con
 	}
 	raw, err := e.Store.GetCursor(ctx, advisoryCheckedPrefix+repo)
 	if err != nil {
-		return err
+		return false, err
 	}
 	var prev []string
 	_ = json.Unmarshal([]byte(raw), &prev) // unreadable: everything is checked again
@@ -95,7 +103,7 @@ func (e *Engine) checkAdvisoryHistory(ctx context.Context, repo string, cfg *con
 		}
 	}
 	if len(fresh) == 0 {
-		return e.saveChecked(ctx, repo, cands, checked, nil) // drops pairs no longer used
+		return false, e.saveChecked(ctx, repo, cands, checked, nil) // drops pairs no longer used
 	}
 	sort.Slice(fresh, func(i, j int) bool {
 		if fresh[i].Package != fresh[j].Package {
@@ -103,8 +111,9 @@ func (e *Engine) checkAdvisoryHistory(ctx context.Context, repo string, cfg *con
 		}
 		return fresh[i].Version < fresh[j].Version
 	})
-	if len(fresh) > maxHistoryQueries {
-		fresh = fresh[:maxHistoryQueries]
+	total := len(fresh)
+	if len(fresh) > maxQueries {
+		fresh = fresh[:maxQueries]
 	}
 	var qs []advisory.Query
 	owner := []int{} // query index -> fresh index
@@ -120,7 +129,7 @@ func (e *Engine) checkAdvisoryHistory(ctx context.Context, repo string, cfg *con
 	}
 	answers, err := q.QueryBatch(ctx, qs)
 	if err != nil {
-		return fmt.Errorf("osv querybatch: %w", err)
+		return false, fmt.Errorf("osv querybatch: %w", err)
 	}
 	perDep := make([][]string, len(fresh))
 	for qi, ids := range answers {
@@ -136,7 +145,7 @@ func (e *Engine) checkAdvisoryHistory(ctx context.Context, repo string, cfg *con
 				added++
 			}
 		}
-		if take > 0 && len(unique)+added > maxHistoryFetch {
+		if take > 0 && len(unique)+added > maxFetch {
 			break
 		}
 		for _, id := range perDep[i] {
@@ -145,6 +154,7 @@ func (e *Engine) checkAdvisoryHistory(ctx context.Context, repo string, cfg *con
 		take++
 	}
 	fresh = fresh[:take]
+	more = take < total
 	ids := make([]string, 0, len(unique))
 	for id := range unique {
 		ids = append(ids, id)
@@ -154,16 +164,28 @@ func (e *Engine) checkAdvisoryHistory(ctx context.Context, repo string, cfg *con
 	for _, id := range ids {
 		v, err := e.historyRecord(ctx, q, id)
 		if err != nil {
-			return fmt.Errorf("osv record %s: %w", id, err)
+			return false, fmt.Errorf("osv record %s: %w", id, err)
 		}
 		if v == nil || v.Withdrawn() {
 			continue
 		}
 		if _, err := e.applyAdvisory(ctx, v, newNote(v), fresh, repos); err != nil {
-			return err
+			return false, err
 		}
 	}
-	return e.saveChecked(ctx, repo, cands, checked, fresh)
+	return more, e.saveChecked(ctx, repo, cands, checked, fresh)
+}
+
+// historyCaps are the per-round bounds: the Engine fields, else the defaults.
+func (e *Engine) historyCaps() (queries, fetch int) {
+	queries, fetch = e.HistoryQueries, e.HistoryFetch
+	if queries <= 0 {
+		queries = maxHistoryQueries
+	}
+	if fetch <= 0 {
+		fetch = maxHistoryFetch
+	}
+	return queries, fetch
 }
 
 // saveChecked remembers the pairs checked before (still in use) plus the ones just done.

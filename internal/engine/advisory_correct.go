@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -34,6 +35,9 @@ import (
 const (
 	advisoryJobsPrefix   = "osv-jobs:"
 	advisoryOpenIxPrefix = "osv-open-ix:"
+	// advisoryRetryCursor lists the record ids whose correction found a repo busy; the
+	// watcher applies them again on its next poll (retryBusy).
+	advisoryRetryCursor = "osv-reconcile-retry"
 	// maxIndexed bounds each index, and with it the work one corrected record causes.
 	maxIndexed = 100
 	// correctWait is how long a corrected record waits for a repo another run holds.
@@ -77,11 +81,11 @@ func (e *Engine) indexRead(ctx context.Context, cursor string) ([]string, error)
 
 // reconcileCorrected applies a record that came through the poller to what ripple made
 // from it before. Errors are logged: the record's fan-out has already succeeded.
-func (e *Engine) reconcileCorrected(ctx context.Context, v *advisory.Vuln) {
+func (e *Engine) reconcileCorrected(ctx context.Context, v *advisory.Vuln) (busy bool) {
 	keys, err := e.indexRead(ctx, advisoryJobsPrefix+v.ID)
 	if err != nil {
 		e.log().Warn("osv: read job index", "id", v.ID, "err", err)
-		return
+		return false
 	}
 	byRepo := map[string][]model.Job{}
 	var order []string
@@ -99,16 +103,65 @@ func (e *Engine) reconcileCorrected(ctx context.Context, v *advisory.Vuln) {
 		byRepo[j.Repo] = append(byRepo[j.Repo], j)
 	}
 	for _, repo := range order {
-		e.reconcileRepo(ctx, v, repo, byRepo[repo])
+		if e.reconcileRepo(ctx, v, repo, byRepo[repo]) {
+			busy = true
+		}
 	}
 	e.reconcileDashboards(ctx, v)
+	return busy
 }
 
-func (e *Engine) reconcileRepo(ctx context.Context, v *advisory.Vuln, repoName string, jobs []model.Job) {
+// retryBusy applies again the records whose correction found a repo busy: it fetches each
+// and reconciles it as the poller would have, and keeps the ones that find a repo busy
+// still. A record OSV no longer serves is dropped.
+func (w *AdvisoryWatcher) retryBusy(ctx context.Context) {
+	e := w.Engine
+	ids, err := e.indexRead(ctx, advisoryRetryCursor)
+	if err != nil || len(ids) == 0 {
+		return
+	}
+	resolved := map[string]bool{}
+	for _, id := range ids {
+		v, err := w.Source.Vuln(ctx, id)
+		switch {
+		case errors.Is(err, advisory.ErrNotFound):
+			resolved[id] = true
+		case err != nil:
+			// OSV is unwell: the next poll tries again.
+		case !e.reconcileCorrected(ctx, v):
+			resolved[id] = true
+		}
+	}
+	if len(resolved) == 0 {
+		return
+	}
+	e.advMu.Lock()
+	defer e.advMu.Unlock()
+	list, err := e.indexRead(ctx, advisoryRetryCursor)
+	if err != nil {
+		return
+	}
+	var keep []string
+	for _, id := range list {
+		if !resolved[id] {
+			keep = append(keep, id)
+		}
+	}
+	val := ""
+	if len(keep) > 0 {
+		b, _ := json.Marshal(keep)
+		val = string(b)
+	}
+	if err := e.Store.SetCursor(ctx, advisoryRetryCursor, val); err != nil {
+		e.log().Warn("osv: store the corrections to retry", "err", err)
+	}
+}
+
+func (e *Engine) reconcileRepo(ctx context.Context, v *advisory.Vuln, repoName string, jobs []model.Job) (busy bool) {
 	deps, err := e.Store.ListRepoDependencies(ctx, repoName)
 	if err != nil {
 		e.log().Warn("osv: list dependencies", "repo", repoName, "err", err)
-		return
+		return false
 	}
 	var stale []model.Job
 	for _, j := range jobs {
@@ -117,17 +170,20 @@ func (e *Engine) reconcileRepo(ctx context.Context, v *advisory.Vuln, repoName s
 		}
 	}
 	if len(stale) == 0 {
-		return
+		return false
 	}
 	release := e.tryRepo(ctx, repoName)
 	if release == nil {
-		e.log().Warn("osv: repo busy; a corrected advisory's work is left as it is", "repo", repoName, "id", v.ID)
-		return
+		e.log().Warn("osv: repo busy; the correction is retried on a later poll", "repo", repoName, "id", v.ID)
+		if err := e.indexAdd(ctx, advisoryRetryCursor, v.ID); err != nil {
+			e.log().Warn("osv: remember the correction to retry", "id", v.ID, "err", err)
+		}
+		return true
 	}
 	defer release()
 	repo, found, err := e.Store.GetRepo(ctx, repoName)
 	if err != nil || !found {
-		return
+		return false
 	}
 	var open []platform.PR
 	opened := false
@@ -157,13 +213,14 @@ func (e *Engine) reconcileRepo(ctx context.Context, v *advisory.Vuln, repoName s
 			if !opened {
 				if open, err = e.Platform.ListOpenPRs(ctx, repo, BranchPrefix); err != nil {
 					e.log().Warn("osv: list open pull requests", "repo", repoName, "err", err)
-					return
+					return false
 				}
 				opened = true
 			}
 			e.closeCorrected(ctx, repo, cur, open, v.ID)
 		}
 	}
+	return false
 }
 
 func (e *Engine) closeCorrected(ctx context.Context, repo model.Repo, j model.Job, open []platform.PR, id string) {

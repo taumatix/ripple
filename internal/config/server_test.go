@@ -198,6 +198,19 @@ func TestServerDynamoCounterStripes(t *testing.T) {
 	}
 }
 
+func TestServerOSVSweepBatch(t *testing.T) {
+	s, err := LoadServer(env(base))
+	if err != nil || s.OSVSweepBatch != 10 {
+		t.Fatalf("default: %d %v", s.OSVSweepBatch, err)
+	}
+	if s, err = LoadServer(env(with("RIPPLE_OSV_SWEEP_BATCH", "3"))); err != nil || s.OSVSweepBatch != 3 {
+		t.Fatalf("set: %d %v", s.OSVSweepBatch, err)
+	}
+	if _, err = LoadServer(env(with("RIPPLE_OSV_SWEEP_BATCH", "0"))); err == nil {
+		t.Fatal("0 accepted")
+	}
+}
+
 func TestServerOSV(t *testing.T) {
 	s, err := LoadServer(env(base))
 	if err != nil || s.OSV || s.OSVInterval != 10*time.Minute || s.OSVMaxFetch != 100 || s.OSVURL != "https://api.osv.dev" {

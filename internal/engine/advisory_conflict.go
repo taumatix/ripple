@@ -127,3 +127,56 @@ func overlaps(a, b map[string]bool) bool {
 	}
 	return false
 }
+
+// closeBeaten runs after a plan's PR was opened. When it is a security toolchain PR, an
+// open directive or toolchain PR of ripple's that does not fix an advisory edits the same
+// line and would conflict with it, so that PR is closed (untouched, with a reason) and its
+// job goes back to waiting: holdForSecurity then keeps it waiting while this PR is open,
+// and it is judged afresh once it is merged. A PR a person touched, a host that cannot
+// close, or close-superseded-pull-requests: false leave both open, as before.
+func (r *runner) closeBeaten(p *prPlan, pr platform.PR, open []platform.PR) {
+	if !r.e.Advisories || !r.cfg.ClosesSuperseded() {
+		return
+	}
+	security := false
+	for _, it := range p.items {
+		if it.job.Datasource == model.DatasourceGoToolchain && it.advisory != nil {
+			security = true
+		}
+	}
+	if !security {
+		return
+	}
+	for _, old := range open {
+		if old.Head == p.branch {
+			continue
+		}
+		for _, pkg := range []string{model.PackageGoDirective, model.PackageGoToolchain} {
+			tail, ok := staleVersion(old.Head, pkg)
+			if !ok {
+				continue
+			}
+			key := model.JobKey(r.repo.FullName, model.DatasourceGoToolchain, pkg, tail)
+			j, found, err := r.e.Store.GetJob(r.ctx, key)
+			if err != nil || !found || j.State != model.JobDone || j.PRURL == "" || j.PRURL != old.URL || r.e.advisoryNoteFor(r.ctx, j) != nil {
+				continue
+			}
+			comment := fmt.Sprintf("Closing: %s fixes a security advisory by editing the same toolchain line of this go.mod, so the two would conflict. ripple will propose this update again once that pull request is merged or closed.", pr.URL)
+			done, err := platform.CloseUntouchedPR(r.ctx, r.e.Platform, r.repo, old, comment)
+			switch {
+			case err != nil:
+				r.e.log().Warn("pull request beaten by a security update not closed", "repo", r.repo.FullName, "pr", old.URL, "err", err)
+			case !done:
+				r.e.log().Info("pull request left open beside a security update: it was touched by someone else", "repo", r.repo.FullName, "pr", old.URL)
+			default:
+				j.State, j.PRURL = model.JobPending, ""
+				j.NotBefore = r.e.now().Add(deferBy)
+				j.Reason = fmt.Sprintf("waiting for the security pull request %s: both edit the toolchain line of the same go.mod", pr.URL)
+				if err := r.e.updateJob(r.ctx, r.hold, j); err != nil {
+					r.e.log().Error("requeue job of a closed pull request", "job", j.Key, "err", err)
+				}
+				r.e.log().Info("closed a pull request beaten by a security toolchain update", "repo", r.repo.FullName, "pr", old.URL, "by", pr.URL)
+			}
+		}
+	}
+}

@@ -441,6 +441,7 @@ func (r *runner) execute(plans []*prPlan, deps []model.Dependency) {
 			if !p.draft {
 				// A draft that failed verification is no replacement for a PR that may be fine.
 				r.supersede(p, *pr, open)
+				r.closeBeaten(p, *pr, open)
 			}
 		}
 	}

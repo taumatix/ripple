@@ -74,3 +74,25 @@ func TestSecurityFromPseudoVersionsIsGomodOnlyAndOffByDefault(t *testing.T) {
 		t.Errorf("with regex: %v", err)
 	}
 }
+
+func TestSecurityBypassIsGomodOnlyValidatedAndOffByDefault(t *testing.T) {
+	c, err := Parse([]byte("updates:\n  - ecosystem: gomod\n    security-bypass: [open-pull-requests-limit, schedule]\n"))
+	if err != nil || !c.Updates[0].Bypasses(BypassLimit) || !c.Updates[0].Bypasses(BypassSchedule) {
+		t.Fatalf("err=%v %+v", err, c)
+	}
+	c, err = Parse([]byte("updates:\n  - ecosystem: gomod\n"))
+	if err != nil || c.Updates[0].Bypasses(BypassLimit) || c.Updates[0].Bypasses(BypassSchedule) {
+		t.Fatalf("default: err=%v", err)
+	}
+	if _, err := Parse([]byte("updates:\n  - ecosystem: gomod\n    security-bypass: [cooldown]\n")); err == nil || !strings.Contains(err.Error(), "security-bypass") {
+		t.Errorf("unknown value: %v", err)
+	}
+	for _, eco := range []string{"docker", "github-actions"} {
+		if _, err := Parse([]byte("updates:\n  - ecosystem: " + eco + "\n    security-bypass: [schedule]\n")); err == nil || !strings.Contains(err.Error(), "security-bypass") {
+			t.Errorf("with %s: %v", eco, err)
+		}
+	}
+	if _, err := Parse([]byte("updates:\n  - ecosystem: regex\n    security-bypass: [schedule]\n    files: [Makefile]\n    patterns: ['(?P<name>a) (?P<version>b)']\n")); err == nil || !strings.Contains(err.Error(), "security-bypass") {
+		t.Errorf("with regex: %v", err)
+	}
+}

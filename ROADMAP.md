@@ -101,12 +101,6 @@ Everything else:
     Kubernetes Jobs backend, and publish an updater image per ecosystem so a repo's build never runs next to the
     App key. Later, behind the plugin mechanism (entry 33): a dependency collector as an isolated container with the
     same limits.
-51. **OSV: should a security PR bypass the open-PR limit and the schedule?** Today only the cooldown is skipped.
-    Needs a decision from real use. Trade-offs: bypassing the limit makes a security fix arrive even when a repo
-    is at its cap of open PRs (the case where it matters most) but lets one advisory affecting many modules open
-    many PRs at once; bypassing the schedule removes the "not on a Friday" protection for the one PR type
-    that is most often wanted at once, but merges ripple would not otherwise open out of hours. Options:
-    bypass only the limit; bypass both for severity HIGH or CRITICAL; or per-repo opt-in. Not decided here.
 52. **OSV: finish the live run.** Four read-only requests on 2026-11-23 settled the querybatch version
     format and the stdlib and toolchain names (UPSTREAM.md `verified-live`). Two more
     requests (2026-11-23): stdlib and toolchain 1.21.0 gave disjoint id sets and no next_page_token. Still open: a
@@ -344,3 +338,6 @@ Everything else:
     remove the manual install; publish `ripple-runner:<minor>` images from CI too. The image selection was verified
     against the fake runtime only; CI builds each minor and runs `go version` in it but no real runtime has run a
     ripple verification in a per-minor image.
+172. **OSV: security-bypass by severity.** `security-bypass` (entry 51) is per update entry and all or nothing. A
+    `severity: [high, critical]` qualifier (bypass only for those) and a per-advisory cap on PRs opened past the limit were left
+    out until real use shows whether a repo wants them.

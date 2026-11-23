@@ -48,6 +48,9 @@ type item struct {
 	group     string
 	typ       rules.UpdateType
 	advisory  *advisoryNote // set when the job fixes a published advisory
+	// bypassLimit is set when the job fixes an advisory and the update entry says its
+	// security PRs skip the open pull request limit (security-bypass).
+	bypassLimit bool
 }
 
 // migrates reports whether the update renames the package (a Go major bump).
@@ -326,6 +329,9 @@ func (r *runner) plan(jobs []model.Job, deps []model.Dependency) []*prPlan {
 				ignored = true
 				continue
 			}
+			if it.advisory != nil && u.Bypasses(config.BypassLimit) {
+				it.bypassLimit = true
+			}
 			if dec.NotBefore.After(notBefore) {
 				notBefore = dec.NotBefore
 			}
@@ -380,6 +386,36 @@ func (r *runner) plan(jobs []model.Job, deps []model.Dependency) []*prPlan {
 	return order
 }
 
+// bypassesLimit reports whether the PR may open at the open pull request limit: every
+// item fixes an advisory of an entry that opted in with security-bypass.
+func (p *prPlan) bypassesLimit() bool {
+	for _, it := range p.items {
+		if !it.bypassLimit {
+			return false
+		}
+	}
+	return len(p.items) > 0
+}
+
+// securityFirst puts the plans that bypass the limit ahead of the others, so that at the
+// limit a security PR is not beaten to the last slot by an ordinary update. The order is
+// otherwise kept, and nothing moves when no plan bypasses.
+func securityFirst(plans []*prPlan) []*prPlan {
+	first := make([]*prPlan, 0, len(plans))
+	var rest []*prPlan
+	for _, p := range plans {
+		if p.bypassesLimit() {
+			first = append(first, p)
+		} else {
+			rest = append(rest, p)
+		}
+	}
+	if len(first) == 0 {
+		return plans
+	}
+	return append(first, rest...)
+}
+
 func (r *runner) execute(plans []*prPlan, deps []model.Dependency) {
 	e := r.e
 	if until := platform.RateLimitedUntil(e.Platform, r.repo); until.After(e.now()) {
@@ -410,6 +446,7 @@ func (r *runner) execute(plans []*prPlan, deps []model.Dependency) {
 	}
 	limit := rules.EffectivePRLimit(e.Limits, r.cfg)
 	count := len(open)
+	plans = securityFirst(plans)
 	for pi, p := range plans {
 		if pr, ok := heads[p.branch]; ok {
 			for _, it := range p.items {
@@ -427,7 +464,7 @@ func (r *runner) execute(plans []*prPlan, deps []model.Dependency) {
 			closed := r.closeStale(supersededBy{ds: j.Datasource, pkg: j.Package, version: j.Version}, p.branch, open)
 			open, count = without(open, closed), count-len(closed)
 		}
-		if count >= limit {
+		if count >= limit && !p.bypassesLimit() {
 			for _, it := range p.items {
 				r.deferJob(it.job, e.now().Add(deferBy), fmt.Sprintf("open pull request limit (%d) reached", limit))
 			}

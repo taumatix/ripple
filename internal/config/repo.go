@@ -121,6 +121,11 @@ type Update struct {
 	// pseudo-version is a commit someone chose on purpose) and lists the advisory on the
 	// dependency dashboard. The PR is never automerged.
 	SecurityFromPseudoVersions bool `yaml:"security-from-pseudo-versions"`
+	// SecurityBypass is gomod only: what a security PR (one that fixes an OSV advisory)
+	// skips besides the cooldown. "open-pull-requests-limit" opens it even when the repo
+	// is at its cap of open ripple PRs; "schedule" opens it outside the schedule window.
+	// The default, empty, skips only the cooldown.
+	SecurityBypass []string `yaml:"security-bypass"`
 	// PrivateModules is gomod only: module path patterns (GONOSUMDB syntax) that the
 	// server's module proxy serves and the public checksum database does not know. Only a
 	// repo that lists them is given the server's proxy credential.
@@ -283,7 +288,7 @@ func (c *checker) add(n *yaml.Node, format string, a ...any) {
 
 var (
 	rootKeys     = []string{"version", "open-pull-requests-limit", "close-superseded-pull-requests", "backfill-new-dependencies", "dependency-dashboard", "updates"}
-	updateKeys   = []string{"ecosystem", "directory", "schedule", "cooldown", "ignore", "groups", "automerge", "go-toolchain", "cgo", "security-pseudo-versions", "security-from-pseudo-versions", "private-modules", "directives", "tidy", "files", "patterns", "package"}
+	updateKeys   = []string{"ecosystem", "directory", "schedule", "cooldown", "ignore", "groups", "automerge", "go-toolchain", "cgo", "security-pseudo-versions", "security-from-pseudo-versions", "security-bypass", "private-modules", "directives", "tidy", "files", "patterns", "package"}
 	scheduleKeys = []string{"days", "from", "to", "timezone"}
 	ignoreKeys   = []string{"dependency", "update-types"}
 	groupKeys    = []string{"patterns", "update-types"}
@@ -428,6 +433,22 @@ func decodeSafe(n *yaml.Node, out any) (err error) {
 	return nil
 }
 
+// The values of an update's security-bypass list.
+const (
+	BypassLimit    = "open-pull-requests-limit"
+	BypassSchedule = "schedule"
+)
+
+// Bypasses reports whether a security PR of this entry skips what, a Bypass* value.
+func (u *Update) Bypasses(what string) bool {
+	for _, b := range u.SecurityBypass {
+		if b == what {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *checker) update(n *yaml.Node, u *Update, where string) {
 	f := c.mapping(n, updateKeys, where)
 	if f == nil {
@@ -444,6 +465,11 @@ func (c *checker) update(n *yaml.Node, u *Update, where string) {
 		case "", "toolchain", "directive":
 		default:
 			c.add(f["go-toolchain"], "%s.go-toolchain must be toolchain or directive (omit it to leave the go directive and toolchain line alone)", where)
+		}
+		for _, b := range u.SecurityBypass {
+			if b != BypassLimit && b != BypassSchedule {
+				c.add(f["security-bypass"], "%s.security-bypass: %q is not %s or %s", where, b, BypassLimit, BypassSchedule)
+			}
 		}
 		switch u.Directives {
 		case "", "extended":
@@ -462,7 +488,7 @@ func (c *checker) update(n *yaml.Node, u *Update, where string) {
 			}
 		}
 	case "regex":
-		for _, k := range []string{"cgo", "security-pseudo-versions", "security-from-pseudo-versions", "private-modules", "directives", "tidy"} {
+		for _, k := range []string{"cgo", "security-pseudo-versions", "security-from-pseudo-versions", "security-bypass", "private-modules", "directives", "tidy"} {
 			if v := f[k]; v != nil {
 				c.add(v, "%s.%s is only valid with ecosystem: gomod", where, k)
 			}
@@ -493,13 +519,13 @@ func (c *checker) update(n *yaml.Node, u *Update, where string) {
 			}
 		}
 	case "github-actions":
-		for _, k := range []string{"files", "patterns", "package", "cgo", "security-pseudo-versions", "private-modules", "directives", "tidy", "go-toolchain"} {
+		for _, k := range []string{"files", "patterns", "package", "cgo", "security-pseudo-versions", "security-bypass", "private-modules", "directives", "tidy", "go-toolchain"} {
 			if v := f[k]; v != nil {
 				c.add(v, "%s.%s does not apply to ecosystem: github-actions", where, k)
 			}
 		}
 	case "docker", "npm", "cargo", "pip":
-		for _, k := range []string{"files", "patterns", "package", "cgo", "security-pseudo-versions", "private-modules", "directives", "tidy", "go-toolchain"} {
+		for _, k := range []string{"files", "patterns", "package", "cgo", "security-pseudo-versions", "security-bypass", "private-modules", "directives", "tidy", "go-toolchain"} {
 			if v := f[k]; v != nil {
 				c.add(v, "%s.%s does not apply to ecosystem: %s", where, k, u.Ecosystem)
 			}

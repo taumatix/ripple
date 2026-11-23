@@ -145,11 +145,15 @@ func Evaluate(l Limits, u *config.Update, pkg string, t UpdateType, releasedAt, 
 
 // EvaluateSecurity is Evaluate for an update that fixes a published advisory: the
 // cooldown, server minimum and repo cooldown alike, is skipped, and nothing else. The
-// repo's ignore rules, schedule, groups and automerge setting still decide.
+// repo's ignore rules, schedule, groups and automerge setting still decide, except that an
+// entry with security-bypass: [schedule] has no schedule for a security update.
 func EvaluateSecurity(l Limits, u *config.Update, pkg string, t UpdateType, now time.Time) Decision {
 	l.MinimumReleaseAge = 0
 	uu := *u
 	uu.Cooldown = nil
+	if u.Bypasses(config.BypassSchedule) {
+		uu.Schedule = nil
+	}
 	return Evaluate(l, &uu, pkg, t, now, now)
 }
 

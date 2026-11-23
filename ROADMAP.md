@@ -280,14 +280,6 @@ Everything else:
     against registry.npmjs.org: the client and fake come from the vendored excerpts (scoped-name encoding, 404 for private
     packages, the `deprecated` shape, a `latest` tag that exists are assumed; see UPSTREAM.md). Also: `npm:packages` is one
     read-modify-write cursor (see 151), versions carry no publication date (the full document has `time` but is much larger).
-150. **Replicas: a consistent older-event check on DynamoDB.** Events are now numbered by the store (shipped), but
-    `HasOlderEvent` on DynamoDB still reads the eventually consistent `gsi1`, so an older event written a moment ago can be
-    missed (DynamoDB refuses `ConsistentRead` on a GSI); Postgres and the memory store have no such window. Write a base-table
-    item per live event under `REPOEVENTS#<repo>` (sort key `<seq, 20 digits>\x1f<id>`) in the same transaction as the event,
-    move or delete it wherever the event's index keys change (`UpdateEvent*`, `DeleteEvent*`, dead-lettering, requeue, purge),
-    backfill it for events from before, and make the check a consistent Query on it. Needs DynamoDB Local to verify the
-    transactions; the in-process fake covers them locally. Also: the sequence counter item is one hot key (one write per event;
-    fine at webhook rates, unmeasured), and Postgres numbers a duplicate delivery too (a gap, harmless).
 151. **Package cursors: one key per package.** `github-tags:packages` (and `docker:packages`, `npm:packages`) is one
     read-modify-write cursor: replicas can still lose each other's additions until the next scan of a repo that uses the
     package. Actions now prune a package no repo uses (entry 96); the rest needs a per-package key and a store method
@@ -312,3 +304,8 @@ Everything else:
     (mixed-case names, 404 for a missing crate, large files, conditional requests are assumed; see UPSTREAM.md). Also:
     `cargo:packages` is one read-modify-write cursor (see 96), versions carry no publication date, and the PR footer
     still says "module index" (see 99).
+157. **Event numbering: measure the hot counter, and the marker backfill.** The event sequence counter is one item written once
+    per event, and every event now also writes and later deletes a marker (`REPOEVENTS#<repo>`); at webhook rates that is
+    fine, but neither was measured under contention against DynamoDB Local or real DynamoDB. The marker backfill reads the
+    eventually consistent index once, so an event an older replica wrote just before the first check can lack a marker until
+    that replica's version is gone; Postgres also numbers a duplicate delivery (a gap, harmless).

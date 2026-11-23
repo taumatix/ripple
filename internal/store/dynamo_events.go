@@ -78,12 +78,12 @@ func eventItem(e model.Event) eventAttrs {
 }
 
 func (d *Dynamo) EnqueueEvent(ctx context.Context, e model.Event) (bool, error) {
-	err := d.put(ctx, eventItem(e), aws.String("attribute_not_exists(PK)"))
-	var cc *types.ConditionalCheckFailedException
-	if errors.As(err, &cc) {
-		return false, nil
+	ws, err := d.eventWrites(e, aws.String("attribute_not_exists(PK)"), nil)
+	if err != nil {
+		return false, wrapD("enqueue event", err)
 	}
-	return err == nil, wrapD("enqueue event", err)
+	ok, err := d.transactEvent(ctx, ws)
+	return ok, wrapD("enqueue event", err)
 }
 
 // ListEvents reads gsi1, which is eventually consistent: an event enqueued a moment
@@ -116,6 +116,15 @@ func (d *Dynamo) listEventPartition(ctx context.Context, op, pk string) ([]model
 }
 
 func (d *Dynamo) UpdateEvent(ctx context.Context, e model.Event) error {
+	if e.Dead() {
+		// Dead-lettering also removes the marker, in one transaction with the new keys.
+		ws, err := d.eventWrites(e, aws.String("attribute_exists(PK)"), nil)
+		if err != nil {
+			return wrapD("update event", err)
+		}
+		_, err = d.transactEvent(ctx, ws)
+		return wrapD("update event", err)
+	}
 	pk, sk := eventKeys(e)
 	_, err := d.db.UpdateItem(ctx, &dynamodb.UpdateItemInput{
 		TableName:           &d.table,
@@ -145,23 +154,12 @@ func (d *Dynamo) RequeueDeadEvent(ctx context.Context, id string) (bool, error) 
 	}
 	e := fromEventAttrs(a)
 	e.Attempts, e.NotBefore, e.DeadAt = 0, time.Time{}, time.Time{}
-	err = d.putIfDead(ctx, e)
-	var cc *types.ConditionalCheckFailedException
-	if errors.As(err, &cc) {
-		return false, nil
-	}
-	return err == nil, wrapD("requeue dead event", err)
-}
-
-func (d *Dynamo) putIfDead(ctx context.Context, e model.Event) error {
-	it, err := attributevalue.MarshalMap(eventItem(e))
+	ws, err := d.eventWrites(e, aws.String("GSI1PK = :dead"), map[string]types.AttributeValue{":dead": s(deadEventsPK)})
 	if err != nil {
-		return err
+		return false, wrapD("requeue dead event", err)
 	}
-	_, err = d.db.PutItem(ctx, &dynamodb.PutItemInput{TableName: &d.table, Item: it,
-		ConditionExpression:       aws.String("GSI1PK = :dead"),
-		ExpressionAttributeValues: map[string]types.AttributeValue{":dead": s(deadEventsPK)}})
-	return err
+	ok, err = d.transactEvent(ctx, ws)
+	return ok, wrapD("requeue dead event", err)
 }
 
 // PurgeDeadEvents queries the dead partition's key range before the cut-off and deletes
@@ -206,28 +204,9 @@ func (d *Dynamo) PurgeDeadEvents(ctx context.Context, before time.Time) (int, er
 }
 
 func (d *Dynamo) DeleteEvent(ctx context.Context, id string) error {
-	_, err := d.db.DeleteItem(ctx, &dynamodb.DeleteItemInput{
-		TableName: &d.table,
-		Key:       map[string]types.AttributeValue{"PK": s("EVENT#" + id), "SK": s("META")},
-	})
-	return wrapD("delete event", err)
-}
-
-var errFoundOlder = errors.New("found an older event")
-
-// HasOlderEvent is store.Store. It reads gsi1, which is eventually consistent: an older
-// event written a moment ago can be missed, and the next claim of this repo's events
-// (or the 30s rescan) sees it. Postgres and Memory have no such window.
-func (d *Dynamo) HasOlderEvent(ctx context.Context, e model.Event) (bool, error) {
-	err := d.query(ctx, &dynamodb.QueryInput{
-		IndexName:                 aws.String(gsi1),
-		KeyConditionExpression:    aws.String("GSI1PK = :pk AND GSI1SK < :sk"),
-		FilterExpression:          aws.String("#r = :r"),
-		ExpressionAttributeNames:  map[string]string{"#r": "Repo"},
-		ExpressionAttributeValues: map[string]types.AttributeValue{":pk": s("EVENTS"), ":sk": s(fmt.Sprintf("%020d", e.Seq) + sep + e.ID), ":r": s(e.Repo)},
-	}, 0, func(map[string]types.AttributeValue) error { return errFoundOlder })
-	if errors.Is(err, errFoundOlder) {
-		return true, nil
+	ws, err := d.deleteEventWrites(ctx, id)
+	if err == nil && ws != nil {
+		_, err = d.transactEvent(ctx, ws)
 	}
-	return false, wrapD("has older event", err)
+	return wrapD("delete event", err)
 }

@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -63,6 +65,11 @@ type Queue struct {
 	// Backoff is the delay before retry number attempt; default attempt * 30s.
 	Backoff func(attempt int) time.Duration
 	Now     func() time.Time
+	// Owner names this replica in the leases it takes on events; empty picks a random id.
+	// LeaseTTL is how long a claim on an event lasts without renewal, i.e. how long a dead
+	// replica's event waits before another retakes it; default store-side 30s.
+	Owner    string
+	LeaseTTL time.Duration
 
 	admit sync.RWMutex // Add holds it shared across persist+insert; loading holds it exclusively.
 
@@ -85,7 +92,15 @@ type Queue struct {
 type entry struct {
 	ev      model.Event
 	running bool
+	// hold keeps the event unstarted until then: another replica claimed it.
+	hold time.Time
 }
+
+// eventLease names the store lease that makes one replica at a time handle an event.
+func eventLease(id string) string { return "event:" + id }
+
+// DefaultEventLeaseTTL is how long a replica's claim on an event lasts without renewal.
+const DefaultEventLeaseTTL = 30 * time.Second
 
 func (q *Queue) init() {
 	q.mu.Lock()
@@ -114,6 +129,14 @@ func (q *Queue) init() {
 	}
 	if q.Now == nil {
 		q.Now = time.Now
+	}
+	if q.LeaseTTL <= 0 {
+		q.LeaseTTL = DefaultEventLeaseTTL
+	}
+	if q.Owner == "" {
+		b := make([]byte, 8)
+		_, _ = rand.Read(b)
+		q.Owner = hex.EncodeToString(b)
 	}
 	if q.Log == nil {
 		q.Log = slog.New(slog.DiscardHandler)
@@ -357,9 +380,13 @@ func (q *Queue) eligible(inst int64, now time.Time) (e *entry, due time.Time) {
 		if blocked[repo] {
 			continue
 		}
-		if c.running || q.busyRepo[repo] || c.ev.NotBefore.After(now) {
-			if !c.running && c.ev.NotBefore.After(now) && (due.IsZero() || c.ev.NotBefore.Before(due)) {
-				due = c.ev.NotBefore
+		nb := c.ev.NotBefore
+		if c.hold.After(nb) {
+			nb = c.hold
+		}
+		if c.running || q.busyRepo[repo] || nb.After(now) {
+			if !c.running && nb.After(now) && (due.IsZero() || nb.Before(due)) {
+				due = nb
 			}
 			blocked[repo] = true
 			continue
@@ -378,9 +405,91 @@ func (q *Queue) start(ctx context.Context, e *entry) {
 	q.wg.Add(1)
 	go func() {
 		defer q.wg.Done()
-		err := q.Process(ctx, e.ev)
+		held, ev, state := q.claim(ctx, e.ev)
+		switch state {
+		case claimedElsewhere:
+			q.standDown(e, ev, q.Now().Add(q.LeaseTTL/3), false)
+			return
+		case claimGone:
+			q.standDown(e, ev, time.Time{}, true)
+			return
+		case claimDeferred:
+			q.standDown(e, ev, time.Time{}, false)
+			return
+		}
+		defer held.Release()
+		err := q.Process(held.Ctx, ev)
+		if errors.Is(context.Cause(held.Ctx), store.ErrLeaseLost) && ctx.Err() == nil {
+			// Another replica owns the event now; its outcome is the event's.
+			q.Log.Warn("event lease lost; leaving the event to its new holder", "event", ev.ID, "repo", ev.Repo)
+			q.standDown(e, ev, q.Now().Add(q.LeaseTTL/3), false)
+			return
+		}
+		q.mu.Lock()
+		e.ev = ev
+		q.mu.Unlock()
 		q.finish(ctx, e, err)
 	}()
+}
+
+type claimState int
+
+const (
+	claimed claimState = iota
+	claimedElsewhere
+	claimGone     // the event no longer exists: another replica handled it
+	claimDeferred // the event is not due, or dead, by the store's account
+)
+
+// claim takes the event's lease and re-reads the event under it, so what runs is the
+// store's current state (another replica may have retried, deferred, dead-lettered or
+// finished it since this replica loaded it).
+func (q *Queue) claim(ctx context.Context, ev model.Event) (*store.Held, model.Event, claimState) {
+	held, err := store.Hold(ctx, q.Store, q.Log, eventLease(ev.ID), q.Owner, q.LeaseTTL)
+	if err != nil {
+		if ctx.Err() == nil {
+			q.Log.Error("claim event", "event", ev.ID, "err", err)
+		}
+		return nil, ev, claimedElsewhere
+	}
+	if held == nil {
+		return nil, ev, claimedElsewhere
+	}
+	fresh, ok, err := q.Store.GetEvent(ctx, ev.ID)
+	switch {
+	case err != nil:
+		held.Release()
+		if ctx.Err() == nil {
+			q.Log.Error("read claimed event", "event", ev.ID, "err", err)
+		}
+		return nil, ev, claimedElsewhere
+	case !ok:
+		held.Release()
+		return nil, ev, claimGone
+	case fresh.Dead():
+		held.Release()
+		return nil, fresh, claimGone
+	case fresh.NotBefore.After(q.Now()):
+		held.Release()
+		return nil, fresh, claimDeferred
+	}
+	return held, fresh, claimed
+}
+
+// standDown returns an event that was not handled here to the queue: held until a time,
+// or dropped when it is gone from the store.
+func (q *Queue) standDown(e *entry, ev model.Event, hold time.Time, drop bool) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	e.running = false
+	e.ev, e.hold = ev, hold
+	q.running--
+	q.runInst[ev.InstallationID]--
+	delete(q.busyRepo, ev.Repo)
+	if drop {
+		q.drop(e)
+	}
+	q.poke()
 }
 
 func (q *Queue) finish(ctx context.Context, e *entry, err error) {

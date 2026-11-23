@@ -89,7 +89,7 @@ func (e *Engine) RunDue(ctx context.Context) (int, error) {
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
-			n := e.runRepo(ctx, name, byRepo[name])
+			n, _ := e.runRepo(ctx, name, byRepo[name])
 			mu.Lock()
 			finished += n
 			mu.Unlock()
@@ -103,6 +103,7 @@ func (e *Engine) RunDue(ctx context.Context) (int, error) {
 type runner struct {
 	e        *Engine
 	ctx      context.Context
+	hold     *repoLease
 	repo     model.Repo
 	cfg      *config.Repo
 	ms       []manager.Manager
@@ -138,6 +139,9 @@ func (r *runner) deferJob(j model.Job, until time.Time, reason string) {
 }
 
 func (r *runner) fail(j model.Job, err error) {
+	if errors.Is(err, ErrLeaseLost) {
+		return // another replica owns the repo now; this run's outcome is not the job's
+	}
 	j.Attempts++
 	j.Reason = err.Error()
 	var rl *platform.RateLimitError
@@ -157,8 +161,52 @@ func (r *runner) fail(j model.Job, err error) {
 	r.e.log().Warn("job failed", "job", j.Key, "attempt", j.Attempts, "err", err)
 }
 
-func (e *Engine) runRepo(ctx context.Context, name string, jobs []model.Job) int {
+// runRepo runs the jobs of one repo and returns how many reached a terminal state. The
+// second result is true when another replica holds the repo, in which case nothing ran and
+// the jobs are left as they were.
+func (e *Engine) runRepo(ctx context.Context, name string, jobs []model.Job) (int, bool) {
 	defer e.lockRepo(name)()
+	hold, err := e.acquireRepo(ctx, name, false)
+	switch {
+	case err != nil:
+		if ctx.Err() == nil {
+			e.log().Error("claim repo", "repo", name, "err", err)
+		}
+		return 0, false
+	case hold == nil:
+		return 0, true
+	}
+	defer hold.Release()
+	ctx = hold.Ctx
+	// The listing these jobs came from may predate another replica's run of the repo.
+	if jobs = e.stillDue(ctx, jobs); len(jobs) == 0 {
+		return 0, false
+	}
+	return e.runClaimed(ctx, hold, name, jobs), false
+}
+
+// stillDue re-reads each job under the repo's lease and keeps the ones that are still
+// pending and due: a replica that listed them before another finished them must not run
+// them again (a merged PR would be reopened).
+func (e *Engine) stillDue(ctx context.Context, jobs []model.Job) []model.Job {
+	now := e.now()
+	var out []model.Job
+	for _, j := range jobs {
+		cur, ok, err := e.Store.GetJob(ctx, j.Key)
+		if err != nil {
+			if ctx.Err() == nil {
+				e.log().Error("get job", "job", j.Key, "err", err)
+			}
+			continue
+		}
+		if ok && cur.State == model.JobPending && !cur.NotBefore.After(now) {
+			out = append(out, cur)
+		}
+	}
+	return out
+}
+
+func (e *Engine) runClaimed(ctx context.Context, hold *repoLease, name string, jobs []model.Job) int {
 	if e.Paused(ctx, name) {
 		// Archived: read-only. Keep the jobs and look again later; Resume makes them due.
 		for _, j := range jobs {
@@ -170,7 +218,7 @@ func (e *Engine) runRepo(ctx context.Context, name string, jobs []model.Job) int
 		return 0
 	}
 	defer func() { e.syncDashboard(ctx, name) }()
-	r := &runner{e: e, ctx: ctx}
+	r := &runner{e: e, ctx: ctx, hold: hold}
 	var err error
 	var found bool
 	if r.repo, found, err = e.Store.GetRepo(ctx, name); err != nil {
@@ -336,6 +384,9 @@ func (r *runner) execute(plans []*prPlan) {
 			continue
 		}
 		pr, err := r.openPR(p)
+		if errors.Is(err, ErrLeaseLost) || errors.Is(context.Cause(r.ctx), ErrLeaseLost) {
+			return // another replica owns the repo; its run handles the rest
+		}
 		if err != nil {
 			var rl *platform.RateLimitError
 			for _, it := range p.items {
@@ -461,6 +512,12 @@ func (r *runner) openPR(p *prPlan) (*platform.PR, error) {
 			r.finish(it.job, model.JobSkipped, "no file changed", "")
 		}
 		return nil, nil
+	}
+	// The branch is pushed; opening the PR is the step a second replica must not repeat, so
+	// confirm the lease is still ours right before it. A replica that lost it stops here and
+	// the new holder finds the branch and opens the one PR.
+	if err := r.hold.Fence(); err != nil {
+		return nil, err
 	}
 	pr, err := e.Platform.CreatePR(r.ctx, r.repo, platform.PRSpec{Head: p.branch, Base: r.ws.DefaultBranch(), Title: title, Body: body, Draft: draft, Labels: labelsFor(applied)})
 	if err != nil {

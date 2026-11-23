@@ -19,6 +19,7 @@ type Memory struct {
 	jobs     map[string]model.Job
 	cursors  map[string]string
 	events   map[string]model.Event
+	leases   map[string]Lease
 }
 
 func NewMemory() *Memory {

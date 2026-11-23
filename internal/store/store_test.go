@@ -96,7 +96,7 @@ func TestDynamo(t *testing.T) {
 		storetest.Run(t, func(t *testing.T) store.Store {
 			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 			defer cancel()
-			d := store.NewDynamo(db, "ripple_test_"+suffix())
+			d := store.NewDynamo(db, "ripple_test_"+suffix(), store.WithLeaseSkew(0))
 			if err := d.EnsureTable(ctx); err != nil {
 				t.Fatal(err)
 			}
@@ -111,7 +111,7 @@ func TestDynamo(t *testing.T) {
 func TestDynamoSharded(t *testing.T) {
 	eachDynamo(t, func(t *testing.T, db *dynamodb.Client, _ *dynamofake.Fake) {
 		storetest.Run(t, func(t *testing.T) store.Store {
-			d := newDynamoTable(t, db, "ripple_test_"+suffix(), store.WithJobShards(5), store.WithDependentShards(3))
+			d := newDynamoTable(t, db, "ripple_test_"+suffix(), store.WithJobShards(5), store.WithDependentShards(3), store.WithLeaseSkew(0))
 			return d
 		})
 	})

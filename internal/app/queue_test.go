@@ -355,3 +355,74 @@ func TestHandleSplitsADeliveryIntoOneEventPerRepo(t *testing.T) {
 		t.Fatalf("push event: %+v", p)
 	}
 }
+
+// Two replicas load the same stored events and race for them: each event is handled
+// exactly once, by whichever replica claims it first.
+func TestTwoReplicasHandleEachEventOnce(t *testing.T) {
+	st := store.NewMemory()
+	var evs []model.Event
+	for i := 0; i < 20; i++ {
+		evs = append(evs, ev(1, fmt.Sprint("e", i), fmt.Sprint("acme/r", i)))
+	}
+	if err := (&Queue{Store: st}).Add(context.Background(), evs...); err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	seen := map[string]int{}
+	process := func(ctx context.Context, e model.Event) error {
+		mu.Lock()
+		seen[e.ID]++
+		mu.Unlock()
+		time.Sleep(2 * time.Millisecond)
+		return nil
+	}
+	for _, owner := range []string{"a", "b"} {
+		startQueue(t, &Queue{Store: st, Process: process, Workers: 3, PerInstallation: 3, Owner: owner, LeaseTTL: 500 * time.Millisecond})
+	}
+	eventually(t, "store drained", func() bool { return stored(t, st) == 0 })
+	mu.Lock()
+	defer mu.Unlock()
+	for _, e := range evs {
+		if seen[e.ID] != 1 {
+			t.Errorf("event %s handled %d times, want 1", e.ID, seen[e.ID])
+		}
+	}
+}
+
+// An event whose lease another replica holds is left alone while the lease lives, and
+// taken once its holder has gone: a replica that died mid-event does not strand it.
+func TestEventHeldByAnotherReplicaIsTakenAfterItsLeaseLapses(t *testing.T) {
+	st, g := store.NewMemory(), newGate()
+	if err := (&Queue{Store: st}).Add(context.Background(), ev(1, "1", "acme/a")); err != nil {
+		t.Fatal(err)
+	}
+	// The dead replica's claim: acquired and never renewed or released.
+	if _, ok, err := st.AcquireLease(context.Background(), eventLease("1"), "dead", 400*time.Millisecond); err != nil || !ok {
+		t.Fatalf("seed lease: ok=%v err=%v", ok, err)
+	}
+	start := time.Now()
+	startQueue(t, &Queue{Store: st, Process: g.process, Workers: 1, PerInstallation: 1, Owner: "live", LeaseTTL: 300 * time.Millisecond})
+	eventually(t, "event taken over", func() bool { return g.has("1") })
+	if d := time.Since(start); d < 350*time.Millisecond {
+		t.Errorf("handled after %v, while the dead replica's lease was live", d)
+	}
+}
+
+// An event another replica finished since this one loaded it is dropped, not run again.
+func TestEventHandledElsewhereIsNotRunAgain(t *testing.T) {
+	st, g := store.NewMemory(), newGate()
+	q := &Queue{Store: st, Process: g.process, Workers: 1, PerInstallation: 1, Owner: "a"}
+	g.hold("acme/blocker")
+	startQueue(t, q)
+	_ = q.Add(context.Background(), ev(1, "1", "acme/blocker"), ev(1, "2", "acme/a"))
+	// Replica b handled "2" meanwhile: it is gone from the store.
+	if err := st.DeleteEvent(context.Background(), "2"); err != nil {
+		t.Fatal(err)
+	}
+	g.release("acme/blocker")
+	eventually(t, "blocker handled", func() bool { return g.has("1") })
+	time.Sleep(50 * time.Millisecond)
+	if g.has("2") {
+		t.Fatal("event deleted by another replica was run again")
+	}
+}

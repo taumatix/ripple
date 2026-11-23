@@ -14,6 +14,7 @@ Billing is on-demand. `Store.EnsureTable` creates both.
 | package shards | `PKGCOUNT#<ds>#<line>` | `META` | | |
 | event | `EVENT#<id>` | `META` | `EVENTS` | `<seq, 20 digits>\x1f<id>` |
 | dead event | `EVENT#<id>` | `META` | `EVENTS#dead` | `<dead_at, fixed width>\x1f<id>` |
+| lease | `LEASE#<name>` | `META` | | |
 
 ## Queries
 

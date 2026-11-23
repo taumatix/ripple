@@ -47,17 +47,20 @@ func (c *clock) Advance(d time.Duration) {
 }
 
 type env struct {
-	t     *testing.T
-	gh    *testutil.GitHub
-	idx   *testutil.Index
-	st    store.Store
-	plat  *testutil.CountingPlatform
-	app   *app.App
-	clock *clock
-	proxy *testutil.GoProxy
-	hook  string
-	ticks int
-	logs  *syncBuf
+	t    *testing.T
+	gh   *testutil.GitHub
+	idx  *testutil.Index
+	st   store.Store
+	plat *testutil.CountingPlatform
+	// client and limits are what a second replica of the server is built from.
+	client *github.Client
+	limits rules.Limits
+	app    *app.App
+	clock  *clock
+	proxy  *testutil.GoProxy
+	hook   string
+	ticks  int
+	logs   *syncBuf
 	// extraHeaders are added to every webhook delivery (a GHES's own headers).
 	extraHeaders http.Header
 
@@ -143,6 +146,7 @@ func newEnvOpts(t *testing.T, st store.Store, lim rules.Limits, o opts) *env {
 		GoProxy: e.proxy.URL, GoSumDB: "off", GoCacheDir: goCache(t), Sandbox: o.sandbox, Now: e.clock.Now,
 		Log: slog.New(slog.NewTextHandler(testWriter{t}, nil))}
 	e.plat = &testutil.CountingPlatform{Inner: gh}
+	e.client, e.limits = gh, lim
 	eng := &engine.Engine{Store: st, Platform: e.plat, Limits: lim, Now: e.clock.Now, Workers: 2, Log: slog.New(slog.NewTextHandler(io.MultiWriter(testWriter{t}, e.logs), nil))}
 	if o.engine != nil {
 		o.engine(eng)

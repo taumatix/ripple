@@ -11,6 +11,8 @@ import (
 // Store is the persistence contract. The performance-critical operation is
 // ListDependents: package -> every repo importing it, with the current version.
 type Store interface {
+	Leases
+
 	UpsertRepo(ctx context.Context, r model.Repo) error
 	GetRepo(ctx context.Context, fullName string) (model.Repo, bool, error)
 	// DeleteRepo removes the repo and all of its dependencies.
@@ -44,6 +46,8 @@ type Store interface {
 	EnqueueEvent(ctx context.Context, e model.Event) (bool, error)
 	// ListEvents returns every live (not dead) queued event, lowest Seq first (ties by ID).
 	ListEvents(ctx context.Context) ([]model.Event, error)
+	// GetEvent returns one event, live or dead; the bool is false when it does not exist.
+	GetEvent(ctx context.Context, id string) (model.Event, bool, error)
 	// UpdateEvent stores Attempts, NotBefore, LastError, LastAttemptAt and DeadAt for an
 	// existing event; setting DeadAt moves it out of ListEvents into ListDeadEvents. An
 	// absent ID is not an error.

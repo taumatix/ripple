@@ -19,16 +19,19 @@ type JobRunner struct {
 	// finished records, per repo, the generation its last run ended in; a listing
 	// taken before that may hold jobs the run has since finished.
 	finished map[string]uint64
-	gen      uint64
-	running  int
-	wake     chan struct{}
-	wg       sync.WaitGroup
-	once     sync.Once
+	// cooling holds repos another replica was running until a time; they are left out of
+	// the listing until then so a held repo does not spin the loop.
+	cooling map[string]time.Time
+	gen     uint64
+	running int
+	wake    chan struct{}
+	wg      sync.WaitGroup
+	once    sync.Once
 }
 
 func (r *JobRunner) init() {
 	r.once.Do(func() {
-		r.inflight, r.finished = map[string]bool{}, map[string]uint64{}
+		r.inflight, r.finished, r.cooling = map[string]bool{}, map[string]uint64{}, map[string]time.Time{}
 		r.wake = make(chan struct{}, 1)
 	})
 }
@@ -77,6 +80,13 @@ func (r *JobRunner) dispatch(ctx context.Context) {
 	for name := range r.inflight {
 		busy = append(busy, name)
 	}
+	for name, until := range r.cooling {
+		if time.Now().Before(until) {
+			busy = append(busy, name)
+		} else {
+			delete(r.cooling, name)
+		}
+	}
 	r.mu.Unlock()
 	if full || ctx.Err() != nil {
 		return
@@ -113,16 +123,23 @@ func (r *JobRunner) dispatch(ctx context.Context) {
 		r.wg.Add(1)
 		go func(name string, jobs []model.Job) {
 			defer r.wg.Done()
-			if n := e.runRepo(ctx, name, jobs); n > 0 {
+			n, held := e.runRepo(ctx, name, jobs)
+			if n > 0 {
 				e.log().Info("jobs finished", "repo", name, "jobs", n)
 			}
 			r.mu.Lock()
+			if held {
+				// Another replica is running this repo: look again after a while, not at once.
+				r.cooling[name] = time.Now().Add(e.leaseTTL() / 3)
+			}
 			r.gen++
 			r.finished[name] = r.gen
 			delete(r.inflight, name)
 			r.running--
 			r.mu.Unlock()
-			r.Wake()
+			if !held {
+				r.Wake()
+			}
 		}(name, byRepo[name])
 	}
 }

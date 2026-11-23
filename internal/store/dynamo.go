@@ -54,6 +54,8 @@ type Dynamo struct {
 	// pkgShards caches each package's recorded shard count for the write path. It only
 	// grows, and a stale (lower) value is safe to write with; reads never use it.
 	pkgShards sync.Map
+	// leaseSkew is the clock-skew margin of lease takeover (see dynamo_lease.go).
+	leaseSkew time.Duration
 }
 
 // DynamoOption configures NewDynamo.
@@ -89,7 +91,7 @@ const (
 )
 
 func NewDynamo(db *dynamodb.Client, table string, opts ...DynamoOption) *Dynamo {
-	d := &Dynamo{db: db, table: table, jobShards: DefaultJobShards, depShards: DefaultDependentShards, concurrency: DefaultQueryConcurrency}
+	d := &Dynamo{db: db, table: table, jobShards: DefaultJobShards, depShards: DefaultDependentShards, concurrency: DefaultQueryConcurrency, leaseSkew: DefaultLeaseSkew}
 	for _, o := range opts {
 		o(d)
 	}
@@ -243,6 +245,23 @@ func (st *Dynamo) depKeys(d model.Dependency, shards int) item {
 		PK: "REPO#" + d.Repo, SK: "DEP#" + d.File + sep + d.Datasource + sep + d.Package,
 		GSI1PK: dependentsPK(pkgBase(d.Datasource, d.Package), shardOf(d.Repo, shards)), GSI1SK: d.Repo + sep + d.File,
 	}
+}
+
+func n(v int64) types.AttributeValue {
+	return &types.AttributeValueMemberN{Value: strconv.FormatInt(v, 10)}
+}
+
+func (d *Dynamo) putCond(ctx context.Context, v any, cond string, vals map[string]types.AttributeValue) error {
+	m, err := attributevalue.MarshalMap(v)
+	if err != nil {
+		return err
+	}
+	in := &dynamodb.PutItemInput{TableName: &d.table, Item: m, ConditionExpression: &cond, ExpressionAttributeValues: vals}
+	if strings.Contains(cond, "#o") {
+		in.ExpressionAttributeNames = map[string]string{"#o": "Owner", "#t": "Token", "#e": "Expires"}
+	}
+	_, err = d.db.PutItem(ctx, in)
+	return err
 }
 
 func s(v string) types.AttributeValue { return &types.AttributeValueMemberS{Value: v} }

@@ -16,6 +16,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 
 	"github.com/taumatix/ripple/internal/store"
+	"github.com/taumatix/ripple/internal/store/dynamofake"
 )
 
 func suffix() string {
@@ -55,13 +56,34 @@ func ForEachStore(t *testing.T, fn func(t *testing.T, s store.Store)) {
 		db := dynamodb.NewFromConfig(cfg, func(o *dynamodb.Options) { o.BaseEndpoint = aws.String(ep) })
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
-		d := store.NewDynamo(db, "ripple_e2e_"+suffix())
+		d := store.NewDynamo(db, "ripple_e2e_"+suffix(), store.WithLeaseSkew(100*time.Millisecond))
 		if err := d.EnsureTable(ctx); err != nil {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = d.DeleteTable(context.Background()) })
 		fn(t, d)
 	})
+}
+
+// ForEachStoreWithFake is ForEachStore plus the in-process DynamoDB fake, which always
+// runs. It is for tests worth the extra run locally, where there is no DynamoDB Local.
+func ForEachStoreWithFake(t *testing.T, fn func(t *testing.T, s store.Store)) {
+	t.Run("dynamodb-fake", func(t *testing.T) {
+		f := dynamofake.New()
+		t.Cleanup(f.Close)
+		cfg, err := awsconfig.LoadDefaultConfig(context.Background(), awsconfig.WithRegion("us-east-1"),
+			awsconfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")))
+		if err != nil {
+			t.Fatal(err)
+		}
+		db := dynamodb.NewFromConfig(cfg, func(o *dynamodb.Options) { o.BaseEndpoint = aws.String(f.URL()) })
+		d := store.NewDynamo(db, "ripple_e2e_"+suffix(), store.WithLeaseSkew(100*time.Millisecond))
+		if err := d.EnsureTable(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		fn(t, d)
+	})
+	ForEachStore(t, fn)
 }
 
 // SkipUnlessRequired skips t with msg, or fails it when RIPPLE_REQUIRE_SERVICES=1:

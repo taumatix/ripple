@@ -63,6 +63,11 @@ type Engine struct {
 	// MaxBackfill bounds the jobs one scan creates for dependencies new to the repo; zero
 	// means DefaultMaxBackfill.
 	MaxBackfill int
+	// Replica names this process among the replicas sharing the Store; empty picks a random
+	// id, which is right unless logs should carry a stable name. LeaseTTL is how long a
+	// repo claim survives without renewal (zero means DefaultLeaseTTL). See docs/replicas.md.
+	Replica  string
+	LeaseTTL time.Duration
 	// DueBatch is how many due jobs one listing reads; zero means 1000.
 	DueBatch int
 
@@ -73,6 +78,9 @@ type Engine struct {
 
 	// parseConfig is a test seam counting repo-file parses; nil means RepoConfig.
 	parseConfig func([]byte) (*config.Repo, error)
+
+	idOnce sync.Once
+	id     string
 
 	mu    sync.Mutex
 	locks map[string]*sync.Mutex
@@ -131,6 +139,12 @@ func RepoConfig(raw []byte) (*config.Repo, error) {
 // the file is fixed.
 func (e *Engine) Scan(ctx context.Context, repo model.Repo) error {
 	defer e.lockRepo(repo.FullName)()
+	hold, err := e.acquireRepo(ctx, repo.FullName, true)
+	if err != nil {
+		return fmt.Errorf("scan %s: %w", repo.FullName, err)
+	}
+	defer hold.Release()
+	ctx = hold.Ctx
 	defer func() { e.syncDashboard(ctx, repo.FullName) }()
 	ws, err := e.Platform.Checkout(ctx, repo)
 	if err != nil {

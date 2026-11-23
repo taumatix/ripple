@@ -19,10 +19,6 @@ Ordered by how much each entry limits real deployments. The top is next.
 6. **Scan without a full checkout.** The clone filter saves nothing while the scan checks out HEAD
    ([docs/bounds.md](docs/bounds.md)): a huge-blob repo still downloads every blob at HEAD. Clone `--no-checkout`
    (or sparse) and read only the paths the managers match, so a repo's size stops mattering to a scan.
-7. **Run more than one replica.** The event queue and the job runner assume one process per store: two
-   replicas would both load the same queued events and both pick the same due jobs. Claim work with a lease
-   (Postgres `FOR UPDATE SKIP LOCKED` with an owner and expiry; DynamoDB a conditional owner/lease write), so
-   replicas share the queue and a crashed one's work is retaken when its lease lapses.
 
 Platforms (code hosts). The goal is the whole list Renovate supports, each behind the one `Platform`
 interface, each with the same end-to-end test (a push or release event leads to exactly one PR in
@@ -245,3 +241,17 @@ Everything else:
     when the record is modified.
 83. **OSV: a pseudo-version dependency is never moved.** A repo on a pseudo-version of a module gets no
     advisory PR. Decide whether to propose the module's first release above that commit.
+84. **Replicas: fence the job row.** `UpdateJob` is not store-fenced: a replica that lost its repo lease while
+    stalled can still write a stale job state. Benign today (the PR is idempotent by branch), but a fenced
+    write (Postgres `WHERE` on the lease token, Dynamo condition on the lease item) would close it
+    ([docs/replicas.md](docs/replicas.md)).
+85. **Replicas: take the lease on every repo mutation.** Rename, pause and the dashboard write path use only the
+    in-process `lockRepo`, so two replicas can interleave them with a running job.
+86. **Replicas: per-repo event order across replicas.** Events of one repo stay ordered within a replica only;
+    claim the oldest event of a repo (or the repo lease) before a later one if ordering turns out to matter.
+87. **Replicas: Postgres and DynamoDB under real contention.** The lease SQL and conditions are proven by the
+    shared store suite and the two-replica e2e, never against a real multi-node database under load or a real
+    clock skew. Run a soak with three replicas and a skewed clock.
+88. **Replicas: configuration and metrics.** Expose `Replica` and `LeaseTTL` as `RIPPLE_REPLICA` and
+    `RIPPLE_LEASE_TTL`, a replica-count and lease-takeover metric, and elect one replica for the feed poll
+    (two polling is safe, since job enqueue is insert-if-absent, but wasteful).

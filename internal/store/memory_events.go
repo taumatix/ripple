@@ -113,3 +113,10 @@ func SortEvents(e []model.Event) {
 		return e[i].ID < e[j].ID
 	})
 }
+
+func (m *Memory) GetEvent(_ context.Context, id string) (model.Event, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	e, ok := m.events[id]
+	return copyEvent(e), ok, nil
+}

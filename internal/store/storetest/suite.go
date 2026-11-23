@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -560,6 +562,101 @@ func Run(t *testing.T, mk func(t *testing.T) store.Store) {
 		evs, err := s.ListEvents(ctx)
 		if err != nil || len(evs) != 130 || evs[0].ID != "e129" || evs[129].ID != "e000" {
 			t.Fatalf("len=%d err=%v", len(evs), err)
+		}
+	})
+
+	t.Run("get event", func(t *testing.T) {
+		s := mk(t)
+		e := model.Event{ID: "g1", Seq: 5, InstallationID: 1, Kind: "push", Repo: "acme/web", Files: []string{"go.mod"}}
+		if _, ok, err := s.GetEvent(ctx, "g1"); err != nil || ok {
+			t.Fatalf("absent event: ok=%v err=%v", ok, err)
+		}
+		_, _ = s.EnqueueEvent(ctx, e)
+		got, ok, err := s.GetEvent(ctx, "g1")
+		if err != nil || !ok || got.ID != "g1" || got.Repo != "acme/web" || len(got.Files) != 1 {
+			t.Fatalf("got %+v ok=%v err=%v", got, ok, err)
+		}
+		e.Attempts, e.DeadAt = 3, time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+		_ = s.UpdateEvent(ctx, e)
+		if got, ok, _ = s.GetEvent(ctx, "g1"); !ok || got.Attempts != 3 || !got.Dead() {
+			t.Fatalf("dead event not returned: %+v ok=%v", got, ok)
+		}
+		_ = s.DeleteEvent(ctx, "g1")
+		if _, ok, _ = s.GetEvent(ctx, "g1"); ok {
+			t.Fatal("deleted event still returned")
+		}
+	})
+
+	t.Run("lease exclusion, renewal and takeover", func(t *testing.T) {
+		s := mk(t)
+		const ttl = 400 * time.Millisecond
+		a, ok, err := s.AcquireLease(ctx, "repo:acme/web", "A", ttl)
+		if err != nil || !ok || a.Owner != "A" || a.Token < 1 || a.Name != "repo:acme/web" {
+			t.Fatalf("first acquire: %+v ok=%v err=%v", a, ok, err)
+		}
+		if _, ok, err := s.AcquireLease(ctx, "repo:acme/web", "B", ttl); err != nil || ok {
+			t.Fatalf("B acquired a held lease: ok=%v err=%v", ok, err)
+		}
+		if _, ok, _ := s.AcquireLease(ctx, "repo:acme/other", "B", ttl); !ok {
+			t.Fatal("a different name is independent")
+		}
+		// The holder asking again extends and keeps the token.
+		again, ok, _ := s.AcquireLease(ctx, "repo:acme/web", "A", ttl)
+		if !ok || again.Token != a.Token {
+			t.Fatalf("re-acquire by holder: %+v ok=%v", again, ok)
+		}
+		// Renewal keeps it from lapsing.
+		for i := 0; i < 3; i++ {
+			time.Sleep(ttl / 2)
+			if a, ok, err = s.RenewLease(ctx, a, ttl); err != nil || !ok {
+				t.Fatalf("renew %d: ok=%v err=%v", i, ok, err)
+			}
+		}
+		if _, ok, _ := s.AcquireLease(ctx, "repo:acme/web", "B", ttl); ok {
+			t.Fatal("B took over a renewed lease")
+		}
+		// Left alone it lapses and B takes over with a higher token; A's renewal is then refused.
+		time.Sleep(ttl + 300*time.Millisecond)
+		b, ok, err := s.AcquireLease(ctx, "repo:acme/web", "B", ttl)
+		if err != nil || !ok || b.Token <= a.Token {
+			t.Fatalf("takeover: %+v ok=%v err=%v (old token %d)", b, ok, err, a.Token)
+		}
+		if _, ok, _ := s.RenewLease(ctx, a, ttl); ok {
+			t.Fatal("the displaced holder renewed")
+		}
+		if err := s.ReleaseLease(ctx, a); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok, _ := s.AcquireLease(ctx, "repo:acme/web", "A", ttl); ok {
+			t.Fatal("a stale release freed B's lease")
+		}
+		if err := s.ReleaseLease(ctx, b); err != nil {
+			t.Fatal(err)
+		}
+		if c, ok, _ := s.AcquireLease(ctx, "repo:acme/web", "A", ttl); !ok || c.Owner != "A" {
+			t.Fatalf("released lease not claimable: %+v ok=%v", c, ok)
+		}
+	})
+
+	t.Run("lease race has one winner", func(t *testing.T) {
+		s := mk(t)
+		const racers = 8
+		var wins atomic.Int32
+		var wg sync.WaitGroup
+		for i := 0; i < racers; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if _, ok, err := s.AcquireLease(ctx, "event:e1", fmt.Sprintf("r%d", i), time.Minute); err != nil {
+					t.Error(err)
+				} else if ok {
+					wins.Add(1)
+				}
+			}()
+		}
+		wg.Wait()
+		if wins.Load() != 1 {
+			t.Fatalf("%d replicas acquired the same lease, want 1", wins.Load())
 		}
 	})
 

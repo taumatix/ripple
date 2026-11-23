@@ -149,6 +149,9 @@ func TestRepositoryDefaultBranchChanged(t *testing.T) {
 		if r, _, _ := e.st.GetRepo(context.Background(), "acme/app"); r.DefaultBranch != "trunk" {
 			t.Fatalf("stored default branch %q, want trunk", r.DefaultBranch)
 		}
+		if n := e.logLines("using the deprecated Ref"); n != 0 {
+			t.Fatalf("a typed event used the deprecated Ref (%d warnings)", n)
+		}
 
 		e.clock.Advance(time.Minute)
 		e.publish("example.com/lib", "v1.2.0")
@@ -225,4 +228,32 @@ func TestRenamedNameReusedDoesNotInheritJobs(t *testing.T) {
 	if n := len(e.gh.PRs("acme/renamed")); n != 1 {
 		t.Errorf("the renamed repository got %d PRs from its own pending job, want 1", n)
 	}
+}
+
+// An event queued before the typed fields existed carries only the overloaded Ref. It is
+// still handled, and each use of the fallback is logged, which is how an operator (and the
+// removal of the overload, ROADMAP 76) learns that no queue holds old rows any more.
+func TestQueuedEventWithOnlyTheDeprecatedRefIsHandledAndLogged(t *testing.T) {
+	forEach(t, func(t *testing.T, st store.Store) {
+		e := newEnv(t, st, defaultLimits())
+		e.gh.AddRepo("acme/app", map[string]string{"go.mod": gomod("example.com/app"), "main.go": blankImports()})
+		start(t, e, "acme/app")
+		e.gh.SetDefaultBranch("acme/app", "trunk")
+		e.gh.CommitOn("acme/app", "trunk", map[string]string{"NOTES.md": "trunk"})
+		const warn = "using the deprecated Ref"
+		if n := e.logLines(warn); n != 0 {
+			t.Fatalf("%d fallback warnings before any old event", n)
+		}
+		old := model.Event{ID: "old-1", InstallationID: 7, Kind: "default_branch_changed", Repo: "acme/app", Ref: "refs/heads/trunk"}
+		if err := e.app.Queue.Add(context.Background(), old); err != nil {
+			t.Fatal(err)
+		}
+		e.eventually("old event handled", func() bool {
+			r, _, _ := e.st.GetRepo(context.Background(), "acme/app")
+			return r.DefaultBranch == "trunk"
+		})
+		if n := e.logLines(warn, "old-1"); n != 1 {
+			t.Fatalf("%d fallback warnings for the old event, want 1", n)
+		}
+	})
 }

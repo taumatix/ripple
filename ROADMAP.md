@@ -139,8 +139,11 @@ Everything else:
     the issue answers "what is ripple waiting on" completely: that needs a platform listing on every sync and a
     refresh when a PR closes. (Shipped: an invalid config is now said on an existing dashboard.)
 76. **Remove the `Ref` overload on `model.Event`.** `Ref` is still populated beside the typed fields and marked
-    deprecated. Remove the fallback in the minor release after the one that introduced it, once no queue holds old
-    rows (`ripple:deprecated event-ref-overload` in MIGRATION.md).
+    deprecated; the typed fields have not been in a release yet (they ship in the next minor, v0.3.0), so nothing is
+    removable until the minor after, v0.4.0. By then, remove the `Ref` use for `repo_renamed` / `default_branch_changed`
+    in `internal/app` (`typedOrLegacy`, the enqueue that fills it) and the marker, if no deployment's log shows the WARN
+    `queued event has no typed field; using the deprecated Ref` (`ripple:deprecated event-ref-overload` in
+    MIGRATION.md). The `ref` column stays: it is a push's ref.
 89. **Partial scan on real hosts.** The fallback is verified against a fake server in both half-way shapes
     (filter without blob by id, blob by id without filter; docs/bounds.md), not against a real GitLab, Bitbucket,
     Gitea/Forgejo, Azure DevOps, Gerrit or CodeCommit. Clone from one of each once with `RIPPLE_LIVE_SCAN_REPO` and

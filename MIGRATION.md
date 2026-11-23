@@ -53,11 +53,13 @@ marker in the code. Deprecations of third-party names (for example GitLab's
 
 - **Marker:** `event-ref-overload`
 - **Introduced in:** the release after v0.2.0 (ROADMAP entry 56)
-- **Removal not before:** the minor release after that one
+- **Removal not before:** the minor release after that one, and then only once no deployment logs the fallback below
 - **Replacement:** the typed `model.Event` fields `NewRepo` (a `repo_renamed` event's new name) and `DefaultBranch`
   (a `default_branch_changed` event's new branch), persisted by all three stores.
 - **Behaviour now:** new events carry both the typed field and the old `Ref` use; a handler prefers the typed
   field and falls back to `Ref` for events queued before upgrading, so a rolling upgrade or a downgrade loses nothing.
+  Each use of that fallback is logged at WARN (`queued event has no typed field; using the deprecated Ref`), so a
+  deployment with none in its logs holds no old rows.
   `Ref` stays populated for `repo_renamed` and `default_branch_changed` (covered by a test) until it is removed.
   Internal packages only: no config key, flag or public Go API changes.
 - **To migrate:** nothing to do. The queued-event schema grows by columns/attributes with empty defaults

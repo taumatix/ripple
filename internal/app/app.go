@@ -468,19 +468,24 @@ func (a *App) process(ctx context.Context, ev model.Event) error {
 	case "push":
 		return a.push(ctx, ev.Repo, ev)
 	case string(platform.RepoRenamed):
-		return a.Engine.Rename(ctx, ev.Repo, firstNonEmpty(ev.NewRepo, ev.Ref), ev.InstallationID)
+		return a.Engine.Rename(ctx, ev.Repo, a.typedOrLegacy(ev, ev.NewRepo, ev.Ref), ev.InstallationID)
 	case string(platform.DefaultBranchChanged):
-		return a.Engine.SetDefaultBranch(ctx, ev.Repo, firstNonEmpty(ev.DefaultBranch, strings.TrimPrefix(ev.Ref, "refs/heads/")), ev.InstallationID)
+		return a.Engine.SetDefaultBranch(ctx, ev.Repo, a.typedOrLegacy(ev, ev.DefaultBranch, strings.TrimPrefix(ev.Ref, "refs/heads/")), ev.InstallationID)
 	}
 	a.Log.Warn("unknown queued event kind; dropped", "kind", ev.Kind, "event", ev.ID)
 	return nil
 }
 
-// firstNonEmpty picks the typed event field, falling back to the deprecated overloaded
+// typedOrLegacy picks the typed event field, falling back to the deprecated overloaded
 // Ref for events queued before the typed fields existed (ripple:deprecated event-ref-overload).
-func firstNonEmpty(typed, legacy string) string {
+// Each fallback is logged, so that "no queue holds old rows" (the condition for removing
+// the overload, ROADMAP 76) can be read off the log of a deployment.
+func (a *App) typedOrLegacy(ev model.Event, typed, legacy string) string {
 	if typed != "" {
 		return typed
+	}
+	if legacy != "" && a.Log != nil {
+		a.Log.Warn("queued event has no typed field; using the deprecated Ref (ripple:deprecated event-ref-overload)", "kind", ev.Kind, "event", ev.ID, "repo", ev.Repo)
 	}
 	return legacy
 }

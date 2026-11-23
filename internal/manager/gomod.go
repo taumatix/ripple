@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"strings"
 
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
@@ -113,8 +114,40 @@ func migrate(f *modfile.File, oldPath, newPath, newVersion string) error {
 			}
 		}
 	}
+	if err := migrateTools(f, oldPath, newPath); err != nil {
+		return err
+	}
 	f.SortBlocks()
 	f.Cleanup()
+	return nil
+}
+
+// migrateTools moves tool directives (Go 1.24) with the module: a tool is a package
+// of a required module, so one under oldPath that is not owned by another required
+// module below it (or by another major of the same module) now lives under newPath.
+func migrateTools(f *modfile.File, oldPath, newPath string) error {
+	var nested []string
+	for _, r := range f.Require {
+		if r.Mod.Path != oldPath && strings.HasPrefix(r.Mod.Path, oldPath+"/") {
+			nested = append(nested, r.Mod.Path)
+		}
+	}
+	tools := make([]string, 0, len(f.Tool))
+	for _, t := range f.Tool {
+		tools = append(tools, t.Path)
+	}
+	for _, t := range tools {
+		nt, ok := mapImport(t, oldPath, newPath, nested)
+		if !ok {
+			continue
+		}
+		if err := f.DropTool(t); err != nil {
+			return err
+		}
+		if err := f.AddTool(nt); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

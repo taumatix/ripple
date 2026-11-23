@@ -69,6 +69,7 @@ updates:
   - ecosystem: gomod               # gomod, or regex (see README)
     directory: /                   # this directory and everything below it
     go-toolchain: toolchain        # optional, off by default: toolchain | directive (docs/go-toolchain.md)
+    directives: extended           # optional, off by default: also rewrite `go run pkg@version` and `go tool pkg` on a major bump
     cooldown: 7d                   # wait this long after a release (never less than the server minimum)
     schedule:
       days: [mon, tue]
@@ -154,7 +155,12 @@ was not verified.
 A major bump also rewrites the package of a plain `//go:generate go run <package>` and canonical
 `package p // import "..."` comments (both found with go/parser, never by pattern). Directives that
 mention the old path in any other shape (`@version`, quoting, a variable, another command, a program
-argument) are left alone and listed in the PR body.
+argument) are left alone and listed in the PR body. Opt in with `directives: extended` on a `gomod` entry
+to also rewrite `go run <package>@<version>` (a full semantic version becomes the version being bumped
+to; `latest`, `upgrade` and `patch` stay) and `go tool <package>`, and to read the directives of a file whose
+body does not parse the way `go generate` does (as lines that start at column 1). `tool` directives in
+`go.mod` always follow the module to its new path. `mockgen` and other generators that take an import path
+as a program argument are still only listed.
 
 **cgo and private modules.** Verification builds with cgo off by default, so a module with cgo files that has
 a pure-Go fallback builds green without compiling its C; the PR then says the C code was not compiled. Set

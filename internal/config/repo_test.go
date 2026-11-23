@@ -223,6 +223,26 @@ func TestGoToolchainKey(t *testing.T) {
 	}
 }
 
+func TestGoModResidualKeys(t *testing.T) {
+	c, err := Parse([]byte("updates:\n  - ecosystem: gomod\n    directives: extended\n    tidy: minimal\n"))
+	if err != nil || c.Updates[0].Directives != "extended" || c.Updates[0].Tidy != "minimal" {
+		t.Fatalf("got %+v, %v", c, err)
+	}
+	if c, err := Parse(nil); err != nil || c.Updates[0].Directives != "" || c.Updates[0].Tidy != "" {
+		t.Errorf("off by default: %+v, %v", c, err)
+	}
+	for key, in := range map[string]string{
+		"directives":         "updates:\n  - ecosystem: gomod\n    directives: all\n",
+		"tidy":               "updates:\n  - ecosystem: gomod\n    tidy: none\n",
+		"directives is only": "updates:\n  - ecosystem: regex\n    directives: extended\n    files: [Makefile]\n    patterns: ['(?P<name>a) (?P<version>b)']\n",
+		"tidy is only":       "updates:\n  - ecosystem: regex\n    tidy: minimal\n    files: [Makefile]\n    patterns: ['(?P<name>a) (?P<version>b)']\n",
+	} {
+		if _, err := Parse([]byte(in)); err == nil || !strings.Contains(err.Error(), strings.Fields(key)[0]) {
+			t.Errorf("%s: want a problem naming the key, got %v", key, err)
+		}
+	}
+}
+
 func TestCloseSupersededDefaultsOnAndCanBeSwitchedOff(t *testing.T) {
 	for _, c := range []struct {
 		file string

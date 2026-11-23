@@ -165,10 +165,6 @@ Everything else:
     and the other signed hosts once a real redelivery has shown identical bodies are rare.
 65. **Webhook retry-id stability, verified.** Whether Bitbucket Cloud's `X-Request-UUID` and Azure DevOps' event
     `id` stay the same across a retry is unverified; confirm against a real delivery before relying on dedupe.
-66. **Webhook bodies off the disk, and a server read timeout.** A forged body is no longer held in memory but a
-    signed body over 64 KiB is spooled to a temp file (`MaxInflight` x `MaxBody` of disk). Also set
-    `http.Server.ReadHeaderTimeout`/`ReadTimeout` in `cmd`, since the per-body deadline needs a ResponseWriter
-    that supports deadlines.
 67. **Dependency dashboard: a "re-run now" control, and more hosts.** The dashboard (opt-in
     `dependency-dashboard`) is a read-only report. A checkbox that releases a deferred job early needs the
     `issues` webhook, a check of the editor's repository permission (never the issue's text) and an audit
@@ -274,3 +270,7 @@ Everything else:
 108. **Sweep removal tombstones.** `removed|<repo>` cursor rows are ignored after 24 hours but never deleted.
 109. **Repo ids from install events.** `repos_added` events carry no repository id, so a repo added that way adopts it
     only on its first signed push; a push with a mismatched id is ignored, not resolved by a lookup on the host.
+110. **Webhook bodies: stream the parse.** A signed body is still held whole, on disk (default) or in memory
+    (`RIPPLE_WEBHOOK_SPOOL=memory`), because an HMAC cannot be checked before its last byte and each receiver
+    unmarshals the whole payload. Extracting only the fields ripple acts on while the stream is hashed, and
+    discarding the result of a forgery, would hold neither; it means a token-level parse per host's payload.

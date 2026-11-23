@@ -21,6 +21,7 @@ import (
 	"github.com/taumatix/ripple/internal/rules"
 	"github.com/taumatix/ripple/internal/sandbox"
 	"github.com/taumatix/ripple/internal/store"
+	"github.com/taumatix/ripple/internal/webhook"
 )
 
 // OpenStore opens the backend named by the server configuration.
@@ -50,6 +51,7 @@ func OpenStore(ctx context.Context, s *config.Server) (store.Store, error) {
 // New wires the production components from the server configuration: every
 // registered host that is configured (see RegisterHost), behind one platform.Mux.
 func New(ctx context.Context, s *config.Server, log *slog.Logger) (*App, store.Store, error) {
+	configureWebhookSpool(s)
 	httpc := &http.Client{Timeout: 30 * time.Second}
 	sb, err := sandbox.DetectWith(s.Sandbox, nil, sandbox.ContainerOptions{Image: s.ContainerImage,
 		CPUs: s.ContainerCPUs, Memory: s.ContainerMemory, Pull: s.ContainerPull, Network: s.ContainerNetwork})
@@ -104,4 +106,13 @@ func wireReplica(eng *engine.Engine, q *Queue, s *config.Server, log *slog.Logge
 	eng.Replica, eng.LeaseTTL = id, s.LeaseTTL
 	q.Owner, q.LeaseTTL = id, s.LeaseTTL
 	log.Info("replica", "replica", id, "lease_ttl", s.LeaseTTL.String(), "store", s.Store)
+}
+
+// configureWebhookSpool applies RIPPLE_WEBHOOK_SPOOL to every webhook receiver, which all
+// read their signed bodies through a webhook.Guard that follows webhook.DefaultSpool.
+func configureWebhookSpool(s *config.Server) {
+	webhook.DefaultSpool = webhook.SpoolDisk
+	if s.WebhookSpool == "memory" {
+		webhook.DefaultSpool = webhook.SpoolMemory
+	}
 }

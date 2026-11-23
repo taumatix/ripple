@@ -182,10 +182,17 @@ func (a *App) Handler() http.Handler {
 	return mux
 }
 
+// newServer is the HTTP server with the deadlines that bound a slow or stalled client: the
+// header read, the whole request read (the backstop under each receiver's own per-body
+// deadline, which needs a ResponseWriter that supports deadlines) and the response write.
+func newServer(h http.Handler) *http.Server {
+	return &http.Server{Handler: h, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: time.Minute, WriteTimeout: time.Minute, IdleTimeout: 2 * time.Minute}
+}
+
 // Run serves HTTP on ln and runs the background loops until ctx ends.
 func (a *App) Run(ctx context.Context, ln net.Listener) error {
 	a.init()
-	srv := &http.Server{Handler: a.Handler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: time.Minute, WriteTimeout: time.Minute}
+	srv := newServer(a.Handler())
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(ln) }()
 	var wg sync.WaitGroup

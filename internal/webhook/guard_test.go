@@ -301,3 +301,42 @@ func TestDedupeFailsOpenWhenFull(t *testing.T) {
 		t.Fatal("a full table must fail open, not drop deliveries")
 	}
 }
+
+func TestSpoolMemoryNeverTouchesTheDisk(t *testing.T) {
+	body := bytes.Repeat([]byte("x"), 3*defaultSpoolAbove)
+	missing := t.TempDir() + "/not-there" // a spill would fail with 500
+	for name, spool := range map[string]SpoolMode{"set on the guard": SpoolMemory, "set as the process default": SpoolDefault} {
+		t.Run(name, func(t *testing.T) {
+			if spool == SpoolDefault {
+				old := DefaultSpool
+				DefaultSpool = SpoolMemory
+				t.Cleanup(func() { DefaultSpool = old })
+			}
+			g := &Guard{SpoolDir: missing, Spool: spool}
+			r := httptest.NewRequest("POST", "/", bytes.NewReader(body))
+			w := httptest.NewRecorder()
+			out, res := g.ReadVerified(w, r, 1<<20, guardSecret, nil, hexSigWant(guardSecret, body))
+			if res != ReadOK || !bytes.Equal(out, body) {
+				t.Fatalf("res=%v code=%d len=%d", res, w.Code, len(out))
+			}
+		})
+	}
+	// The disk mode is still what an unset guard does.
+	g := &Guard{SpoolDir: missing}
+	w := httptest.NewRecorder()
+	if _, res := g.ReadVerified(w, httptest.NewRequest("POST", "/", bytes.NewReader(body)), 1<<20, guardSecret, nil, hexSigWant(guardSecret, body)); res != ReadAnswered || w.Code != 500 {
+		t.Fatalf("default should spill to SpoolDir: res=%v code=%d", res, w.Code)
+	}
+}
+
+func TestSpoolMemoryStillBoundsAndRejectsForgery(t *testing.T) {
+	g := &Guard{Spool: SpoolMemory}
+	w := httptest.NewRecorder()
+	big := bytes.Repeat([]byte("x"), 100)
+	if _, res := g.ReadVerified(w, httptest.NewRequest("POST", "/", bytes.NewReader(big)), 10, guardSecret, nil, forgedWant); res != ReadAnswered || w.Code != 413 {
+		t.Fatalf("over the cap: res=%v code=%d", res, w.Code)
+	}
+	if _, res := g.ReadVerified(httptest.NewRecorder(), httptest.NewRequest("POST", "/", bytes.NewReader(big)), 1<<20, guardSecret, nil, forgedWant); res != ReadForged {
+		t.Fatalf("forged: %v", res)
+	}
+}

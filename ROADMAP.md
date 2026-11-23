@@ -336,3 +336,7 @@ Everything else:
     holds a signed body whole (disk above 64 KiB, or memory) and unmarshals it. Each needs its payload's field tree in
     the extractor. The extractor keeps at most 16 MiB of values while the signature is unchecked, so a forged body
     can cost that much per inflight request where it used to cost 64 KiB; lower it or spill to disk if that is too much.
+169. **Backfill lookup: far majors.** A module that skipped more than three majors is found only by the feed, and the
+    lookup was spot-checked against proxy.golang.org only for a stable module, an unknown one and a missing path;
+    a prerelease-only or retracted real module has not been tried. Probe the proxy's own listing for higher majors
+    instead of a fixed three, and try a real retraction.

@@ -164,11 +164,15 @@ func TestActionsUnusedPackageIsPruned(t *testing.T) {
 		e.gh.AddRepo("acme/app", map[string]string{".ripple.yaml": actionsConfig, ".github/workflows/ci.yml": ci})
 		start(t, e, "acme/app")
 		cursor := func() string {
-			c, err := e.st.GetCursor(context.Background(), "github-tags:packages")
+			cs, err := e.st.(store.CursorLister).ListCursors(context.Background(), "github-tags:packages#")
 			if err != nil {
 				t.Fatal(err)
 			}
-			return c
+			var names []string
+			for _, c := range cs {
+				names = append(names, strings.TrimPrefix(c.Name, "github-tags:packages#"))
+			}
+			return strings.Join(names, "\n")
 		}
 		if got := cursor(); got != "up/action\nup/other" {
 			t.Fatalf("polled set after the scan = %q", got)

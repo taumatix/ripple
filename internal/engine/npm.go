@@ -53,13 +53,13 @@ func (w *NpmWatcher) Poll(ctx context.Context) (int, error) {
 	if e.Npm == nil {
 		return 0, nil
 	}
-	raw, err := e.Store.GetCursor(ctx, npmPackagesCursor)
+	pkgs, err := e.polledPackages(ctx, npmPackagesCursor)
 	if err != nil {
 		return 0, err
 	}
 	n := 0
 	repos := map[string]*repoState{}
-	for _, pkg := range strings.Fields(raw) {
+	for _, pkg := range pkgs {
 		deps, err := e.Store.ListDependents(ctx, model.DatasourceNpm, pkg)
 		if err != nil {
 			return n, fmt.Errorf("list dependents of %s: %w", pkg, err)

@@ -693,10 +693,7 @@ func (d *Dynamo) GetCursor(ctx context.Context, n string) (string, error) {
 }
 
 func (d *Dynamo) SetCursor(ctx context.Context, n, v string) error {
-	return wrapD("set cursor", d.put(ctx, struct {
-		item
-		Value string
-	}{item{PK: "CURSOR#" + n, SK: "META"}, v}, nil))
+	return wrapD("set cursor", d.put(ctx, cursorItem(n, v), nil))
 }
 
 func wrapD(op string, err error) error {

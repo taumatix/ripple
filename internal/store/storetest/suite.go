@@ -1148,6 +1148,66 @@ func Run(t *testing.T, mk func(t *testing.T) store.Store) {
 		}
 	})
 
+	t.Run("cursor listing", func(t *testing.T) {
+		s := mk(t)
+		cl, ok := s.(store.CursorLister)
+		if !ok {
+			t.Fatalf("%T does not list cursors", s)
+		}
+		for n, v := range map[string]string{
+			"pkgs#actions/checkout": "1", "pkgs#actions/cache": "1", "pkgs#registry:5000/img": "2",
+			"other#x": "9", "pkgs": "legacy", "plain:one": "p1", "plain:two": "p2", "unplain": "u",
+		} {
+			if err := s.SetCursor(ctx, n, v); err != nil {
+				t.Fatal(err)
+			}
+		}
+		names := func(prefix string) []string {
+			t.Helper()
+			got, err := cl.ListCursors(ctx, prefix)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var out []string
+			for _, c := range got {
+				if v, _ := s.GetCursor(ctx, c.Name); v != c.Value {
+					t.Errorf("%s listed with %q, stored %q", c.Name, c.Value, v)
+				}
+				out = append(out, c.Name)
+			}
+			sort.Strings(out)
+			return out
+		}
+		eq := func(prefix string, want ...string) {
+			t.Helper()
+			if got := names(prefix); !reflect.DeepEqual(got, want) {
+				t.Errorf("ListCursors(%q) = %v, want %v", prefix, got, want)
+			}
+		}
+		eq("pkgs#", "pkgs#actions/cache", "pkgs#actions/checkout", "pkgs#registry:5000/img")
+		eq("pkgs#actions/", "pkgs#actions/cache", "pkgs#actions/checkout")
+		eq("other#", "other#x")
+		eq("pkgs#nothing")
+		eq("plain:", "plain:one", "plain:two") // a prefix with no group is a scan, same answer
+		eq("un", "unplain")
+		if err := cl.DeleteCursor(ctx, "pkgs#actions/cache"); err != nil {
+			t.Fatal(err)
+		}
+		if err := cl.DeleteCursor(ctx, "never-set"); err != nil {
+			t.Fatalf("deleting an absent cursor: %v", err)
+		}
+		eq("pkgs#", "pkgs#actions/checkout", "pkgs#registry:5000/img")
+		if v, _ := s.GetCursor(ctx, "pkgs#actions/cache"); v != "" {
+			t.Errorf("deleted cursor reads %q", v)
+		}
+		if err := s.SetCursor(ctx, "pkgs#actions/checkout", "3"); err != nil {
+			t.Fatal(err)
+		}
+		if got, _ := cl.ListCursors(ctx, "pkgs#actions/checkout"); len(got) != 1 || got[0].Value != "3" {
+			t.Errorf("an overwritten cursor lists once with its new value: %v", got)
+		}
+	})
+
 	t.Run("cursor purge", func(t *testing.T) {
 		s := mk(t)
 		c, ok := s.(store.CursorPurger)

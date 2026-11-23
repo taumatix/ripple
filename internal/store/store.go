@@ -125,3 +125,21 @@ type DeliveryTable interface {
 type CursorPurger interface {
 	PurgeCursors(ctx context.Context, prefix string, drop func(value string) bool) (int, error)
 }
+
+// Cursor is one named value of the cursor table.
+type Cursor struct{ Name, Value string }
+
+// CursorLister is the optional listing of cursors by name prefix, for state kept as one
+// cursor per key instead of one shared list that replicas overwrite each other's additions
+// to. ListCursors returns every cursor whose name starts with prefix. DeleteCursor removes
+// one; an absent name is not an error.
+//
+// A name of the form "<group>#<key>" is indexed by its group on DynamoDB, so a prefix that
+// includes the "#" (such as "docker:packages#") is one Query of the group; the listing then
+// reads the index and is eventually consistent. Any other prefix is a scan of the table, as
+// PurgeCursors is, and is meant for rare callers. Memory and Postgres read only the prefix's
+// rows, current.
+type CursorLister interface {
+	ListCursors(ctx context.Context, prefix string) ([]Cursor, error)
+	DeleteCursor(ctx context.Context, name string) error
+}

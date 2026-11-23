@@ -9,7 +9,7 @@ Billing is on-demand. `Store.EnsureTable` creates both.
 | dependency | `REPO#<repo>` | `DEP#<file>\x1f<ds>\x1f<pkg>[\x1e<version>]` | `PKG#<ds>#<line>[\x1f<shard>]` | `<repo>\x1f<file>` |
 | release | `PKG#<ds>#<pkg>` | `REL#<version>` | | |
 | job | `JOB#<key>` | `META` | `JOBS#pending[#<shard>]` (only while pending) | `<not_before, fixed width>\x1f<key>` |
-| cursor | `CURSOR#<name>` | `META` | | |
+| cursor | `CURSOR#<name>` | `META` | `CURSORS#<group>` (only a name `<group>#<key>`) | `<name>` |
 | shard marks | `CONFIG#shards` | `META` | | |
 | package shards | `PKGCOUNT#<ds>#<line>` | `META` | | |
 | event | `EVENT#<id>` | `META` | `EVENTS` | `<seq, 20 digits>\x1f<id>` |

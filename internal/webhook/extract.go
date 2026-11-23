@@ -79,7 +79,10 @@ func (x *extractor) str(dst *string) *node {
 	}}
 }
 
-func (x *extractor) i64(dst *int64) *node {
+func (x *extractor) i64(dst *int64) *node { return x.i64At(func() *int64 { return dst }) }
+
+// i64At is i64 into whatever the target currently is, for a value inside an array element.
+func (x *extractor) i64At(dst func() *int64) *node {
 	return &node{leaf: func(k kind, v []byte) error {
 		switch k {
 		case kNumber:
@@ -87,7 +90,7 @@ func (x *extractor) i64(dst *int64) *node {
 			if err != nil {
 				return errType
 			}
-			*dst = n
+			*dst() = n
 		case kNull:
 		default:
 			return errType
@@ -96,10 +99,12 @@ func (x *extractor) i64(dst *int64) *node {
 	}}
 }
 
-// repos reads [{"full_name": ...}, ...] into names, one entry per object.
-func (x *extractor) repos(dst *[]string) *node {
+// repos reads [{"full_name": ..., "id": ...}, ...] into names, one entry per object, and
+// the repositories' ids into ids (0 for an object without one) at the same index.
+func (x *extractor) repos(dst *[]string, ids *[]int64) *node {
 	var cur *string
-	e := obj(map[string]*node{"full_name": {leaf: func(k kind, v []byte) error {
+	var curID *int64
+	e := obj(map[string]*node{"id": x.i64At(func() *int64 { return curID }), "full_name": {leaf: func(k kind, v []byte) error {
 		switch k {
 		case kString:
 			if err := x.hold(len(v)); err != nil {
@@ -112,7 +117,12 @@ func (x *extractor) repos(dst *[]string) *node {
 		}
 		return nil
 	}}})
-	e.onObject = func() { *dst = append(*dst, ""); cur = &(*dst)[len(*dst)-1] }
+	e.onObject = func() {
+		*dst = append(*dst, "")
+		cur = &(*dst)[len(*dst)-1]
+		*ids = append(*ids, 0)
+		curID = &(*ids)[len(*ids)-1]
+	}
 	return &node{container: true, elem: e}
 }
 

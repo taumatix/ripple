@@ -8,6 +8,7 @@ Fetched 2026-11-23, read before the `repository` event mapping in `internal/webh
 | `repository-{renamed,transferred,edited,archived,unarchived,deleted}.schema.json` | github.com/octokit/webhooks `payload-schemas/api.github.com/repository/` (JSON Schema generated from GitHub's payloads) | `changes.repository.name.from` (renamed), `changes.owner.from` (transferred), `changes.default_branch.from` (edited), `installation` |
 | `push.schema.json` | same repo, `push/event.schema.json` | `ref`, `deleted`, `repository` |
 | `repository-lite.schema.json` | same repo, `common/repository-lite.schema.json` | `id`, `name`, `full_name`, `default_branch`, `archived` |
+| `installation.created.schema.json`, `installation_repositories.added.schema.json` | same repo, `installation/created`, `installation_repositories/added` | `repositories[]` / `repositories_added[]` items require `id`, `node_id`, `name`, `full_name`, `private` |
 
 Assumed, unverified against a real delivery (the docs page does not show these actions' bodies and
 no live App was available):

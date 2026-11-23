@@ -167,8 +167,6 @@ Everything else:
 107. **Archive events on other hosts.** GitLab (`project_update`), Gitea/Forgejo, Bitbucket and Azure DevOps report no
     archive event in the docs checked (see each `docs/platform-*.md`). Poll the archived flag per host on a refresh,
     or map an event once a host documents one; Forgejo and Bitbucket Data Center were not checked.
-109. **Repo ids from install events.** `repos_added` events carry no repository id, so a repo added that way adopts it
-    only on its first signed push; a push with a mismatched id is ignored, not resolved by a lookup on the host.
 113. **DynamoDB: throttling and index lag against a real table.** `ThrottleNext` and `HoldIndex` model the errors and
     the stale reads, not their timing or frequency, and DynamoDB Local throttles and lags neither. Run the sharded
     and striped paths against a real on-demand table once (a throwaway account, a bounded run) and record the
@@ -341,3 +339,7 @@ Everything else:
 172. **OSV: security-bypass by severity.** `security-bypass` (entry 51) is per update entry and all or nothing. A
     `severity: [high, critical]` qualifier (bypass only for those) and a per-advisory cap on PRs opened past the limit were left
     out until real use shows whether a repo wants them.
+173. **Resolve an id mismatch by asking the host.** A repo added by `installation_repositories` or `installation`
+    now stores its id (GitHub carries it in every added-repository object), but a signed push whose id differs from
+    the stored one is still ignored, not resolved with a lookup of the name on the host. A GitHub lookup
+    (`GET /repositories/{id}`) would say which name the id holds now and settle a missed rename or a reused name.

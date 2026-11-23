@@ -60,6 +60,20 @@ type Event struct {
 	NewRepo string
 	// push only: the repository's immutable id (repository.id), 0 when absent.
 	RepoID int64
+	// repos_added only: the id of each of Repos, at the same index (0 when a payload
+	// object had none); nil when no object carried one.
+	RepoIDs []int64
+}
+
+// idsOrNil drops an id list in which no repository had an id, so an event without any
+// compares equal to one built before the field existed.
+func idsOrNil(ids []int64) []int64 {
+	for _, id := range ids {
+		if id != 0 {
+			return ids
+		}
+	}
+	return nil
 }
 
 // Sink consumes events. Returning an error makes the receiver answer 503, but
@@ -213,18 +227,19 @@ func parseStream(name string, r io.Reader) (Event, error) {
 			Action       string
 			Installation struct{ ID int64 }
 			Repositories []string
+			IDs          []int64
 		}
 		err := extract(r, obj(map[string]*node{
 			"action":       x.str(&p.Action),
 			"installation": obj(map[string]*node{"id": x.i64(&p.Installation.ID)}),
-			"repositories": x.repos(&p.Repositories),
+			"repositories": x.repos(&p.Repositories, &p.IDs),
 		}))
 		if err != nil {
 			return Event{}, fmt.Errorf("bad installation payload: %w", err)
 		}
 		switch p.Action {
 		case "created":
-			return Event{Kind: "repos_added", InstallationID: p.Installation.ID, Repos: p.Repositories}, nil
+			return Event{Kind: "repos_added", InstallationID: p.Installation.ID, Repos: p.Repositories, RepoIDs: idsOrNil(p.IDs)}, nil
 		case "deleted":
 			return Event{Kind: "repos_removed", InstallationID: p.Installation.ID, Repos: p.Repositories}, nil
 		}
@@ -232,21 +247,23 @@ func parseStream(name string, r io.Reader) (Event, error) {
 		var p struct {
 			Installation struct{ ID int64 }
 			Added        []string
+			AddedIDs     []int64
 			Removed      []string
+			RemovedIDs   []int64
 			Action       string
 		}
 		err := extract(r, obj(map[string]*node{
 			"action":               x.str(&p.Action),
 			"installation":         obj(map[string]*node{"id": x.i64(&p.Installation.ID)}),
-			"repositories_added":   x.repos(&p.Added),
-			"repositories_removed": x.repos(&p.Removed),
+			"repositories_added":   x.repos(&p.Added, &p.AddedIDs),
+			"repositories_removed": x.repos(&p.Removed, &p.RemovedIDs),
 		}))
 		if err != nil {
 			return Event{}, fmt.Errorf("bad installation_repositories payload: %w", err)
 		}
 		switch p.Action {
 		case "added":
-			return Event{Kind: "repos_added", InstallationID: p.Installation.ID, Repos: p.Added}, nil
+			return Event{Kind: "repos_added", InstallationID: p.Installation.ID, Repos: p.Added, RepoIDs: idsOrNil(p.AddedIDs)}, nil
 		case "removed":
 			return Event{Kind: "repos_removed", InstallationID: p.Installation.ID, Repos: p.Removed}, nil
 		}

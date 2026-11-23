@@ -1,0 +1,758 @@
+<!-- vendored 2026-11-23 from https://gerrit-review.googlesource.com/Documentation/config-labels.html; text extracted from the HTML, not edited -->
+
+
+
+Gerrit Code Review - Review Labels
+
+Gerrit Code Review - Review Labels
+
+version v3.15.0-rc4-356-g0bdf31d913 | Privacy | Terms
+
+Table of Contents
+
+- Sticky Votes
+
+- Label: Code-Review
+
+- Label: Verified
+
+- Customized Labels
+
+- Inheritance
+
+- Layout
+
+- label.Label-Name
+
+- label.Label-Name.description
+
+- label.Label-Name.value
+
+- label.Label-Name.defaultValue
+
+- label.Label-Name.function (deprecated)
+
+- label.Label-Name.allowPostSubmit
+
+- label.Label-Name.copyCondition
+
+- label.Label-Name.canOverride
+
+- label.Label-Name.branch
+
+- label.Label-Name.ignoreSelfApproval (deprecated)
+
+- Example
+
+- Default Value Example
+
+- Patch Set Lock Example
+
+As part of the code review process, reviewers score each change with
+values for each label configured for the project.  The label values that
+a given user is allowed to set are defined according to the
+access controls.  Gerrit
+comes pre-configured with the Code-Review label that can be granted to
+groups within projects, enabling functionality for that group’s members.
+Project owners and admins might also need to configure rules which require
+labels to be voted before a change can be submittable. See the
+submit requirements documentation to
+configure such rules.
+
+## Sticky Votes
+
+Whether votes are sticky when a new patch set is created depends on the
+copyCondition of the label. If an approval
+matches the configured condition it is copied from the old current
+patch set to the new current patch set. Votes that are not copied to
+the new patch set, are called outdated.
+
+If votes get outdated due to pushing a new patch set the uploader is
+informed about this by a message in the git output. In addition,
+outdated votes are also listed in the email notification that is sent
+for the new patch set (unless this is disabled by a custom email
+template). Note, that the uploader only gets this email notification if
+they have configured Every Comment for Email notifications in their
+user preferences. With any other email preference the email sender, the
+uploader in this case, is not included in the email recipients.
+
+If votes get outdated due to creating a new patch set the user of the
+removed vote is added to the attention set of the change, as they need
+to re-review the change and renew their vote.
+
+If a vote is applied on an outdated patch set (i.e. a patch set that is
+not the current patch set) the vote is copied forward to follow-up
+patch sets if possible. A newly added or updated vote on an outdated
+patch set is copied to follow-up patch sets if:
+
+- 
+
+the vote is copyable (i.e. it matches the
+copyCondition of the label)
+
+- 
+
+neither the follow-up patch set nor an intermediate patch set has a
+non-copied vote or a deletion vote (vote with value 0) that
+overrides the copy vote
+
+If an approval on an outdated patch set is removed or updated to a
+value that is not copyable, existing copies of that approval on
+follow-up patch sets are removed.
+
+## Label: Code-Review
+
+The Code-Review label is configured upon the creation of a Gerrit
+instance.  It may have any meaning the project desires.  It was
+originally invented by the Android Open Source Project to mean
+'I read the code and it seems reasonably correct'.
+
+The range of values is:
+
+- 
+
+-2 This shall not be submitted
+
+The code is so horribly incorrect/buggy/broken that it must not be
+submitted to this project, or to this branch.  This value is valid
+across all patch sets in the same change, i.e. the reviewer must
+actively change his/her review to something else before the change
+is submittable.
+
+Any -2 blocks submit.
+
+- 
+
+-1 I would prefer this is not submitted as is
+
+The code doesn’t look right, or could be done differently, but
+the reviewer is willing to live with it as-is if another reviewer
+accepts it, perhaps because it is better than what is currently in
+the project.  Often this is also used by contributors who don’t like
+the change, but also aren’t responsible for the project long-term
+and thus don’t have final say on change submission.
+
+Does not block submit.
+
+- 
+
+0 No score
+
+Didn’t try to perform the code review task, or glanced over it but
+don’t have an informed opinion yet.
+
+- 
+
++1 Looks good to me, but someone else must approve
+
+The code looks right to this reviewer, but the reviewer doesn’t
+have access to the +2 value for this category.  Often this is
+used by contributors to a project who were able to review the change
+and like what it is doing, but don’t have final approval over what
+gets submitted.
+
+- 
+
++2 Looks good to me, approved
+
+Basically the same as +1, but for those who have final say over
+how the project will develop.
+
+Any +2 enables submit.
+
+For a change to be submittable, the latest patch set must have a
++2 Looks good to me, approved in this category, and no
+-2 This shall not be submitted.  Thus -2 on any patch set can
+block a submit, while +2 on the latest patch set can enable it.
+
+If a Gerrit installation does not wish to use this label in any project,
+the [label "Code-Review"] section can be deleted from project.config
+in All-Projects.
+
+If a Gerrit installation or project wants to modify the description text
+associated with these label values, the text can be updated in the
+label.Code-Review.value fields in project.config.
+
+Additional entries could be added to label.Code-Review.value to
+further extend the negative and positive range, but there is likely
+little value in doing so as this only expands the middle region.
+
+By default a submit-requirement is created that requires at least one
+MAX vote on this label and no MIN votes to enable submission.
+
+## Label: Verified
+
+The Verified label was originally invented by the Android Open Source
+Project to mean 'compiles, passes basic unit tests'.  Some CI tools
+expect to use the Verified label to vote on a change after running.
+
+During site initialization the administrator may have chosen to
+configure the default Verified label for all projects.  In case it is
+desired to configure it at a later time, administrators can do this by
+adding the following to project.config in All-Projects:
+
+  [label "Verified"]
+      function = NoBlock
+      value = -1 Fails
+      value = 0 No score
+      value = +1 Verified
+      copyCondition = changekind:NO_CODE_CHANGE
+
+The range of values is:
+
+- 
+
+-1 Fails
+
+Tried to compile, but got a compile error, or tried to run tests,
+but one or more tests did not pass.
+
+Any -1 blocks submit.
+
+- 
+
+0 No score
+
+Didn’t try to perform the verification tasks.
+
+- 
+
++1 Verified
+
+Compiled (and ran tests) successfully.
+
+Any +1 enables submit.
+
+Add a submit-requirement for the "Verified" label to define which
+conditions are required to make the change submittable:
+
+  [submit-requirement "Verified"]
+    submittableIf = label:Verified=MAX AND -label:Verified=MIN
+    applicableIf = -branch:refs/meta/config
+
+See the
+submit-requirements
+documentation for more details.
+
+For a change to be submittable, the change must have a +1 Verified
+in this label, and no -1 Fails.  Thus, -1 Fails can block a submit,
+while +1 Verified enables a submit.
+
+Additional values could also be added to this label, to allow it to
+behave more like Code-Review (below).  Add -2 and +2 entries to the
+label.Verified.value fields in project.config to get the same
+behavior.
+
+## Customized Labels
+
+Site administrators and project owners can define their own labels,
+or customize labels inherited from parent projects.
+
+See above for descriptions of how Verified
+and Code-Review work, and add your own
+label to project.config to get the same behavior over your own range
+of values, for any label you desire.
+
+Just like the built-in labels, users need to be given permissions to
+vote on custom labels. Permissions can either be added by manually
+editing project.config when adding the labels, or, once the labels are
+added, permission categories for those labels will show up in the
+permission editor web UI.
+
+Labels may be added to any project’s project.config; the default
+labels are defined in All-Projects.
+
+### Inheritance
+
+Labels are inherited from parent projects. A child project may add,
+override, or remove labels defined in its parents.
+
+Overriding a label in a child project overrides all its properties and
+values. It is not possible to modify an inherited label by adding
+properties in the child project’s configuration; all properties from
+the parent definition must be redefined in the child.
+
+To remove a label in a child project, add an empty label with a single "0"
+value, with the same name as in the parent. This will override the parent label
+with a label containing the defaults (function = NoBlock,
+defaultValue = 0 and no further allowed values)
+
+### Layout
+
+Labels are laid out in alphabetical order.
+
+### label.Label-Name
+
+The name for a label, consisting only of alphanumeric characters and
+-.
+
+### label.Label-Name.description
+
+The label description. This field can provide extra information of what the
+label is supposed to do.
+
+### label.Label-Name.value
+
+A multi-valued key whose values are of the form "<#> Value description
+text". The <#> may be any positive or negative number with an
+optional leading +.
+
+### label.Label-Name.defaultValue
+
+The default value (or score) for the label.  The defaultValue must be
+within the range of valid label values.  It is an optional label setting,
+if not defined the defaultValue for the label will be 0.  When a
+defaultValue is defined, that value will get set in the Reply dialog
+by default.
+
+A defaultValue can be set to a score that is outside of the permissible
+range for a user.  In that case the score that will get set in the Reply
+box will be either the lowest or highest score in the permissible range.
+
+### label.Label-Name.function (deprecated)
+
+Label functions dictate the rules for requiring certain label votes before a
+change is allowed for submission. Label functions are deprecated and updates
+that set function to a blocking value {MaxWithBlock, MaxNoBlock,
+AnyWithBlock} will be rejected. Existing label function definitions can only
+be updated to {NoBlock, NoOp, PatchSetLock}.
+
+Important
+ | 
+
+New label definitions should explicitly set the function attribute to a
+non-blocking value since the default is MaxWithBlock.
+ | 
+
+If you have a submit-requirement configured for a label, you must change the
+label function to NoBlock. We also highly encourage you to convert all
+blocking labels to use the NoBlock function and replace the blocking behavior
+by adding a submit-requirement for the same label. See the
+submit-requirements
+documentation for more details.
+
+The name of a function for evaluating multiple votes for a label.  This
+function is only applied if the default submit rule is used for a label.
+If you write a custom
+submit rule (and do not call the default rule), the function name is
+ignored and may be treated as optional.
+
+Valid values are:
+
+- 
+
+NoBlock/NoOp
+
+The label is purely informational and values are not considered when
+determining whether a change is submittable.
+
+- 
+
+MaxWithBlock (default)
+
+The lowest possible negative value, if present, blocks a submit, while
+the highest possible positive value is required to enable submit. There
+must be at least one positive value, or else submit will never be
+enabled. To permit blocking submits, ensure a negative value is defined.
+
+- 
+
+AnyWithBlock
+
+The label is not mandatory but the lowest possible negative value,
+if present, blocks a submit. To permit blocking submits, ensure that a
+negative value is defined.
+
+- 
+
+MaxNoBlock
+
+The highest possible positive value is required to enable submit, but
+the lowest possible negative value will not block the change.
+
+- 
+
+PatchSetLock
+
+The PatchSetLock function provides a locking mechanism for patch
+sets.  This function’s values are not considered when determining
+whether a change is submittable. When set, no new patchsets can be
+created and rebase and abandon are blocked. This is useful to prevent
+updates to a change while (potentially expensive) CI
+validation is running.
+
+This function is designed to allow overlapping locks, so several lock
+accounts could lock the same change.
+
+Allowed range of values are 0 (Patch Set Unlocked) to 1 (Patch Set
+Locked).
+
+### label.Label-Name.allowPostSubmit
+
+If true, the label may be voted on for changes that have already been
+submitted. If false, the label will not appear in the UI and will not
+be accepted when reviewing a closed change.
+
+In either case, voting on a label after submission is only permitted if
+the new vote is at least as high as the old vote by that user. This
+avoids creating the false impression that a post-submit vote can change
+the past and affect submission somehow.
+
+Defaults to true.
+
+### label.Label-Name.copyCondition
+
+If set, Gerrit matches patch set approvals against the provided query
+string. If the query matches, the approval is copied from one patch set
+to the next. The query language is the same as for
+other queries.
+
+This logic is triggered whenever a new patch set is uploaded.
+
+Gerrit currently supports the following predicates:
+
+#### changekind:{NO_CHANGE,NO_CODE_CHANGE,MERGE_FIRST_PARENT_UPDATE,REWORK,TRIVIAL_REBASE,TRIVIAL_REBASE_WITH_MESSAGE_UPDATE}
+
+Matches if the diff between two patch sets was of a certain change kind:
+
+- 
+
+NO_CHANGE:
+
+Matches when a new patch set is uploaded that has the same parent tree,
+code delta, and commit message as the previous patch set. This means
+that only the patch set SHA-1 is different. This can be used to enable
+sticky approvals, reducing turn-around for this special case.
+
+It is recommended to leave this enabled for both, the Code-Review and
+the Verified labels.
+
+NO_CHANGE is more trivial than a trivial rebase, no code change and
+a first parent update, hence this change kind is also matched by
+changekind:TRIVIAL_REBASE, changekind:NO_CODE_CHANGE and if it’s
+a merge commit by changekind:MERGE_FIRST_PARENT_UPDATE.
+
+- 
+
+NO_CODE_CHANGE:
+
+Matches when a new patch set is uploaded that has the same parent tree
+as the previous patch set and the same code diff (including context
+lines) as the previous patch set. This means only the commit message
+may be different; the change hasn’t even been rebased. Also matches if
+the commit message is not different, which means this includes matching
+patch sets that have NO_CHANGE as the change kind.
+
+This predicate can be used to enable sticky approvals on labels that
+only depend on the code, reducing turn-around if only the commit
+message is changed prior to submitting a change.
+
+For the Verified label that is optionally installed by the
+init site program this predicate is used by
+default.
+
+- 
+
+MERGE_FIRST_PARENT_UPDATE:
+
+Matches when a new patch set is uploaded that is a new merge commit
+which only differs from the merge commit in the previous patch set in
+its first parent, or has identical parents (aka the change kind of the
+merge commit is NO_CHANGE).
+
+The first parent of the merge commit is part of the change’s target
+branch, whereas the other parent(s) refer to the feature branch(es) to
+be merged.
+
+Matching this change kind is useful if you don’t want to trigger CI or
+human verification again if your target branch moved on but the feature
+branch(es) being merged into the target branch did not change.
+
+This predicate does not match if the patch set is not a merge commit.
+
+- 
+
+TRIVIAL_REBASE:
+
+Matches when a new patch set is uploaded that is a trivial rebase. A
+new patch set is considered to be trivial rebase if the commit message
+is the same as in the previous patch set and if it has the same diff
+(including context lines) as the previous patch set. This is the case
+if the change was rebased onto a different parent and that rebase did
+not require git to perform any conflict resolution, or if the parent
+did not change at all (aka the change kind of the commit is
+NO_CHANGE).
+
+This predicate can be used to enable sticky approvals, reducing
+turn-around for trivial rebases prior to submitting a change.
+
+For the pre-installed Code-Review label this predicate is used by
+default.
+
+- 
+
+TRIVIAL_REBASE_WITH_MESSAGE_UPDATE:
+
+Same as TRIVIAL_REBASE, but commit message can be different.
+
+- 
+
+REWORK:
+
+Matches all kind of change kinds because any other change kind
+is just a more trivial version of a rework. This means setting
+changekind:REWORK is equivalent to setting is:ANY.
+
+#### is:{MIN,MAX,POSITIVE,NEGATIVE,ANY}
+
+Matches approvals that have a minimal, maximal, positive, negative or any score:
+
+- 
+
+MIN:
+
+Matches approvals that have a minimal score, i.e. the lowest possible
+(negative) value for this label.
+
+- 
+
+MAX:
+
+Matches approvals that a maximal score, i.e. the highest possible
+(positive) value for this label.
+
+- 
+
+POSITIVE:
+
+Matches approvals that have score larger than 0.
+
+- 
+
+NEGATIVE:
+
+Matches approvals that have score smaller than 0.
+
+- 
+
+ANY:
+
+Matches any approval when a new patch set is uploaded.
+
+#### is:'VALUE'
+
+Matches approvals that have a voting value that is equal to 'VALUE'.
+
+Negative values need to be quoted, e.g.: is:"-1"
+
+#### approverin:{group-id}
+
+Matches votes granted by a user who is a member of
+{group-id}.
+
+Plugins can install custom operands for "uploaderin" that are checked before
+group membership is checked and have format of
+"uploaderin:<operand>_<pluginName>"
+
+#### uploaderin:{group-id}
+
+Matches all votes if the new patch set was uploaded by a member of
+{group-id}.
+
+Plugins can install custom operands for "uploaderin" that are checked before
+group membership is checked and have format of
+"uploaderin:<operand>_<pluginName>"
+
+#### has:unchanged-files
+
+Matches when the new patch-set has the same list of files as the
+previous patch-set.
+
+Votes are not copied in the following cases:
+
+- 
+
+If one more files are renamed in the new patch set. These files are counted
+as a deletion of the file at the old path and an addition of the file at the
+new path. This means the list of files did change.
+
+- 
+
+If one or more files are reverted to their original content, that is files
+that become same as in the base revision.
+
+This predicate is useful if you don’t want to trigger CI or human
+verification again if the list of files didn’t change.
+
+Note, "unchanged-files" is the only value that is supported for the
+"has" operator.
+
+#### changeis:{Change Query is: predicate}
+
+Any "is:{something}" predicate that is available as part of
+Change Query can be used in copy
+condition with "changeis:" prefix.
+
+#### Group ID
+
+Some predicates (approverin, uploaderin)
+expect a group ID as value. This group ID can be any of the
+group identifiers that are supported in the
+REST API: group UUID, group ID (for Gerrit internal groups only) and group name
+
+It’s preferred to reference groups by UUID, rather than name. Referencing
+groups by name is not recommended because:
+
+- 
+
+Groups may be renamed and then the group reference can no longer be resolved.
+If this happens another group with different members can take over the group
+name, so that exemptions which have been granted by this predicate apply to
+the other group. This is a security concern.
+
+- 
+
+Group names that contain spaces are not supported.
+
+- 
+
+Ambiguous group names cannot be resolved. This means if another group with
+the same name gets created at a later point in time, the group name can no
+longer be resolved and the predicate breaks.
+
+Using the group UUID has a small drawback though, since it makes the condition
+less human-readable.
+
+#### Example
+
+copyCondition = is:MIN OR -change-kind:REWORK OR uploaderin:dead...beef
+
+### label.Label-Name.canOverride
+
+If false, the label cannot be overridden by child projects. Any
+configuration for this label in child projects will be ignored. Defaults
+to true.
+
+### label.Label-Name.branch
+
+By default a given project’s label applicable scope is all changes
+on all branches of this project and its child projects.
+
+Label’s applicable scope can be branch specific via configuration.
+E.g. create a label Video-Qualify on parent project and configure
+the branch as:
+
+  [label "Video-Qualify"]
+      branch = refs/heads/video-1.0/*
+      branch = refs/heads/video-1.1/Kino
+
+Then only changes in above branch scope of parent project and child
+projects will be affected by Video-Qualify.
+
+Note
+ | 
+
+The branch is independent from the branch scope defined in access
+parts in project.config file. That means from the UI a user can always
+assign permissions for that label on a branch, but this permission is then
+ignored if the label doesn’t apply for that branch.
+Additionally, the branch modifier has no effect when the submit rule
+is customized in the rules.pl of the project or inherited from parent projects.
+Branch can be a ref pattern similar to what is documented
+here, but must not contain ${username} or
+${shardeduserid}.
+ | 
+
+### label.Label-Name.ignoreSelfApproval (deprecated)
+
+If true, the label may be voted on by the uploader of the latest patch set,
+but their approval does not make a change submittable. Instead, a
+non-uploader who has the right to vote has to approve the change.
+
+Defaults to false.
+
+The ignoreSelfApproval attribute is deprecated, favour
+using submit requirements and
+define the submittableIf expression with the label operator and
+the user=non_uploader argument. See the
+Code Review submit
+requirement example.
+
+### Example
+
+To define a new 3-valued category that behaves exactly like Verified,
+but has different names/labels:
+
+  [label "Copyright-Check"]
+      function = NoBlock
+      value = -1 Do not have copyright
+      value = 0 No score
+      value = +1 Copyright clear
+
+Add a submit-requirement for the "Copyright-Check" label to define which
+score is required to make the change submittable:
+
+  [submit-requirement "Copyright-Check"]
+    submittableIf = label:Copyright-Check=MAX AND -label:Copyright-Check=MIN
+    applicableIf = -branch:refs/meta/config
+
+See the
+submit-requirements
+documentation for more details.
+
+The new column will appear at the end of the table, and -1 Do not have
+copyright will block submit, while +1 Copyright clear is required to
+enable submit.
+
+### Default Value Example
+
+This example attempts to describe how a label default value works with the
+user permissions.  Assume the configuration below.
+
+  [access "refs/heads/*"]
+      label-Snarky-Review = -3..+3 group Administrators
+      label-Snarky-Review = -2..+2 group Project Owners
+      label-Snarky-Review = -1..+1 group Registered Users
+  [label "Snarky-Review"]
+      value = -3 Ohh, hell no!
+      value = -2 Hmm, I'm not a fan
+      value = -1 I'm not sure I like this
+      value = 0 No score
+      value = +1 I like, but need another to like it as well
+      value = +2 Hmm, this is pretty nice
+      value = +3 Ohh, hell yes!
+      defaultValue = -3
+
+Upon clicking the Reply button:
+
+- 
+
+Administrators have all scores (-3..+3) available, -3 is set as the default.
+
+- 
+
+Project Owners have limited scores (-2..+2) available, -2 is set as the default.
+
+- 
+
+Registered Users have limited scores (-1..+1) available, -1 is set as the default.
+
+### Patch Set Lock Example
+
+This example shows how a label can be configured to have a standard patch set lock.
+
+  [access "refs/heads/*"]
+      label-Patch-Set-Lock = +0..+1 group Administrators
+  [label "Patch-Set-Lock"]
+      function = PatchSetLock
+      value =  0 Patch Set Unlocked
+      value = +1 Patch Set Locked
+      defaultValue = 0
+
+Part of Gerrit Code Review
+
+  Search
+
+Version v3.15.0-rc4-356-g0bdf31d913 | Privacy | Terms
+
+

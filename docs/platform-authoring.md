@@ -96,8 +96,9 @@ in `platformtest` is the smallest host that passes it and shows a listing-only h
 
 ## Known gaps in the seam
 
-- `gitws` pushes to `refs/heads/<branch>`; Gerrit needs `refs/for/<branch>` with a Change-Id. Add a
-  push-target option to `gitws.Options` in the Gerrit branch.
+- `gitws` pushes to `refs/heads/<branch>` unless `Options.Proposal` is set (Gerrit: `refs/for/<base>` plus a
+  Change-Id trailer). A host whose push itself creates the proposal also declares `PushCreatesProposals` in its
+  fixture, so the rate-limit test expects the proposal that the push left behind.
 - A `Lister` host with no push events is re-scanned only when it is re-registered; periodic
   re-scans are a ROADMAP entry.
 - The previous listing is one store cursor per host, which fits tens of thousands of repo names,

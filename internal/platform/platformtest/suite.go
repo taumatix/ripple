@@ -68,6 +68,13 @@ type Fixture interface {
 // API requests; it must still trigger no scan.
 type FilelessPushes interface{ FilelessPushes() }
 
+// PushCreatesProposals is implemented by a Fixture whose host opens the proposal
+// when the commit is pushed, not when the platform creates it (Gerrit: a push to
+// refs/for/<branch> is the change). A rate limit answered after the push therefore
+// leaves the change behind; the suite then holds the host to "one proposal in the
+// whole repo set, jobs pending, and no duplicate after the retry".
+type PushCreatesProposals interface{ PushCreatesProposals() }
+
 // Run runs every conformance test against f.
 func Run(t *testing.T, f Fixture) {
 	t.Run("ReleaseOpensOnePRInExactlyTheImportingRepos", func(t *testing.T) { releaseFanOut(t, f) })

@@ -64,6 +64,24 @@ type Options struct {
 	// checkout. Nil means no confinement. Network git commands (clone, fetch, push)
 	// run unconfined: they hold the credential and execute no repository code.
 	Sandbox sandbox.Backend
+	// Proposal says how CommitAndPush hands a change to a host that takes proposals
+	// instead of branches (Gerrit). Nil, the default and every other host's setting,
+	// force-pushes refs/heads/<branch>.
+	Proposal *Proposal
+}
+
+// Proposal is the optional push shape of a host whose unit of review is not a
+// branch. The commit is pushed, not forced (a re-push with the same trailer is a
+// new patch set, not a rewrite), to the ref Ref names.
+type Proposal struct {
+	// Ref is the remote ref HEAD is pushed to when branch is proposed against base,
+	// the default branch of the checkout (Gerrit: refs/for/<base>%topic=<branch>).
+	// It must return a ref git accepts as a push destination.
+	Ref func(branch, base string) (string, error)
+	// Trailer, when set, returns the footer line appended to the commit message as
+	// its own last paragraph (Gerrit: "Change-Id: I<40 hex>"). It must be stable for
+	// a branch, so pushing the branch again updates the same proposal.
+	Trailer func(branch string) string
 }
 
 // CredentialFunc returns the credential for one network git command. It is called
@@ -296,11 +314,22 @@ func (w *workspace) CommitAndPush(ctx context.Context, branch, message string) (
 	if email == "" {
 		email = "ripple@users.noreply.invalid"
 	}
+	push := []string{"push", "--force", "origin", "HEAD:refs/heads/" + branch}
+	if p := w.o.Proposal; p != nil {
+		ref, err := p.Ref(branch, w.branch)
+		if err != nil {
+			return false, err
+		}
+		if p.Trailer != nil {
+			message += "\n\n" + p.Trailer(branch)
+		}
+		push = []string{"push", "origin", "HEAD:" + ref}
+	}
 	for _, a := range [][]string{
 		{"checkout", "-B", branch},
 		{"add", "-A"},
 		{"-c", "user.name=" + name, "-c", "user.email=" + email, "commit", "--no-verify", "--no-gpg-sign", "-m", message},
-		{"push", "--force", "origin", "HEAD:refs/heads/" + branch},
+		push,
 	} {
 		run := w.git
 		if a[0] == "push" {

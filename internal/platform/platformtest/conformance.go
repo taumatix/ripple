@@ -170,8 +170,13 @@ func rateLimit(t *testing.T, f Fixture) {
 	beforeA, beforeB := e.calls("rl-a"), e.calls("rl-b")
 	e.publish("example.com/lib", "v1.0.1")
 	e.tick()
+	_, pushCreates := f.(PushCreatesProposals)
+	left := 0
 	for _, r := range []string{"rl-a", "rl-b"} {
-		if n := len(e.prs(r)); n != 0 {
+		n := len(e.prs(r))
+		if pushCreates {
+			left += n // the refused repo already pushed; its proposal exists
+		} else if n != 0 {
 			t.Fatalf("%s: PR created despite the rate limit", r)
 		}
 		if j := e.job(r, "example.com/lib", "v1.0.1"); j.State != model.JobPending {
@@ -182,6 +187,9 @@ func rateLimit(t *testing.T, f Fixture) {
 	da, db := e.calls("rl-a")-beforeA, e.calls("rl-b")-beforeB
 	if max(da, db) == 0 || min(da, db) != 0 {
 		t.Errorf("calls during the rate limit: rl-a %d, rl-b %d; want one repo refused and the other untouched", da, db)
+	}
+	if pushCreates && left != 1 {
+		t.Fatalf("proposals left by the refused push: %d, want 1 (one repo refused, the other untouched)", left)
 	}
 	e.clock.Advance(time.Hour)
 	e.tick()

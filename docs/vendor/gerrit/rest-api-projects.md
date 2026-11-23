@@ -1,0 +1,6762 @@
+<!-- vendored 2026-11-23 from https://gerrit-review.googlesource.com/Documentation/rest-api-projects.html; text extracted from the HTML, not edited -->
+
+
+
+Gerrit Code Review - /projects/ REST API
+
+Gerrit Code Review - /projects/ REST API
+
+version v3.15.0-rc4-356-g0bdf31d913 | Privacy | Terms
+
+Table of Contents
+
+- Project Endpoints
+
+- List Projects
+
+- Query Projects
+
+- Get Project
+
+- Create Project
+
+- Get Project Description
+
+- Set Project Description
+
+- Delete Project Description
+
+- Get Project Parent
+
+- Set Project Parent
+
+- Get HEAD
+
+- Set HEAD
+
+- Get Repository Statistics
+
+- Get Config
+
+- Set Config
+
+- Create Config Change for review
+
+- Convert Ref Storage
+
+- Run GC
+
+- Ban Commit
+
+- List Access Rights for Project
+
+- Add, Update and Delete Access Rights for Project
+
+- Create Change for review
+
+- Create Access Rights Change for review
+
+- Check Access
+
+- Index project
+
+- Index all changes in a project
+
+- Check project consistency
+
+- Get Commits Included In Refs
+
+- Diff Between Commits
+
+- Get Diff for File
+
+- Branch Endpoints
+
+- List Branches
+
+- Get Branch
+
+- Create Branch
+
+- Delete Branch
+
+- Delete Branches
+
+- Delete Changes
+
+- Get Content
+
+- Create Commit
+
+- Get Validation Options
+
+- Suggest Reviewers
+
+- Get Mergeable Information
+
+- Get Reflog
+
+- Child Project Endpoints
+
+- List Child Projects
+
+- Get Child Project
+
+- Tag Endpoints
+
+- Create Tag
+
+- List Tags
+
+- Get Tag
+
+- Delete Tag
+
+- Delete Tags
+
+- Commit Endpoints
+
+- Get Commit
+
+- Get Included In
+
+- Get Content
+
+- Cherry Pick Commit
+
+- List Files
+
+- Dashboard Endpoints
+
+- List Dashboards
+
+- Get Dashboard
+
+- Create Dashboard
+
+- Update Dashboard
+
+- Delete Dashboard
+
+- Label Endpoints
+
+- List Labels
+
+- Get Label
+
+- Create Label
+
+- Set Label
+
+- Delete Label
+
+- Batch Update Labels
+
+- Create Labels Change for review
+
+- Submit Requirement Endpoints
+
+- Create Submit Requirement
+
+- Update Submit Requirement
+
+- Get Submit Requirement
+
+- List Submit Requirements
+
+- Delete Submit Requirement
+
+- Batch Update Submit Requirements
+
+- Create Submit Requirements Change for review
+
+- Get Submit Requirement Templates
+
+- Get Submit Requirement Template
+
+- Migrate label functions to submit requirements
+
+- Create change which migrate label functions to submit requirements
+
+- IDs
+
+- {branch-id}
+
+- {commit-id}
+
+- {tag-id}
+
+- {dashboard-id}
+
+- {label-name}
+
+- {submit-requirement-name}
+
+- {project-name}
+
+- JSON Entities
+
+- AccessCheckInfo
+
+- AutoCloseableChangesCheckInput
+
+- AutoCloseableChangesCheckResult
+
+- BanInput
+
+- BanResultInfo
+
+- BranchInfo
+
+- BranchInput
+
+- CheckProjectInput
+
+- CheckProjectResultInfo
+
+- CommentLinkInfo
+
+- CommentLinkInput
+
+- ConfigInfo
+
+- CreateCommitInput
+
+- FileChange
+
+- ConfigInput
+
+- ConfigParameterInfo
+
+- ConfigValue
+
+- DashboardInfo
+
+- DashboardInput
+
+- DashboardSectionInfo
+
+- DeleteLabelInput
+
+- DeleteBranchesInput
+
+- DeleteChangesInput
+
+- DeleteTagsInput
+
+- GCInput
+
+- HeadInput
+
+- IndexProjectInput
+
+- InheritedBooleanInfo
+
+- LabelDefinitionInfo
+
+- LabelDefinitionInput
+
+- LabelTypeInfo
+
+- MaxObjectSizeLimitInfo
+
+- BatchLabelInput
+
+- BatchSubmitRequirementInput
+
+- ProjectAccessInput
+
+- ProjectDescriptionInput
+
+- ProjectInfo
+
+- ProjectInput
+
+- RefStorageInput
+
+- ProjectParentInput
+
+- ReflogEntryInfo
+
+- RepositoryStatisticsInfo
+
+- SubmitRequirementInfo
+
+- SubmitRequirementInput
+
+- SubmitTypeInfo
+
+- TagInfo
+
+- TagInput
+
+- MigrateLabelsInfo
+
+- MigrateLabelsReviewInfo
+
+This page describes the project related REST endpoints.
+Please also take note of the general information on the
+REST API.
+
+## Project Endpoints
+
+### List Projects
+
+'GET /projects/'
+
+Lists the projects accessible by the caller. This is the same as
+using the ls-projects command over SSH,
+and accepts the same options as query parameters.
+
+As result a map is returned that maps the project names to
+ProjectInfo entries. The entries in the map are sorted
+by project name.
+
+Request
+
+  GET /projects/?d HTTP/1.0
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+    "external/bison": {
+      "id": "external%2Fbison",
+      "description": "GNU parser generator"
+    },
+    "external/gcc": {
+      "id": "external%2Fgcc"
+    },
+    "external/openssl": {
+      "id": "external%2Fopenssl",
+      "description": "encryption\ncrypto routines"
+    },
+    "test": {
+      "id": "test",
+      "description": "\u003chtml\u003e is escaped"
+    }
+  }
+
+#### Project Options
+
+Branch(b)
+
+Limit the results to the projects having the specified branch and
+include the sha1 of the branch in the results.
+
+Get projects that have a 'master' branch:
+
+Request
+
+GET /projects/?b=master HTTP/1.0
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+    "some-project": {
+      "id": "some-project",
+      "branches": {
+        "master": "c5ed9dfcbf002ca0e432d788dab6ca2387829ca7"
+      }
+    },
+    "some-other-project": {
+      "id": "some-other-project",
+      "branches": {
+        "master": "ef1c270142f9581ecf768f4193fc8f8a81102ec2"
+      }
+    },
+  }
+
+Description(d)
+
+Include project description in the results.
+
+Get all the projects with their description:
+
+Request
+
+GET /projects/?d HTTP/1.0
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+    "some-project": {
+      "id": "some-project",
+      "description": "Description of some project."
+    },
+    "some-other-project": {
+      "id": "some-other-project",
+      "description": "Description of some other project."
+    },
+  }
+
+Limit(n)
+
+Limit the number of projects to be included in the results.
+
+Query the first project in the project list:
+
+Request
+
+  GET /projects/?n=1 HTTP/1.0
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+    "some-project": {
+      "id": "some-project",
+      "_more_projects": true
+    }
+  }
+
+If the number of projects matching the query exceeds either the
+internal limit or a supplied limit query parameter, the last project
+object has a _more_projects: true JSON field set.
+
+Prefix(p)
+
+Limit the results to those projects that start with the specified
+prefix.
+
+The match is case sensitive. May not be used together with m or r.
+
+List all projects that start with platform/:
+
+Request
+
+  GET /projects/?p=platform%2F HTTP/1.0
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+    "platform/drivers": {
+      "id": "platform%2Fdrivers"
+    },
+    "platform/tools": {
+      "id": "platform%2Ftools"
+    }
+  }
+
+E.g. this feature can be used by suggestion client UI’s to limit results.
+
+Regex(r)
+
+Limit the results to those projects that match the specified regex.
+
+Boundary matchers '^' and '$' are implicit. For example: the regex 'test.*' will
+match any projects that start with 'test' and regex '.*test' will match any
+project that end with 'test'.
+
+The match is case sensitive. May not be used together with m or p.
+
+List all projects that match regex test.*project:
+
+Request
+
+  GET /projects/?r=test.*project HTTP/1.0
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+    "test/some-project": {
+      "id": "test%2Fsome-project"
+    },
+    "test/some-other-project": {
+      "id": "test%2Fsome-other-project"
+    }
+  }
+
+Skip(S)
+
+Skip the given number of projects from the beginning of the list.
+
+Query the second project in the project list:
+
+Request
+
+  GET /projects/?n=1&S=1 HTTP/1.0
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+    "some-other-project": {
+      "id": "some-other-project"
+    }
+  }
+
+Substring(m)
+
+Limit the results to those projects that match the specified substring.
+
+The match is case insensitive. May not be used together with r or p.
+
+List all projects that match substring test/:
+
+Request
+
+  GET /projects/?m=test%2F HTTP/1.0
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+    "test/some-project": {
+      "id": "test%2Fsome-project"
+    },
+    "some-path/test/some-other-project": {
+      "id": "some-path%2Ftest%2Fsome-other-project"
+    }
+  }
+
+Tree(t)
+
+Get projects inheritance in a tree-like format. This option does
+not work together with the branch option.
+
+Note
+ | 
+
+If the calling user does not meet any of the following criteria:
+ | 
+
+- 
+
+The state of the parent project is either "ACTIVE" or "READ ONLY",
+and the calling user has READ permission to at least one ref.
+
+- 
+
+The state of the parent project is "HIDDEN" and the calling user
+has READ permission for 'refs/meta/config'.
+
+Then the 'parent' field will be labeled as '?-N', where N represents the
+nesting level within the project’s tree structure. In the provided example,
+'All-Projects' corresponds to level 1, 'parent-project' to level 2, and
+'child-project' to level 3.
+
+Get all the projects with tree option:
+
++
+.Request
+
+GET /projects/?t HTTP/1.0
+
++
+.Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+    "All-Projects" {
+      "id": "All-Projects"
+    },
+    "child-project": {
+      "id": "child-project",
+      "parent": "parent-project"
+    },
+    "parent-project": {
+      "id": "parent-project",
+      "parent": "All-Projects"
+    }
+  }
+
+Type(type)
+
+Get projects with specified type: ALL, CODE, PERMISSIONS.
+
+Get all the projects of type 'PERMISSIONS':
+
+Request
+
+GET /projects/?type=PERMISSIONS HTTP/1.0
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+    "All-Projects" {
+      "id": "All-Projects"
+    },
+    "some-parent-project": {
+      "id": "some-parent-project"
+    }
+  }
+
+All
+
+Get all projects, including those whose state is "HIDDEN". May not be used
+together with the state option.
+
+Request
+
+GET /projects/?all HTTP/1.0
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+    "All-Projects" {
+      "id": "All-Projects",
+      "state": "ACTIVE"
+    },
+    "some-other-project": {
+      "id": "some-other-project",
+      "state": "HIDDEN"
+    }
+  }
+
+State(s)
+
+Get all projects with the given state. May not be used together with the
+all option.
+
+Request
+
+GET /projects/?state=HIDDEN HTTP/1.0
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+    "some-other-project": {
+      "id": "some-other-project",
+      "state": "HIDDEN"
+    }
+  }
+
+### Query Projects
+
+'GET /projects/?query=<query>'
+
+Queries projects visible to the caller. The
+query string must be
+provided by the query parameter. The start and limit parameters
+can be used to skip/limit results.
+
+As result a list of ProjectInfo entities is returned.
+
+Request
+
+  GET /projects/?query=name:test HTTP/1.0
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  [
+    {
+      "id": "test",
+      "description": "\u003chtml\u003e is escaped"
+    }
+  ]
+
+#### Project Limit
+
+The /projects/?query=<query> URL also accepts a limit integer in the
+limit parameter. This limits the results to limit projects.
+
+Query the first 25 projects in project list.
+
+  GET /projects/?query=<query>&limit=25 HTTP/1.0
+
+If the number of projects matching the query exceeds either the
+internal limit or a supplied limit query parameter, the last project
+object has a _more_projects: true JSON field set.
+
+The /projects/ URL also accepts a start integer in the start
+parameter. The results will skip start projects from project list.
+
+Query 25 projects starting from index 50.
+
+  GET /projects/?query=<query>&limit=25&start=50 HTTP/1.0
+
+#### Project Options
+
+Additional fields can be obtained by adding o parameters. Each option
+requires more lookups and slows down the query response time to the
+client so they are generally disabled by default. The supported fields
+are described in the context of the List Projects
+REST endpoint.
+
+### Get Project
+
+'GET /projects/{project-name}'
+
+Retrieves a project.
+
+Request
+
+  GET /projects/plugins%2Freplication HTTP/1.0
+
+As response a ProjectInfo entity is returned that
+describes the project.
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+    "id": "plugins%2Freplication",
+    "name": "plugins/replication",
+    "parent": "Public-Plugins",
+    "description": "Copies to other servers using the Git protocol",
+    "state": "ACTIVE",
+    "labels": {
+      "Code-Review": {
+        "values": {
+          " 0": "No score",
+          "+1": "Approved"
+        },
+        "default_value": 0
+      }
+    }
+  }
+
+### Create Project
+
+'PUT /projects/{project-name}'
+
+Creates a new project.
+
+In the request body additional data for the project can be provided as
+ProjectInput.
+
+Request
+
+  PUT /projects/MyProject HTTP/1.0
+  Content-Type: application/json; charset=UTF-8
+
+  {
+    "description": "This is a demo project.",
+    "submit_type": "INHERIT",
+    "owners": [
+      "MyProject-Owners"
+    ]
+  }
+
+As response the ProjectInfo entity is returned that
+describes the created project.
+
+Response
+
+  HTTP/1.1 201 Created
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+    "id": "MyProject",
+    "name": "MyProject",
+    "parent": "All-Projects",
+    "description": "This is a demo project.",
+    "labels": {
+      "Code-Review": {
+        "values": {
+          " 0": "No score",
+          "+1": "Approved"
+        },
+        "default_value": 0
+      }
+    }
+  }
+
+The response code is 201 Created, unless init_only is set in the request
+input and an existing project is updated. In this case the response code is 200
+OK.
+
+### Get Project Description
+
+'GET /projects/{project-name}/description'
+
+Retrieves the description of a project.
+
+Request
+
+  GET /projects/plugins%2Freplication/description HTTP/1.0
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  "Copies to other servers using the Git protocol"
+
+If the project does not have a description an empty string is returned.
+
+### Set Project Description
+
+'PUT /projects/{project-name}/description'
+
+Sets the description of a project.
+
+The new project description must be provided in the request body inside
+a ProjectDescriptionInput entity.
+
+Request
+
+  PUT /projects/plugins%2Freplication/description HTTP/1.0
+  Content-Type: application/json; charset=UTF-8
+
+  {
+    "description": "Plugin for Gerrit that handles the replication.",
+    "commit_message": "Update the project description"
+  }
+
+As response the new project description is returned.
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  "Plugin for Gerrit that handles the replication."
+
+If the description was deleted the response is “204 No Content”.
+
+### Delete Project Description
+
+'DELETE /projects/{project-name}/description'
+
+Deletes the description of a project.
+
+Request
+
+  DELETE /projects/plugins%2Freplication/description HTTP/1.0
+
+Response
+
+  HTTP/1.1 204 No Content
+
+A commit message can be provided in the request body as a
+ProjectDescriptionInput entity.
+Historically, this method allowed a body in the DELETE, but that behavior is
+deprecated.
+In this case, use PUT instead.
+
+Request
+
+  PUT /projects/plugins%2Freplication/description HTTP/1.0
+  Content-Type: application/json; charset=UTF-8
+
+  {
+    "commit_message": "Update the project description"
+  }
+
+Response
+
+  HTTP/1.1 204 No Content
+
+### Get Project Parent
+
+'GET /projects/{project-name}/parent'
+
+Retrieves the name of a project’s parent project. For the
+All-Projects root project an empty string is returned.
+
+Request
+
+  GET /projects/plugins%2Freplication/parent HTTP/1.0
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  "All-Projects"
+
+### Set Project Parent
+
+'PUT /projects/{project-name}/parent'
+
+Sets the parent project for a project.
+
+The new name of the parent project must be provided in the request body
+inside a ProjectParentInput entity.
+
+Request
+
+  PUT /projects/plugins%2Freplication/parent HTTP/1.0
+  Content-Type: application/json; charset=UTF-8
+
+  {
+    "parent": "Public-Plugins",
+    "commit_message": "Update the project parent"
+  }
+
+As response the new parent project name is returned.
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  "Public-Plugins"
+
+### Get HEAD
+
+'GET /projects/{project-name}/HEAD'
+
+Retrieves for a project the name of the branch to which HEAD points.
+
+Request
+
+  GET /projects/plugins%2Freplication/HEAD HTTP/1.0
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  "refs/heads/master"
+
+### Set HEAD
+
+'PUT /projects/{project-name}/HEAD'
+
+Sets HEAD for a project.
+
+The new ref to which HEAD should point must be provided in the
+request body inside a HeadInput entity.
+
+Request
+
+  PUT /projects/plugins%2Freplication/HEAD HTTP/1.0
+  Content-Type: application/json; charset=UTF-8
+
+  {
+    "ref": "refs/heads/stable"
+  }
+
+As response the new ref to which HEAD points is returned.
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  "refs/heads/stable"
+
+### Get Repository Statistics
+
+'GET /projects/{project-name}/statistics.git'
+
+Return statistics for the repository of a project.
+
+Request
+
+  GET /projects/plugins%2Freplication/statistics.git HTTP/1.0
+
+The repository statistics are returned as a
+RepositoryStatisticsInfo entity.
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+    "number_of_loose_objects": 127,
+    "number_of_loose_refs": 15,
+    "number_of_pack_files": 15,
+    "number_of_packed_objects": 67,
+    "number_of_packed_refs": 0,
+    "size_of_loose_objects": 29466,
+    "size_of_packed_objects": 9646
+  }
+
+### Get Config
+
+'GET /projects/{project-name}/config'
+
+Gets some configuration information about a project. Note that this
+config info is not simply the contents of project.config; it generally
+contains fields that may have been inherited from parent projects.
+
+Request
+
+  GET /projects/myproject/config
+
+A ConfigInfo entity is returned that describes the
+project configuration. Some fields are only visible to users that have
+read access to refs/meta/config.
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+    "description": "demo project",
+    "use_contributor_agreements": {
+      "value": true,
+      "configured_value": "TRUE",
+      "inherited_value": false
+    },
+    "use_content_merge": {
+      "value": true,
+      "configured_value": "INHERIT",
+      "inherited_value": true
+    },
+    "use_signed_off_by": {
+      "value": false,
+      "configured_value": "INHERIT",
+      "inherited_value": false
+    },
+    "create_new_change_for_all_not_in_target": {
+      "value": false,
+      "configured_value": "INHERIT",
+      "inherited_value": false
+    },
+    "require_change_id": {
+      "value": false,
+      "configured_value": "FALSE",
+      "inherited_value": true
+    },
+    "max_object_size_limit": {
+      "value": "15m",
+      "configured_value": "15m",
+      "inherited_value": "20m"
+    },
+    "submit_type": "INHERIT",
+    "default_submit_type": {
+      "value": "MERGE_IF_NECESSARY",
+      "configured_value": "INHERIT",
+      "inherited_value": "MERGE_IF_NECESSARY"
+    },
+    "state": "ACTIVE",
+    "commentlinks": {},
+    "plugin_config": {
+      "helloworld": {
+        "language": {
+          "display_name": "Preferred Language",
+          "type": "STRING",
+          "value": "en"
+        }
+      }
+    },
+    "actions": {
+      "cookbook~hello-project": {
+        "method": "POST",
+        "label": "Say hello",
+        "title": "Say hello in different languages",
+        "enabled": true
+      }
+    }
+  }
+
+### Set Config
+
+'PUT /projects/{project-name}/config'
+
+Sets the configuration of a project.
+
+The new configuration must be provided in the request body as a
+ConfigInput entity.
+
+Request
+
+  PUT /projects/myproject/config HTTP/1.0
+  Content-Type: application/json; charset=UTF-8
+
+  {
+    "description": "demo project",
+    "use_contributor_agreements": "FALSE",
+    "use_content_merge": "INHERIT",
+    "use_signed_off_by": "INHERIT",
+    "create_new_change_for_all_not_in_target": "INHERIT",
+    "enable_signed_push": "INHERIT",
+    "require_signed_push": "INHERIT",
+    "reject_implicit_merges": "INHERIT",
+    "require_change_id": "TRUE",
+    "max_object_size_limit": "10m",
+    "submit_type": "REBASE_IF_NECESSARY",
+    "state": "ACTIVE"
+  }
+
+As response the new configuration is returned as a 
+ConfigInfo entity.
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+    "use_contributor_agreements": {
+      "value": false,
+      "configured_value": "FALSE",
+      "inherited_value": false
+    },
+    "use_content_merge": {
+      "value": true,
+      "configured_value": "INHERIT",
+      "inherited_value": true
+    },
+    "use_signed_off_by": {
+      "value": false,
+      "configured_value": "INHERIT",
+      "inherited_value": false
+    },
+    "create_new_change_for_all_not_in_target": {
+      "value": true,
+      "configured_value": "INHERIT",
+      "inherited_value": false
+    },
+    "require_change_id": {
+      "value": true,
+      "configured_value": "TRUE",
+      "inherited_value": true
+    },
+    "enable_signed_push": {
+      "value": true,
+      "configured_value": "INHERIT",
+      "inherited_value": false
+    },
+    "require_signed_push": {
+      "value": false,
+      "configured_value": "INHERIT",
+      "inherited_value": false
+    },
+    "reject_implicit_merges": {
+      "value": false,
+      "configured_value": "INHERIT",
+      "inherited_value": false
+    },
+    "max_object_size_limit": {
+      "value": "10m",
+      "configured_value": "10m",
+      "inherited_value": "20m"
+    },
+    "submit_type": "REBASE_IF_NECESSARY",
+    "default_submit_type": {
+      "value": "REBASE_IF_NECESSARY",
+      "configured_value": "INHERIT",
+      "inherited_value": "REBASE_IF_NECESSARY"
+    },
+    "state": "ACTIVE",
+    "commentlinks": {}
+  }
+
+### Create Config Change for review
+
+'PUT /projects/{project-name}/config:review'
+
+Sets the configuration of a project.
+
+This takes the same input as Set Config, but creates a pending
+change for review. Like Create Change, it returns
+a ChangeInfo entity describing the resulting change.
+
+Request
+
+  PUT /projects/myproject/config:review HTTP/1.0
+  Content-Type: application/json; charset=UTF-8
+
+  {
+    "description": "demo project",
+    "use_contributor_agreements": "FALSE",
+    "use_content_merge": "INHERIT",
+    "use_signed_off_by": "INHERIT",
+    "create_new_change_for_all_not_in_target": "INHERIT",
+    "enable_signed_push": "INHERIT",
+    "require_signed_push": "INHERIT",
+    "reject_implicit_merges": "INHERIT",
+    "require_change_id": "TRUE",
+    "max_object_size_limit": "10m",
+    "submit_type": "REBASE_IF_NECESSARY",
+    "state": "ACTIVE"
+  }
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+    "id": "testproj~refs%2Fmeta%2Fconfig~Ieaf185bf90a1fc3b58461e399385e158a20b31a2",
+    "project": "testproj",
+    "branch": "refs/meta/config",
+    "hashtags": [],
+    "change_id": "Ieaf185bf90a1fc3b58461e399385e158a20b31a2",
+    "subject": "Review access change",
+    "status": "NEW",
+    "created": "2017-09-07 14:31:11.852000000",
+    "updated": "2017-09-07 14:31:11.852000000",
+    "submit_type": "CHERRY_PICK",
+    "mergeable": true,
+    "insertions": 2,
+    "deletions": 0,
+    "unresolved_comment_count": 0,
+    "has_review_started": true,
+    "_number": 7,
+    "owner": {
+      "_account_id": 1000000
+    }
+  }
+
+### Convert Ref Storage
+
+'POST /projects/{project-name}/convert-ref-storage'
+
+Converts the ref storage of a project’s repository between FILES
+and REFTABLE.
+
+Conversion is supported in both directions, but only for a local repository
+that is not already in the requested format. A request is rejected with
+409 Conflict when it cannot be satisfied: the repository is already in the
+requested format, is not a local repository, or a backup from a previous
+conversion is still present and must be removed before converting again. A
+missing or unrecognized ref_storage is rejected with 400 Bad Request, and
+404 Not Found is returned if the repository cannot be opened.
+
+When backup is kept, the previous ref storage is retained on the server and
+is not removed automatically: converting from FILES renames the old files
+(refs.old, packed-refs.old, logs.old), while converting from REFTABLE
+leaves the old reftable directory in place. A leftover backup blocks a later
+conversion back until it is removed.
+
+Caller must be a member of a group that is granted the
+Administrate Server
+capability.
+
+Note
+ | 
+
+The conversion does not lock the repository. Concurrent writes during the
+conversion can leave the ref storage in an inconsistent state, so ensure the
+repository is quiescent. The SSH convert-ref-storage command and git’s own
+git refs migrate have the same limitation.
+ | 
+
+The conversion is described in the request body as a
+RefStorageInput entity. As a shorthand, the body
+may be just the target format as a bare string, e.g. "REFTABLE".
+
+Request
+
+  POST /projects/myproject/convert-ref-storage HTTP/1.0
+  Content-Type: application/json; charset=UTF-8
+
+  {
+    "ref_storage": "REFTABLE",
+    "backup": false
+  }
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  "REFTABLE"
+
+### Run GC
+
+'POST /projects/{project-name}/gc'
+
+Run the Git garbage collection for the repository of a project.
+
+Options for the Git garbage collection can be specified in the
+request body as a GCInput entity.
+
+Request
+
+  POST /projects/plugins%2Freplication/gc HTTP/1.0
+  Content-Type: application/json; charset=UTF-8
+
+  {
+    "show_progress": true
+  }
+
+The response is the streamed output of the garbage collection.
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: text/plain; charset=UTF-8
+
+  collecting garbage for "plugins/replication":
+  Pack refs:              100% (21/21)
+  Counting objects:       20
+  Finding sources:        100% (20/20)
+  Getting sizes:          100% (13/13)
+  Compressing objects:     83% (5/6)
+  Writing objects:        100% (20/20)
+  Selecting commits:      100% (7/7)
+  Building bitmaps:       100% (7/7)
+  Finding sources:        100% (41/41)
+  Getting sizes:          100% (25/25)
+  Compressing objects:     52% (12/23)
+  Writing objects:        100% (41/41)
+  Prune loose objects also found in pack files: 100% (36/36)
+  Prune loose, unreferenced objects: 100% (36/36)
+  done.
+
+#### Asynchronous Execution
+
+The option async allows to schedule a background task that asynchronously
+executes a Git garbage collection.
+
+The Location header of the response refers to the background task
+which allows to inspect the progress of its execution. In case of asynchronous
+execution the show_progress option is ignored.
+
+Request
+
+  POST /projects/plugins%2Freplication/gc HTTP/1.0
+  Content-Type: application/json;charset=UTF-8
+
+  {
+    "async": true
+  }
+
+The response is empty.
+
+Response
+
+  HTTP/1.1 202 Accepted
+  Content-Disposition: attachment
+  Location: https:<host>/a/config/server/tasks/383a0602
+
+### Ban Commit
+
+'PUT /projects/{project-name}/ban'
+
+Marks commits as banned for the project. If a commit is banned Gerrit
+rejects every push that includes this commit with
+contains banned commit …​.
+
+Note
+ | 
+
+This REST endpoint only marks the commits as banned, but it does not
+remove the commits from the history of any central branch. This needs
+to be done manually.
+ | 
+
+The commits to be banned must be specified in the request body as a
+BanInput entity.
+
+The caller must be project owner.
+
+Request
+
+  PUT /projects/plugins%2Freplication/ban HTTP/1.0
+  Content-Type: application/json; charset=UTF-8
+
+  {
+    "commits": [
+      "a8a477efffbbf3b44169bb9a1d3a334cbbd9aa96",
+      "cf5b56541f84b8b57e16810b18daca9c3adc377b"
+    ],
+    "reason": "Violates IP"
+  }
+
+As response a BanResultInfo entity is returned.
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+    "newly_banned": [
+      "a8a477efffbbf3b44169bb9a1d3a334cbbd9aa96",
+      "cf5b56541f84b8b57e16810b18daca9c3adc377b"
+    ]
+  }
+
+### List Access Rights for Project
+
+'GET /projects/{project-name}/access'
+
+Lists the access rights for a single project.
+
+As result a
+ProjectAccessInfo
+entity is returned.
+
+Request
+
+  GET /projects/MyProject/access HTTP/1.0
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+    "revision": "61157ed63e14d261b6dca40650472a9b0bd88474",
+    "inherits_from": {
+      "id": "All-Projects",
+      "name": "All-Projects",
+      "description": "Access inherited by all other projects."
+    },
+    "local": {
+        "refs/*": {
+          "permissions": {
+            "read": {
+              "rules": {
+                "c2ce4749a32ceb82cd6adcce65b8216e12afb41c": {
+                  "action": "ALLOW",
+                  "force": false
+                },
+                "global:Anonymous-Users": {
+                  "action": "ALLOW",
+                  "force": false
+                }
+              }
+            }
+          }
+        }
+    },
+    "is_owner": true,
+    "owner_of": [
+      "refs/*"
+    ],
+    "can_upload": true,
+    "can_add": true,
+    "can_add_tags": true,
+    "config_visible": true,
+    "groups": {
+      "c2ce4749a32ceb82cd6adcce65b8216e12afb41c": {
+        "url": "#/admin/groups/uuid-c2ce4749a32ceb82cd6adcce65b8216e12afb41c",
+        "options": {},
+        "description": "Users who perform batch actions on Gerrit",
+        "group_id": 2,
+        "owner": "Administrators",
+        "owner_id": "d5b7124af4de52924ed397913e2c3b37bf186948",
+        "created_on": "2009-06-08 23:31:00.000000000",
+        "name": "Service Users"
+      },
+      "global:Anonymous-Users": {
+        "options": {},
+        "name": "Anonymous Users"
+      }
+    }
+  }
+
+### Add, Update and Delete Access Rights for Project
+
+'POST /projects/{project-name}/access'
+
+Sets access rights for the project using the diff schema provided by
+ProjectAccessInput. Deductions are used to
+remove access sections, permissions or permission rules. The backend will remove
+the entity with the finest granularity in the request, meaning that if an
+access section without permissions is posted, the access section will be
+removed; if an access section with a permission but no permission rules is
+posted, the permission will be removed; if an access section with a permission
+and a permission rule is posted, the permission rule will be removed.
+
+Additionally, access sections and permissions will be cleaned up after applying
+the deductions by removing items that have no child elements.
+
+After removals have been applied, additions will be applied.
+
+As result a
+ProjectAccessInfo
+entity is returned.
+
+Request
+
+  POST /projects/MyProject/access HTTP/1.0
+  Content-Type: application/json; charset=UTF-8
+
+  {
+    "remove": {
+      "refs/*": {
+        "permissions": {
+          "read": {
+            "rules": {
+              "c2ce4749a32ceb82cd6adcce65b8216e12afb41c": {
+                "action": "ALLOW"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+    "revision": "61157ed63e14d261b6dca40650472a9b0bd88474",
+    "inherits_from": {
+      "id": "All-Projects",
+      "name": "All-Projects",
+      "description": "Access inherited by all other projects."
+    },
+    "local": {
+        "refs/*": {
+          "permissions": {
+            "read": {
+              "rules": {
+                "global:Anonymous-Users": {
+                  "action": "ALLOW",
+                  "force": false
+                }
+              }
+            }
+          }
+        }
+    },
+    "is_owner": true,
+    "owner_of": [
+      "refs/*"
+    ],
+    "can_upload": true,
+    "can_add": true,
+    "can_add_tags": true,
+    "config_visible": true,
+    "groups": {
+      "global:Anonymous-Users": {
+        "options": {},
+        "name": "Anonymous Users"
+      }
+    }
+  }
+
+### Create Change for review
+
+'POST /projects/{project-name}/create.change'
+
+This endpoint is functionally equivalent to
+create change in the change
+API, but it has the project name in the URL, which is easier to route
+in sharded deployments.
+
+Request
+
+  POST /projects/myProject/create.change HTTP/1.0
+  Content-Type: application/json; charset=UTF-8
+
+  {
+    "subject" : "Let's support 100% Gerrit workflow direct in browser",
+    "branch" : "master",
+    "topic" : "create-change-in-browser",
+    "status" : "NEW"
+  }
+
+As response a ChangeInfo entity is returned that describes
+the resulting change.
+
+Response
+
+  HTTP/1.1 201 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+    "id": "myProject~master~I8473b95934b5732ac55d26311a706c9c2bde9941",
+    "project": "myProject",
+    "branch": "master",
+    "topic": "create-change-in-browser",
+    "change_id": "I8473b95934b5732ac55d26311a706c9c2bde9941",
+    "subject": "Let's support 100% Gerrit workflow direct in browser",
+    "status": "NEW",
+    "created": "2014-05-05 07:15:44.639000000",
+    "updated": "2014-05-05 07:15:44.639000000",
+    "mergeable": true,
+    "insertions": 0,
+    "deletions": 0,
+    "_number": 4711,
+    "owner": {
+      "name": "John Doe"
+    }
+  }
+
+### Create Access Rights Change for review
+
+'PUT /projects/{project-name}/access:review'
+
+Sets access rights for the project using the diff schema provided by
+ProjectAccessInput
+
+This takes the same input as Update Access Rights, but creates a pending
+change for review. Like Create Change, it returns
+a ChangeInfo entity describing the resulting change.
+
+Request
+
+  PUT /projects/MyProject/access:review HTTP/1.0
+  Content-Type: application/json; charset=UTF-8
+
+  {
+    "add": {
+      "refs/heads/*": {
+        "permissions": {
+          "read": {
+            "rules": {
+              "global:Anonymous-Users": {
+                "action": "DENY",
+                "force": false
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+    "id": "testproj~refs%2Fmeta%2Fconfig~Ieaf185bf90a1fc3b58461e399385e158a20b31a2",
+    "project": "testproj",
+    "branch": "refs/meta/config",
+    "hashtags": [],
+    "change_id": "Ieaf185bf90a1fc3b58461e399385e158a20b31a2",
+    "subject": "Review access change",
+    "status": "NEW",
+    "created": "2017-09-07 14:31:11.852000000",
+    "updated": "2017-09-07 14:31:11.852000000",
+    "submit_type": "CHERRY_PICK",
+    "mergeable": true,
+    "insertions": 2,
+    "deletions": 0,
+    "unresolved_comment_count": 0,
+    "has_review_started": true,
+    "_number": 7,
+    "owner": {
+      "_account_id": 1000000
+    }
+  }
+
+### Check Access
+
+'GET /projects/MyProject/check.access?account=1000098&ref=refs%2Fheads%2Fsecret%2Fbla'
+
+This command runs access checks for other users. This requires the
+View Access global
+capability.
+
+The result is a AccessCheckInfo entity
+detailing the access of the given user for the given project,
+project-ref, or project-permission-ref combination.
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+    "message": "user Kristen Burns \u003cKristen.Burns@gerritcodereview.com\u003e (1000098) cannot see ref refs/heads/secret/bla in project MyProject",
+    "status": 403
+  }
+
+#### Check Access Options
+
+Account(account)
+
+The account for which to check access. Mandatory.
+
+Permission(perm)
+
+The ref permission for which to check access. If not specified, read
+access to at least branch is checked.
+
+Ref(ref)
+
+The branch for which to check access. This must be given if perm is specified.
+
+### Index project
+
+'POST /projects/{project-name}/index'
+
+Adds or updates the current project (and children, if specified) in the secondary index.
+The indexing task is executed asynchronously in background and this command returns
+immediately if async is specified in the input.
+
+As an input, a IndexProjectInput entity can be provided.
+
+Request
+
+  POST /projects/MyProject/index HTTP/1.0
+  Content-Type: application/json; charset=UTF-8
+
+  {
+    "index_children": "true"
+    "async": "true"
+  }
+
+Response
+
+  HTTP/1.1 202 Accepted
+  Content-Disposition: attachment
+
+### Index all changes in a project
+
+'POST /projects/{project-name}/index.changes'
+
+Adds or updates all the changes belonging to a project in the secondary index.
+The indexing task is executed asynchronously in background, so this command
+returns immediately.
+
+Request
+
+  POST /projects/MyProject/index.changes HTTP/1.0
+
+Response
+
+  HTTP/1.1 202 Accepted
+  Content-Disposition: attachment
+
+### Check project consistency
+
+'POST /projects/{project-name}/check'
+
+Performs consistency checks on the project.
+
+Which consistency checks should be performed is controlled by the
+CheckProjectInput entity in the request
+body.
+
+The following consistency checks are supported:
+
+- 
+
+AutoCloseableChangesCheck: Searches for open changes that can be
+auto-closed because a patch set of the change is already contained in
+the destination branch or because the destination branch contains a
+commit with the same Change-Id. Normally Gerrit auto-closes such
+changes when the corresponding commits are pushed directly to the
+repository. However if a branch is updated behind Gerrit’s back or if
+auto-closing changes fails (and the push is still successful) change
+states can get inconsistent (changes that are already part of the
+destination branch are still open). This consistency check is
+intended to detect and repair this situation.
+
+To fix any problems that can be fixed automatically set the fix field
+in the inputs for the consistency checks  to true.
+
+This REST endpoint requires the
+Administrate Server
+global capability.
+
+Request
+
+  POST /projects/MyProject/check HTTP/1.0
+  Content-Type: application/json; charset=UTF-8
+
+  {
+    "auto_closeable_changes_check": {
+      "fix": true,
+      "branch": "refs/heads/master",
+      "max_commits": 100
+    }
+  }
+
+As response a CheckProjectResultInfo
+entity is returned that results for the consistency checks.
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+    "auto_closeable_changes_check_result": {
+      "auto_closeable_changes": {
+        "refs/heads/master": [
+          {
+            "id": "myProject~master~I8473b95934b5732ac55d26311a706c9c2bde9940",
+            "project": "myProject",
+            "branch": "master",
+            "change_id": "I8473b95934b5732ac55d26311a706c9c2bde9940",
+            "subject": "Implementing Feature X",
+            "status": "NEW",
+            "created": "2013-02-01 09:59:32.126000000",
+            "updated": "2013-02-21 11:16:36.775000000",
+            "insertions": 34,
+            "deletions": 101,
+            "_number": 3965,
+            "owner": {
+              "name": "John Doe"
+            },
+            "problems": [
+              {
+                "message": "Patch set 1 (2f15e416237ed9b561199f24184f5f5d2708c584) is merged into destination ref refs/heads/master (2f15e416237ed9b561199f24184f5f5d2708c584), but change status is NEW",
+                "status": "FIXED",
+                "outcome": "Marked change as merged"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+
+### Get Commits Included In Refs
+
+'GET /projects/{project-name}/commits:in'
+
+Gets refs in which the specified commits were merged into. Returns a map of commits
+to sets of full ref names.
+
+One or more commit query parameters are required and each specifies a
+commit-id (SHA-1 in 40 digit hex representation). Commits will not be contained
+in the map if they do not exist or are not reachable from visible, specified refs.
+
+One or more ref query parameters are required and each specifies a full ref name.
+Refs which are not visible to the calling user according to the project’s read
+permissions and refs which do not exist will be filtered out from the result.
+
+Request
+
+  GET /projects/work%2Fmy-project/commits:in?commit=a8a477efffbbf3b44169bb9a1d3a334cbbd9aa96&commit=6d2a3adb10e844c33617fc948dbeb88e868d396e&ref=refs/heads/master&ref=refs/heads/branch1 HTTP/1.0
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json;charset=UTF-8
+
+  )]}'
+  {
+    "a8a477efffbbf3b44169bb9a1d3a334cbbd9aa96": [
+      "refs/heads/master"
+    ],
+    "6d2a3adb10e844c33617fc948dbeb88e868d396e": [
+      "refs/heads/branch1",
+      "refs/heads/master"
+    ]
+  }
+
+### Diff Between Commits
+
+'GET /projects/{project-name}/commits/{commit-id}/diff'
+
+Lists the files that differ between two commits. This is useful for comparing
+commits across multiple changes (similar to a pull request diff).
+
+The base query parameter is required and must be a 40-character
+SHA-1 commit ID. The commits must be in an ancestor/descendant relationship.
+All commits in the path between the base commit and the target commit must be
+visible to the caller.
+Private changes that the caller cannot access will result in a 404 error.
+
+The name-only option is also required; requests without it are rejected
+with 400 Bad Request.
+
+The response format is identical to the
+List Files endpoint for changes.
+
+Request
+
+  GET /projects/my-project/commits/6d2a3adb10e844c33617fc948dbeb88e868d396e/diff?base=a8a477efffbbf3b44169bb9a1d3a334cbbd9aa96&name-only HTTP/1.0
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json;charset=UTF-8
+
+  )]}'
+  {
+    "/COMMIT_MSG": {
+      "status": "A",
+      "lines_inserted": 15,
+      "size_delta": 450,
+      "size": 450
+    },
+    "src/main/java/Example.java": {
+      "lines_inserted": 10,
+      "lines_deleted": 5,
+      "size_delta": 150,
+      "size": 2500
+    }
+  }
+
+### Get Diff for File
+
+'GET /projects/{project-name}/commits/{commit-id}/files/{file-id}/diff'
+
+Gets the diff for a single file between two commits. The base
+query parameter is required (same as Diff Between Commits).
+
+The response format is identical to the
+Get Diff endpoint for changes.
+
+Request
+
+  GET /projects/my-project/commits/6d2a3adb10e844c33617fc948dbeb88e868d396e/files/src%2Fmain%2Fjava%2FExample.java/diff?base=a8a477efffbbf3b44169bb9a1d3a334cbbd9aa96 HTTP/1.0
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json;charset=UTF-8
+
+  )]}'
+  {
+    "meta_a": {
+      "name": "src/main/java/Example.java",
+      "content_type": "text/x-java",
+      "lines": 50
+    },
+    "meta_b": {
+      "name": "src/main/java/Example.java",
+      "content_type": "text/x-java",
+      "lines": 55
+    },
+    "change_type": "MODIFIED",
+    "content": [
+      {
+        "ab": [
+          "// Copyright header",
+          "package com.example;"
+        ]
+      },
+      {
+        "a": [
+          "  private int oldField;"
+        ],
+        "b": [
+          "  private int newField;",
+          "  private String additionalField;"
+        ]
+      }
+    ]
+  }
+
+Options
+
+- 
+
+--whitespace: Controls whitespace handling. Valid values are IGNORE_NONE,
+IGNORE_TRAILING, IGNORE_LEADING_AND_TRAILING (default), and IGNORE_ALL.
+
+- 
+
+--intraline: If set, includes intra-line diffs.
+
+## Branch Endpoints
+
+### List Branches
+
+'GET /projects/{project-name}/branches/'
+
+List the branches of a project.
+
+As result a list of BranchInfo entries is
+returned.
+
+If the limit parameter was set and the number of branches is larger than the
+limit, the response header X-GERRIT-NEXT-PAGE-TOKEN will be set. Clients
+can pass this token with subsequent requests (using the next-page-token
+request parameter) for pagination to skip over previous results.
+
+Request
+
+  GET /projects/work%2Fmy-project/branches/ HTTP/1.0
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  [
+    {
+      "ref": "HEAD",
+      "revision": "master"
+    },
+    {
+      "ref": "refs/meta/config",
+      "revision": "76016386a0d8ecc7b6be212424978bb45959d668"
+    },
+    {
+      "ref": "refs/heads/master",
+      "revision": "67ebf73496383c6777035e374d2d664009e2aa5c"
+    },
+    {
+      "ref": "refs/heads/stable",
+      "revision": "64ca533bd0eb5252d2fee83f63da67caae9b4674",
+      "can_delete": true
+    }
+  ]
+
+#### Branch Options
+
+Limit(n)
+
+Limit the number of branches to be included in the results.
+
+Request
+
+  GET /projects/testproject/branches?n=1 HTTP/1.0
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  [
+    {
+      "ref": "HEAD",
+      "revision": "master",
+    }
+  ]
+
+Skip(S)
+
+Skip the given number of branches from the beginning of the list.
+
+Request
+
+  GET /projects/testproject/branches?n=1&s=0 HTTP/1.0
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  [
+    {
+      "ref": "HEAD",
+      "revision": "master",
+    }
+  ]
+
+Substring(m)
+
+Limit the results to those branches that match the specified substring.
+
+The match is case insensitive. May not be used together with r.
+
+List all branches that match substring test:
+
+Request
+
+  GET /projects/testproject/branches?m=test HTTP/1.0
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  [
+    {
+      "ref": "refs/heads/test1",
+      "revision": "9c9d08a438e55e52f33b608415e6dddd9b18550d",
+      "can_delete": true
+    }
+  ]
+
+Regex(r)
+
+Limit the results to those branches that match the specified regex.
+Boundary matchers '^' and '$' are implicit. For example: the regex 't*' will
+match any branches that start with 't' and regex '*t' will match any
+branches that end with 't'.
+
+The match is case sensitive. May not be used together with m.
+
+List all branches that match regex t.*1:
+
+Request
+
+  GET /projects/testproject/branches?r=t.*1 HTTP/1.0
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  [
+    {
+      "ref": "refs/heads/test1",
+      "revision": "9c9d08a438e55e52f33b608415e6dddd9b18550d",
+      "can_delete": true
+    }
+  ]
+
+Next-page-token(t)
+
+Skips over previous results. Cannot be set simultaneously with the Skip
+parameter, and also must be set to an exact token received by the server in a
+previous call, otherwise the request would fail with 400 Bad Request.
+
+### Get Branch
+
+'GET /projects/{project-name}/branches/{branch-id}'
+
+Retrieves a branch of a project. For the "All-Users" repository, the magic
+branch "refs/users/self" is automatically resolved to the user branch of the
+calling user.
+
+Request
+
+  GET /projects/work%2Fmy-project/branches/master HTTP/1.0
+
+As response a BranchInfo entity is returned that
+describes the branch.
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+    "ref": "refs/heads/master",
+    "revision": "67ebf73496383c6777035e374d2d664009e2aa5c"
+  }
+
+### Create Branch
+
+'PUT /projects/{project-name}/branches/{branch-id}'
+
+Creates a new branch.
+
+In the request body additional data for the branch can be provided as
+BranchInput. The {branch-id} in the URL
+should exactly match with the ref field of BranchInput, or
+otherwise the request would fail with 400 Bad Request.
+
+Request
+
+  PUT /projects/MyProject/branches/stable HTTP/1.0
+  Content-Type: application/json; charset=UTF-8
+
+  {
+    "revision": "76016386a0d8ecc7b6be212424978bb45959d668"
+  }
+
+As response a BranchInfo entity is returned that
+describes the created branch.
+
+Response
+
+  HTTP/1.1 201 Created
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+    "ref": "refs/heads/stable",
+    "revision": "76016386a0d8ecc7b6be212424978bb45959d668",
+    "can_delete": true
+  }
+
+### Delete Branch
+
+'DELETE /projects/{project-name}/branches/{branch-id}'
+
+Deletes a branch.
+
+Request
+
+  DELETE /projects/MyProject/branches/stable HTTP/1.0
+
+Response
+
+  HTTP/1.1 204 No Content
+
+### Delete Branches
+
+'POST /projects/{project-name}/branches:delete'
+
+Delete one or more branches.
+
+The branches to be deleted must be provided in the request body as a
+DeleteBranchesInput entity.
+
+Request
+
+  POST /projects/MyProject/branches:delete HTTP/1.0
+  Content-Type: application/json;charset=UTF-8
+
+  {
+    "branches": [
+      "stable-1.0",
+      "stable-2.0"
+    ]
+  }
+
+Response
+
+  HTTP/1.1 204 No Content
+
+If some branches could not be deleted, the response is “409 Conflict” and the
+error message is contained in the response body.
+
+### Delete Changes
+
+'POST /projects/{project-name}/changes:delete'
+
+Delete one or more changes.
+
+The changes to be deleted must be provided in the request body as a
+DeleteChangesInput entity.
+
+Request
+
+  POST /projects/MyProject/changes:delete HTTP/1.0
+  Content-Type: application/json;charset=UTF-8
+
+  {
+    "changes": [
+      "changeId1",
+      "changeId2",
+      "changeId3",
+      "changeId4"
+    ]
+  }
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+    "FAILURE": [
+      "changeId1"
+    ],
+    "NOT_UNIQUE": [
+      "changeId2"
+    ].
+    "SUCCESS": [
+      "changeId3",
+      "changeId4"
+    ]
+  }
+
+If some changes could not be deleted, the response will be “200 OK” with the details in the response body.
+
+### Get Content
+
+'GET /projects/{project-name}/branches/{branch-id}/files/{file-id}/content'
+
+Gets the content of a file from the HEAD revision of a certain branch.
+
+Request
+
+  GET /projects/gerrit/branches/master/files/gerrit-server%2Fsrc%2Fmain%2Fjava%2Fcom%2Fgoogle%2Fgerrit%2Fserver%2Fproject%2FRefControl.java/content HTTP/1.0
+
+The content is returned as base64 encoded string.
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: text/plain; charset=UTF-8
+
+  Ly8gQ29weXJpZ2h0IChDKSAyMDEwIFRoZSBBbmRyb2lkIE9wZW4gU291cmNlIFByb2plY...
+
+### Create Commit
+
+'POST /projects/{project-name}/branches/{branch-id}/commit'
+
+Creates a single commit that applies a set of file operations (create/update,
+delete, rename) directly to the branch, for CI and automation use cases (no clone
+or multi-step change workflow required).
+
+This is a server-side branch update, not a git push. The caller needs the
+Push access right (a fast-forward
+UPDATE) on a writable, ordinary branch (not HEAD, a tag, or refs/meta/*).
+Writing to HEAD is rejected with “405 Method Not Allowed”; the caller must
+target the branch HEAD points to instead.
+Ref-update and commit validators run, including validators contributed by
+plugins, and validation failures are returned as an error. There is no
+receive-pack, so push-only policies are not applied: signed-push /
+push-certificate verification is skipped, and receive-pack object checks such
+as receive.maxObjectSizeLimit
+are not enforced. Matching open changes are not auto-closed.
+
+The request body is a CreateCommitInput entity that
+lists the file operations and the commit message.
+
+Request
+
+  POST /projects/MyProject/branches/master/commit HTTP/1.0
+  Content-Type: application/json; charset=UTF-8
+
+  {
+    "commit_message": "Update configuration files",
+    "files": {
+      "conf/app.config": {
+        "content": "a2V5ID0gdmFsdWUK"
+      },
+      "bin/run.sh": {
+        "content": "IyEvYmluL3NoCmVjaG8gaGkK",
+        "file_mode": 100755
+      },
+      "conf/obsolete.config": {
+        "delete": true
+      },
+      "conf/renamed.config": {
+        "rename_from": "conf/old.config"
+      }
+    }
+  }
+
+As response the CommitInfo of the new
+commit is returned.
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+    "commit": "84276d7ab324c9a50f8db21375e1a49f2a2e970f",
+    "subject": "Update configuration files",
+    "message": "Update configuration files\n"
+  }
+
+The file operations are applied atomically: the request either creates a single
+commit containing all listed operations and advances the branch to it, or fails
+without modifying the branch.
+
+If base_revision is set in the input and the branch no longer points at that
+commit (for example because of a concurrent update), the request is rejected with
+“409 Conflict”, so callers can retry without clobbering the other change. A
+request that would not change the tree is rejected with “400 Bad Request”.
+
+The new commit is authored and committed by the calling user, using the
+account’s full name and preferred email address. If the account has no
+preferred email, a generic username@host identity is used instead. Author
+and committer timestamps are the server time at which the commit was created.
+Neither the identities nor the timestamps can be overridden through this
+endpoint.
+
+### Get Validation Options
+
+'GET /projects/{project-name}/branches/{branch-id}/validation-options'
+
+Retrieves the validation options applicable for the given project and branch.
+
+Request
+
+  GET /projects/link:#project-name[\{project-name\}]/branches/link:#branch-id[\{branch-id\}]/validation-options HTTP/1.0
+
+As response a ValidationOptionInfos entity is
+returned that contains all the validation options.
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+    validation_options: [
+      {
+        name: "optionName",
+        description: "description of the validation option"
+      }
+    ]
+  }
+
+### Suggest Reviewers
+
+'GET /projects/{project-name}/branches/{branch-id}/suggest_reviewers?q=J&n=5'
+
+Suggest the reviewers for a given query q and result limit n. If result
+limit is not passed, then the default 10 is used.
+
+This REST endpoint only suggests accounts that
+
+- 
+
+are active
+
+- 
+
+can see the branch
+
+- 
+
+are visible to the calling user
+
+- 
+
+are not service users (unless
+skipServiceUsers is set to false)
+
+Groups can be excluded from the results by specifying the 'exclude-groups'
+request parameter:
+
+'GET /changes/{project-name}/branches/{branch-id}/suggest_reviewers?q=J&n=5&exclude-groups'
+
+As result a list of SuggestedReviewerInfo entries is returned.
+
+Request
+
+  GET /projects/myProject/branches/myBranch/suggest_reviewers?q=J HTTP/1.0
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  [
+    {
+      "account": {
+        "_account_id": 1000097,
+        "name": "Jane Roe",
+        "email": "jane.roe@example.com"
+      },
+      "count": 1
+    },
+    {
+      "group": {
+        "id": "4fd581c0657268f2bdcc26699fbf9ddb76e3a279",
+        "name": "Joiner"
+      },
+      "count": 5
+    }
+  ]
+
+To suggest CCs reviewer-state=CC can be specified as additional URL
+parameter.
+
+'GET /changes/{project-name}/branches/{branch-id}/suggest_reviewers?q=J&reviewer-state=CC'
+
+### Get Mergeable Information
+
+'GET /projects/{project-name}/branches/{branch-id}/mergeable'
+
+Gets whether the source is mergeable with the target branch.
+
+The source query parameter is required, which can be anything that
+could be resolved to a commit, and is visible to the caller. See
+examples of the source attribute in
+MergeInput.
+
+Also takes an optional parameter strategy, which can be recursive, resolve,
+simple-two-way-in-core, ours or theirs, default will use project settings.
+
+Request
+
+  GET /projects/test/branches/master/mergeable?source=testbranch&strategy=recursive HTTP/1.0
+
+As response a MergeableInfo entity is returned.
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+    "submit_type": "MERGE_IF_NECESSARY",
+    "strategy": "recursive",
+    "mergeable": true,
+    "commit_merged": false,
+    "content_merged": false
+  }
+
+or when there were conflicts.
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+    "submit_type": "MERGE_IF_NECESSARY",
+    "strategy": "recursive",
+    "mergeable": false,
+    "conflicts": [
+      "common.txt",
+      "shared.txt"
+    ]
+  }
+
+or when the 'testbranch' has been already merged.
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+    "submit_type": "MERGE_IF_NECESSARY",
+    "strategy": "recursive",
+    "mergeable": true,
+    "commit_merged": true,
+    "content_merged": true
+  }
+
+or when only the content of 'testbranch' has been merged.
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+    "submit_type": "MERGE_IF_NECESSARY",
+    "strategy": "recursive",
+    "mergeable": true,
+    "commit_merged": false,
+    "content_merged": true
+  }
+
+### Get Reflog
+
+'GET /projects/{project-name}/branches/{branch-id}/reflog'
+
+Gets the reflog of a certain branch.
+
+The caller must be project owner.
+
+Request
+
+  GET /projects/gerrit/branches/master/reflog HTTP/1.0
+
+As response a list of ReflogEntryInfo entities
+is returned that describe the reflog entries. The reflog entries are
+returned in reverse order.
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  [
+    {
+      "old_id": "976ced8f4fc0909d7e1584d18455299545881d60",
+      "new_id": "2eaa94bac536654eb592c941e33b91f925698d16",
+      "who": {
+        "name": "Jane Roe",
+        "email": "jane.roe@example.com",
+        "date": "2014-06-30 11:53:43.000000000",
+        "tz": 120
+      },
+      "comment": "merged: fast forward"
+    },
+    {
+      "old_id": "c271c6a7161b74f85560c5899c8c73ee89ca5e29",
+      "new_id": "976ced8f4fc0909d7e1584d18455299545881d60",
+      "who": {
+        "name": "John Doe",
+        "email": "john.doe@example.com",
+        "date": "2013-10-02 10:45:26.000000000",
+        "tz": 120
+      },
+      "comment": "merged: fast forward"
+    },
+    {
+      "old_id": "0000000000000000000000000000000000000000",
+      "new_id": "c271c6a7161b74f85560c5899c8c73ee89ca5e29",
+      "who": {
+        "name": "John Doe",
+        "email": "john.doe@example.com",
+        "date": "2013-09-30 19:08:44.000000000",
+        "tz": 120
+      },
+      "comment": ""
+    }
+  ]
+
+The get reflog endpoint also accepts a limit integer in the n
+parameter. This limits the results to show the last n reflog entries.
+
+Query the last 25 reflog entries.
+
+  GET /projects/gerrit/branches/master/reflog?n=25 HTTP/1.0
+
+The reflog can also be filtered by timestamp by specifying the from
+and to parameters. The timestamp for from and to must be given as
+UTC in the following format: yyyyMMdd_HHmm.
+
+  GET /projects/gerrit/branches/master/reflog?from=20130101_0000&to=20140101_0000=25 HTTP/1.0
+
+## Child Project Endpoints
+
+### List Child Projects
+
+'GET /projects/{project-name}/children/'
+
+List the direct child projects of a project.
+
+Request
+
+  GET /projects/Public-Plugins/children/ HTTP/1.0
+
+As result a list of ProjectInfo entries is
+returned that describe the child projects.
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  [
+    {
+      "id": "plugins%2Freplication",
+      "name": "plugins/replication",
+      "parent": "Public-Plugins",
+      "description": "Copies to other servers using the Git protocol"
+    },
+    {
+      "id": "plugins%2Freviewnotes",
+      "name": "plugins/reviewnotes",
+      "parent": "Public-Plugins",
+      "description": "Annotates merged commits using notes on refs/notes/review."
+    },
+    {
+      "id": "plugins%2Fsingleusergroup",
+      "name": "plugins/singleusergroup",
+      "parent": "Public-Plugins",
+      "description": "GroupBackend enabling users to be directly added to access rules"
+    }
+  ]
+
+To resolve the child projects of a project recursively the parameter
+recursive can be set.
+
+Child projects that are not visible to the calling user are ignored and
+are not resolved further.
+
+Request
+
+  GET /projects/Public-Projects/children/?recursive HTTP/1.0
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  [
+    {
+      "id": "gerrit",
+      "name": "gerrit",
+      "parent": "Public-Projects",
+      "description": "Gerrit Code Review"
+    },
+    {
+      "id": "plugins%2Freplication",
+      "name": "plugins/replication",
+      "parent": "Public-Plugins",
+      "description": "Copies to other servers using the Git protocol"
+    },
+    {
+      "id": "plugins%2Freviewnotes",
+      "name": "plugins/reviewnotes",
+      "parent": "Public-Plugins",
+      "description": "Annotates merged commits using notes on refs/notes/review."
+    },
+    {
+      "id": "plugins%2Fsingleusergroup",
+      "name": "plugins/singleusergroup",
+      "parent": "Public-Plugins",
+      "description": "GroupBackend enabling users to be directly added to access rules"
+    },
+    {
+      "id": "Public-Plugins",
+      "name": "Public-Plugins",
+      "parent": "Public-Projects",
+      "description": "Parent project for plugins/*"
+    }
+  ]
+
+### Get Child Project
+
+'GET /projects/{project-name}/children/{project-name}'
+
+Retrieves a child project. If a non-direct child project should be
+retrieved the parameter recursive must be set.
+
+Request
+
+  GET /projects/Public-Plugins/children/plugins%2Freplication HTTP/1.0
+
+As response a ProjectInfo entity is returned that
+describes the child project.
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+    "id": "plugins%2Freplication",
+    "name": "plugins/replication",
+    "parent": "Public-Plugins",
+    "description": "Copies to other servers using the Git protocol"
+  }
+
+## Tag Endpoints
+
+### Create Tag
+
+'PUT /projects/{project-name}/tags/{tag-id}'
+
+Create a new tag on the project.
+
+In the request body additional data for the tag can be provided as
+TagInput.
+
+If a message is provided in the input, the tag is created as an
+annotated tag with the current user as tagger. Signed tags are not
+supported.
+
+Request
+
+  PUT /projects/MyProject/tags/v1.0 HTTP/1.0
+  Content-Type: application/json; charset=UTF-8
+
+  {
+    "message": "annotation",
+    "revision": "c83117624b5b5d8a7f86093824e2f9c1ed309d63"
+  }
+
+As response a TagInfo entity is returned that describes
+the created tag.
+
+Response
+
+  HTTP/1.1 201 Created
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+
+  "object": "d48d304adc4b6674e11dc2c018ea05fcbdda32fd",
+  "message": "annotation",
+  "tagger": {
+    "name": "David Pursehouse",
+    "email": "dpursehouse@collab.net",
+    "date": "2016-06-06 01:22:03.000000000",
+    "tz": 540
+  },
+  "ref": "refs/tags/v1.0",
+  "revision": "c83117624b5b5d8a7f86093824e2f9c1ed309d63"
+  }
+
+### List Tags
+
+'GET /projects/{project-name}/tags/'
+
+List the tags of a project.
+
+As result a list of TagInfo entries is returned.
+
+Only includes tags under the refs/tags/ namespace.
+
+Request
+
+  GET /projects/work%2Fmy-project/tags/ HTTP/1.0
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  [
+    {
+      "ref": "refs/tags/v1.0",
+      "revision": "49ce77fdcfd3398dc0dedbe016d1a425fd52d666",
+      "object": "1624f5af8ae89148d1a3730df8c290413e3dcf30",
+      "message": "Annotated tag",
+      "tagger": {
+        "name": "David Pursehouse",
+        "email": "david.pursehouse@sonymobile.com",
+        "date": "2014-10-06 07:35:03.000000000",
+        "tz": 540
+      }
+    },
+    {
+      "ref": "refs/tags/v2.0",
+      "revision": "1624f5af8ae89148d1a3730df8c290413e3dcf30"
+    },
+    {
+      "ref": "refs/tags/v3.0",
+      "revision": "c628685b3c5a3614571ecb5c8fceb85db9112313",
+      "object": "1624f5af8ae89148d1a3730df8c290413e3dcf30",
+      "message": "Signed tag\n-----BEGIN PGP SIGNATURE-----\nVersion: GnuPG v1.4.11 (GNU/Linux)\n\niQEcBAABAgAGBQJUMlqYAAoJEPI2qVPgglptp7MH/j+KFcittFbxfSnZjUl8n5IZ\nveZo7wE+syjD9sUbMH4EGv0WYeVjphNTyViBof+stGTNkB0VQzLWI8+uWmOeiJ4a\nzj0LsbDOxodOEMI5tifo02L7r4Lzj++EbqtKv8IUq2kzYoQ2xjhKfFiGjeYOn008\n9PGnhNblEHZgCHguGR6GsfN8bfA2XNl9B5Ysl5ybX1kAVs/TuLZR4oDMZ/pW2S75\nhuyNnSgcgq7vl2gLGefuPs9lxkg5Fj3GZr7XPZk4pt/x1oiH7yXxV4UzrUwg2CC1\nfHrBlNbQ4uJNY8TFcwof52Z0cagM5Qb/ZSLglHbqEDGA68HPqbwf5z2hQyU2/U4\u003d\n\u003dZtUX\n-----END PGP SIGNATURE-----",
+      "tagger": {
+        "name": "David Pursehouse",
+        "email": "david.pursehouse@sonymobile.com",
+        "date": "2014-10-06 09:02:16.000000000",
+        "tz": 540
+      }
+    }
+  ]
+
+#### Tag Options
+
+Limit(n)
+
+Limit the number of tags to be included in the results.
+
+Request
+
+  GET /projects/work%2Fmy-project/tags?n=2 HTTP/1.0
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  [
+    {
+      "ref": "refs/tags/v1.0",
+      "revision": "49ce77fdcfd3398dc0dedbe016d1a425fd52d666",
+      "object": "1624f5af8ae89148d1a3730df8c290413e3dcf30",
+      "message": "Annotated tag",
+      "tagger": {
+        "name": "David Pursehouse",
+        "email": "david.pursehouse@sonymobile.com",
+        "date": "2014-10-06 07:35:03.000000000",
+        "tz": 540
+      }
+    },
+    {
+      "ref": "refs/tags/v2.0",
+      "revision": "1624f5af8ae89148d1a3730df8c290413e3dcf30"
+    }
+  ]
+
+Skip(S)
+
+Skip the given number of tags from the beginning of the list.
+
+Request
+
+  GET /projects/work%2Fmy-project/tags?n=2&s=1 HTTP/1.0
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  [
+    {
+      "ref": "refs/tags/v2.0",
+      "revision": "1624f5af8ae89148d1a3730df8c290413e3dcf30"
+    },
+    {
+      "ref": "refs/tags/v3.0",
+      "revision": "c628685b3c5a3614571ecb5c8fceb85db9112313",
+      "object": "1624f5af8ae89148d1a3730df8c290413e3dcf30",
+      "message": "Signed tag\n-----BEGIN PGP SIGNATURE-----\nVersion: GnuPG v1.4.11 (GNU/Linux)\n\niQEcBAABAgAGBQJUMlqYAAoJEPI2qVPgglptp7MH/j+KFcittFbxfSnZjUl8n5IZ\nveZo7wE+syjD9sUbMH4EGv0WYeVjphNTyViBof+stGTNkB0VQzLWI8+uWmOeiJ4a\nzj0LsbDOxodOEMI5tifo02L7r4Lzj++EbqtKv8IUq2kzYoQ2xjhKfFiGjeYOn008\n9PGnhNblEHZgCHguGR6GsfN8bfA2XNl9B5Ysl5ybX1kAVs/TuLZR4oDMZ/pW2S75\nhuyNnSgcgq7vl2gLGefuPs9lxkg5Fj3GZr7XPZk4pt/x1oiH7yXxV4UzrUwg2CC1\nfHrBlNbQ4uJNY8TFcwof52Z0cagM5Qb/ZSLglHbqEDGA68HPqbwf5z2hQyU2/U4\u003d\n\u003dZtUX\n-----END PGP SIGNATURE-----",
+      "tagger": {
+        "name": "David Pursehouse",
+        "email": "david.pursehouse@sonymobile.com",
+        "date": "2014-10-06 09:02:16.000000000",
+        "tz": 540
+      }
+    }
+  ]
+
+DescendingOrder(d)
+
+Sort the returned tags in descending order.
+
+Request
+
+  GET /projects/work%2Fmy-project/tags?d HTTP/1.0
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  [
+    {
+      "ref": "refs/tags/v3.0",
+      "revision": "c628685b3c5a3614571ecb5c8fceb85db9112313",
+      "object": "1624f5af8ae89148d1a3730df8c290413e3dcf30",
+      "message": "Signed tag\n-----BEGIN PGP SIGNATURE-----\nVersion: GnuPG v1.4.11 (GNU/Linux)\n\niQEcBAABAgAGBQJUMlqYAAoJEPI2qVPgglptp7MH/j+KFcittFbxfSnZjUl8n5IZ\nveZo7wE+syjD9sUbMH4EGv0WYeVjphNTyViBof+stGTNkB0VQzLWI8+uWmOeiJ4a\nzj0LsbDOxodOEMI5tifo02L7r4Lzj++EbqtKv8IUq2kzYoQ2xjhKfFiGjeYOn008\n9PGnhNblEHZgCHguGR6GsfN8bfA2XNl9B5Ysl5ybX1kAVs/TuLZR4oDMZ/pW2S75\nhuyNnSgcgq7vl2gLGefuPs9lxkg5Fj3GZr7XPZk4pt/x1oiH7yXxV4UzrUwg2CC1\nfHrBlNbQ4uJNY8TFcwof52Z0cagM5Qb/ZSLglHbqEDGA68HPqbwf5z2hQyU2/U4\u003d\n\u003dZtUX\n-----END PGP SIGNATURE-----",
+      "tagger": {
+        "name": "David Pursehouse",
+        "email": "david.pursehouse@sonymobile.com",
+        "date": "2014-10-06 09:02:16.000000000",
+        "tz": 540
+      }
+    },
+    {
+      "ref": "refs/tags/v2.0",
+      "revision": "1624f5af8ae89148d1a3730df8c290413e3dcf30"
+    },
+    {
+      "ref": "refs/tags/v1.0",
+      "revision": "49ce77fdcfd3398dc0dedbe016d1a425fd52d666",
+      "object": "1624f5af8ae89148d1a3730df8c290413e3dcf30",
+      "message": "Annotated tag",
+      "tagger": {
+        "name": "David Pursehouse",
+        "email": "david.pursehouse@sonymobile.com",
+        "date": "2014-10-06 07:35:03.000000000",
+        "tz": 540
+      }
+    }
+  ]
+
+SortBy(sort-by)
+
+Sort the returned tags by one of the supported sort options: ref (default), creation_time.
+
+Request
+
+  GET /projects/work%2Fmy-project/tags?sort-by=creation_time HTTP/1.0
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  [
+    {
+      "ref": "refs/tags/v1.0",
+      "revision": "49ce77fdcfd3398dc0dedbe016d1a425fd52d666",
+      "object": "1624f5af8ae89148d1a3730df8c290413e3dcf30",
+      "message": "Annotated tag",
+      "tagger": {
+        "name": "David Pursehouse",
+        "email": "david.pursehouse@sonymobile.com",
+        "date": "2014-10-06 07:35:03.000000000",
+        "tz": 540
+      }
+    },
+    {
+      "ref": "refs/tags/v3.0",
+      "revision": "c628685b3c5a3614571ecb5c8fceb85db9112313",
+      "object": "1624f5af8ae89148d1a3730df8c290413e3dcf30",
+      "message": "Signed tag\n-----BEGIN PGP SIGNATURE-----\nVersion: GnuPG v1.4.11 (GNU/Linux)\n\niQEcBAABAgAGBQJUMlqYAAoJEPI2qVPgglptp7MH/j+KFcittFbxfSnZjUl8n5IZ\nveZo7wE+syjD9sUbMH4EGv0WYeVjphNTyViBof+stGTNkB0VQzLWI8+uWmOeiJ4a\nzj0LsbDOxodOEMI5tifo02L7r4Lzj++EbqtKv8IUq2kzYoQ2xjhKfFiGjeYOn008\n9PGnhNblEHZgCHguGR6GsfN8bfA2XNl9B5Ysl5ybX1kAVs/TuLZR4oDMZ/pW2S75\nhuyNnSgcgq7vl2gLGefuPs9lxkg5Fj3GZr7XPZk4pt/x1oiH7yXxV4UzrUwg2CC1\nfHrBlNbQ4uJNY8TFcwof52Z0cagM5Qb/ZSLglHbqEDGA68HPqbwf5z2hQyU2/U4\u003d\n\u003dZtUX\n-----END PGP SIGNATURE-----",
+      "tagger": {
+        "name": "David Pursehouse",
+        "email": "david.pursehouse@sonymobile.com",
+        "date": "2014-10-06 09:02:16.000000000",
+        "tz": 540
+      }
+    },
+    {
+      "ref": "refs/tags/v2.0",
+      "revision": "1624f5af8ae89148d1a3730df8c290413e3dcf30"
+    }
+  ]
+
+Substring(m)
+
+Limit the results to those tags that match the specified substring.
+
+The match is case insensitive.  May not be used together with r.
+
+List all tags that match substring v2:
+
+Request
+
+  GET /projects/testproject/tags?m=v2 HTTP/1.0
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  [
+    {
+      "ref": "refs/tags/v2.0",
+      "revision": "1624f5af8ae89148d1a3730df8c290413e3dcf30"
+    },
+  ]
+
+Regex(r)
+
+Limit the results to those tags that match the specified regex.
+Boundary matchers '^' and '$' are implicit. For example: the regex 't*' will
+match any tags that start with 't' and regex '*t' will match any
+tags that end with 't'.
+
+The match is case sensitive.  May not be used together with m.
+
+List all tags that match regex v.*0:
+
+Request
+
+  GET /projects/testproject/tags?r=v.*0 HTTP/1.0
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  [
+    {
+      "ref": "refs/tags/v1.0",
+      "revision": "49ce77fdcfd3398dc0dedbe016d1a425fd52d666",
+      "object": "1624f5af8ae89148d1a3730df8c290413e3dcf30",
+      "message": "Annotated tag",
+      "tagger": {
+        "name": "David Pursehouse",
+        "email": "david.pursehouse@sonymobile.com",
+        "date": "2014-10-06 07:35:03.000000000",
+        "tz": 540
+      }
+    },
+    {
+      "ref": "refs/tags/v2.0",
+      "revision": "1624f5af8ae89148d1a3730df8c290413e3dcf30"
+    },
+    {
+      "ref": "refs/tags/v3.0",
+      "revision": "c628685b3c5a3614571ecb5c8fceb85db9112313",
+      "object": "1624f5af8ae89148d1a3730df8c290413e3dcf30",
+      "message": "Signed tag\n-----BEGIN PGP SIGNATURE-----\nVersion: GnuPG v1.4.11 (GNU/Linux)\n\niQEcBAABAgAGBQJUMlqYAAoJEPI2qVPgglptp7MH/j+KFcittFbxfSnZjUl8n5IZ\nveZo7wE+syjD9sUbMH4EGv0WYeVjphNTyViBof+stGTNkB0VQzLWI8+uWmOeiJ4a\nzj0LsbDOxodOEMI5tifo02L7r4Lzj++EbqtKv8IUq2kzYoQ2xjhKfFiGjeYOn008\n9PGnhNblEHZgCHguGR6GsfN8bfA2XNl9B5Ysl5ybX1kAVs/TuLZR4oDMZ/pW2S75\nhuyNnSgcgq7vl2gLGefuPs9lxkg5Fj3GZr7XPZk4pt/x1oiH7yXxV4UzrUwg2CC1\nfHrBlNbQ4uJNY8TFcwof52Z0cagM5Qb/ZSLglHbqEDGA68HPqbwf5z2hQyU2/U4\u003d\n\u003dZtUX\n-----END PGP SIGNATURE-----",
+      "tagger": {
+        "name": "David Pursehouse",
+        "email": "david.pursehouse@sonymobile.com",
+        "date": "2014-10-06 09:02:16.000000000",
+        "tz": 540
+      }
+    }
+  ]
+
+### Get Tag
+
+'GET /projects/{project-name}/tags/{tag-id}'
+
+Retrieves a tag of a project.
+
+Request
+
+  GET /projects/work%2Fmy-project/tags/v1.0 HTTP/1.0
+
+As response a TagInfo entity is returned that describes the tag.
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+    "ref": "refs/tags/v1.0",
+    "revision": "49ce77fdcfd3398dc0dedbe016d1a425fd52d666",
+    "object": "1624f5af8ae89148d1a3730df8c290413e3dcf30",
+    "message": "Annotated tag",
+    "tagger": {
+      "name": "David Pursehouse",
+      "email": "david.pursehouse@sonymobile.com",
+      "date": "2014-10-06 07:35:03.000000000",
+      "tz": 540
+    }
+  }
+
+### Delete Tag
+
+'DELETE /projects/{project-name}/tags/{tag-id}'
+
+Deletes a tag.
+
+Request
+
+  DELETE /projects/MyProject/tags/v1.0 HTTP/1.0
+
+Response
+
+  HTTP/1.1 204 No Content
+
+### Delete Tags
+
+'POST /projects/{project-name}/tags:delete'
+
+Delete one or more tags.
+
+The tags to be deleted must be provided in the request body as a
+DeleteTagsInput entity.
+
+Request
+
+  POST /projects/MyProject/tags:delete HTTP/1.0
+  Content-Type: application/json;charset=UTF-8
+
+  {
+    "tags": [
+      "v1.0",
+      "v2.0"
+    ]
+  }
+
+Response
+
+  HTTP/1.1 204 No Content
+
+If some tags could not be deleted, the response is “409 Conflict” and the
+error message is contained in the response body.
+
+## Commit Endpoints
+
+### Get Commit
+
+'GET /projects/{project-name}/commits/{commit-id}'
+
+Retrieves a commit of a project.
+
+The commit must be visible to the caller.
+
+Request
+
+  GET /projects/work%2Fmy-project/commits/a8a477efffbbf3b44169bb9a1d3a334cbbd9aa96 HTTP/1.0
+
+As response a CommitInfo entity
+is returned that describes the commit.
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+    "commit": "184ebe53805e102605d11f6b143486d15c23a09c",
+    "parents": [
+      {
+        "commit": "1eee2c9d8f352483781e772f35dc586a69ff5646",
+        "subject": "Migrate contributor agreements to All-Projects."
+      }
+    ],
+    "author": {
+      "name": "Shawn O. Pearce",
+      "email": "sop@google.com",
+      "date": "2012-04-24 18:08:08.000000000",
+      "tz": -420
+    },
+    "committer": {
+      "name": "Shawn O. Pearce",
+      "email": "sop@google.com",
+      "date": "2012-04-24 18:08:08.000000000",
+      "tz": -420
+    },
+    "subject": "Use an EventBus to manage star icons",
+    "message": "Use an EventBus to manage star icons\n\nImage widgets that need to ..."
+  }
+
+### Get Included In
+
+'GET /projects/{project-name}/commits/{commit-id}/in'
+
+Retrieves the branches and tags in which a change is included. As result
+an IncludedInInfo entity is returned.
+
+Branches that are not visible to the calling user according to the project’s
+read permissions are filtered out from the result.
+
+Request
+
+  GET /projects/work%2Fmy-project/commits/a8a477efffbbf3b44169bb9a1d3a334cbbd9aa96/in HTTP/1.0
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json;charset=UTF-8
+
+  )]}'
+  {
+    "branches": [
+      "master"
+    ],
+    "tags": []
+  }
+
+### Get Content
+
+'GET /projects/{project-name}/commits/{commit-id}/files/{file-id}/content'
+
+Gets the content of a file from a certain commit.
+
+Request
+
+  GET /projects/work%2Fmy-project/commits/a8a477efffbbf3b44169bb9a1d3a334cbbd9aa96/files/gerrit-server%2Fsrc%2Fmain%2Fjava%2Fcom%2Fgoogle%2Fgerrit%2Fserver%2Fproject%2FRefControl.java/content HTTP/1.0
+
+The content is returned as base64 encoded string.
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: text/plain; charset=UTF-8
+
+  Ly8gQ29weXJpZ2h0IChDKSAyMDEwIFRoZSBBbmRyb2lkIE9wZW4gU291cmNlIFByb2plY...
+
+### Cherry Pick Commit
+
+'POST /projects/{project-name}/commits/{commit-id}/cherrypick'
+
+Cherry-picks a commit of a project to a destination branch.
+
+If one of the secondary emails associated with the user performing the operation was used as the
+committer email in the original commit, the same email will be used as the committer email in the
+new patch set; otherwise, the user’s preferred email will be used.
+
+To cherry pick a change revision, see CherryPick.
+
+The destination branch must be provided in the request body inside a
+CherryPickInput entity.
+If the commit message is not set, the commit message of the source
+commit will be used.
+
+When cherry-picking a commit into a branch that already contains the Change-Id
+that we want to cherry-pick, the cherry-pick will create a new patch-set on the
+destination’s branch’s appropriate Change-Id. If the change is closed on the
+destination branch, the cherry-pick will fail.
+
+Request
+
+  POST /projects/work%2Fmy-project/commits/a8a477efffbbf3b44169bb9a1d3a334cbbd9aa96/cherrypick HTTP/1.0
+  Content-Type: application/json; charset=UTF-8
+
+  {
+    "message" : "Implementing Feature X",
+    "destination" : "release-branch"
+  }
+
+As response a ChangeInfo entity
+is returned that describes the resulting cherry-picked change.
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+    "id": "myProject~master~I8473b95934b5732ac55d26311a706c9c2bde9941",
+    "project": "myProject",
+    "branch": "release-branch",
+    "change_id": "I8473b95934b5732ac55d26311a706c9c2bde9941",
+    "subject": "Implementing Feature X",
+    "status": "NEW",
+    "created": "2013-02-01 09:59:32.126000000",
+    "updated": "2013-02-21 11:16:36.775000000",
+    "mergeable": true,
+    "insertions": 12,
+    "deletions": 11,
+    "_number": 3965,
+    "owner": {
+      "name": "John Doe"
+    }
+  }
+
+### List Files
+
+'GET /projects/{project-name}/commits/{commit-id}/files/'
+
+Lists the files that were modified, added or deleted in a commit.
+
+Request
+
+  GET /projects/work%2Fmy-project/commits/a8a477efffbbf3b44169bb9a1d3a334cbbd9aa96/files/ HTTP/1.0
+
+As result a map is returned that maps the file path to a
+FileInfo entry. The entries in the map are
+sorted by file path.
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+    "/COMMIT_MSG": {
+      "status": "A",
+      "lines_inserted": 7,
+      "size_delta": 551,
+      "size": 551
+    },
+    "gerrit-server/src/main/java/com/google/gerrit/server/project/RefControl.java": {
+      "lines_inserted": 5,
+      "lines_deleted": 3,
+      "size_delta": 98,
+      "size": 23348
+    }
+  }
+
+The integer-valued request parameter parent changes the response to return a
+list of the files which are different in this commit compared to the given
+parent commit. This is useful for supporting review of merge commits. The value
+is the 1-based index of the parent’s position in the commit object. If the
+value 0 is used for parent, the default base commit will be used, which is
+the only parent for commits having one parent or the auto-merge commit
+otherwise.
+
+## Dashboard Endpoints
+
+### List Dashboards
+
+'GET /projects/{project-name}/dashboards/'
+
+List custom dashboards for a project.
+
+As result a list of DashboardInfo entries is
+returned.
+
+List all dashboards for the work/my-project project:
+
+Request
+
+  GET /projects/work%2Fmy-project/dashboards/ HTTP/1.0
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  [
+    {
+      "id": "main:closed",
+      "ref": "main",
+      "path": "closed",
+      "description": "Merged and abandoned changes in last 7 weeks",
+      "url": "/dashboard/?title\u003dClosed+changes\u0026Merged\u003dstatus:merged+age:7w\u0026Abandoned\u003dstatus:abandoned+age:7w",
+      "is_default": true,
+      "title": "Closed changes",
+      "sections": [
+        {
+          "name": "Merged",
+          "query": "status:merged age:7w"
+        },
+        {
+          "name": "Abandoned",
+          "query": "status:abandoned age:7w"
+        }
+      ]
+    }
+  ]
+
+Get all dashboards of the 'All-Projects' project
+
+    GET /projects/All-Projects/dashboards/ HTTP/1.0
+
+### Get Dashboard
+
+'GET /projects/{project-name}/dashboards/{dashboard-id}'
+
+Retrieves a project dashboard. The dashboard can be defined on that
+project or be inherited from a parent project.
+
+Request
+
+  GET /projects/work%2Fmy-project/dashboards/main:closed HTTP/1.0
+
+As response a DashboardInfo entity is returned
+that describes the dashboard.
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+    "id": "main:closed",
+    "ref": "main",
+    "path": "closed",
+    "description": "Merged and abandoned changes in last 7 weeks",
+    "url": "/dashboard/?title\u003dClosed+changes\u0026Merged\u003dstatus:merged+age:7w\u0026Abandoned\u003dstatus:abandoned+age:7w",
+    "is_default": true,
+    "title": "Closed changes",
+    "sections": [
+      {
+        "name": "Merged",
+        "query": "status:merged age:7w"
+      },
+      {
+        "name": "Abandoned",
+        "query": "status:abandoned age:7w"
+      }
+    ]
+  }
+
+To retrieve the default dashboard of a project use default as
+dashboard-id.
+
+Request
+
+  GET /projects/work%2Fmy-project/dashboards/default HTTP/1.0
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+    "id": "main:closed",
+    "ref": "main",
+    "path": "closed",
+    "description": "Merged and abandoned changes in last 7 weeks",
+    "url": "/dashboard/?title\u003dClosed+changes\u0026Merged\u003dstatus:merged+age:7w\u0026Abandoned\u003dstatus:abandoned+age:7w",
+    "is_default": true,
+    "title": "Closed changes",
+    "sections": [
+      {
+        "name": "Merged",
+        "query": "status:merged age:7w"
+      },
+      {
+        "name": "Abandoned",
+        "query": "status:abandoned age:7w"
+      }
+    ]
+  }
+
+### Create Dashboard
+
+'PUT /projects/{project-name}/dashboards/{dashboard-id}'
+
+Creates a project dashboard, if a project dashboard with the given
+dashboard ID doesn’t exist yet.
+
+Currently only supported for the default dashboard.
+
+The creation information for the dashboard must be provided in
+the request body as a DashboardInput entity.
+
+Request
+
+  PUT /projects/work%2Fmy-project/dashboards/default HTTP/1.0
+  Content-Type: application/json; charset=UTF-8
+
+  {
+    "id": "main:closed",
+    "commit_message": "Define the default dashboard"
+  }
+
+As response the new dashboard is returned as a 
+DashboardInfo entity.
+
+Response
+
+  HTTP/1.1 201 Created
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+    "id": "main:closed",
+    "ref": "main",
+    "path": "closed",
+    "description": "Merged and abandoned changes in last 7 weeks",
+    "url": "/dashboard/?title\u003dClosed+changes\u0026Merged\u003dstatus:merged+age:7w\u0026Abandoned\u003dstatus:abandoned+age:7w",
+    "is_default": true,
+    "title": "Closed changes",
+    "sections": [
+      {
+        "name": "Merged",
+        "query": "status:merged age:7w"
+      },
+      {
+        "name": "Abandoned",
+        "query": "status:abandoned age:7w"
+      }
+    ]
+  }
+
+### Update Dashboard
+
+'PUT /projects/{project-name}/dashboards/{dashboard-id}'
+
+Updates a project dashboard, if a project dashboard with the given
+dashboard ID already exists.
+
+Currently only supported for the default dashboard.
+
+The update information for the dashboard must be provided in
+the request body as a DashboardInput entity.
+
+Request
+
+  PUT /projects/work%2Fmy-project/dashboards/default HTTP/1.0
+  Content-Type: application/json; charset=UTF-8
+
+  {
+    "id": "main:closed",
+    "commit_message": "Update the default dashboard"
+  }
+
+As response the updated dashboard is returned as a
+DashboardInfo entity.
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+    "id": "main:closed",
+    "ref": "main",
+    "path": "closed",
+    "description": "Merged and abandoned changes in last 7 weeks",
+    "url": "/dashboard/?title\u003dClosed+changes\u0026Merged\u003dstatus:merged+age:7w\u0026Abandoned\u003dstatus:abandoned+age:7w",
+    "is_default": true,
+    "title": "Closed changes",
+    "sections": [
+      {
+        "name": "Merged",
+        "query": "status:merged age:7w"
+      },
+      {
+        "name": "Abandoned",
+        "query": "status:abandoned age:7w"
+      }
+    ]
+  }
+
+### Delete Dashboard
+
+'DELETE /projects/{project-name}/dashboards/{dashboard-id}'
+
+Deletes a project dashboard.
+
+Currently only supported for the default dashboard.
+
+The request body does not need to include a 
+DashboardInput entity if no commit message is specified.
+
+Please note that some proxies prohibit request bodies for DELETE
+requests.
+
+Request
+
+  DELETE /projects/work%2Fmy-project/dashboards/default HTTP/1.0
+
+Response
+
+  HTTP/1.1 204 No Content
+
+## Label Endpoints
+
+### List Labels
+
+'GET /projects/{project-name}/labels/'
+
+Lists the labels that are defined in this project.
+
+The calling user must have read access to the refs/meta/config branch of the
+project.
+
+Request
+
+  GET /projects/All-Projects/labels/ HTTP/1.0
+
+As result a list of LabelDefinitionInfo entities
+is returned that describe the labels that are defined in this project
+(inherited labels are not returned unless the inherited parameter is set, see
+below). The returned labels are sorted by
+label name.
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  [
+    {
+      "name": "Code-Review",
+      "project": "All-Projects",
+      "function": "NoBlock",
+      "values": {
+        " 0": "No score",
+        "-1": "I would prefer this is not submitted as is",
+        "-2": "This shall not be submitted",
+        "+1": "Looks good to me, but someone else must approve",
+        "+2": "Looks good to me, approved"
+      },
+      "default_value": 0,
+      "can_override": true,
+      "copy_condition": "changekind:NO_CHANGE OR changekind:TRIVIAL_REBASE or is:MIN",
+      "allow_post_submit": true
+    }
+  ]
+
+To include inherited labels from all parent projects the parameter inherited
+can be set.
+
+The calling user must have read access to the refs/meta/config branch of the
+project and all its parent projects.
+
+Request
+
+  GET /projects/My-Project/labels/?inherited HTTP/1.0
+
+As result a list of LabelDefinitionInfo entities
+is returned that describe the labels that are defined in this project and in
+all its parent projects. The returned labels are sorted by parent projects
+in-order from All-Projects through the project hierarchy to this project.
+Labels that belong to the same project are sorted by label name.
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  [
+    {
+      "name": "Code-Review",
+      "project": "All-Projects",
+      "function": "NoBlock",
+      "values": {
+        " 0": "No score",
+        "-1": "I would prefer this is not submitted as is",
+        "-2": "This shall not be submitted",
+        "+1": "Looks good to me, but someone else must approve",
+        "+2": "Looks good to me, approved"
+      },
+      "default_value": 0,
+      "can_override": true,
+      "copy_condition": "changekind:NO_CHANGE OR changekind:TRIVIAL_REBASE or is:MIN",
+      "allow_post_submit": true
+    },
+    {
+      "name": "Foo-Review",
+      "project": "My-Project",
+      "function": "NoBlock",
+      "values": {
+        " 0": "No score",
+        "-1": "I would prefer this is not submitted as is",
+        "-2": "This shall not be submitted",
+        "+1": "Looks good to me, but someone else must approve",
+        "+2": "Looks good to me, approved"
+      },
+      "default_value": 0,
+      "can_override": true,
+      "copy_condition": "is:ANY",
+      "allow_post_submit": true
+    }
+  ]
+
+To include only labels where the current user has permission to vote with positive values
+on a specific ref, the parameter voteable-on-ref can be set.
+
+The calling user must have read access to the refs/meta/config branch of the
+project. The ref name can be provided with or without the refs/heads/ prefix.
+
+Request
+
+  GET /projects/My-Project/labels/?voteable-on-ref=master HTTP/1.0
+
+As result a list of LabelDefinitionInfo entities
+is returned that describe the labels where the current user has permission to vote
+with positive values on the specified ref. The returned labels are sorted by label name.
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  [
+    {
+      "name": "Code-Review",
+      "project": "All-Projects",
+      "function": "NoBlock",
+      "values": {
+        " 0": "No score",
+        "-1": "I would prefer this is not submitted as is",
+        "-2": "This shall not be submitted",
+        "+1": "Looks good to me, but someone else must approve",
+        "+2": "Looks good to me, approved"
+      },
+      "default_value": 0,
+      "can_override": true,
+      "copy_condition": "changekind:NO_CHANGE OR changekind:TRIVIAL_REBASE or is:MIN",
+      "allow_post_submit": true
+    }
+  ]
+
+If the specified ref does not exist, the request will fail with 409 Conflict.
+
+### Get Label
+
+'GET /projects/{project-name}/labels/{label-name}'
+
+Retrieves the definition of a label that is defined in this project.
+
+The calling user must have read access to the refs/meta/config branch of the
+project.
+
+Request
+
+  GET /projects/All-Projects/labels/Code-Review HTTP/1.0
+
+As response a LabelDefinitionInfo entity is
+returned that describes the label.
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+    "name": "Code-Review",
+    "project": "All-Projects",
+    "function": "NoBlock",
+    "values": {
+      " 0": "No score",
+      "-1": "I would prefer this is not submitted as is",
+      "-2": "This shall not be submitted",
+      "+1": "Looks good to me, but someone else must approve",
+      "+2": "Looks good to me, approved"
+    },
+    "default_value": 0,
+    "can_override": true,
+    "copy_condition": "changekind:NO_CHANGE OR changekind:TRIVIAL_REBASE OR is:MIN",
+    "allow_post_submit": true
+  }
+
+### Create Label
+
+'PUT /projects/{project-name}/labels/{label-name}'
+
+Creates a new label definition in this project.
+
+The calling user must have write access to the refs/meta/config branch of the
+project.
+
+If a label with this name is already defined in this project, this label
+definition is updated (see Set Label).
+
+Request
+
+  PUT /projects/My-Project/labels/Foo HTTP/1.0
+  Content-Type: application/json; charset=UTF-8
+
+  {
+    "commit_message": "Create Foo Label",
+    "values": {
+      " 0": "No score",
+      "-1": "I would prefer this is not submitted as is",
+      "-2": "This shall not be submitted",
+      "+1": "Looks good to me, but someone else must approve",
+      "+2": "Looks good to me, approved"
+    }
+  }
+
+As response a LabelDefinitionInfo entity is
+returned that describes the created label.
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+    "name": "Foo",
+    "project_name": "My-Project",
+    "function": "NoBlock",
+    "values": {
+      " 0": "No score",
+      "-1": "I would prefer this is not submitted as is",
+      "-2": "This shall not be submitted",
+      "+1": "Looks good to me, but someone else must approve",
+      "+2": "Looks good to me, approved"
+    },
+    "default_value": 0,
+    "can_override": true,
+    "copy_condition": "changekind:NO_CHANGE",
+    "allow_post_submit": true
+  }
+
+### Set Label
+
+'PUT /projects/{project-name}/labels/{label-name}'
+
+Updates the definition of a label that is defined in this project.
+
+The calling user must have write access to the refs/meta/config branch of the
+project.
+
+Properties which are not set in the input entity are not modified.
+
+Request
+
+  PUT /projects/All-Projects/labels/Code-Review HTTP/1.0
+  Content-Type: application/json; charset=UTF-8
+
+  {
+    "commit_message": "Ignore self approvals for Code-Review label",
+    "ignore_self_approval": true
+  }
+
+As response a LabelDefinitionInfo entity is
+returned that describes the updated label.
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+    "name": "Code-Review",
+    "project": "All-Projects",
+    "function": "NoBlock",
+    "values": {
+      " 0": "No score",
+      "-1": "I would prefer this is not submitted as is",
+      "-2": "This shall not be submitted",
+      "+1": "Looks good to me, but someone else must approve",
+      "+2": "Looks good to me, approved"
+    },
+    "default_value": 0,
+    "can_override": true,
+    "copy_condition": "changekind:NO_CHANGE OR changekind:TRIVIAL_REBASE OR is:MIN",
+    "allow_post_submit": true,
+    "ignore_self_approval": true
+  }
+
+### Delete Label
+
+'DELETE /projects/{project-name}/labels/{label-name}'
+
+Deletes the definition of a label that is defined in this project.
+
+The calling user must have write access to the refs/meta/config branch of the
+project.
+
+The request body does not need to include a 
+DeleteLabelInput entity if no commit message is specified.
+
+Request
+
+  DELETE /projects/My-Project/labels/Foo-Review HTTP/1.0
+  Content-Type: application/json; charset=UTF-8
+
+  {
+    "commit_message": "Delete Foo-Review label",
+  }
+
+If a label was deleted the response is “204 No Content”.
+
+Response
+
+  HTTP/1.1 204 No Content
+
+### Batch Update Labels
+
+'POST /projects/{project-name}/labels/'
+
+Creates/updates/deletes multiple label definitions in this project at once.
+
+The calling user must have write access to the refs/meta/config branch of the
+project.
+
+The updates must be specified in the request body as
+BatchLabelInput entity.
+
+The updates are processed in the following order:
+
+- 
+
+label deletions
+
+- 
+
+label creations
+
+- 
+
+label updates
+
+Request
+
+  POST /projects/My-Project/labels/ HTTP/1.0
+  Content-Type: application/json; charset=UTF-8
+
+  {
+    "commit_message": "Update Labels",
+    "delete": [
+      "Old-Review",
+      "Unused-Review"
+    ],
+    "create": [
+      {
+        "name": "Foo-Review",
+        "values": {
+          " 0": "No score",
+          "-1": "I would prefer this is not submitted as is",
+          "-2": "This shall not be submitted",
+          "+1": "Looks good to me, but someone else must approve",
+          "+2": "Looks good to me, approved"
+      }
+    ],
+    "update:" {
+      "Bar-Review": {
+        "function": "NoBlock"
+      },
+      "Baz-Review": {
+        "copy_condition": "is:MIN"
+      }
+    }
+  }
+
+If the label updates were done successfully the response is “200 OK”.
+
+Response
+
+  HTTP/1.1 200 OK
+
+### Create Labels Change for review
+
+'POST /projects/{project-name}/labels:review'
+
+Creates/updates/deletes multiple label definitions in this project at once.
+
+This takes the same input as Batch Updates Labels,
+but creates a pending change for review. Like
+Create Change, it returns a ChangeInfo
+entity describing the resulting change.
+
+Request
+
+  POST /projects/testproj/config:review HTTP/1.0
+  Content-Type: application/json; charset=UTF-8
+
+  {
+    "commit_message": "Update Labels",
+    "delete": [
+      "Old-Review",
+      "Unused-Review"
+    ],
+    "create": [
+      {
+        "name": "Foo-Review",
+        "values": {
+          " 0": "No score",
+          "-1": "I would prefer this is not submitted as is",
+          "-2": "This shall not be submitted",
+          "+1": "Looks good to me, but someone else must approve",
+          "+2": "Looks good to me, approved"
+      }
+    ],
+    "update:" {
+      "Bar-Review": {
+        "function": "NoBlock"
+      },
+      "Baz-Review": {
+        "copy_condition": "is:MIN"
+      }
+    }
+  }
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+    "id": "testproj~refs%2Fmeta%2Fconfig~Ieaf185bf90a1fc3b58461e399385e158a20b31a2",
+    "project": "testproj",
+    "branch": "refs/meta/config",
+    "hashtags": [],
+    "change_id": "Ieaf185bf90a1fc3b58461e399385e158a20b31a2",
+    "subject": "Review access change",
+    "status": "NEW",
+    "created": "2017-09-07 14:31:11.852000000",
+    "updated": "2017-09-07 14:31:11.852000000",
+    "submit_type": "CHERRY_PICK",
+    "mergeable": true,
+    "insertions": 2,
+    "deletions": 0,
+    "unresolved_comment_count": 0,
+    "has_review_started": true,
+    "_number": 7,
+    "owner": {
+      "_account_id": 1000000
+    }
+  }
+
+## Submit Requirement Endpoints
+
+### Create Submit Requirement
+
+'PUT /projects/{project-name}/submit_requirements/{submit-requirement-name}'
+
+Creates a new submit requirement definition in this project.
+
+The calling user must have write access to the refs/meta/config branch of the
+project.
+
+If a submit requirement with this name is already defined in this project, this
+submit requirement definition is updated
+(see Update Submit Requirement).
+
+The submit requirement data must be provided in the request body as
+SubmitRequirementInput.
+
+Request
+
+  PUT /projects/My-Project/submit_requirements/Code-Review HTTP/1.0
+  Content-Type: application/json; charset=UTF-8
+
+  {
+    "name": "Code-Review",
+    "description": "At least one maximum vote for the Code-Review label is required",
+    "submittability_expression": "label:Code-Review=+2"
+  }
+
+As response a SubmitRequirementInfo entity is
+returned that describes the created submit requirement.
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+      "name": "Code-Review",
+      "description": "At least one maximum vote for the Code-Review label is required",
+      "project": "My-Project",
+      "submittability_expression": "label:Code-Review=+2",
+      "allow_override_in_child_projects": false
+   }
+
+### Update Submit Requirement
+
+'PUT /projects/{project-name}/submit_requirements/{submit-requirement-name}'
+
+Updates the definition of a submit requirement that is defined in this project.
+
+The calling user must have write access to the refs/meta/config branch of the
+project.
+
+The new submit requirement will overwrite the existing submit requirement.
+That is, unspecified attributes will be set to their defaults.
+
+Request
+
+  PUT /projects/My-Project/submit_requirements/Code-Review HTTP/1.0
+  Content-Type: application/json; charset=UTF-8
+
+  {
+    "name": "Code-Review",
+    "description": "At least one maximum vote for the Code-Review label is required",
+    "submittability_expression": "label:Code-Review=+2"
+  }
+
+As response a SubmitRequirementInfo entity is
+returned that describes the created submit requirement.
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+      "name": "Code-Review",
+      "description": "At least one maximum vote for the Code-Review label is required",
+      "project": "My-Project",
+      "submittability_expression": "label:Code-Review=+2",
+      "allow_override_in_child_projects": false
+   }
+
+### Get Submit Requirement
+
+'GET /projects/{project-name}/submit_requirements/{submit-requirement-name}'
+
+Retrieves the definition of a submit requirement that is defined in this project.
+
+The calling user must have read access to the refs/meta/config branch of the
+project.
+
+Request
+
+  GET /projects/All-Projects/submit-requirement/Code-Review HTTP/1.0
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+      "name": "Code-Review",
+      "description": "At least one maximum vote for the Code-Review label is required",
+      "project": "All-Projects",
+      "submittability_expression": "label:Code-Review=+2",
+      "allow_override_in_child_projects": false
+   }
+
+### List Submit Requirements
+
+'GET /projects/{project-name}/submit_requirements'
+
+Retrieves a list of all submit requirements for this project. The inherited
+parameter can be supplied to also list submit requirements from parent projects.
+
+The calling user must have read access to the refs/meta/config branch of the
+project. If the inherited option is used, the caller must have read access to
+the refs/meta/config branch of all parent projects as well.
+
+As response a list of SubmitRequirementInfo
+entities is returned.
+
+Request
+
+  GET /projects/All-Projects/submit-requirements HTTP/1.0
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  [
+    {
+      "name": "Code-Review",
+      "description": "At least one maximum vote for the Code-Review label is required",
+      "project": "All-Projects",
+      "submittability_expression": "label:Code-Review=+2",
+      "allow_override_in_child_projects": false
+    }
+  ]
+
+### Delete Submit Requirement
+
+'DELETE /projects/{project-name}/submit_requirements/{submit-requirement-name}'
+
+Deletes the definition of a submit requirement that is defined in this project.
+
+The calling user must have write access to the refs/meta/config branch of the
+project. The request would fail with 404 Not Found if there is no submit
+requirement with this name for this project.
+
+No request body is needed.
+
+Request
+
+  DELETE /projects/My-Project/submit_requirements/Foo-Review HTTP/1.0
+  Content-Type: application/json; charset=UTF-8
+
+If a submit requirement was deleted the response is “204 No Content”.
+
+Response
+
+  HTTP/1.1 204 No Content
+
+### Batch Update Submit Requirements
+
+'POST /projects/{project-name}/submit_requirements/'
+
+Creates/updates/deletes multiple submit requirements definitions in this project at once.
+
+The calling user must have write access to the refs/meta/config branch of the
+project.
+
+The updates must be specified in the request body as
+BatchSubmitRequirementInput entity.
+
+The updates are processed in the following order:
+
+- 
+
+submit requirements deletions
+
+- 
+
+submit requirements creations
+
+- 
+
+submit requirements updates
+
+Request
+
+  POST /projects/My-Project/submit_requirements/ HTTP/1.0
+  Content-Type: application/json; charset=UTF-8
+
+  {
+    "commit_message": "Update Submit Requirements",
+    "delete": [
+      "Old-Review",
+      "Unused-Review"
+    ]
+  }
+
+If the submit requirements updates were done successfully the response is “200 OK”.
+
+Response
+
+  HTTP/1.1 200 OK
+
+### Create Submit Requirements Change for review
+
+'POST /projects/{project-name}/submit_requirements:review'
+
+Creates/updates/deletes multiple submit requirements definitions in this project at once.
+
+This takes the same input as Batch Update Submit Requirements,
+but creates a pending change for review. Like
+Create Change, it returns a ChangeInfo
+entity describing the resulting change.
+
+Request
+
+  POST /projects/testproj/submit_requirements:review HTTP/1.0
+  Content-Type: application/json; charset=UTF-8
+
+  {
+    "commit_message": "Update Submit Requirements",
+    "delete": [
+      "Old-Review",
+      "Unused-Review"
+    ]
+  }
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+    "id": "testproj~refs%2Fmeta%2Fconfig~Ieaf185bf90a1fc3b58461e399385e158a20b31a2",
+    "project": "testproj",
+    "branch": "refs/meta/config",
+    "hashtags": [],
+    "change_id": "Ieaf185bf90a1fc3b58461e399385e158a20b31a2",
+    "subject": "Review access change",
+    "status": "NEW",
+    "created": "2017-09-07 14:31:11.852000000",
+    "updated": "2017-09-07 14:31:11.852000000",
+    "submit_type": "CHERRY_PICK",
+    "mergeable": true,
+    "insertions": 2,
+    "deletions": 0,
+    "unresolved_comment_count": 0,
+    "has_review_started": true,
+    "_number": 7,
+    "owner": {
+      "_account_id": 1000000
+    }
+  }
+
+### Get Submit Requirement Templates
+
+'GET /projects/{project-name}/submit_requirements_templates'
+
+Retrieves submit requirement templates configured in project.config and in its parent projects.
+
+The calling user must be authenticated and must have read access to the
+refs/meta/config branch of the requested project and all its parent
+projects.
+
+As response a list of SubmitRequirementInfo
+entities is returned. If no templates are configured, an empty list is
+returned.
+
+Request
+
+  GET /projects/My-Project/submit_requirements_templates HTTP/1.0
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  [
+    {
+      "name": "Code-Review",
+      "description": "Require Code-Review +2 before submit",
+      "project_name": "All-Projects",
+      "applicability_expression": "-branch:refs/meta/config",
+      "submittability_expression": "label:Code-Review=+2",
+      "allow_override_in_child_projects": true
+    }
+  ]
+
+### Get Submit Requirement Template
+
+'GET /projects/{project-name}/submit_requirements_templates/{submit-requirement-template-name}'
+
+Retrieves a single effective submit requirement template for a project. The
+returned template may be defined in the project itself or inherited from one of
+its parent projects.
+
+The calling user must be authenticated and must have read access to the
+refs/meta/config branch of the requested project and all its parent
+projects.
+
+Request
+
+  GET /projects/My-Project/submit_requirements_templates/Code-Review HTTP/1.0
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Disposition: attachment
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+      "name": "Code-Review",
+      "project_name": "All-Projects",
+      "submittability_expression": "label:Code-Review=+2",
+      "allow_override_in_child_projects": false
+   }
+
+### Migrate label functions to submit requirements
+
+'POST /projects/{project-name}/migrate-labels'
+
+Migrates labels with functions to submit requirements. The migration result is
+committed into the refs/meta/config branch and thus immediately active. As a
+response it returns MigrateLabelsInfo entity
+describing the outcome of the migration.
+
+The caller must be a project owner.
+
+Request
+
+  POST /projects/testproj/migrate-labels HTTP/1.0
+  Content-Type: application/json; charset=UTF-8
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {"status": "MIGRATED"}
+
+### Create change which migrate label functions to submit requirements
+
+'POST /projects/{project-name}/migrate-labels:review'
+
+Creates a change for review which migrates labels with functions to submit requirements.
+As a response it returns MigrageLabelsReviewInfo entity
+describing the outcome of the migration.
+
+Request
+
+  POST /projects/testproj/migrate-labels:review HTTP/1.0
+  Content-Type: application/json; charset=UTF-8
+
+Response
+
+  HTTP/1.1 200 OK
+  Content-Type: application/json; charset=UTF-8
+
+  )]}'
+  {
+    "status": "MIGRATED",
+    "change": {
+      "id": "testproj~12345",
+      ...
+    }
+  }
+
+## IDs
+
+### {branch-id}
+
+The name of a branch or HEAD. The prefix refs/heads/ can be
+omitted.
+
+### {commit-id}
+
+Commit ID.
+
+### {tag-id}
+
+The name of a tag. The prefix refs/tags/ can be omitted.
+
+### {dashboard-id}
+
+The ID of a dashboard in the format '<ref>:<path>'.
+
+A special dashboard ID is default which represents the default
+dashboard of a project.
+
+### {label-name}
+
+The name of a review label.
+
+### {submit-requirement-name}
+
+The name of a submit requirement.
+
+### {project-name}
+
+The name of the project.
+
+If the name ends with .git, the suffix will be automatically removed.
+
+## JSON Entities
+
+### AccessCheckInfo
+
+The AccessCheckInfo entity is the result of an access check.
+
+Field Name | 
+ | 
+Description | 
+
+status | 
+ | 
+
+The HTTP status code for the access.
+200 means success and 403 means denied. | 
+
+message | 
+
+optional | 
+
+A clarifying message if status is not 200. | 
+
+debug_logs | 
+
+optional | 
+
+Debug logs that may help to understand why a permission is denied or allowed. | 
+
+### AutoCloseableChangesCheckInput
+
+The AutoCloseableChangesCheckInput entity contains options for running
+the AutoCloseableChangesCheck.
+
+Field Name | 
+ | 
+Description | 
+
+fix | 
+
+optional | 
+
+Whether auto-closeable changes should be closed automatically. | 
+
+branch | 
+ | 
+
+The branch for which the 
+AutoCloseableChangesCheck should be performed. The 'refs/heads/'
+prefix for the branch name can be omitted. | 
+
+skip_commits | 
+
+optional | 
+
+Number of commits that should be skipped when walking the commits of
+the branch. | 
+
+max_commits | 
+
+optional | 
+
+Maximum number of commits to walk. If not specified this defaults to
+10,000 commits. 10,000 is also the maximum that can be set.
+Auto-closing changes is an expensive operation and the more commits
+are walked the slower it gets. This is why you should avoid walking too
+many commits. | 
+
+### AutoCloseableChangesCheckResult
+
+The AutoCloseableChangesCheckResult entity contains the results of
+running the AutoCloseableChangesCheck
+on a project.
+
+Field Name | 
+Description | 
+
+auto_closeable_changes | 
+
+Changes that can be auto-closed as list of
+ChangeInfo entities. For each
+returned ChangeInfo entity the
+problems field is populated that includes details about the detected
+issues. If fix in the 
+AutoCloseableChangesCheckInput was set to true, status and
+outcome in ProblemInfo are
+populated. If the status says FIXED Gerrit was able to auto-close the
+change now. | 
+
+### BanInput
+
+The BanInput entity contains information for banning commits in a
+project.
+
+Field Name | 
+ | 
+Description | 
+
+commits | 
+ | 
+
+List of commits to be banned. | 
+
+reason | 
+
+optional | 
+
+Reason for banning the commits. | 
+
+### BanResultInfo
+
+The BanResultInfo entity describes the result of banning commits.
+
+Field Name | 
+ | 
+Description | 
+
+newly_banned | 
+
+optional | 
+
+List of newly banned commits. | 
+
+already_banned | 
+
+optional | 
+
+List of commits that were already banned. | 
+
+ignored | 
+
+optional | 
+
+List of object IDs that were ignored. | 
+
+### BranchInfo
+
+The BranchInfo entity contains information about a branch.
+
+Field Name | 
+ | 
+Description | 
+
+ref | 
+ | 
+
+The ref of the branch. | 
+
+revision | 
+ | 
+
+The revision to which the branch points. | 
+
+can_delete | 
+
+not set if false | 
+
+Whether the calling user can delete this branch. | 
+
+web_links | 
+
+optional | 
+
+Links to the branch in external sites as a list of
+WebLinkInfo entries. | 
+
+actions | 
+
+optional | 
+
+Actions the caller might be able to perform on this branch, as a map of action
+name to ActionInfo entities. | 
+
+### BranchInput
+
+The BranchInput entity contains information for the creation of
+a new branch.
+
+Field Name | 
+ | 
+Description | 
+
+ref | 
+
+optional | 
+
+The name of the branch. The prefix refs/heads/ can be
+omitted.
+
+If set, must match the branch ID in the URL. | 
+
+revision | 
+
+optional | 
+
+The base revision of the new branch.
+
+If not set and create_empty_commit is true the branch is created with an empty initial commit.
+
+If not set and create_empty_commit is false or unset HEAD will be used as base revision. | 
+
+source_ref | 
+
+optional | 
+
+The full name of the source ref where revision can be found.
+
+Used when revision is not a ref name in order to check reachability from a
+specific ref. This ref should be visible to the caller.
+
+If not set, then all visible refs under refs/heads/ and refs/tags/ are
+searched. | 
+
+create_empty_commit | 
+
+false if not set | 
+
+Whether the branch should be created with an empty initial commit.
+
+Cannot be used in combination with setting a revision.
+
+Can be used to review the initial content of a branch (create the branch with
+an empty initial commit, make a second commit with the initial content, e.g. by
+merging in another branch, and push the commit for review). | 
+
+validation_options | 
+
+optional | 
+
+Map with key-value pairs that are forwarded as options to the ref operation
+validation listeners (e.g. can be used to skip certain validations). Which
+validation options are supported depends on the installed ref operation
+validation listeners. Gerrit core doesn’t support any validation options, but
+ref operation validation listeners that are implemented in plugins may. Please
+refer to the documentation of the installed plugins to learn whether they
+support validation options. Unknown validation options are silently ignored. | 
+
+### CheckProjectInput
+
+The CheckProjectInput entity contains information about which
+consistency checks should be run on a project.
+
+Field Name | 
+ | 
+Description | 
+
+auto_closeable_changes_check | 
+
+optional | 
+
+Parameters for the 
+AutoCloseableChangesCheck as
+
+AutoCloseableChangesCheckInput entity. | 
+
+### CheckProjectResultInfo
+
+The CheckProjectResultInfo entity contains results for consistency
+checks that have been run on a project.
+
+Field Name | 
+ | 
+Description | 
+
+auto_closeable_changes_check_result | 
+
+optional | 
+
+Results for the 
+AutoCloseableChangesCheck as
+
+AutoCloseableChangesCheckResult entity. | 
+
+### CommentLinkInfo
+
+The CommentLinkInfo entity describes a
+commentlink.
+
+Field Name | 
+ | 
+Description | 
+
+match | 
+ | 
+
+A JavaScript regular expression to match
+positions to be replaced with a hyperlink, as documented in
+commentlink.name.match. | 
+
+link | 
+ | 
+
+The URL to direct the user to whenever the
+regular expression is matched, as documented in
+commentlink.name.link. | 
+
+prefix | 
+
+optional | 
+
+Text inserted before the link. | 
+
+suffix | 
+
+optional | 
+
+Text inserted after the link. | 
+
+text | 
+
+optional | 
+
+Text of the link. | 
+
+enabled | 
+
+optional | 
+
+Whether the commentlink is enabled, as documented
+in 
+commentlink.name.enabled. If not set the commentlink is enabled. | 
+
+### CommentLinkInput
+
+The CommentLinkInput entity describes the input for a
+commentlink.
+
+Field Name | 
+ | 
+Description | 
+
+match | 
+ | 
+
+A JavaScript regular expression to match
+positions to be replaced with a hyperlink, as documented in
+commentlink.name.match. | 
+
+link | 
+ | 
+
+The URL to direct the user to whenever the
+regular expression is matched, as documented in
+commentlink.name.link. | 
+
+prefix | 
+
+optional | 
+
+Text inserted before the link. | 
+
+suffix | 
+
+optional | 
+
+Text inserted after the link. | 
+
+text | 
+
+optional | 
+
+Text of the link. | 
+
+enabled | 
+
+optional | 
+
+Whether the commentlink is enabled, as documented
+in 
+commentlink.name.enabled. If not set the commentlink is enabled. | 
+
+### ConfigInfo
+
+The ConfigInfo entity contains information about the effective project
+configuration.
+
+Field Name | 
+ | 
+Description | 
+
+description | 
+
+optional | 
+
+The description of the project. | 
+
+use_contributor_agreements | 
+
+optional | 
+
+InheritedBooleanInfo that tells whether
+authors must complete a contributor agreement on the site before
+pushing any commits or changes to this project. | 
+
+use_content_merge | 
+
+optional | 
+
+InheritedBooleanInfo that tells whether
+Gerrit will try to perform a 3-way merge of text file content when a
+file has been modified by both the destination branch and the change
+being submitted. This option only takes effect if submit type is not
+FAST_FORWARD_ONLY. | 
+
+use_signed_off_by | 
+
+optional | 
+
+InheritedBooleanInfo that tells whether
+each change must contain a Signed-off-by line from either the author or
+the uploader in the commit message. | 
+
+create_new_change_for_all_not_in_target | 
+
+optional | 
+
+InheritedBooleanInfo that tells whether
+a new change is created for every commit not in target branch. | 
+
+require_change_id | 
+
+optional | 
+
+InheritedBooleanInfo that tells whether a
+valid Change-Id footer in any commit uploaded
+for review is required. This does not apply to commits pushed directly
+to a branch or tag. This property is deprecated and will be removed in
+a future release. | 
+
+enable_signed_push | 
+
+optional, not set if signed push is disabled | 
+
+InheritedBooleanInfo that tells whether
+signed push validation is enabled on the project. | 
+
+require_signed_push | 
+
+optional, not set if signed push is disabled | 
+
+InheritedBooleanInfo that tells whether
+signed push validation is required on the project. | 
+
+reject_implicit_merges | 
+
+optional | 
+
+InheritedBooleanInfo that tells whether
+implicit merges should be rejected on changes pushed to or submitted in
+the project. | 
+
+private_by_default | 
+ | 
+
+InheritedBooleanInfo that tells whether
+all new changes are set as private by default. | 
+
+work_in_progress_by_default | 
+ | 
+
+InheritedBooleanInfo that tells whether
+all new changes are set as work-in-progress by default. | 
+
+max_object_size_limit | 
+ | 
+
+The max object size
+limit of this project as a 
+MaxObjectSizeLimitInfo entity. | 
+
+default_submit_type | 
+ | 
+
+SubmitTypeInfo that describes the default submit type of
+the project, when not overridden at the change level. | 
+
+submit_type | 
+ | 
+
+Deprecated; equivalent to value in
+default_submit_type. | 
+
+match_author_to_committer_date | 
+
+optional | 
+
+InheritedBooleanInfo that indicates whether
+a change’s author date will be changed to match its submitter date upon submit. | 
+
+state | 
+
+optional | 
+
+The state of the project, can be ACTIVE, READ_ONLY or HIDDEN.
+
+Not set if the project state is ACTIVE. | 
+
+ref_storage | 
+ | 
+
+The ref storage format of the project’s repository (FILES or
+REFTABLE). The request fails if the repository cannot be opened. | 
+
+commentlinks | 
+ | 
+
+Map with the comment link configurations of the project. The name of
+the comment link configuration is mapped to a 
+CommentlinkInfo entity. | 
+
+plugin_config | 
+
+optional | 
+
+Plugin configuration as map which maps the plugin name to a map of
+parameter names to ConfigParameterInfo
+entities. Only filled for users who have read access to refs/meta/config. | 
+
+actions | 
+
+optional | 
+
+Actions the caller might be able to perform on this project. The
+information is a map of view names to | 
+
+reject_empty_commit | 
+
+optional | 
+
+InheritedBooleanInfo that tells whether
+empty commits should be rejected when a change is merged.
+ActionInfo entities. | 
+
+skip_adding_author_and_committer_as_reviewers | 
+
+optional | 
+
+Whether to skip adding the Git commit author and committer as reviewers for a new change. | 
+
+enable_reviewer_by_email | 
+ | 
+
+InheritedBooleanInfo that tells whether reviewers
+and CCs that do not have a Gerrit account can be added to a change by their
+email address. | 
+
+extension_panel_names | 
+
+optional | 
+
+Views that are shown as extension panels, as a map of panel section name to the
+list of panel names configured for the project. | 
+
+### CreateCommitInput
+
+The CreateCommitInput entity describes the file operations to apply to a
+branch as a single commit, used by Create Commit.
+
+Field Name | 
+ | 
+Description | 
+
+commit_message | 
+ | 
+
+The commit message. Must be non-empty. | 
+
+base_revision | 
+
+optional | 
+
+The commit (SHA-1) the target branch is expected to point at: the request is
+rejected with “409 Conflict” if the branch tip is any other commit (optimistic
+concurrency). This is a compare-and-swap check only; the new commit is always
+created on top of the current branch tip, and base_revision does not select an
+older base to commit onto. A value that is not a full 40-character SHA-1 is
+rejected with “400 Bad Request”. | 
+
+files | 
+ | 
+
+A map of file path to FileChange describing the operation to
+apply at that path. Applied together as one commit. | 
+
+validation_options | 
+
+optional | 
+
+Map with key-value pairs that are forwarded as options to the ref-operation and
+commit validation listeners (e.g. to skip certain validations). Which options are
+supported depends on the installed validation listeners; Gerrit core supports
+none. Unknown options are silently ignored. | 
+
+### FileChange
+
+The FileChange entity describes a single file operation within a
+CreateCommitInput. Exactly one of content, delete, or
+rename_from must be set.
+
+Field Name | 
+ | 
+Description | 
+
+content | 
+
+optional | 
+
+The new file content, base64-encoded, for a create or update. For a 120000
+(symlink) entry, the decoded content is the symlink target path. | 
+
+file_mode | 
+
+optional | 
+
+The file mode in octal format (100644 regular file, 100755 executable,
+120000 symlink). If not set, new files are created as 100644 and existing
+files keep their mode. | 
+
+delete | 
+
+optional | 
+
+If true, deletes the file at this path. | 
+
+rename_from | 
+
+optional | 
+
+Source path to rename from. The file at rename_from is moved to this entry’s
+path. | 
+
+### ConfigInput
+
+The ConfigInput entity describes a new project configuration.
+
+Field Name | 
+ | 
+Description | 
+
+description | 
+
+optional | 
+
+The new description of the project.
+
+If not set, the description is removed. | 
+
+use_contributor_agreements | 
+
+optional | 
+
+Whether authors must complete a contributor agreement on the site
+before pushing any commits or changes to this project.
+
+Can be TRUE, FALSE or INHERIT.
+
+If not set, this setting is not updated. | 
+
+use_content_merge | 
+
+optional | 
+
+Whether Gerrit will try to perform a 3-way merge of text file content
+when a file has been modified by both the destination branch and the
+change being submitted. This option only takes effect if submit type is
+not FAST_FORWARD_ONLY.
+
+Can be TRUE, FALSE or INHERIT.
+
+If not set, this setting is not updated. | 
+
+use_signed_off_by | 
+
+optional | 
+
+Whether each change must contain a Signed-off-by line from either the
+author or the uploader in the commit message.
+
+Can be TRUE, FALSE or INHERIT.
+
+If not set, this setting is not updated. | 
+
+create_new_change_for_all_not_in_target | 
+
+optional | 
+
+Whether a new change will be created for every commit not in target
+branch.
+
+Can be TRUE, FALSE or INHERIT.
+
+If not set, this setting is not updated. | 
+
+require_change_id | 
+
+optional | 
+
+Whether a valid Change-Id footer in any commit
+uploaded for review is required. This does not apply to commits pushed
+directly to a branch or tag.
+
+Can be TRUE, FALSE or INHERIT.
+
+If not set, this setting is not updated.
+This property is deprecated and will be removed in
+a future release. | 
+
+enable_signed_push | 
+
+optional | 
+
+Whether signed push validation is enabled on the project.
+
+Can be TRUE, FALSE or INHERIT.
+
+If not set, this setting is not updated. | 
+
+require_signed_push | 
+
+optional | 
+
+Whether signed push validation is required on the project.
+
+Can be TRUE, FALSE or INHERIT.
+
+If not set, this setting is not updated. | 
+
+reject_implicit_merges | 
+
+optional | 
+
+Whether a check for implicit merges will be performed when changes are
+pushed for review or submitted.
+
+Can be TRUE, FALSE or INHERIT.
+
+If not set, this setting is not updated. | 
+
+private_by_default | 
+
+optional | 
+
+Whether all new changes in the project are set to private by default.
+
+Can be TRUE, FALSE or INHERIT.
+
+If not set, this setting is not updated. | 
+
+work_in_progress_by_default | 
+
+optional | 
+
+Whether all new changes in the project are set to work-in-progress by default.
+
+Can be TRUE, FALSE or INHERIT.
+
+If not set, this setting is not updated. | 
+
+enable_reviewer_by_email | 
+
+optional | 
+
+Whether reviewers and CCs that do not have a Gerrit account can be added to a
+change by their email address.
+
+Can be TRUE, FALSE or INHERIT.
+
+If not set, this setting is not updated. | 
+
+match_author_to_committer_date | 
+
+optional | 
+
+Whether a change’s author date is changed to match its submit date when the
+change is submitted.
+
+Can be TRUE, FALSE or INHERIT.
+
+If not set, this setting is not updated. | 
+
+skip_adding_author_and_committer_as_reviewers | 
+
+optional | 
+
+Whether to skip adding the Git commit author and committer as reviewers of a
+new change.
+
+Can be TRUE, FALSE or INHERIT.
+
+If not set, this setting is not updated. | 
+
+max_object_size_limit | 
+
+optional | 
+
+The max object size
+limit of this project as a 
+MaxObjectSizeLimitInfo entity.
+
+If set to 0, the max object size limit is removed.
+
+If not set, this setting is not updated. | 
+
+submit_type | 
+
+optional | 
+
+The default submit type of the project, can be MERGE_IF_NECESSARY,
+FAST_FORWARD_ONLY, REBASE_IF_NECESSARY, REBASE_ALWAYS, MERGE_ALWAYS or
+CHERRY_PICK.
+
+If not set, the submit type is not updated. | 
+
+state | 
+
+optional | 
+
+The state of the project, can be ACTIVE, READ_ONLY or HIDDEN.
+
+Not set if the project state is ACTIVE.
+
+If not set, the project state is not updated. | 
+
+plugin_config_values | 
+
+optional | 
+
+Plugin configuration values as map which maps the plugin name to a map
+of parameter names to values. | 
+
+reject_empty_commit | 
+
+optional | 
+
+Whether empty commits should be rejected when a change is merged.
+Can be TRUE, FALSE or INHERIT.
+
+If not set, this setting is not updated. | 
+
+comment_links | 
+
+optional | 
+
+Map of commentlink names to CommentLinkInput
+entities to add or update on the project. If the given commentlink
+already exists, it will be updated with the given values, otherwise
+it will be created. If the value is null, that entry is deleted. | 
+
+commit_message | 
+
+optional | 
+
+A commit message for this change. | 
+
+### ConfigParameterInfo
+
+The ConfigParameterInfo entity describes a project configuration
+parameter.
+
+Field Name | 
+ | 
+Description | 
+
+display_name | 
+
+optional | 
+
+The display name of the configuration parameter. | 
+
+description | 
+
+optional | 
+
+The description of the configuration parameter. | 
+
+warning | 
+
+optional | 
+
+Warning message for the configuration parameter. | 
+
+type | 
+ | 
+
+The type of the configuration parameter. Can be STRING, INT,
+LONG, BOOLEAN, LIST or ARRAY. | 
+
+value | 
+
+optional | 
+
+The value of the configuration parameter as string. If the parameter
+is inheritable this is the effective value which is deduced from
+configured_value and inherited_value. | 
+
+values | 
+
+optional | 
+
+The list of values. Only set if the type is ARRAY. | 
+
+editable | 
+
+false if not set | 
+
+Whether the value is editable. | 
+
+permitted_values | 
+
+optional | 
+
+The list of permitted values. Only set if the type is LIST. | 
+
+inheritable | 
+
+false if not set | 
+
+Whether the configuration parameter can be inherited. | 
+
+configured_value | 
+
+optional | 
+
+The value of the configuration parameter that is configured on this
+project, only set if inheritable is true. | 
+
+inherited_value | 
+
+optional | 
+
+The inherited value of the configuration parameter, only set if
+inheritable is true. | 
+
+### ConfigValue
+
+The ConfigValue entity describes a single configuration value, used when
+setting project configuration parameters.
+
+Field Name | 
+ | 
+Description | 
+
+value | 
+
+optional | 
+
+The new single value for the configuration parameter. | 
+
+values | 
+
+optional | 
+
+The new list of values for a multi-valued configuration parameter. | 
+
+### DashboardInfo
+
+The DashboardInfo entity contains information about a project
+dashboard.
+
+Field Name | 
+ | 
+Description | 
+
+id | 
+ | 
+
+The ID of the dashboard. The ID has the format '<ref>:<path>',
+where ref and path are URL encoded. | 
+
+project | 
+ | 
+
+The name of the project for which this dashboard is returned. | 
+
+defining_project | 
+ | 
+
+The name of the project in which this dashboard is defined.
+This is different from project if the dashboard is inherited from a
+parent project. | 
+
+ref | 
+ | 
+
+The name of the ref in which the dashboard is defined, without the
+refs/meta/dashboards/ prefix, which is common for all dashboard refs. | 
+
+path | 
+ | 
+
+The path of the file in which the dashboard is defined. | 
+
+description | 
+
+optional | 
+
+The description of the dashboard. | 
+
+foreach | 
+
+optional | 
+
+Subquery that applies to all sections in the dashboard.
+
+Tokens such as ${project} are not resolved. | 
+
+url | 
+ | 
+
+The URL under which the dashboard can be opened in the Gerrit Web UI.
+
+The URL is relative to the canonical web URL.
+
+Tokens in the queries such as ${project} are resolved. | 
+
+is_default | 
+
+not set if false | 
+
+Whether this is the default dashboard of the project. | 
+
+title | 
+
+optional | 
+
+The title of the dashboard. | 
+
+sections | 
+ | 
+
+The list of sections in the dashboard. | 
+
+### DashboardInput
+
+The DashboardInput entity contains information to create/update a
+project dashboard.
+
+Field Name | 
+ | 
+Description | 
+
+id | 
+
+optional | 
+
+URL encoded ID of a dashboard to which this dashboard should link to. | 
+
+commit_message | 
+
+optional | 
+
+Message that should be used to commit the change of the dashboard. | 
+
+### DashboardSectionInfo
+
+The DashboardSectionInfo entity contains information about a section
+in a dashboard.
+
+Field Name | 
+Description | 
+
+name | 
+
+The title of the section. | 
+
+query | 
+
+The query of the section.
+
+Tokens such as ${project} are not resolved. | 
+
+### DeleteLabelInput
+
+The DeleteLabelInput entity contains information for deleting a label
+definition in a project.
+
+Field Name | 
+ | 
+Description | 
+
+commit_message | 
+
+optional | 
+
+Message that should be used to commit the deletion of the label in the
+project.config file to the refs/meta/config branch. | 
+
+### DeleteBranchesInput
+
+The DeleteBranchesInput entity contains information about branches that should
+be deleted.
+
+Field Name | 
+Description | 
+
+branches | 
+
+A list of branch names that identify the branches that should be
+deleted. | 
+
+### DeleteChangesInput
+
+The DeleteChangesInput entity contains information about changes that should
+be deleted.
+
+Field Name | 
+Description | 
+
+changes | 
+
+A list of changes (Change-Id or Change-Number) that identify the changes that should be deleted. | 
+
+### DeleteTagsInput
+
+The DeleteTagsInput entity contains information about tags that should
+be deleted.
+
+Field Name | 
+Description | 
+
+tags | 
+
+A list of tag names that identify the tags that should be
+deleted. | 
+
+### GCInput
+
+The GCInput entity contains information to run the Git garbage
+collection.
+
+Field Name | 
+ | 
+Description | 
+
+show_progress | 
+
+false if not set | 
+
+Whether progress information should be shown. | 
+
+aggressive | 
+
+false if not set | 
+
+Whether an aggressive garbage collection should be done. | 
+
+async | 
+
+false if not set | 
+
+Whether the garbage collection should run asynchronously. | 
+
+### HeadInput
+
+The HeadInput entity contains information for setting HEAD for a
+project.
+
+Field Name | 
+Description | 
+
+ref | 
+
+The ref to which HEAD should be set, the refs/heads prefix can be
+omitted. | 
+
+### IndexProjectInput
+
+The IndexProjectInput contains parameters for indexing a project.
+
+Field Name | 
+ | 
+Description | 
+
+index_children | 
+ | 
+
+If children should be indexed recursively. | 
+
+async | 
+ | 
+
+If projects should be indexed asynchronously. | 
+
+### InheritedBooleanInfo
+
+A boolean value that can also be inherited.
+
+Field Name | 
+ | 
+Description | 
+
+value | 
+ | 
+
+The effective boolean value. | 
+
+configured_value | 
+ | 
+
+The configured value, can be TRUE, FALSE or INHERIT. | 
+
+inherited_value | 
+
+optional | 
+
+The boolean value inherited from the parent.
+
+Not set if there is no parent. | 
+
+### LabelDefinitionInfo
+
+The LabelDefinitionInfo entity describes a 
+review label.
+
+Field Name | 
+ | 
+Description | 
+
+name | 
+ | 
+
+The name of the label. | 
+
+description | 
+
+optional | 
+
+The description of the label. | 
+
+project_name | 
+
+optional | 
+
+The name of the project in which this label is defined. Not set for globally
+defined labels. | 
+
+function | 
+ | 
+
+The function of the label (can be
+MaxWithBlock, AnyWithBlock, MaxNoBlock, NoBlock, NoOp and PatchSetLock. | 
+
+values | 
+ | 
+
+The values of the label as a map of label
+value to value description. The label values are formatted strings, e.g. "+1"
+instead of "1", " 0" instead of "0". | 
+
+default_value | 
+ | 
+
+The default value of the label (as
+integer). | 
+
+branches | 
+
+optional | 
+
+A list of branches for which the label
+applies. A branch can be a ref, a ref pattern or a regular expression. If not
+set, the label applies for all branches. | 
+
+can_override | 
+
+false if not set | 
+
+Whether this label can be overridden
+by child projects. | 
+
+copy_condition | 
+
+optional | 
+
+See copyCondition. | 
+
+allow_post_submit | 
+
+false if not set | 
+
+Whether allowPostSubmit is set
+on the label. | 
+
+ignore_self_approval | 
+
+false if not set | 
+
+Whether ignoreSelfApproval is
+set on the label. | 
+
+### LabelDefinitionInput
+
+The LabelDefinitionInput entity describes a 
+review label.
+
+Field Name | 
+ | 
+Description | 
+
+commit_message | 
+
+optional | 
+
+Message that should be used to commit the change of the label in the
+project.config file to the refs/meta/config branch.+
+Must not be set if this LabelDefinitionInput entity is contained in a
+BatchLabelInput entity. | 
+
+name | 
+
+optional | 
+
+The new name of the label.+
+For label creation the name is required if this LabelDefinitionInput entity
+is contained in a BatchLabelInput
+entity. | 
+
+description | 
+
+optional | 
+
+The new description for the label. | 
+
+function | 
+
+optional | 
+
+The new function of the label (can be
+NoOp/NoBlock and PatchSetLock). By default NoOp when creating new
+labels. | 
+
+values | 
+
+optional | 
+
+The new values of the label as a map of
+label value to value description. The label values are formatted strings, e.g.
+"+1" instead of "1", " 0" instead of "0". | 
+
+default_value | 
+
+optional | 
+
+The new default value of the label
+(as integer). | 
+
+branches | 
+
+optional | 
+
+The new branches for which the label applies as a list of
+branches. A branch can be a ref, a ref
+pattern or a regular expression. If not set, the label applies for all
+branches. | 
+
+can_override | 
+
+optional | 
+
+Whether this label can be overridden
+by child projects. | 
+
+copy_condition | 
+
+optional | 
+
+See copyCondition. | 
+
+unset_copy_condition | 
+
+optional | 
+
+If true, clears the value stored in copy_condition. | 
+
+allow_post_submit | 
+
+optional | 
+
+Whether allowPostSubmit is set
+on the label. | 
+
+ignore_self_approval | 
+
+optional | 
+
+Whether ignoreSelfApproval is
+set on the label. | 
+
+### LabelTypeInfo
+
+The LabelTypeInfo entity contains metadata about the labels that a
+project has.
+
+Field Name | 
+ | 
+Description | 
+
+values | 
+ | 
+
+Map of the available values to their description. | 
+
+default_value | 
+ | 
+
+The default value of this label. | 
+
+### MaxObjectSizeLimitInfo
+
+The MaxObjectSizeLimitInfo entity contains information about the
+max object size
+limit of a project.
+
+Field Name | 
+ | 
+Description | 
+
+value | 
+
+optional | 
+
+The effective value in bytes of the max object size limit.
+
+Not set if there is no limit for the object size. | 
+
+configured_value | 
+
+optional | 
+
+The max object size limit that is configured on the project as a
+formatted string.
+
+Not set if there is no limit for the object size configured on project
+level. | 
+
+summary | 
+
+optional | 
+
+A string describing whether the value was inherited or overridden from
+the parent project or global config.
+
+Not set if not inherited or overridden. | 
+
+### BatchLabelInput
+
+The BatchLabelInput entity contains information for batch updating label
+definitions in a project.
+
+Field Name | 
+ | 
+Description | 
+
+commit_message | 
+
+optional | 
+
+Message that should be used to commit the label updates in the
+project.config file to the refs/meta/config branch. | 
+
+delete | 
+
+optional | 
+
+List of labels that should be deleted. | 
+
+create | 
+
+optional | 
+
+List of LabelDefinitionInput entities that
+describe labels that should be created. | 
+
+update | 
+
+optional | 
+
+Map of label names to LabelDefinitionInput
+entities that describe the updates that should be done for the labels.
+The given inputs only need to set the properties that are being changed. | 
+
+### BatchSubmitRequirementInput
+
+The BatchSubmitRequirementInput entity contains information for batch updating submit requirements
+definitions in a project.
+
+Field Name | 
+ | 
+Description | 
+
+commit_message | 
+
+optional | 
+
+Message that should be used to commit the submit requirements updates in the
+project.config file to the refs/meta/config branch. | 
+
+delete | 
+
+optional | 
+
+List of submit requirements that should be deleted. | 
+
+create | 
+
+optional | 
+
+List of SubmitRequirementInput entities that
+describe submit requirements that should be created. | 
+
+update | 
+
+optional | 
+
+Map of submit requirement names to SubmitRequirementInput
+entities that describe the updates that should be done for the submit requirements. The
+given inputs must set all properties (including those that are not being changed). | 
+
+### ProjectAccessInput
+
+The ProjectAccessInput describes changes that should be applied to a project
+access config.
+
+Field Name | 
+ | 
+Description | 
+
+remove | 
+
+optional | 
+
+A map of deductions to be applied to the project access, mapping refs to
+AccessSectionInfo entities.
+AccessSectionInfo entities can either be empty (whole section removed),
+individual permissions can be specified without rules (so whole permission
+setting removed), or fully specific down to the rule level. | 
+
+add | 
+
+optional | 
+
+A map of additions to be applied to the project access, mapping refs to
+AccessSectionInfo entities. | 
+
+message | 
+
+optional | 
+
+A commit message for this change. | 
+
+parent | 
+
+optional | 
+
+A new parent for the project to inherit from. Changing the parent project
+requires administrative privileges. | 
+
+### ProjectDescriptionInput
+
+The ProjectDescriptionInput entity contains information for setting a
+project description.
+
+Field Name | 
+ | 
+Description | 
+
+description | 
+
+optional | 
+
+The project description.
+
+The project description will be deleted if not set. | 
+
+commit_message | 
+
+optional | 
+
+Message that should be used to commit the change of the project
+description in the project.config file to the refs/meta/config
+branch. | 
+
+### ProjectInfo
+
+The ProjectInfo entity contains information about a project.
+
+Field Name | 
+ | 
+Description | 
+
+id | 
+ | 
+
+The URL encoded project name. | 
+
+name | 
+
+not set if returned in a map where the project name is used as map key | 
+
+The name of the project. | 
+
+parent | 
+
+optional | 
+
+The name of the parent project.
+
+?-<n> if the parent project is not visible (<n> is a number which
+is increased for each non-visible project). | 
+
+description | 
+
+optional | 
+
+The description of the project. | 
+
+state | 
+
+optional | 
+
+ACTIVE, READ_ONLY or HIDDEN. | 
+
+branches | 
+
+optional | 
+
+Map of branch names to HEAD revisions. | 
+
+labels | 
+
+optional | 
+
+Map of label names to
+LabelTypeInfo entries.
+This field is filled for Create Project and
+Get Project calls. | 
+
+web_links | 
+
+optional | 
+
+Links to the project in external sites as a list of
+WebLinkInfo entries. | 
+
+_more_projects | 
+
+optional, not set if false | 
+
+Whether the query would deliver more results if not limited.
+
+Only set on the last project that is returned. | 
+
+### ProjectInput
+
+The ProjectInput entity contains information for the creation of
+a new project.
+
+Field Name | 
+ | 
+Description | 
+
+name | 
+
+optional | 
+
+The name of the project (not encoded).
+
+If set, must match the project name in the URL.
+
+If name ends with .git the suffix will be automatically removed. | 
+
+parent | 
+
+optional | 
+
+The name of the parent project.
+
+If not set, the All-Projects project will be the parent project. | 
+
+description | 
+
+optional | 
+
+The description of the project. | 
+
+permissions_only | 
+
+false if not set | 
+
+Whether a permission-only project should be created. | 
+
+create_empty_commit | 
+
+false if not set | 
+
+Whether an empty initial commit should be created. | 
+
+submit_type | 
+
+optional | 
+
+The submit type that should be set for the project
+(MERGE_IF_NECESSARY, REBASE_IF_NECESSARY, REBASE_ALWAYS,
+FAST_FORWARD_ONLY, MERGE_ALWAYS, CHERRY_PICK).
+
+If not set, MERGE_IF_NECESSARY is set as submit type unless
+
+repository.<name>.defaultSubmitType is set to a different value. | 
+
+branches | 
+
+optional | 
+
+A list of branches that should be initially created.
+
+For the branch names the refs/heads/ prefix can be omitted.
+
+The first entry of the list will be the
+default branch.
+
+If the list is empty, host-level default
+is used.
+
+Branches in the Gerrit internal ref space are not allowed, such as
+refs/groups/, refs/changes/, etc…​ | 
+
+owners | 
+
+optional | 
+
+A list of groups that should be assigned as project owner.
+
+Each group in the list must be specified as
+group-id.
+
+If not set, the 
+groups that are configured as default owners are set as project
+owners. | 
+
+use_contributor_agreements | 
+
+INHERIT if not set | 
+
+Whether contributor agreements should be used for the project  (TRUE,
+FALSE, INHERIT). | 
+
+use_signed_off_by | 
+
+INHERIT if not set | 
+
+Whether the usage of 'Signed-Off-By' footers is required for the
+project (TRUE, FALSE, INHERIT). | 
+
+create_new_change_for_all_not_in_target | 
+
+INHERIT if not set | 
+
+Whether a new change is created for every commit not in target branch
+for the project (TRUE, FALSE, INHERIT). | 
+
+use_content_merge | 
+
+INHERIT if not set | 
+
+Whether content merge should be enabled for the project (TRUE,
+FALSE, INHERIT).
+
+FALSE, if the submit_type is FAST_FORWARD_ONLY. | 
+
+require_change_id | 
+
+INHERIT if not set | 
+
+Whether the usage of Change-Ids is required for the project (TRUE,
+FALSE, INHERIT).
+This property is deprecated and will be removed in
+a future release. | 
+
+enable_signed_push | 
+
+INHERIT if not set | 
+
+Whether signed push validation is enabled on the project  (TRUE,
+FALSE, INHERIT). | 
+
+require_signed_push | 
+
+INHERIT if not set | 
+
+Whether signed push validation is required on the project  (TRUE,
+FALSE, INHERIT). | 
+
+max_object_size_limit | 
+
+optional | 
+
+Max allowed Git object size for this project.
+Common unit suffixes of 'k', 'm', or 'g' are supported. | 
+
+plugin_config_values | 
+
+optional | 
+
+Plugin configuration values as map which maps the plugin name to a map
+of parameter names to values. | 
+
+reject_empty_commit | 
+
+optional | 
+
+Whether empty commits should be rejected when a change is merged
+(TRUE, FALSE, INHERIT). | 
+
+init_only | 
+
+optional | 
+
+If set, only the project initialization is being (re-)done and the repository
+creation is skipped. The project initialization consists out of setting HEAD,
+creating the project.config file in refs/meta/config and creating initial
+branches with empty commits. This is useful to retry the project initialization
+after a create project request has failed and as a result the repository was
+created but the project initialization was not done. Note, that this does not
+override any existing project configuration. If a conflicting configuration
+already exists the request is rejected with 409 Conflict. The default is
+false. | 
+
+ref_storage | 
+
+optional | 
+
+The ref storage format for the project’s repository (FILES,
+REFTABLE).
+
+If not set, the repository manager selects the format. Local disk storage
+uses JGit’s init defaults, falling back to FILES. | 
+
+### RefStorageInput
+
+The RefStorageInput entity contains information for converting the ref
+storage of a project’s repository.
+
+Field Name | 
+ | 
+Description | 
+
+ref_storage | 
+ | 
+
+The target ref storage format (REFTABLE or FILES). This is the default
+field, so the request body may also be this value as a bare string. | 
+
+backup | 
+
+true if not set | 
+
+Whether a backup of the old ref storage should be kept. | 
+
+### ProjectParentInput
+
+The ProjectParentInput entity contains information for setting a
+project parent.
+
+Field Name | 
+ | 
+Description | 
+
+parent | 
+ | 
+
+The name of the parent project. | 
+
+commit_message | 
+
+optional | 
+
+Message that should be used to commit the change of the project parent
+in the project.config file to the refs/meta/config branch. | 
+
+### ReflogEntryInfo
+
+The ReflogEntryInfo entity describes an entry in a reflog.
+
+Field Name | 
+Description | 
+
+old_id | 
+
+The old commit ID. | 
+
+new_id | 
+
+The new commit ID. | 
+
+who | 
+
+The user performing the change as a
+GitPersonInfo entity. | 
+
+comment | 
+
+Comment of the reflog entry. | 
+
+### RepositoryStatisticsInfo
+
+The RepositoryStatisticsInfo entity contains information about
+statistics of a Git repository.
+
+Field Name | 
+Description | 
+
+number_of_loose_objects | 
+
+Number of loose objects. | 
+
+number_of_loose_refs | 
+
+Number of loose refs. | 
+
+number_of_pack_files | 
+
+Number of pack files. | 
+
+number_of_packed_objects | 
+
+Number of packed objects. | 
+
+number_of_packed_refs | 
+
+Number of packed refs. | 
+
+size_of_loose_objects | 
+
+Size of loose objects in bytes. | 
+
+size_of_packed_objects | 
+
+Size of packed objects in bytes. | 
+
+### SubmitRequirementInfo
+
+The SubmitRequirementInfo entity describes a submit requirement.
+
+Field Name | 
+ | 
+Description | 
+
+name | 
+ | 
+
+The submit requirement name. | 
+
+description | 
+
+optional | 
+
+Description of the submit requirement. | 
+
+project_name | 
+
+optional | 
+
+The name of the project in which this submit requirement is defined. Not set
+for globally defined submit requirements. | 
+
+applicability_expression | 
+
+optional | 
+
+Query expression that can be evaluated on any change. If evaluated to true on a
+change, the submit requirement is then applicable for this change.
+If not specified, the submit requirement is applicable for all changes. | 
+
+submittability_expression | 
+ | 
+
+Query expression that can be evaluated on any change. If evaluated to true on a
+change, the submit requirement is fulfilled and not blocking change submission. | 
+
+override_expression | 
+
+optional | 
+
+Query expression that can be evaluated on any change. If evaluated to true on a
+change, the submit requirement is overridden and not blocking change submission. | 
+
+allow_override_in_child_projects | 
+ | 
+
+Whether this submit requirement can be overridden in child projects. | 
+
+### SubmitRequirementInput
+
+The SubmitRequirementInput entity describes a submit requirement.
+
+Field Name | 
+ | 
+Description | 
+
+name | 
+ | 
+
+The submit requirement name. | 
+
+description | 
+
+optional | 
+
+Description of the submit requirement. | 
+
+applicability_expression | 
+
+optional | 
+
+Query expression that can be evaluated on any change. If evaluated to true on a
+change, the submit requirement is then applicable for this change.
+If not specified, the submit requirement is applicable for all changes. | 
+
+submittability_expression | 
+ | 
+
+Query expression that can be evaluated on any change. If evaluated to true on a
+change, the submit requirement is fulfilled and not blocking change submission. | 
+
+override_expression | 
+
+optional | 
+
+Query expression that can be evaluated on any change. If evaluated to true on a
+change, the submit requirement is overridden and not blocking change submission. | 
+
+allow_override_in_child_projects | 
+
+optional | 
+
+Whether this submit requirement can be overridden in child projects. Default is
+false. | 
+
+### SubmitTypeInfo
+
+Information about the default submit
+type of a project, taking into account project inheritance.
+
+Valid values for each field are MERGE_IF_NECESSARY, FAST_FORWARD_ONLY,
+REBASE_IF_NECESSARY, REBASE_ALWAYS, MERGE_ALWAYS or CHERRY_PICK, plus
+INHERIT where applicable.
+
+Field Name | 
+Description | 
+
+value | 
+
+The effective submit type value. Never INHERIT. | 
+
+configured_value | 
+
+The configured value, can be one of the submit types, or INHERIT to inherit
+from the parent project. | 
+
+inherited_value | 
+
+The effective value that would be inherited from the parent. Never INHERIT. | 
+
+### TagInfo
+
+The TagInfo entity contains information about a tag.
+
+Field Name | 
+ | 
+Description | 
+
+ref | 
+ | 
+
+The ref of the tag. | 
+
+revision | 
+ | 
+
+For lightweight tags, the revision of the commit to which the tag
+points. For annotated tags, the revision of the tag object. | 
+
+object | 
+
+Only set for annotated tags. | 
+
+The revision of the object to which the
+tag points. | 
+
+message | 
+
+Only set for annotated tags. | 
+
+The tag message. For signed tags, includes
+the signature. | 
+
+tagger | 
+
+Only set for annotated tags, if present in the tag. | 
+
+The tagger as a
+GitPersonInfo entity. | 
+
+created | 
+
+optional | 
+
+The timestamp of when the tag
+was created. For annotated and signed tags, this is the timestamp of the tag object
+and is the same as the date field in the tagger. For lightweight tags, it is
+the commit timestamp of the commit to which the tag points, when the object is a
+commit. It is not set when the object is any other type. | 
+
+can_delete | 
+
+not set if false | 
+
+Whether the calling user can delete this tag. | 
+
+web_links | 
+
+optional | 
+
+Links to the tag in external sites as a list of
+WebLinkInfo entries. | 
+
+### TagInput
+
+The TagInput entity contains information for creating a tag.
+
+Field Name | 
+ | 
+Description | 
+
+ref | 
+ | 
+
+The name of the tag. The leading refs/tags/ is optional. | 
+
+revision | 
+
+optional | 
+
+The revision to which the tag should point. If not
+specified, the project’s HEAD will be used. | 
+
+message | 
+
+optional | 
+
+The tag message. When set, the tag will be created
+as an annotated tag. | 
+
+date | 
+
+optional | 
+
+Creation timestamp for annotated tags. Must not be
+a date in the future. | 
+
+### MigrateLabelsInfo
+
+The MigrateLabelsInfo entity contains information about an outcome of labels
+function migration.
+
+Field Name | 
+ | 
+Description | 
+
+status | 
+ | 
+
+The status of the migration. Takes one of the following values:
+MIGRATED,
+HAS_PROLOG,
+PREVIOUSLY_MIGRATED,
+NO_CHANGE | 
+
+### MigrateLabelsReviewInfo
+
+The MigrateLabelsReviewInfo entity contains information about an outcome of creating
+a change for labels function migration.
+
+Field Name | 
+ | 
+Description | 
+
+status | 
+ | 
+
+The status of the migration. Takes one of the following values:
+MIGRATED,
+HAS_PROLOG,
+PREVIOUSLY_MIGRATED,
+NO_CHANGE | 
+
+change | 
+
+optional | 
+
+The change created.
+It is a ChangeInfo entity
+and is set only when the status value is MIGRATED. | 
+
+Part of Gerrit Code Review
+
+  Search
+
+Version v3.15.0-rc4-356-g0bdf31d913 | Privacy | Terms
+
+

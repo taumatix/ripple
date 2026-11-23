@@ -857,4 +857,93 @@ func Run(t *testing.T, mk func(t *testing.T) store.Store) {
 			t.Fatalf("v=%q", v)
 		}
 	})
+
+	t.Run("delivery table", func(t *testing.T) {
+		d, ok := mk(t).(store.DeliveryTable)
+		if !ok {
+			t.Fatal("store has no DeliveryTable")
+		}
+		at := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+		if got, err := d.ClaimDelivery(ctx, "github/d1", at, time.Hour); err != nil || !got {
+			t.Fatalf("first claim = %v, %v", got, err)
+		}
+		if got, err := d.ClaimDelivery(ctx, "github/d1", at.Add(30*time.Minute), time.Hour); err != nil || got {
+			t.Fatalf("repeat inside the ttl = %v, %v; want false", got, err)
+		}
+		if got, _ := d.ClaimDelivery(ctx, "github/d2", at, time.Hour); !got {
+			t.Fatal("another key was refused")
+		}
+		if got, err := d.ClaimDelivery(ctx, "github/d1", at.Add(time.Hour), time.Hour); err != nil || !got {
+			t.Fatalf("claim at expiry = %v, %v; want true", got, err)
+		}
+		if err := d.ReleaseDelivery(ctx, "github/d1"); err != nil {
+			t.Fatal(err)
+		}
+		if got, _ := d.ClaimDelivery(ctx, "github/d1", at.Add(time.Hour), time.Hour); !got {
+			t.Fatal("a released key was refused")
+		}
+		if err := d.ReleaseDelivery(ctx, "never-claimed"); err != nil {
+			t.Fatalf("releasing an absent key: %v", err)
+		}
+	})
+
+	t.Run("delivery table races", func(t *testing.T) {
+		d := mk(t).(store.DeliveryTable)
+		at := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+		var won atomic.Int32
+		var wg sync.WaitGroup
+		for range 8 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if got, err := d.ClaimDelivery(ctx, "github/race", at, time.Hour); err == nil && got {
+					won.Add(1)
+				}
+			}()
+		}
+		wg.Wait()
+		if won.Load() != 1 {
+			t.Fatalf("%d of 8 racing claims won, want exactly 1", won.Load())
+		}
+	})
+
+	t.Run("delivery table purge", func(t *testing.T) {
+		d := mk(t).(store.DeliveryTable)
+		at := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+		_, _ = d.ClaimDelivery(ctx, "old", at, time.Hour)
+		_, _ = d.ClaimDelivery(ctx, "new", at, 3*time.Hour)
+		n, err := d.PurgeDeliveries(ctx, at.Add(2*time.Hour))
+		if err != nil || n != 1 {
+			t.Fatalf("purged %d, %v; want 1 (only the expired key)", n, err)
+		}
+		if got, _ := d.ClaimDelivery(ctx, "new", at.Add(2*time.Hour), time.Hour); got {
+			t.Fatal("the live key was purged")
+		}
+		if got, _ := d.ClaimDelivery(ctx, "old", at.Add(2*time.Hour), time.Hour); !got {
+			t.Fatal("the purged key was still held")
+		}
+	})
+
+	t.Run("cursor purge", func(t *testing.T) {
+		s := mk(t)
+		c, ok := s.(store.CursorPurger)
+		if !ok {
+			t.Fatal("store has no CursorPurger")
+		}
+		for k, v := range map[string]string{"removed|a/x": "100|0", "removed|a/y": "900|0", "other|a/z": "100|0", "removed|a/under_score": "100|0"} {
+			if err := s.SetCursor(ctx, k, v); err != nil {
+				t.Fatal(err)
+			}
+		}
+		n, err := c.PurgeCursors(ctx, "removed|", func(v string) bool { return v == "100|0" })
+		if err != nil || n != 2 {
+			t.Fatalf("purged %d, %v; want 2", n, err)
+		}
+		for k, want := range map[string]string{"removed|a/x": "", "removed|a/under_score": "", "removed|a/y": "900|0", "other|a/z": "100|0"} {
+			if got, _ := s.GetCursor(ctx, k); got != want {
+				t.Fatalf("cursor %q = %q, want %q", k, got, want)
+			}
+		}
+	})
+
 }

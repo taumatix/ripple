@@ -101,7 +101,7 @@ upstream:
     used: [GET /repositories/{workspace}, GET and POST /repositories/{ws}/{repo}/pullrequests, GET /repositories/{ws}/{repo}/merge-queues, POST /pullrequests/{n}/merge (queue only, async=true), GET /repositories/{ws}/{repo}/diffstat/{commit}]
     webhooks: [repo:push, "signature X-Hub-Signature = sha256=hex HMAC-SHA256(body); secret optional upstream, required by ripple"]
     auth: "Authorization: Bearer <access or API token>; git basic auth x-token-auth"
-    unverified: "429 headers; queued-merge 202 and Location; x-token-auth with API tokens; merge-commit diffstat; the fake is written from docs, not recorded"
+    unverified: "429 headers; queued-merge 202 and Location; x-token-auth with API tokens; merge-commit diffstat; whether a retry (X-Attempt-Number above 1) keeps the first attempt's X-Request-UUID (the docs call it the UUID \"of the request\" and do not say; ripple dedupes on it, so a retry under a new UUID is handled again, which is safe); the fake is written from docs, not recorded"
     checked: 2026-11-23
   - name: azure-devops-rest-api
     kind: http-api
@@ -112,7 +112,7 @@ upstream:
     auth: "personal access token as HTTP Basic with an empty user name (REST and git); Entra ID tokens not supported"
     webhooks: [service hook git.push (resourceVersion 2.0 sample), authenticated by HTTP Basic basicAuthCredentials; no HMAC exists; payload lists commits but no changed files, resolved through the commit changes API]
     rate-limits: "429 TF400733 with Retry-After; Retry-After may arrive on a 200 and is honoured"
-    unverified: "a repo name accepted as repositoryId; autoCompleteSetBy.id taken from the creator's id; the labels endpoint; commit changes for merge commits and paging; exact service-hook delivery headers; the fake Azure DevOps in tests is written from the docs, not recorded; names with spaces unsupported"
+    unverified: "a repo name accepted as repositoryId; autoCompleteSetBy.id taken from the creator's id; the labels endpoint; commit changes for merge commits and paging; exact service-hook delivery headers; whether the payload id ripple dedupes on stays the same across a retry (the vendored docs describe the retry schedule, not the payload id: unverified, and a retry under a new id is handled again, which is safe); the fake Azure DevOps in tests is written from the docs, not recorded; names with spaces unsupported"
     checked: 2026-11-23
   - name: aws-codecommit
     kind: http-api

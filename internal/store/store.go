@@ -93,3 +93,27 @@ type OpenJobLister interface {
 type RepoLister interface {
 	ListRepos(ctx context.Context, after string, limit int) ([]string, error)
 }
+
+// DeliveryTable is the optional table of webhook delivery ids that were already handled,
+// shared by every replica and surviving a restart. Every store in this package implements
+// it; a store without it leaves the receivers on their in-memory table.
+type DeliveryTable interface {
+	// ClaimDelivery reserves key until now+ttl. It returns false, changing nothing, when
+	// the key is held and has not expired: the delivery is a repeat. Of several callers
+	// racing for one key exactly one gets true.
+	ClaimDelivery(ctx context.Context, key string, now time.Time, ttl time.Duration) (bool, error)
+	// ReleaseDelivery forgets key, so a delivery whose handling failed can be redelivered.
+	// An absent key is not an error.
+	ReleaseDelivery(ctx context.Context, key string) error
+	// PurgeDeliveries deletes the keys whose expiry is before the given time and returns
+	// how many. Expired keys are ignored by ClaimDelivery whether or not they were purged.
+	PurgeDeliveries(ctx context.Context, before time.Time) (int, error)
+}
+
+// CursorPurger is the optional deletion of stale cursors by name prefix. PurgeCursors
+// deletes every cursor whose name starts with prefix and whose value drop reports true,
+// and returns how many; drop must not call the store. Memory and Postgres read only the
+// prefix's rows; DynamoDB has no key listing across partitions and scans the table.
+type CursorPurger interface {
+	PurgeCursors(ctx context.Context, prefix string, drop func(value string) bool) (int, error)
+}

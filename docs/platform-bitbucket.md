@@ -21,7 +21,12 @@ scope (ripple does not create webhooks itself; do it by hand).
 Per repository (or workspace): URL `https://<ripple>/webhook/bitbucket`, trigger `Repository > Push`,
 and a secret equal to `RIPPLE_BITBUCKET_WEBHOOK_SECRET`. Deliveries are verified with
 `X-Hub-Signature: sha256=<HMAC-SHA256 of the body>`; a missing or malformed header is refused before the
-body is read, and a repeated `X-Request-UUID` is dropped.
+body is read, and a repeated `X-Request-UUID` is dropped (in memory, and in the store's delivery table, so a
+restart or another replica drops it too). Bitbucket's reference calls the header "the UUID of the request" and
+`X-Attempt-Number` the number of attempts (up to three); it does not say whether a retry keeps the first
+attempt's UUID ([vendored](vendor/bitbucket-cloud/event-payloads.md)). If a retry carries a new UUID it is handled
+again, which costs a repeated scan and nothing else; a failed delivery is released, so the retry always gets
+through. Confirming the UUID stays put needs a real workspace (ROADMAP).
 
 ## How it works
 

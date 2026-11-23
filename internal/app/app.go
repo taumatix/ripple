@@ -21,6 +21,7 @@ import (
 	"github.com/taumatix/ripple/internal/model"
 	"github.com/taumatix/ripple/internal/platform"
 	"github.com/taumatix/ripple/internal/platform/github"
+	"github.com/taumatix/ripple/internal/store"
 	"github.com/taumatix/ripple/internal/webhook"
 )
 
@@ -52,11 +53,20 @@ type App struct {
 	// at /webhook/<name>, the default host's also at /webhook; a host that is a
 	// platform.Lister is discovered by listing on every poll.
 	Hosts []*platform.Host
+	// DeliveryTTL is how long a handled delivery id is remembered in the Store, so a
+	// restart or another replica drops the host's redelivery of it. Default 1h (the
+	// receivers' in-memory window); negative turns the store table off. It applies only
+	// to a store that implements store.DeliveryTable (all of this module's do) and to
+	// deliveries that carry an id.
+	DeliveryTTL time.Duration
 	// DefaultHost names the host whose repos are stored unprefixed; empty means github.
 	DefaultHost string
 
 	once sync.Once
 	jobs engine.JobRunner
+
+	keepMu                       sync.Mutex
+	lastDeliveryPurge, lastSweep time.Time
 }
 
 func (a *App) init() {
@@ -118,7 +128,7 @@ func (h hostSink) HandleEvent(ctx context.Context, ev platform.Event) error {
 // enqueue persists a verified event, one queued event per repo, so the HTTP response
 // does not wait on a clone and a restart does not lose it. ErrBacklogFull (the
 // receiver answers 503) when the backlog is at its cap.
-func (a *App) enqueue(ctx context.Context, host string, ev platform.Event) error {
+func (a *App) enqueue(ctx context.Context, host string, ev platform.Event) (retErr error) {
 	a.init()
 	prefix := ev.Delivery
 	switch {
@@ -133,6 +143,21 @@ func (a *App) enqueue(ctx context.Context, host string, ev platform.Event) error
 	}
 	if host != a.defaultHost() {
 		prefix = host + "/" + prefix
+	}
+	if ev.Delivery != "" {
+		fresh, release, err := a.claimDelivery(ctx, prefix)
+		if err != nil {
+			return err
+		}
+		if !fresh {
+			a.log().Info("webhook delivery already handled; dropped", "host", host, "delivery", ev.Delivery)
+			return nil
+		}
+		defer func() {
+			if retErr != nil {
+				release()
+			}
+		}()
 	}
 	evs := make([]model.Event, 0, len(ev.Repos))
 	for i, repo := range ev.Repos {
@@ -243,6 +268,7 @@ func (a *App) Tick(ctx context.Context) {
 	a.pollActions(ctx)
 	a.pollDocker(ctx)
 	a.pollAdvisories(ctx)
+	a.housekeep(ctx)
 	if _, err := a.Engine.RunDue(ctx); err != nil && ctx.Err() == nil {
 		a.Log.Error("run due jobs", "err", err)
 	}
@@ -301,6 +327,7 @@ func (a *App) pollLoop(ctx context.Context) {
 		if a.pollDocker(ctx) > 0 {
 			a.jobs.Wake()
 		}
+		a.housekeep(ctx)
 		select {
 		case <-ctx.Done():
 			return
@@ -471,4 +498,83 @@ func (a *App) pollToolchain(ctx context.Context) int {
 		a.Log.Info("go release poll enqueued jobs", "jobs", n)
 	}
 	return n
+}
+
+// DefaultDeliveryTTL is DeliveryTTL's default.
+const DefaultDeliveryTTL = time.Hour
+
+// claimDelivery reserves the delivery in the Store's table. fresh is false when it was
+// already handled (by this process, an earlier run or another replica); release forgets
+// the claim again when queueing failed, so the host's retry is handled. A store without
+// the table, or a negative DeliveryTTL, claims nothing and reports fresh. A store error
+// fails the delivery (the host retries): dropping it would lose an event.
+func (a *App) claimDelivery(ctx context.Context, key string) (fresh bool, release func(), err error) {
+	t, ok := a.Queue.Store.(store.DeliveryTable)
+	ttl := a.DeliveryTTL
+	if !ok || ttl < 0 {
+		return true, func() {}, nil
+	}
+	if ttl == 0 {
+		ttl = DefaultDeliveryTTL
+	}
+	fresh, err = t.ClaimDelivery(ctx, key, a.nowTime(), ttl)
+	if err != nil || !fresh {
+		return false, nil, err
+	}
+	return true, func() {
+		// The request context may be the reason queueing failed; the release must still run.
+		if err := t.ReleaseDelivery(context.WithoutCancel(ctx), key); err != nil {
+			a.log().Warn("release delivery", "delivery", key, "err", err)
+		}
+	}, nil
+}
+
+func (a *App) nowTime() time.Time {
+	if a.Queue.Now != nil {
+		return a.Queue.Now()
+	}
+	return time.Now()
+}
+
+const (
+	deliveryPurgeEvery  = time.Hour
+	tombstoneSweepEvery = 24 * time.Hour
+)
+
+// housekeep deletes what has expired and nothing reads again: handled delivery ids past
+// their ttl (hourly) and removal tombstones past theirs (daily; on DynamoDB that is a
+// Scan). Failures are logged; the next period tries again.
+func (a *App) housekeep(ctx context.Context) {
+	now, engNow := a.nowTime(), time.Now()
+	if a.Engine.Now != nil {
+		engNow = a.Engine.Now() // the clock tombstones are written and read on
+	}
+	a.keepMu.Lock()
+	doDeliveries := now.Sub(a.lastDeliveryPurge) >= deliveryPurgeEvery
+	doSweep := engNow.Sub(a.lastSweep) >= tombstoneSweepEvery
+	if doDeliveries {
+		a.lastDeliveryPurge = now
+	}
+	if doSweep {
+		a.lastSweep = engNow
+	}
+	a.keepMu.Unlock()
+	if t, ok := a.Engine.Store.(store.DeliveryTable); ok && doDeliveries {
+		n, err := t.PurgeDeliveries(ctx, now)
+		switch {
+		case err != nil && ctx.Err() == nil:
+			a.Log.Error("purge deliveries", "err", err)
+		case n > 0:
+			a.Log.Info("purged expired delivery ids", "ids", n)
+		}
+	}
+	if doSweep {
+		n, err := a.Engine.SweepTombstones(ctx)
+		switch {
+		case err != nil && ctx.Err() == nil:
+			a.Log.Error("sweep removal tombstones", "err", err)
+		case n > 0:
+			a.Log.Info("swept removal tombstones", "tombstones", n)
+		}
+	}
 }

@@ -26,6 +26,11 @@ func (f sinkFunc) HandleEvent(_ context.Context, e platform.Event) error { f(e);
 // serves a fake GHES that answers under /api/v3 and /api/graphql only.
 func buildGHES(t *testing.T, h *testutil.GHES, extra map[string]string) *platform.Host {
 	t.Helper()
+	return buildGHESLog(t, h, extra, slog.New(slog.DiscardHandler))
+}
+
+func buildGHESLog(t *testing.T, h *testutil.GHES, extra map[string]string, log *slog.Logger) *platform.Host {
+	t.Helper()
 	key := filepath.Join(t.TempDir(), "app.pem")
 	if err := os.WriteFile(key, h.KeyPEM(), 0o600); err != nil {
 		t.Fatal(err)
@@ -39,7 +44,7 @@ func buildGHES(t *testing.T, h *testutil.GHES, extra map[string]string) *platfor
 	if err != nil {
 		t.Fatal(err)
 	}
-	host, err := buildGitHub(context.Background(), HostDeps{Server: srv, HTTP: http.DefaultClient, Log: slog.New(slog.DiscardHandler)})
+	host, err := buildGitHub(context.Background(), HostDeps{Server: srv, HTTP: http.DefaultClient, Log: log})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,5 +123,38 @@ func TestGitHubHostReceivesAnEnterpriseDelivery(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusAccepted || len(got) != 1 || got[0].Scope != 7 || len(got[0].Repos) != 1 {
 		t.Fatalf("status %d, events %+v", resp.StatusCode, got)
+	}
+}
+
+// Starting against a GHES reads its release once and logs it; the release changes nothing else.
+func TestGitHubHostLogsTheGHESReleaseOnce(t *testing.T) {
+	for name, tc := range map[string]struct {
+		release string
+		status  int
+		level   string
+		contain string
+	}{
+		"supported": {"3.14.2", 0, "level=INFO", "3.14.2"},
+		"too old":   {"3.7.0", 0, "level=WARN", "minimum"},
+		"meta down": {"", http.StatusInternalServerError, "level=WARN", "could not read"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := testutil.NewGHES(t)
+			h.Release, h.MetaStatus = tc.release, tc.status
+			var logs bytes.Buffer
+			host := buildGHESLog(t, h, nil, slog.New(slog.NewTextHandler(&logs, nil)))
+			if host == nil {
+				t.Fatal("start was blocked")
+			}
+			if h.MetaCalls() != 1 {
+				t.Errorf("meta requests = %d, want 1", h.MetaCalls())
+			}
+			if out := logs.String(); !bytes.Contains([]byte(out), []byte(tc.level)) || !bytes.Contains([]byte(out), []byte(tc.contain)) {
+				t.Errorf("log %q lacks %s / %s", out, tc.level, tc.contain)
+			}
+			if len(h.Strays()) != 0 {
+				t.Errorf("strays %v", h.Strays())
+			}
+		})
 	}
 }

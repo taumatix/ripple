@@ -30,12 +30,17 @@ type GHES struct {
 	// OldSchema makes the auto-merge mutation fail GraphQL validation (HTTP 200 with
 	// an undefinedField error), as a schema without the mutation would.
 	OldSchema bool
+	// Release is the installed_version GET /api/v3/meta reports; empty means "3.22.0".
+	Release string
+	// MetaStatus, when not zero, is the status /api/v3/meta answers instead of the release.
+	MetaStatus int
 
 	mu     sync.Mutex
 	gone   int
 	seen   []string
 	stray  []string
 	gqlHit int
+	meta   int
 }
 
 // NewGHES starts the fake. Repos, commits and PRs are managed through the embedded GitHub.
@@ -68,6 +73,9 @@ func (h *GHES) Strays() []string {
 	return append([]string(nil), h.stray...)
 }
 
+// MetaCalls is how many requests reached /api/v3/meta.
+func (h *GHES) MetaCalls() int { h.mu.Lock(); defer h.mu.Unlock(); return h.meta }
+
 // GraphQLCalls is how many requests reached /api/graphql.
 func (h *GHES) GraphQLCalls() int { h.mu.Lock(); defer h.mu.Unlock(); return h.gqlHit }
 
@@ -83,6 +91,22 @@ func (h *GHES) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.stray = append(h.stray, r.URL.Path)
 		h.mu.Unlock()
 		http.NotFound(w, r)
+		return
+	}
+	if inner == "/meta" {
+		// Unauthenticated and unversioned, so it answers whatever the version header says.
+		h.mu.Lock()
+		h.meta++
+		h.mu.Unlock()
+		if h.MetaStatus != 0 {
+			http.Error(w, `{"message":"meta unavailable"}`, h.MetaStatus)
+			return
+		}
+		rel := h.Release
+		if rel == "" {
+			rel = "3.22.0"
+		}
+		_, _ = w.Write([]byte(`{"installed_version":"` + rel + `","verifiable_password_authentication":false}`))
 		return
 	}
 	v := r.Header.Get("X-GitHub-Api-Version")

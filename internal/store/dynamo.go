@@ -215,6 +215,7 @@ type repoAttrs struct {
 	InstallationID int64  `dynamodbav:"installation_id"`
 	DefaultBranch  string `dynamodbav:"default_branch"`
 	Config         []byte `dynamodbav:"config,omitempty"`
+	RepoID         int64  `dynamodbav:"repo_id,omitempty"`
 }
 
 type depAttrs struct {
@@ -316,7 +317,7 @@ func (d *Dynamo) query(ctx context.Context, in *dynamodb.QueryInput, limit int, 
 
 func (d *Dynamo) UpsertRepo(ctx context.Context, r model.Repo) error {
 	err := d.put(ctx, repoAttrs{item: item{PK: "REPO#" + r.FullName, SK: "META"}, FullName: r.FullName,
-		InstallationID: r.InstallationID, DefaultBranch: r.DefaultBranch, Config: r.Config}, nil)
+		InstallationID: r.InstallationID, DefaultBranch: r.DefaultBranch, Config: r.Config, RepoID: r.RepoID}, nil)
 	return wrapD("upsert repo", err)
 }
 
@@ -326,7 +327,7 @@ func (d *Dynamo) GetRepo(ctx context.Context, n string) (model.Repo, bool, error
 	if err != nil || !ok {
 		return model.Repo{}, false, wrapD("get repo", err)
 	}
-	return model.Repo{FullName: a.FullName, InstallationID: a.InstallationID, DefaultBranch: a.DefaultBranch, Config: a.Config}, true, nil
+	return model.Repo{FullName: a.FullName, InstallationID: a.InstallationID, DefaultBranch: a.DefaultBranch, Config: a.Config, RepoID: a.RepoID}, true, nil
 }
 
 func (d *Dynamo) DeleteRepo(ctx context.Context, n string) error {

@@ -25,7 +25,7 @@ func Run(t *testing.T, mk func(t *testing.T) store.Store) {
 	ctx := context.Background()
 	t.Run("repo roundtrip and delete", func(t *testing.T) {
 		s := mk(t)
-		r := model.Repo{FullName: "acme/web", InstallationID: 42, DefaultBranch: "main", Config: []byte(`{"prLimit":3}`)}
+		r := model.Repo{FullName: "acme/web", InstallationID: 42, DefaultBranch: "main", RepoID: 777, Config: []byte(`{"prLimit":3}`)}
 		if err := s.UpsertRepo(ctx, r); err != nil {
 			t.Fatal(err)
 		}

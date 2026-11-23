@@ -157,8 +157,6 @@ Everything else:
     licence or a sponsored one): the first release that accepts `2026-03-10`, whether `enablePullRequestAutoMerge` exists
     and what an absent one answers, a disabled GraphQL/REST status, and the webhook payloads; then record the facts in
     `UPSTREAM.md` and `docs/vendor/ghes`.
-62. **Detect the GHES release.** `GET /api/v3/meta` returns `installed_version`; read it once at start to log the release,
-    choose the API version up front instead of by a 410, and skip the auto-merge probe on a release known to lack it.
 63. **Several GitHub hosts.** One GitHub host (github.com or one GHES) per server. Serving github.com and a GHES together
     needs a second host name in the registry with its own webhook path, App and secret.
 64. **Webhook delivery ids in the Store.** The delivery table is in memory, per process, so a restart or a second
@@ -202,18 +200,9 @@ Everything else:
     size. Add what the store starts to use as it does, a stale-GSI mode to test the eventual-consistency
     paths, and a CI step that runs the whole suite against both and diffs the results, since DynamoDB Local
     stays the source of truth.
-73. **Store the repository id on `model.Repo`.** GitHub's OpenAPI has no lookup of a repo by id, so ripple cannot
-    ask the host who owns an id, and a push for an unknown name is trusted on its signed payload alone. Storing
-    the id (additive column or attribute, all three stores) would tie a push under a new name to the old record
-    and make a stale or replayed push detectable. Postgres and DynamoDB paths are covered only by CI.
-74. **Other hosts: archive as pause.** Only GitHub reports `RepoArchived` and `RepoUnarchived`; GitLab, Gitea,
-    Bitbucket and Azure DevOps archive events still forget the repo. Map them once each host's payload is checked.
-75. **A late push after `repos_removed` re-registers the repo.** A signed push carrying a repo id registers an
-    unknown name, so a delivery that arrives after a delete brings the repo back. Needs a tombstone (see 73) or a
-    delete that is remembered for a short while.
-76. **Remove the `Ref` overload on `model.Event`.** `ref` still carries the new name or `refs/heads/<name>` for
-    events queued before the typed fields; drop the fallback after a minor release and when no queue holds
-    old rows (`ripple:deprecated event-ref-overload` in MIGRATION.md).
+76. **Remove the `Ref` overload on `model.Event`.** `Ref` is still populated beside the typed fields and marked
+    deprecated. Remove the fallback in the minor release after the one that introduced it, once no queue holds old
+    rows (`ripple:deprecated event-ref-overload` in MIGRATION.md).
 77. **Generators that take an import path.** `directives: extended` rewrites `go run pkg[@version]` and
     `go tool pkg`; `mockgen`, `stringer -type` and the like name the module in their own flag grammar
     (`-source`, `-imports`, `reflect` mode packages) and stay reported in the PR body. Each needs its own
@@ -279,3 +268,9 @@ Everything else:
     version is not implemented; rule to use: the first release above the pseudo-version and released after its
     timestamp, opt-in. Decision recorded: `security-from-pseudo-versions` is opt-in and never automerged until real
     PR diffs show otherwise.
+107. **Archive events on other hosts.** GitLab (`project_update`), Gitea/Forgejo, Bitbucket and Azure DevOps report no
+    archive event in the docs checked (see each `docs/platform-*.md`). Poll the archived flag per host on a refresh,
+    or map an event once a host documents one; Forgejo and Bitbucket Data Center were not checked.
+108. **Sweep removal tombstones.** `removed|<repo>` cursor rows are ignored after 24 hours but never deleted.
+109. **Repo ids from install events.** `repos_added` events carry no repository id, so a repo added that way adopts it
+    only on its first signed push; a push with a mismatched id is ignored, not resolved by a lookup on the host.

@@ -343,6 +343,20 @@ func (a *App) push(ctx context.Context, name string, ev model.Event) error {
 	if !ok {
 		return a.pushUnknown(ctx, name, ev)
 	}
+	if ev.RepoID != 0 {
+		switch {
+		case repo.RepoID == 0:
+			if err := a.Engine.AdoptRepoID(ctx, name, ev.RepoID); err != nil {
+				return err
+			}
+		case repo.RepoID != ev.RepoID:
+			// Another repository than the one registered under this name, or a replay from
+			// before the name was reused. Which one is not knowable from the push, so it is
+			// not acted on; a re-add or rename event settles it.
+			a.Log.Warn("push ignored: repository id mismatch", "repo", name, "stored", repo.RepoID, "push", ev.RepoID)
+			return nil
+		}
+	}
 	// The payload's default_branch is only a hint that the stored one may be stale (a
 	// missed repository.edited); the engine confirms it with the host before storing.
 	if healed, err := a.Engine.HealDefaultBranch(ctx, repo, ev.DefaultBranch, ev.InstallationID); healed || err != nil {
@@ -385,7 +399,19 @@ func (a *App) pushUnknown(ctx context.Context, name string, ev model.Event) erro
 	if ev.RepoID == 0 || ev.InstallationID == 0 {
 		return nil
 	}
-	return a.Engine.RegisterFromPush(ctx, name, ev.InstallationID)
+	// The record held under another name with this id is this repo before a rename the
+	// rename event has not delivered yet.
+	if old, ok := a.Engine.RepoIDOwner(ctx, ev.RepoID); ok && old != name {
+		if err := a.Engine.Rename(ctx, old, name, ev.InstallationID); err != nil {
+			return err
+		}
+		return a.push(ctx, name, ev)
+	}
+	if a.Engine.RemovedRecently(ctx, name, ev.RepoID) {
+		a.Log.Info("push after removal ignored", "repo", name, "id", ev.RepoID)
+		return nil
+	}
+	return a.Engine.RegisterFromPush(ctx, name, ev.InstallationID, ev.RepoID)
 }
 
 // pollActions polls the tags of the GitHub Actions in use and returns how many jobs it enqueued.

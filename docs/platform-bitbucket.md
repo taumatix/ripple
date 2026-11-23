@@ -52,6 +52,10 @@ Unconfirmed: the 429 response headers, the 202 and Location of a queued merge, q
 those documented, whether `x-token-auth` works with API tokens for git, whether payload `commits` lists
 are always newest first, and the diffstat of merge commits.
 
+## Archive
+
+Only GitHub reports archive and unarchive today (ripple pauses the repo on `archived`, resumes on `unarchived`). Bitbucket Cloud: whether any `repo:*` event reports an archive was not established (the event-payload page could not be read in full on 2026-11-23). ripple maps none, so an archive is not seen and nothing pauses; treat this as unverified.
+
 ## Superseded pull requests
 
 When a newer release's PR replaces ripple's own earlier one, the old PR is declined

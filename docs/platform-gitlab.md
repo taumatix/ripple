@@ -60,6 +60,10 @@ paths are validated before they reach a URL, and the API id is the path URL-enco
   the job's log and the merge request stays open.
 - The legacy `.github/ripple.yml` alias is not read.
 
+## Archive
+
+Only GitHub reports archive and unarchive today (ripple pauses the repo on `archived`, resumes on `unarchived`). GitLab's system hooks list `project_create`, `project_destroy`, `project_rename`, `project_transfer` and `project_update`; no event reports an archive, and the documentation does not say whether archiving fires `project_update` or carries an `archived` field (checked 2026-11-23 against docs.gitlab.com/administration/system_hooks). ripple therefore never pauses a GitLab repo on archive; an archived project's push is refused by GitLab, so nothing is opened until it is unarchived. `project_destroy` still forgets the repo.
+
 ## Superseded pull requests
 
 When a newer release replaces ripple's own merge request for an older version of the same module, ripple closes the

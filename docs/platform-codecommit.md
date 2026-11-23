@@ -74,6 +74,10 @@ a quiet repository; a wrong setup is reported by the missing subscription confir
 - **Throttling** is `ThrottlingException` with HTTP 400 and no `Retry-After`, so ripple holds a
   region back for a fixed minute from the clock.
 
+## Archive
+
+Only GitHub reports archive and unarchive today (ripple pauses the repo on `archived`, resumes on `unarchived`). CodeCommit has no archive state for a repository (it can be deleted, which ripple handles); nothing to map. Not verified against the AWS docs on 2026-11-23.
+
 ## Superseded pull requests
 
 When a newer ripple pull request replaces a stale one, ripple closes the stale one and comments

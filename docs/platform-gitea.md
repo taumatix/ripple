@@ -27,6 +27,10 @@ One host, `gitea`, serves both. Repositories of this host are stored as `gitea:o
 
 Sources are vendored in `docs/vendor/` (see its README).
 
+## Archive
+
+Only GitHub reports archive and unarchive today (ripple pauses the repo on `archived`, resumes on `unarchived`). Gitea's webhook documentation lists `create`, `delete`, `fork`, `push`, `wiki`, `repository`, `release`, `package` and `status`, and no archive or unarchive event (checked 2026-11-23 against docs.gitea.com/usage/webhooks). Forgejo is a fork and its list was not checked. ripple does not pause on archive here; the `repository` event's actions are mapped only as far as `created` and `deleted`.
+
 ## Superseded pull requests
 
 When a newer release replaces ripple's own pull request for an older version of the same module, ripple closes the

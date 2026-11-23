@@ -25,6 +25,10 @@ type Repo struct {
 	FullName       string
 	InstallationID int64
 	DefaultBranch  string
+	// RepoID is the host's immutable repository id when a signed delivery vouched for it,
+	// else 0 (a repo registered by an install event alone). It survives renames, which is
+	// what lets a push under a new name be tied to the record held under the old one.
+	RepoID int64
 	// Config is the raw per-repo config file (.ripple.yaml or its deprecated alias), empty when absent.
 	Config []byte
 }

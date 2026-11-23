@@ -108,9 +108,6 @@ Everything else:
 23. **Verify with cgo and private modules.** The sandbox builds with `CGO_ENABLED=0` (cgo files are
    rewritten but not compiled) and only from `RIPPLE_GOPROXY`; support a toolchain image with C
    headers and credentials for private proxies, without exposing the App token to the build.
-25. **Backfill for newly registered dependencies.** A repo that starts importing a package only hears
-   about releases published afterwards; compare against the latest stored release on registration.
-   This also closes the DynamoDB GSI eventual-consistency window.
 26. **Default-branch rename handling.** Handle the `repository` rename and default-branch change
    events; today a stale `DefaultBranch` is corrected only on the next push.
 27. **Dependency dashboard issue.** One issue per repo listing pending, deferred and failed jobs.
@@ -172,7 +169,14 @@ Everything else:
     bump work (entry 21), which can read the same records.
 50. **OSV: history for new registrations and gaps.** A repo registered after an advisory was published, or an
     advisory modified while ripple was down for longer than one poll's line cap, is never examined. On
-    registration, check the repo's dependencies with `POST /v1/querybatch` (entry 25 is the same shape for releases).
+    registration, check the repo's dependencies with `POST /v1/querybatch` (backfill of releases for new dependencies has shipped; this is the advisory side).
 51. **OSV: should a security PR bypass the open-PR limit and the schedule?** Today only the cooldown is skipped.
     Needs a decision from real use.
 52. **OSV: a run against real OSV** to turn the `unverified` list in `UPSTREAM.md` into recorded fact.
+53. **Backfill residuals.** A new dependency beyond `DefaultMaxBackfill` (10 per scan) is never backfilled, and
+    only a release of the exact module path is found: a newer major path on the same line is not. Make the
+    bound a server setting (`RIPPLE_MAX_BACKFILL`), carry the unserved remainder to the next scan instead of
+    dropping it, look across the line for a newer major, and cover releases the feed never recorded (a module
+    nobody else imports has none stored) with a bounded index lookup. Also ListDependents is still an
+    eventually consistent GSI read on DynamoDB, so a release fanned out in that window can still miss a repo
+    that registered a moment before.

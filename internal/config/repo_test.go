@@ -240,3 +240,21 @@ func TestCloseSupersededDefaultsOnAndCanBeSwitchedOff(t *testing.T) {
 		t.Error("a non-boolean value must be an error")
 	}
 }
+
+func TestBackfillNewDependenciesDefaultsOn(t *testing.T) {
+	for _, c := range []struct {
+		file string
+		want bool
+	}{{"", true}, {"version: 1\n", true}, {"backfill-new-dependencies: true\n", true}, {"backfill-new-dependencies: false\n", false}} {
+		r, err := Parse([]byte(c.file))
+		if err != nil {
+			t.Fatalf("%q: %v", c.file, err)
+		}
+		if got := r.Backfills(); got != c.want {
+			t.Errorf("%q: Backfills = %v, want %v", c.file, got, c.want)
+		}
+	}
+	if _, err := Parse([]byte("backfill-new-dependencies: maybe\n")); err == nil {
+		t.Error("a non-boolean value must be an error")
+	}
+}

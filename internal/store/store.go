@@ -25,6 +25,9 @@ type Store interface {
 
 	// RecordRelease stores a discovered version; reports whether it was new.
 	RecordRelease(ctx context.Context, r model.Release) (bool, error)
+	// ListReleases returns the stored releases of exactly this package (not the rest of its
+	// line), ordered by version string. It reads what RecordRelease stored; it never asks a feed.
+	ListReleases(ctx context.Context, datasource, pkg string) ([]model.Release, error)
 
 	// EnqueueJob inserts the job unless its key exists; reports whether inserted.
 	EnqueueJob(ctx context.Context, j model.Job) (bool, error)

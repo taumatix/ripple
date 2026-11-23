@@ -250,6 +250,24 @@ func (p *Postgres) UpdateJob(ctx context.Context, j model.Job) error {
 	return wrap("update job", err)
 }
 
+// ListOpenJobs is store.OpenJobLister.
+func (p *Postgres) ListOpenJobs(ctx context.Context, repo string) ([]model.Job, error) {
+	rows, err := p.pool.Query(ctx, `SELECT `+jobCols+` FROM jobs WHERE repo=$1 AND state IN ('pending','failed') ORDER BY key`, repo)
+	if err != nil {
+		return nil, wrap("list open jobs", err)
+	}
+	defer rows.Close()
+	var out []model.Job
+	for rows.Next() {
+		j, err := scanJob(rows)
+		if err != nil {
+			return nil, wrap("list open jobs", err)
+		}
+		out = append(out, j)
+	}
+	return out, wrap("list open jobs", rows.Err())
+}
+
 func (p *Postgres) ListDueJobs(ctx context.Context, now time.Time, limit int) ([]model.Job, error) {
 	return p.ListDueJobsExcluding(ctx, now, limit, nil)
 }

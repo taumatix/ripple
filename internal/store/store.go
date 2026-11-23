@@ -64,3 +64,11 @@ type Store interface {
 
 	Close() error
 }
+
+// OpenJobLister is the optional listing of a repo's jobs that still need attention:
+// pending (due or deferred) and failed, in no particular order. The dependency
+// dashboard reads it; a store without it simply has no dashboard. Every store in
+// this package implements it.
+type OpenJobLister interface {
+	ListOpenJobs(ctx context.Context, repo string) ([]model.Job, error)
+}

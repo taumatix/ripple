@@ -281,11 +281,11 @@ Everything else:
 144. **Replicas: elect the other pollers.** Only the Go module feed poll is elected; the toolchain, Actions and Docker
     pollers still run on every replica (safe, wasteful). Give each its own `feed:<name>` lease the way `PollElected`
     does.
-144. **DynamoDB: the hygiene commands at scale, and on a schedule.** `ripple dynamodb check-counts`, `recount` and
+145. **DynamoDB: the hygiene commands at scale, and on a schedule.** `ripple dynamodb check-counts`, `recount` and
     `backfill-failed-jobs` find their work by a Scan of the whole table, which has only run against the in-process fake
     (the DynamoDB Local run is CI-only, real AWS never). Measure the Scan and the per-package recount on a large table,
     page them with a rate limit so they cannot starve live traffic, and decide whether the server should run the drift
     check itself (log the gap) instead of leaving it to an operator.
-145. **e2e: run the suite with `-count=2` in CI.** Entry 139 made `waitRepo` wait for the first scan; repeating the suite
+146. **e2e: run the suite with `-count=2` in CI.** Entry 139 made `waitRepo` wait for the first scan; repeating the suite
     would show any test that still depends on a run order or leftover state. Do it once the container-runtimes job is not
     the long pole. The podman fake-runtime container failure that CI missed on PR #53 was not reproduced.

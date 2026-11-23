@@ -159,6 +159,36 @@ func Run(t *testing.T, mk func(t *testing.T) store.Store) {
 		}
 	})
 
+	t.Run("list releases", func(t *testing.T) {
+		s := mk(t)
+		at := time.Date(2026, 11, 20, 8, 0, 0, 0, time.UTC)
+		for _, r := range []model.Release{
+			{Datasource: "go", Package: "example.com/lib", Version: "v1.1.0", Time: at},
+			{Datasource: "go", Package: "example.com/lib", Version: "v1.0.0", Time: at.Add(-time.Hour)},
+			{Datasource: "go", Package: "example.com/lib/v2", Version: "v2.0.0", Time: at},
+			{Datasource: "go", Package: "example.com/library", Version: "v9.0.0", Time: at},
+			{Datasource: "other", Package: "example.com/lib", Version: "v5.0.0", Time: at},
+		} {
+			if _, err := s.RecordRelease(ctx, r); err != nil {
+				t.Fatal(err)
+			}
+		}
+		got, err := s.ListReleases(ctx, "go", "example.com/lib")
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := []model.Release{
+			{Datasource: "go", Package: "example.com/lib", Version: "v1.0.0", Time: at.Add(-time.Hour)},
+			{Datasource: "go", Package: "example.com/lib", Version: "v1.1.0", Time: at},
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("exactly this package, ordered by version string:\n got %+v\nwant %+v", got, want)
+		}
+		if got, err := s.ListReleases(ctx, "go", "example.com/none"); err != nil || len(got) != 0 {
+			t.Fatalf("unknown package: %v %v", got, err)
+		}
+	})
+
 	t.Run("jobs", func(t *testing.T) {
 		s := mk(t)
 		base := time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC)

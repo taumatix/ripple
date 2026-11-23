@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -410,6 +412,28 @@ func (d *Dynamo) RecordRelease(ctx context.Context, r model.Release) (bool, erro
 		return false, nil
 	}
 	return err == nil, wrapD("record release", err)
+}
+
+// ListReleases is a consistent Query on the release partition of one package.
+func (d *Dynamo) ListReleases(ctx context.Context, ds, pkg string) ([]model.Release, error) {
+	var out []model.Release
+	err := d.query(ctx, &dynamodb.QueryInput{
+		ConsistentRead:            aws.Bool(true),
+		KeyConditionExpression:    aws.String("PK = :pk AND begins_with(SK, :p)"),
+		ExpressionAttributeValues: map[string]types.AttributeValue{":pk": s("PKG#" + ds + "#" + pkg), ":p": s("REL#")},
+	}, 0, func(it map[string]types.AttributeValue) error {
+		var a struct {
+			SK   string
+			Time string
+		}
+		if err := attributevalue.UnmarshalMap(it, &a); err != nil {
+			return err
+		}
+		out = append(out, model.Release{Datasource: ds, Package: pkg, Version: strings.TrimPrefix(a.SK, "REL#"), Time: parseTS(a.Time)})
+		return nil
+	})
+	sort.Slice(out, func(i, j int) bool { return out[i].Version < out[j].Version })
+	return out, wrapD("list releases", err)
 }
 
 func (d *Dynamo) jobItem(j model.Job) jobAttrs {

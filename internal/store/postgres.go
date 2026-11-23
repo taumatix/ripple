@@ -200,6 +200,24 @@ func (p *Postgres) RecordRelease(ctx context.Context, r model.Release) (bool, er
 	return tag.RowsAffected() == 1, wrap("record release", err)
 }
 
+func (p *Postgres) ListReleases(ctx context.Context, ds, pkg string) ([]model.Release, error) {
+	rows, err := p.pool.Query(ctx, `SELECT version,released_at FROM releases WHERE datasource=$1 AND package=$2 ORDER BY version`, ds, pkg)
+	if err != nil {
+		return nil, wrap("list releases", err)
+	}
+	defer rows.Close()
+	var out []model.Release
+	for rows.Next() {
+		r := model.Release{Datasource: ds, Package: pkg}
+		if err := rows.Scan(&r.Version, &r.Time); err != nil {
+			return nil, wrap("list releases", err)
+		}
+		r.Time = r.Time.UTC()
+		out = append(out, r)
+	}
+	return out, wrap("list releases", rows.Err())
+}
+
 func (p *Postgres) EnqueueJob(ctx context.Context, j model.Job) (bool, error) {
 	tag, err := p.pool.Exec(ctx, `INSERT INTO jobs(key,repo,datasource,package,version,released_at,state,not_before,attempts,pr_url,reason)
 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT (key) DO NOTHING`,

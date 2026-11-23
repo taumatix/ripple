@@ -119,13 +119,21 @@ type Repo struct {
 	Version     int `yaml:"version"`
 	OpenPRLimit int `yaml:"open-pull-requests-limit"`
 	// CloseSuperseded is nil when the key is absent, which means true.
-	CloseSuperseded *bool    `yaml:"close-superseded-pull-requests"`
-	Updates         []Update `yaml:"updates"`
+	CloseSuperseded *bool `yaml:"close-superseded-pull-requests"`
+	// BackfillNewDependencies is nil when the key is absent, which means true.
+	BackfillNewDependencies *bool    `yaml:"backfill-new-dependencies"`
+	Updates                 []Update `yaml:"updates"`
 }
 
 // ClosesSuperseded reports whether ripple may close its own untouched PR once a newer
 // version of the same module has its own PR. On unless the file says false.
 func (r *Repo) ClosesSuperseded() bool { return r.CloseSuperseded == nil || *r.CloseSuperseded }
+
+// Backfills reports whether a dependency the repo starts using is brought up to the
+// newest release already known for it. On unless the file says false.
+func (r *Repo) Backfills() bool {
+	return r.BackfillNewDependencies == nil || *r.BackfillNewDependencies
+}
 
 // Default is what a repo without a file, or with an empty one, gets.
 func Default() *Repo {
@@ -176,6 +184,7 @@ func InDirectory(dir, file string) bool {
 const Example = `version: 1
 open-pull-requests-limit: 3        # at most this many ripple PRs open at once
 close-superseded-pull-requests: true  # close ripple's own untouched PR when a newer version gets one (default: true)
+backfill-new-dependencies: true    # a dependency the repo starts using is moved to the newest release already known (default: true)
 updates:
   - ecosystem: gomod               # gomod, or regex (see README)
     directory: /                   # this directory and everything below it
@@ -245,7 +254,7 @@ func (c *checker) add(n *yaml.Node, format string, a ...any) {
 }
 
 var (
-	rootKeys     = []string{"version", "open-pull-requests-limit", "close-superseded-pull-requests", "updates"}
+	rootKeys     = []string{"version", "open-pull-requests-limit", "close-superseded-pull-requests", "backfill-new-dependencies", "updates"}
 	updateKeys   = []string{"ecosystem", "directory", "schedule", "cooldown", "ignore", "groups", "automerge", "go-toolchain", "files", "patterns", "package"}
 	scheduleKeys = []string{"days", "from", "to", "timezone"}
 	ignoreKeys   = []string{"dependency", "update-types"}

@@ -50,6 +50,9 @@ type Engine struct {
 	// Advisories is set when OSV is enabled: the runner then looks up the advisory
 	// note of each job (see FanOutAdvisory) to label the PR and skip the cooldown.
 	Advisories bool
+	// MaxBackfill bounds the jobs one scan creates for dependencies new to the repo; zero
+	// means DefaultMaxBackfill.
+	MaxBackfill int
 
 	// parseConfig is a test seam counting repo-file parses; nil means RepoConfig.
 	parseConfig func([]byte) (*config.Repo, error)
@@ -197,6 +200,14 @@ func (e *Engine) Scan(ctx context.Context, repo model.Repo) error {
 	}
 	if err := e.Store.UpsertRepo(ctx, repo); err != nil {
 		return err
+	}
+	// Before the rows are replaced, so a failure is retried with the same "new" set.
+	prev, err := e.Store.ListRepoDependencies(ctx, repo.FullName)
+	if err != nil {
+		return err
+	}
+	if err := e.backfill(ctx, repo.FullName, cfg, prev, deps); err != nil {
+		return fmt.Errorf("scan %s: backfill: %w", repo.FullName, err)
 	}
 	if err := e.Store.ReplaceDependencies(ctx, repo.FullName, deps); err != nil {
 		return err

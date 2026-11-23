@@ -63,6 +63,7 @@ that, add `.ripple.yaml` at the repository root. This is the whole schema:
 version: 1
 open-pull-requests-limit: 3        # at most this many ripple PRs open at once
 close-superseded-pull-requests: true  # close ripple's own untouched PR when a newer version gets one (default: true)
+backfill-new-dependencies: true    # bring a dependency the repo starts using to the newest release already known (default: true)
 updates:
   - ecosystem: gomod               # gomod, or regex (see README)
     directory: /                   # this directory and everything below it
@@ -93,6 +94,13 @@ updates:
   does not delete the branch (turn on "automatically delete head branches" in the repository settings), and
   it does not notice an edited description. Only the GitHub host can close pull requests so far; on the
   others both PRs stay open. Set it to `false` to keep every PR.
+- `backfill-new-dependencies` (default `true`): a repo that starts importing a module only hears about
+  releases published afterwards, so when a scan finds a dependency the repo did not have, ripple compares it
+  with the newest release of that exact module path already stored from the feed and opens a normal job when
+  the repo is behind. The job obeys the same cooldown, schedule, ignore rules, PR limit and verification as any
+  other. It never asks a feed: a release ripple has not stored is not found. At most 10 jobs are created per
+  scan (a repo registering 5000 dependencies gets 10, the rest wait for their next release), and a rescan
+  with no new dependency creates none. Set it to `false` to turn it off.
 - `cooldown` can only **raise** the server's minimum release age; `open-pull-requests-limit` can
   only **lower** the server's limit; `automerge` works only if the server allows it.
 - Unknown keys are errors that name the key and line. `ripple config validate [FILE]` checks a file

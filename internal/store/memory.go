@@ -91,6 +91,20 @@ func (m *Memory) RecordRelease(_ context.Context, r model.Release) (bool, error)
 	return true, nil
 }
 
+func (m *Memory) ListReleases(_ context.Context, ds, pkg string) ([]model.Release, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []model.Release
+	for _, r := range m.releases {
+		if r.Datasource == ds && r.Package == pkg {
+			r.Time = r.Time.UTC()
+			out = append(out, r)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Version < out[j].Version })
+	return out, nil
+}
+
 func (m *Memory) EnqueueJob(_ context.Context, j model.Job) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

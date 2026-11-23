@@ -57,6 +57,8 @@ type Event struct {
 	Files         []string
 	// repo_renamed only: Repos holds the old full name, NewRepo the new one.
 	NewRepo string
+	// push only: the repository's immutable id (repository.id), 0 when absent.
+	RepoID int64
 }
 
 // Sink consumes events. Returning an error makes the receiver answer 503, but
@@ -227,6 +229,7 @@ func Parse(name string, body []byte) (Event, error) {
 			Ref          string             `json:"ref"`
 			Installation struct{ ID int64 } `json:"installation"`
 			Repository   struct {
+				ID            int64  `json:"id"`
 				FullName      string `json:"full_name"`
 				DefaultBranch string `json:"default_branch"`
 			} `json:"repository"`
@@ -250,7 +253,7 @@ func Parse(name string, body []byte) (Event, error) {
 			}
 		}
 		return Event{Kind: "push", InstallationID: p.Installation.ID, Repos: []string{p.Repository.FullName},
-			Ref: p.Ref, DefaultBranch: p.Repository.DefaultBranch, Files: files}, nil
+			Ref: p.Ref, DefaultBranch: p.Repository.DefaultBranch, Files: files, RepoID: p.Repository.ID}, nil
 	case "repository":
 		return parseRepository(body)
 	}

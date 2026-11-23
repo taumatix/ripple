@@ -149,8 +149,12 @@ func (a *App) enqueue(ctx context.Context, host string, ev platform.Event) error
 			}
 			ref = "refs/heads/" + ev.DefaultBranch
 		}
-		evs = append(evs, model.Event{ID: fmt.Sprintf("%s/%d", prefix, i), InstallationID: ev.Scope,
-			Kind: string(ev.Kind), Repo: a.repoName(host, repo), Ref: ref, Files: ev.Files})
+		me := model.Event{ID: fmt.Sprintf("%s/%d", prefix, i), InstallationID: ev.Scope,
+			Kind: string(ev.Kind), Repo: a.repoName(host, repo), Ref: ref, Files: ev.Files, DefaultBranch: ev.DefaultBranch, RepoID: ev.RepoID}
+		if ev.Kind == platform.RepoRenamed {
+			me.NewRepo = ref
+		}
+		evs = append(evs, me)
 	}
 	return a.Queue.Add(ctx, evs...)
 }
@@ -297,12 +301,21 @@ func (a *App) process(ctx context.Context, ev model.Event) error {
 	case "push":
 		return a.push(ctx, ev.Repo, ev)
 	case string(platform.RepoRenamed):
-		return a.Engine.Rename(ctx, ev.Repo, ev.Ref, ev.InstallationID)
+		return a.Engine.Rename(ctx, ev.Repo, firstNonEmpty(ev.NewRepo, ev.Ref), ev.InstallationID)
 	case string(platform.DefaultBranchChanged):
-		return a.Engine.SetDefaultBranch(ctx, ev.Repo, strings.TrimPrefix(ev.Ref, "refs/heads/"), ev.InstallationID)
+		return a.Engine.SetDefaultBranch(ctx, ev.Repo, firstNonEmpty(ev.DefaultBranch, strings.TrimPrefix(ev.Ref, "refs/heads/")), ev.InstallationID)
 	}
 	a.Log.Warn("unknown queued event kind; dropped", "kind", ev.Kind, "event", ev.ID)
 	return nil
+}
+
+// firstNonEmpty picks the typed event field, falling back to the deprecated overloaded
+// Ref for events queued before the typed fields existed (ripple:deprecated event-ref-overload).
+func firstNonEmpty(typed, legacy string) string {
+	if typed != "" {
+		return typed
+	}
+	return legacy
 }
 
 // push re-scans a registered repo when its default branch changed a file a manager

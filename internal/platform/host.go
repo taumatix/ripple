@@ -147,6 +147,10 @@ type Event struct {
 	Files         []string
 	// RepoRenamed only: the new native repo name.
 	NewRepo string
+	// RepoID is the host's immutable id for the repository, 0 when the host provides
+	// none. A host sets it only when it vouches for it (a verified delivery): ripple
+	// registers an unknown repo from a push only when it is non-zero.
+	RepoID int64
 }
 
 // Sink consumes events. An error makes the receiver answer 503, which tells a host

@@ -33,7 +33,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --rm|--read-only|--init) shift;;
     -w) wd="$2"; shift 2;;
-    --name|--label|--progress|--pull|--pids-limit|--security-opt|--network|--tmpfs|--cap-drop|--user|-c|--cpus|-m|--memory|-v|-e) shift 2;;
+    --name|--label|--progress|--pull|--pids-limit|--security-opt|--network|--tmpfs|--cap-drop|--user|--userns|-c|--cpus|-m|--memory|-v|-e) shift 2;;
     -*) echo "fake runtime: unknown option $1" >&2; exit 125;;
     *) break;;
   esac

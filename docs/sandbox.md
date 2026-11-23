@@ -37,25 +37,34 @@ home directory, the App key or other jobs.
 **Network.** Commands that need none (local git) get `--network none`. `go` needs the module proxy and a
 container cannot reach the host's loopback gate that seatbelt uses, so it gets the runtime's default network (or
 `RIPPLE_CONTAINER_NETWORK`) and `GOPROXY` is the configured `RIPPLE_GOPROXY` itself, which must therefore be
-reachable from inside the container (not `127.0.0.1`). **That network is not confined to the proxy**: a repository's
-build can reach whatever the container network can. What is gained is that no secret is in reach (the App key and
+reachable from inside the container (not `127.0.0.1`). **By default that network is not confined to the proxy**: a repository's
+build can reach whatever the container network can (see Confining the network below). What is gained is that no secret is in reach (the App key and
 installation token are never mounted or passed). To confine it, point `RIPPLE_CONTAINER_NETWORK` at an internal
-runtime network (Docker `network create --internal`) that holds only a proxy container, and set `RIPPLE_GOPROXY` to it.
+runtime network that holds only a proxy container, and set `RIPPLE_GOPROXY` to it.
 
 **Timeouts.** Killing the `container run` client does not stop the container (verified with Apple's CLI: it kept
 running). When a command's context ends, ripple runs `<cli> kill <name>` and, for Docker and Podman, `<cli> rm -f
 <name>`; Apple's `--rm` removes it after the kill. A server killed outright can leave containers behind, labelled
 `ripple.job=1`: list them with `container ls -a` or `docker ps -a --filter label=ripple.job=1`.
 
-**Verification status.** The Apple `container` argv was written from `container run --help` (version 1.4.1) and
-run for real: `internal/sandbox/container_live_darwin_test.go` runs `go build`, `go mod tidy`, a read-only-root write, a
-networkless fetch, a host file outside the mounts, and a timeout reap. It skips when the CLI is absent and never runs
-in CI (GitHub's hosted runners have no Apple container runtime). **Docker and Podman are unverified against a real
-runtime**: their options come from the documented `docker run` reference and are tested only against a fake CLI
-(`internal/testutil/fakecontainer.go`) that records its argv and then runs the command on the host; the
-cross-flavour engine test (`internal/e2e/container_test.go`) uses it for all three flavours. The `go` command with a real
-proxy through a real container, and `git` inside an image, have not been run under Apple's CLI either (the live image
-has `go` only). Only `go` and local `git` run in a container; clone, fetch, push and the server stay on the host.
+**Confining the network.** `sandbox.ConfineNetwork(ctx, flavour, bin, ConfineOptions{Upstream: "https://proxy.golang.org"})`
+(docker and podman; Apple's `container` has no internal networks) runs `network create --internal`, starts an
+nginx sidecar (`nginx:1.27-alpine`) that forwards everything to the upstream, joins it to the internal network and waits
+for it to answer. Pass the result's `Network` as `ContainerOptions.Network` and its `ProxyURL` (`http://<name>-proxy:3128`)
+as the command's `GOPROXY` and `Policy.Proxy`; `Close` removes both. A command on that network reaches the sidecar and
+nothing else: no other address, no DNS for other names. The server does not start it yet (ROADMAP), so today this is a
+library function and a recipe; `RIPPLE_CONTAINER_NETWORK` can name a network you created yourself the same way.
+
+**Verification status.** The `container-runtimes` CI job runs `internal/sandbox/container_live_shared_test.go` (build,
+`go mod tidy`, a read-only-root write, writable mounts, a networkless fetch, a host file outside the mounts, a timeout
+reap) against real Docker and real Podman on a hosted Linux runner, and the confined network (`go mod download` through the
+sidecar to the real module proxy; `1.1.1.1`, `proxy.golang.org` and `example.com` unreachable from the container). The
+Apple runner runs the same checks on a developer's Mac (`container_live_darwin_test.go`), which CI cannot. Not
+verified anywhere: `git` inside an image (the live image has `go` only), the server driving a container end to end,
+Podman as a non-rootless install, SELinux hosts, Docker Desktop, and Podman's image storage under the engine's
+environment (ROADMAP). The unit tests still use the fake CLI (`internal/testutil/fakecontainer.go`) and the
+cross-flavour engine test (`internal/e2e/container_test.go`). Only `go` and local `git` run in a container; clone,
+fetch, push and the server stay on the host.
 
 ## What is confined
 

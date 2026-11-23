@@ -58,6 +58,7 @@ marker in the code. Deprecations of third-party names (for example GitLab's
   (a `default_branch_changed` event's new branch), persisted by all three stores.
 - **Behaviour now:** new events carry both the typed field and the old `Ref` use; a handler prefers the typed
   field and falls back to `Ref` for events queued before upgrading, so a rolling upgrade or a downgrade loses nothing.
+  `Ref` stays populated for `repo_renamed` and `default_branch_changed` (covered by a test) until it is removed.
   Internal packages only: no config key, flag or public Go API changes.
 - **To migrate:** nothing to do. The queued-event schema grows by columns/attributes with empty defaults
   (Postgres migration `004_event_typed_fields.sql`).

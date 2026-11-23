@@ -42,6 +42,10 @@ page says a token cannot merge); that `draft` is honoured and from which release
 the fallback); Basic versus Bearer for project and repository tokens (the token page shows both); repositories
 with no commits in listings; the `permission` filter on `/repos`.
 
+## Archive
+
+Only GitHub reports archive and unarchive today (ripple pauses the repo on `archived`, resumes on `unarchived`). Bitbucket Data Center: an archive event is not documented to ripple's knowledge and was not verified (2026-11-23). ripple maps none and nothing pauses on archive.
+
 ## Superseded pull requests
 
 When a newer release's PR replaces ripple's own earlier one, the old PR is declined

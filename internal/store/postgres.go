@@ -104,17 +104,17 @@ func (p *Postgres) migrate(ctx context.Context) error {
 func (p *Postgres) Close() error { p.pool.Close(); return nil }
 
 func (p *Postgres) UpsertRepo(ctx context.Context, r model.Repo) error {
-	_, err := p.pool.Exec(ctx, `INSERT INTO repos(full_name, installation_id, default_branch, config)
-VALUES($1,$2,$3,$4)
-ON CONFLICT (full_name) DO UPDATE SET installation_id=$2, default_branch=$3, config=$4`,
-		r.FullName, r.InstallationID, r.DefaultBranch, r.Config)
+	_, err := p.pool.Exec(ctx, `INSERT INTO repos(full_name, installation_id, default_branch, config, repo_id)
+VALUES($1,$2,$3,$4,$5)
+ON CONFLICT (full_name) DO UPDATE SET installation_id=$2, default_branch=$3, config=$4, repo_id=$5`,
+		r.FullName, r.InstallationID, r.DefaultBranch, r.Config, r.RepoID)
 	return wrap("upsert repo", err)
 }
 
 func (p *Postgres) GetRepo(ctx context.Context, n string) (model.Repo, bool, error) {
 	var r model.Repo
-	err := p.pool.QueryRow(ctx, `SELECT full_name, installation_id, default_branch, config FROM repos WHERE full_name=$1`, n).
-		Scan(&r.FullName, &r.InstallationID, &r.DefaultBranch, &r.Config)
+	err := p.pool.QueryRow(ctx, `SELECT full_name, installation_id, default_branch, config, repo_id FROM repos WHERE full_name=$1`, n).
+		Scan(&r.FullName, &r.InstallationID, &r.DefaultBranch, &r.Config, &r.RepoID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return model.Repo{}, false, nil
 	}

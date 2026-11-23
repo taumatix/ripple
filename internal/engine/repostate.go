@@ -3,6 +3,8 @@ package engine
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/taumatix/ripple/internal/model"
@@ -20,6 +22,23 @@ const pausedCursor = "paused|"
 
 // pauseDefer is how far a due job of a paused repo is pushed back each time it comes up.
 const pauseDefer = time.Hour
+
+// repoIDCursor maps a host repository id to the stored name that holds it
+// ("repoid|<id>" -> name), so a push under a new name finds the record to rename. It is
+// a hint: it is trusted only while the record it names still carries that id.
+const repoIDCursor = "repoid|"
+
+// removedCursor is the tombstone a removal leaves ("removed|<name>" -> "<unix>|<id>", id 0
+// when it was not known). The rule it serves: for removedTTL after a removal, a signed
+// push for that name does not register it again unless it carries a different repository
+// id than the removed one (a new repository that took the name). An explicit re-add
+// (repos_added, unarchive of an unknown repo) clears it. Expired tombstones are never
+// read again but are not swept: one small cursor row per removed repo.
+const removedCursor = "removed|"
+
+// removedTTL is how long a removal is remembered. A delivery the host retries arrives
+// within hours; a day covers it without keeping a removed repo out for long.
+const removedTTL = 24 * time.Hour
 
 // maxRenameHops bounds following a chain of renames (a -> b -> c).
 const maxRenameHops = 8
@@ -79,6 +98,11 @@ func (e *Engine) Rename(ctx context.Context, old, now string, scope int64) error
 	if err := e.Store.SetCursor(ctx, renamedCursor+old, now); err != nil {
 		return err
 	}
+	if repo.RepoID != 0 {
+		if err := e.Store.SetCursor(ctx, repoIDCursor+strconv.FormatInt(repo.RepoID, 10), now); err != nil {
+			return err
+		}
+	}
 	if err := e.Store.DeleteRepo(ctx, old); err != nil {
 		return err
 	}
@@ -110,6 +134,11 @@ func (e *Engine) Rename(ctx context.Context, old, now string, scope int64) error
 // ForgetRename drops the alias for name. It is called when name is registered
 // (again): a new repository that took a freed name must not inherit the old one's jobs.
 func (e *Engine) ForgetRename(ctx context.Context, name string) error {
+	if v, err := e.Store.GetCursor(ctx, removedCursor+name); err == nil && v != "" {
+		if err := e.Store.SetCursor(ctx, removedCursor+name, ""); err != nil {
+			return err
+		}
+	}
 	if v, err := e.Store.GetCursor(ctx, renamedCursor+name); err != nil || v == "" {
 		return err
 	}
@@ -143,7 +172,7 @@ func (e *Engine) RenamedTo(ctx context.Context, name string) (string, bool) {
 // event that would have registered it). It is idempotent: a registered repo is left alone.
 // The branch is left for the host to name and the scan is the same one a repos_added does,
 // so a repo the credential cannot reach fails the scan and the queue's retry bound applies.
-func (e *Engine) RegisterFromPush(ctx context.Context, name string, scope int64) error {
+func (e *Engine) RegisterFromPush(ctx context.Context, name string, scope, id int64) error {
 	if _, found, err := e.Store.GetRepo(ctx, name); err != nil || found {
 		return err
 	}
@@ -151,7 +180,58 @@ func (e *Engine) RegisterFromPush(ctx context.Context, name string, scope int64)
 		return err
 	}
 	e.log().Info("repository registered from a push", "repo", name)
-	return e.Scan(ctx, model.Repo{FullName: name, InstallationID: scope})
+	return e.Scan(ctx, model.Repo{FullName: name, InstallationID: scope, RepoID: id})
+}
+
+// RepoIDOwner reports the stored repo that holds host repository id, if any.
+func (e *Engine) RepoIDOwner(ctx context.Context, id int64) (string, bool) {
+	name, err := e.Store.GetCursor(ctx, repoIDCursor+strconv.FormatInt(id, 10))
+	if err != nil || name == "" {
+		return "", false
+	}
+	if repo, ok, err := e.Store.GetRepo(ctx, name); err != nil || !ok || repo.RepoID != id {
+		return "", false
+	}
+	return name, true
+}
+
+// AdoptRepoID stores the host's repository id on a registered repo that has none (one
+// registered by an install event, or before ids were stored). A repo that has an id keeps it.
+func (e *Engine) AdoptRepoID(ctx context.Context, name string, id int64) error {
+	defer e.lockRepo(name)()
+	repo, ok, err := e.Store.GetRepo(ctx, name)
+	if err != nil || !ok || repo.RepoID != 0 || id == 0 {
+		return err
+	}
+	repo.RepoID = id
+	if err := e.Store.UpsertRepo(ctx, repo); err != nil {
+		return err
+	}
+	return e.Store.SetCursor(ctx, repoIDCursor+strconv.FormatInt(id, 10), name)
+}
+
+func (e *Engine) releaseRepoID(ctx context.Context, id int64, name string) error {
+	key := repoIDCursor + strconv.FormatInt(id, 10)
+	if v, err := e.Store.GetCursor(ctx, key); err != nil || v != name {
+		return err
+	}
+	return e.Store.SetCursor(ctx, key, "")
+}
+
+// RemovedRecently applies the tombstone rule (see removedCursor) to a signed push for
+// name carrying repository id: true means the push is a late delivery for a removed repo.
+func (e *Engine) RemovedRecently(ctx context.Context, name string, id int64) bool {
+	v, err := e.Store.GetCursor(ctx, removedCursor+name)
+	if err != nil || v == "" {
+		return false
+	}
+	at, tomb, _ := strings.Cut(v, "|")
+	secs, err1 := strconv.ParseInt(at, 10, 64)
+	removed, err2 := strconv.ParseInt(tomb, 10, 64)
+	if err1 != nil || err2 != nil || e.now().Sub(time.Unix(secs, 0)) > removedTTL {
+		return false
+	}
+	return removed == 0 || removed == id
 }
 
 // followRename re-keys jobs of a name that no longer exists to the repo it became,

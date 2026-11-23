@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"strconv"
 	"sync"
 	"time"
 
@@ -148,6 +149,12 @@ func RepoConfig(raw []byte) (*config.Repo, error) {
 // a full checkout.
 func (e *Engine) Scan(ctx context.Context, repo model.Repo) error {
 	defer e.lockRepo(repo.FullName)()
+	if repo.RepoID == 0 {
+		// An install or re-scan event does not know the id; the stored one stays.
+		if cur, ok, err := e.Store.GetRepo(ctx, repo.FullName); err == nil && ok {
+			repo.RepoID = cur.RepoID
+		}
+	}
 	hold, err := e.acquireRepo(ctx, repo.FullName, true)
 	if err != nil {
 		return fmt.Errorf("scan %s: %w", repo.FullName, err)
@@ -159,6 +166,9 @@ func (e *Engine) Scan(ctx context.Context, repo model.Repo) error {
 	if errors.Is(err, platform.ErrScanFallback) {
 		e.log().Info("partial scan unavailable; scanning a full checkout", "repo", repo.FullName, "reason", err)
 		err = e.scan(ctx, repo)
+	}
+	if err == nil && repo.RepoID != 0 {
+		err = e.Store.SetCursor(ctx, repoIDCursor+strconv.FormatInt(repo.RepoID, 10), repo.FullName)
 	}
 	return err
 }
@@ -329,6 +339,21 @@ func (e *Engine) Remove(ctx context.Context, name string) error {
 	defer release()
 	if err := e.Store.SetCursor(ctx, pausedCursor+name, ""); err != nil {
 		return err
+	}
+	// Remember the removal (see removedCursor) before the record that holds the id goes.
+	var id int64
+	if repo, ok, err := e.Store.GetRepo(ctx, name); err != nil {
+		return err
+	} else if ok {
+		id = repo.RepoID
+	}
+	if err := e.Store.SetCursor(ctx, removedCursor+name, fmt.Sprintf("%d|%d", e.now().Unix(), id)); err != nil {
+		return err
+	}
+	if id != 0 {
+		if err := e.releaseRepoID(ctx, id, name); err != nil {
+			return err
+		}
 	}
 	return e.Store.DeleteRepo(ctx, name)
 }

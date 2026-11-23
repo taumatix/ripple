@@ -161,7 +161,7 @@ func newEnvOpts(t *testing.T, st store.Store, lim rules.Limits, o opts) *env {
 		o.engine(eng)
 	}
 	e.newApp = func() *app.App {
-		a := &app.App{Engine: eng, Secret: []byte(secret), Log: slog.New(slog.NewTextHandler(testWriter{t}, nil)),
+		a := &app.App{Engine: eng, Secret: []byte(secret), Log: slog.New(slog.NewTextHandler(io.MultiWriter(testWriter{t}, e.logs), nil)),
 			PollEvery: o.pollEvery, Queue: &app.Queue{},
 			Watcher: &engine.Watcher{Engine: eng, Feed: &feed.GoIndex{BaseURL: e.idx.URL}},
 			Actions: &engine.ActionsWatcher{Engine: eng}}

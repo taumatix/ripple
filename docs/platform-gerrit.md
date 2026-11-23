@@ -58,6 +58,10 @@ and whether the URL token reaches ripple through the plugin; a `Retry-After` on 
 the clone URL `/a/<project>` and the change URL `/c/<project>/+/<n>`; WIP and hashtag permissions; the "no new
 changes" refusal; file lists of merge commits; first-parent walking of multi-commit pushes.
 
+## Archive
+
+Only GitHub reports archive and unarchive today (ripple pauses the repo on `archived`, resumes on `unarchived`). Gerrit: a project can be set read-only or hidden, but ripple's stream/webhook events were not verified to report that (2026-11-23). Nothing pauses on it.
+
 ## Superseded pull requests
 
 When a newer release replaces an open ripple change, ripple abandons the stale change with the new version as

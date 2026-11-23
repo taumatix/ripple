@@ -46,6 +46,10 @@ that `autoCompleteSetBy.id` may be the pull request creator's id; the labels end
 delivery headers; page-size behaviour; and the fake in `internal/testutil/azuredevops.go` itself, which is
 written from the docs, not recorded. Entra ID bearer tokens are not supported (ROADMAP).
 
+## Archive
+
+Only GitHub reports archive and unarchive today (ripple pauses the repo on `archived`, resumes on `unarchived`). Azure DevOps: ripple consumes only the service hook events listed here; none reports a repository being disabled or archived, and this was not verified against the service hook docs (2026-11-23). Nothing pauses on archive.
+
 ## Superseded pull requests
 
 Not implemented: when a newer release's PR replaces ripple's earlier one on Azure DevOps, the old PR stays

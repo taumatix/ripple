@@ -145,3 +145,33 @@ func TestDefaultHostNamesCannotPoseAsAnotherHost(t *testing.T) {
 		t.Fatalf("queued %s", got)
 	}
 }
+
+// The deprecated Event.Ref overload stays populated beside the typed fields for the
+// deprecation window (MIGRATION.md, event-ref-overload).
+func TestEnqueueKeepsTheDeprecatedRefBesideTypedFields(t *testing.T) {
+	st := store.NewMemory()
+	a := &App{Queue: &Queue{Store: st, Process: newGate().process}}
+	ctx := context.Background()
+	if err := a.enqueue(ctx, "github", platform.Event{Delivery: "d1", Kind: platform.RepoRenamed, Repos: []string{"o/old"}, NewRepo: "o/new"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.enqueue(ctx, "github", platform.Event{Delivery: "d2", Kind: platform.DefaultBranchChanged, Repos: []string{"o/new"}, DefaultBranch: "trunk"}); err != nil {
+		t.Fatal(err)
+	}
+	evs, err := st.ListEvents(ctx)
+	if err != nil || len(evs) != 2 {
+		t.Fatalf("events %v, err %v", evs, err)
+	}
+	for _, e := range evs {
+		switch e.Kind {
+		case string(platform.RepoRenamed):
+			if e.NewRepo != "o/new" || e.Ref != "o/new" {
+				t.Errorf("rename: NewRepo %q Ref %q", e.NewRepo, e.Ref)
+			}
+		case string(platform.DefaultBranchChanged):
+			if e.DefaultBranch != "trunk" || e.Ref != "refs/heads/trunk" {
+				t.Errorf("default branch: DefaultBranch %q Ref %q", e.DefaultBranch, e.Ref)
+			}
+		}
+	}
+}

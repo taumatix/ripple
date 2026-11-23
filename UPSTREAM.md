@@ -28,7 +28,7 @@ upstream:
     format: "REST at https://HOST/api/v3, GraphQL at https://HOST/api/graphql, same paths as github-rest-api; X-GitHub-Api-Version 2026-03-10 and 2022-11-28 on 3.22, 410 for an unsupported one; webhooks add X-GitHub-Enterprise-Version and -Host"
     newest-read: "3.22"
     verified-against: "docs/vendor/ghes excerpts read 2026-11-23; tests use internal/testutil/ghes.go, a fake written from them"
-    unverified: "never run against a real GHES: which release first accepts 2026-03-10; whether enablePullRequestAutoMerge exists on every release and the error shape of one that lacks it; the status of a disabled GraphQL or REST API (assumed 404); webhook payload parity with github.com"
+    unverified: "never run against a real GHES: the `/api/v3/meta` answer (`installed_version`, unauthenticated) and ripple's own 3.9 warning floor; which release first accepts 2026-03-10; whether enablePullRequestAutoMerge exists on every release and the error shape of one that lacks it; the status of a disabled GraphQL or REST API (assumed 404); webhook payload parity with github.com"
     checked: 2026-11-23
   - name: go-release-list
     kind: http-feed

@@ -57,6 +57,10 @@ call (Renovate's page says the same). `Client` therefore does not implement `pla
 `automerge` in a repository's config opens the pull request and leaves the merge to a human. Merging at
 once would skip the checks.
 
+## Archive
+
+Only GitHub reports archive and unarchive today (ripple pauses the repo on `archived`, resumes on `unarchived`). SCM-Manager: ripple consumes only the events listed here; an archive event was not verified (2026-11-23). Nothing pauses on archive.
+
 ## Superseded pull requests
 
 Not implemented: when a newer ripple pull request replaces a stale one, the stale one stays open on

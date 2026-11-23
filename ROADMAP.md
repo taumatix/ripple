@@ -208,8 +208,7 @@ Everything else:
     (`RIPPLE_WEBHOOK_SPOOL=memory`), because an HMAC cannot be checked before its last byte and each receiver
     unmarshals the whole payload. Extracting only the fields ripple acts on while the stream is hashed, and
     discarding the result of a forgery, would hold neither; it means a token-level parse per host's payload.
-123. **Dashboard: reopen and share the sets.** Turning the key back on after ripple closed the issue creates a
-    new one rather than reopening the old, and a person's own close is still never reopened. The refresh set
+123. **Dashboard: share the sets.** The refresh set
     (`dashboard-dirty`) and the repo list that drives the hourly read-back (`dashboard-watch`) are
     read-modify-write cursors, so two replicas marking at once can lose an entry; the loss heals at the repo's
     next run or write, but a per-item store write would remove it. Read-back finds the issue by its marker, so an

@@ -115,6 +115,28 @@ func (c *Client) CloseIssue(ctx context.Context, repo model.Repo, number int) er
 	return err
 }
 
+// ReopenIssue sets the issue's state to open and nothing else.
+func (c *Client) ReopenIssue(ctx context.Context, repo model.Repo, number int) error {
+	if err := checkRepo(repo); err != nil {
+		return err
+	}
+	status, err := c.do(ctx, repo, http.MethodPatch, c.issuesURL(repo, fmt.Sprintf("/%d", number)), map[string]any{"state": "open"}, nil)
+	if err == nil {
+		return nil
+	}
+	var rl *platform.RateLimitError
+	if errors.As(err, &rl) {
+		return err
+	}
+	switch status {
+	case http.StatusNotFound, http.StatusGone:
+		return fmt.Errorf("%w: %v", platform.ErrIssueGone, err)
+	case http.StatusForbidden:
+		return fmt.Errorf("%w: %v", platform.ErrIssuesUnavailable, err)
+	}
+	return err
+}
+
 // UpdateIssueBody patches only the body. A 404 or 410 on the issue itself means it
 // was deleted (or issues were disabled since); the caller re-finds to tell which.
 func (c *Client) UpdateIssueBody(ctx context.Context, repo model.Repo, number int, body string) error {

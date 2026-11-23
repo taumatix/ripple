@@ -148,6 +148,15 @@ func (c *CountingPlatform) CloseIssue(ctx context.Context, r model.Repo, number 
 	return platform.CloseIssue(ctx, c.Inner, r, number)
 }
 
+// ReopenIssue forwards to Inner, or answers platform.ErrNoIssues without counting a call.
+func (c *CountingPlatform) ReopenIssue(ctx context.Context, r model.Repo, number int) error {
+	if _, ok := c.Inner.(platform.IssueReopener); !ok {
+		return platform.ErrNoIssues
+	}
+	c.hit(r.FullName)
+	return platform.ReopenIssue(ctx, c.Inner, r, number)
+}
+
 // ListTags, TagCommit and ReleaseOf forward to Inner without counting a call (the
 // repo they name is another repository's, read through the dependent's credential),
 // or answer platform.ErrNoTags when Inner cannot read tags.

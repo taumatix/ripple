@@ -107,8 +107,9 @@ updates:
   all when the text is unchanged. It is a report, not a control: ripple reads the issue back about once an hour and
   rewrites it if a person edited it, and nothing in it is acted on. It needs the App's Issues read and write
   permission and issues enabled on the repo; without either ripple logs once and goes on, and tries again
-  after an hour even across a restart. A closed dashboard keeps being updated and is never reopened. Set the key
-  to `false` and ripple closes the issue (once) and leaves it alone. When the repo's config stops parsing, an
+  after an hour even across a restart. A dashboard a person closed keeps being updated and is never reopened. Set the key
+  to `false` and ripple closes the issue (once) and leaves it alone; set it back to `true` and ripple reopens that same issue,
+  but only if ripple was the one that closed it. When the repo's config stops parsing, an
   existing dashboard gains a "Configuration invalid" section with the parse error (ripple skips the repo's jobs until
   the file is fixed) and loses it once the file parses. GitHub only.
 - `backfill-new-dependencies` (default `true`): a repo that starts importing a module only hears about

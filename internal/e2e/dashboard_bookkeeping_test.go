@@ -142,3 +142,37 @@ func TestDashboardBackoffSurvivesARestart(t *testing.T) {
 		e.eventually("the retry after the hour", func() bool { return total() > tried })
 	})
 }
+
+func TestDashboardIsReopenedWhenRippleClosedItAndTheKeyComesBack(t *testing.T) {
+	forEach(t, func(t *testing.T, st store.Store) {
+		e := dashEnv(t, st, optIn)
+		e.publish("example.com/lib", "v1.1.0")
+		e.tick()
+		e.push(repo, map[string]string{".ripple.yaml": "dependency-dashboard: false\n"})
+		e.eventually("the dashboard to be closed", func() bool { is := e.gh.Issues(repo); return len(is) == 1 && is[0].Closed })
+		number := e.gh.Issues(repo)[0].Number
+
+		e.push(repo, map[string]string{".ripple.yaml": optIn})
+		e.eventually("the same issue to be open again", func() bool {
+			is := e.gh.Issues(repo)
+			return len(is) == 1 && is[0].Number == number && !is[0].Closed && strings.Contains(is[0].Body, "## Deferred (1)")
+		})
+	})
+}
+
+func TestDashboardAPersonClosedIsNotReopenedWhenTheKeyIsToggled(t *testing.T) {
+	forEach(t, func(t *testing.T, st store.Store) {
+		e := dashEnv(t, st, optIn)
+		e.publish("example.com/lib", "v1.1.0")
+		e.tick()
+		e.gh.HumanCloseIssue(repo, e.gh.Issues(repo)[0].Number)
+		e.push(repo, map[string]string{".ripple.yaml": "dependency-dashboard: false\n"})
+		e.push(repo, map[string]string{".ripple.yaml": optIn})
+		e.clock.Advance(time.Minute)
+		e.publish("example.com/other", "v1.1.0")
+		e.tick()
+		if is := e.gh.Issues(repo); len(is) != 1 || !is[0].Closed {
+			t.Fatalf("a person's close must stand: %+v", is)
+		}
+	})
+}

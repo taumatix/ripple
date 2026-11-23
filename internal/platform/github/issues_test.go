@@ -82,3 +82,29 @@ func TestIssuesErrorMapping(t *testing.T) {
 		t.Fatalf("deleted update: %v", err)
 	}
 }
+
+func TestIssuesReopenChangesOnlyTheState(t *testing.T) {
+	p, repo, gh := newIssueFixture(t)
+	ctx := context.Background()
+	iss, err := p.CreateIssue(ctx, repo, platform.IssueSpec{Title: "Dashboard", Body: mark + "\nv1", Labels: []string{"ripple"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.(platform.IssueCloser).CloseIssue(ctx, repo, iss.Number); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.(platform.IssueReopener).ReopenIssue(ctx, repo, iss.Number); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.(platform.IssueReopener).ReopenIssue(ctx, repo, iss.Number); err != nil {
+		t.Fatalf("reopening an open issue: %v", err)
+	}
+	got, ok, _ := p.FindIssue(ctx, repo, "ripple", mark)
+	if !ok || got.Closed || got.Body != mark+"\nv1" {
+		t.Fatalf("want it open with its body: %+v", got)
+	}
+	gh.HumanDeleteIssue(repo.FullName, iss.Number)
+	if err := p.(platform.IssueReopener).ReopenIssue(ctx, repo, iss.Number); !errors.Is(err, platform.ErrIssueGone) {
+		t.Fatalf("deleted: %v", err)
+	}
+}

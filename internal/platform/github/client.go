@@ -278,9 +278,12 @@ const maxEventPages = 5
 // means: the head branch is not in this repository; the PR has other than exactly
 // one commit, or that commit's author or committer is not ripple's identity (a
 // person pushed to the branch); it has any review, review comment or issue comment;
-// or its issue events hold a rename. Every read must succeed and nothing is
-// closed on a failed one. Not detected: an edit of the PR description, a changed
-// label or assignee, or a force-push by someone using ripple's commit identity.
+// or its issue events hold a rename or a force-push of the head branch (a rewrite
+// that keeps ripple's commit identity); or its description was ever edited (GraphQL
+// userContentEdits; ripple never edits one). Every read must succeed and nothing
+// is closed on a failed one. Not detected: a changed label or assignee. The PR is
+// closed first and the comment is best effort, so a failed close leaves nothing
+// to repeat on the retry.
 func (c *Client) CloseUntouchedPR(ctx context.Context, repo model.Repo, pr platform.PR, comment string) (bool, error) {
 	if err := checkRepo(repo); err != nil {
 		return false, err
@@ -291,8 +294,9 @@ func (c *Client) CloseUntouchedPR(ctx context.Context, repo model.Repo, pr platf
 		return err
 	}
 	var cur struct {
-		State string `json:"state"`
-		Head  struct {
+		State  string `json:"state"`
+		NodeID string `json:"node_id"`
+		Head   struct {
 			Ref  string `json:"ref"`
 			Repo struct {
 				FullName string `json:"full_name"`
@@ -338,7 +342,7 @@ func (c *Client) CloseUntouchedPR(ctx context.Context, repo model.Repo, pr platf
 			return false, err
 		}
 		for _, e := range events {
-			if e.Event == "renamed" {
+			if e.Event == "renamed" || e.Event == "head_ref_force_pushed" {
 				return false, nil
 			}
 		}
@@ -346,14 +350,40 @@ func (c *Client) CloseUntouchedPR(ctx context.Context, repo model.Repo, pr platf
 			break
 		}
 	}
-	if _, err := c.do(ctx, repo, http.MethodPost, fmt.Sprintf("%s/issues/%d/comments", base, pr.Number), map[string]string{"body": comment}, nil); err != nil {
+	if cur.NodeID == "" {
+		return false, errors.New("pull request has no node id to read its description edits")
+	}
+	var edits struct {
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+		Data struct {
+			Node struct {
+				UserContentEdits struct {
+					TotalCount int `json:"totalCount"`
+				} `json:"userContentEdits"`
+			} `json:"node"`
+		} `json:"data"`
+	}
+	if _, err := c.do(ctx, repo, http.MethodPost, c.graphQLURL(), map[string]any{"query": editsQuery, "variables": map[string]string{"id": cur.NodeID}}, &edits); err != nil {
 		return false, err
+	}
+	if len(edits.Errors) > 0 {
+		return false, fmt.Errorf("read description edits: %s", edits.Errors[0].Message)
+	}
+	if edits.Data.Node.UserContentEdits.TotalCount > 0 {
+		return false, nil
 	}
 	if _, err := c.do(ctx, repo, http.MethodPatch, fmt.Sprintf("%s/pulls/%d", base, pr.Number), map[string]string{"state": "closed"}, nil); err != nil {
 		return false, err
 	}
+	if _, err := c.do(ctx, repo, http.MethodPost, fmt.Sprintf("%s/issues/%d/comments", base, pr.Number), map[string]string{"body": comment}, nil); err != nil && c.Log != nil {
+		c.Log.Warn("commenting on the closed superseded pull request failed", "repo", repo.FullName, "pr", pr.Number, "err", err)
+	}
 	return true, nil
 }
+
+const editsQuery = `query($id: ID!) { node(id: $id) { ... on PullRequest { userContentEdits(first: 1) { totalCount } } } }`
 
 const automergeMutation = `mutation($id: ID!) { enablePullRequestAutoMerge(input: {pullRequestId: $id, mergeMethod: SQUASH}) { pullRequest { number } } }`
 

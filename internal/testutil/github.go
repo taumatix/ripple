@@ -41,6 +41,9 @@ type PR struct {
 	Comments []string
 	Reviews  int
 	Renamed  bool
+	// BodyEdited records a description edit by a human; ForcePushed a force-push of
+	// the head branch (the issue events and GraphQL report them, nothing else does).
+	BodyEdited, ForcePushed bool
 }
 
 // GitHub is a fake GitHub: the REST API for apps, pulls and GraphQL over HTTP, and
@@ -69,6 +72,8 @@ type GitHub struct {
 	RateLimitOnce bool
 	// FailPath makes every request whose path ends with it answer 500.
 	FailPath string
+	// FailClose makes closing a pull request (PATCH /pulls/{n}) answer 500.
+	FailClose bool
 }
 
 func NewGitHub(t *testing.T) *GitHub {
@@ -348,6 +353,26 @@ func (g *GitHub) handleGraphQL(w http.ResponseWriter, r *http.Request) {
 		Query     string
 		Variables struct{ ID string }
 	}
+	if json.Unmarshal(body, &req) == nil && strings.Contains(req.Query, "userContentEdits") {
+		id := strings.TrimPrefix(req.Variables.ID, "PR_")
+		repo, num, _ := strings.Cut(id, "#")
+		n, _ := strconv.Atoi(num)
+		g.mu.Lock()
+		defer g.mu.Unlock()
+		g.calls[repo]++
+		for _, p := range g.prs[repo] {
+			if p.Number == n {
+				edits := 0
+				if p.BodyEdited {
+					edits = 1
+				}
+				_, _ = fmt.Fprintf(w, `{"data":{"node":{"userContentEdits":{"totalCount":%d}}}}`, edits)
+				return
+			}
+		}
+		_, _ = w.Write([]byte(`{"errors":[{"message":"Could not resolve to a node"}]}`))
+		return
+	}
 	if json.Unmarshal(body, &req) != nil || !strings.Contains(req.Query, "enablePullRequestAutoMerge") {
 		g.fail(w, http.StatusBadRequest, "unexpected graphql")
 		return
@@ -482,6 +507,8 @@ func (g *GitHub) handleSub(w http.ResponseWriter, r *http.Request, repo string, 
 	switch {
 	case sub[0] == "pulls" && what == "" && r.Method == http.MethodGet:
 		_ = json.NewEncoder(w).Encode(prJSON(repo, pr))
+	case sub[0] == "pulls" && what == "" && r.Method == http.MethodPatch && g.FailClose:
+		g.fail(w, http.StatusInternalServerError, "injected close failure")
 	case sub[0] == "pulls" && what == "" && r.Method == http.MethodPatch:
 		var in struct{ State string }
 		if json.NewDecoder(r.Body).Decode(&in) != nil || in.State != "closed" {
@@ -530,6 +557,9 @@ func (g *GitHub) handleSub(w http.ResponseWriter, r *http.Request, repo string, 
 		if pr.Renamed {
 			items = append(items, map[string]any{"event": "renamed"})
 		}
+		if pr.ForcePushed {
+			items = append(items, map[string]any{"event": "head_ref_force_pushed"})
+		}
 		page(items)
 	default:
 		g.fail(w, http.StatusNotFound, "unknown route %s %s", r.Method, r.URL.Path)
@@ -569,6 +599,43 @@ func (g *GitHub) HumanReview(repo string, number int) {
 // HumanRename changes a PR's title and records the rename event.
 func (g *GitHub) HumanRename(repo string, number int, title string) {
 	g.mutatePR(repo, number, func(p *PR) { p.Title, p.Renamed = title, true })
+}
+
+// HumanEditBody records an edit of the PR description.
+func (g *GitHub) HumanEditBody(repo string, number int) {
+	g.mutatePR(repo, number, func(p *PR) { p.BodyEdited = true })
+}
+
+// HumanForcePush rewrites the PR's branch commit keeping its author and committer,
+// so only the force-push event tells it from ripple's own push.
+func (g *GitHub) HumanForcePush(repo string, number int) {
+	g.t.Helper()
+	var branch string
+	g.mutatePR(repo, number, func(p *PR) { branch, p.ForcePushed = p.Head, true })
+	work := g.t.TempDir()
+	git(g.t, work, "clone", "-q", "--branch", branch, g.bare(repo), "w")
+	w := filepath.Join(work, "w")
+	cmd := exec.Command("git", "commit", "-q", "--amend", "--no-edit", "--allow-empty", "-m", "amended")
+	cmd.Dir = w
+	f := strings.Split(strings.TrimSpace(git(g.t, w, "log", "-1", "--format=%an\t%ae\t%cn\t%ce")), "\t")
+	cmd.Env = append(gitEnv(), "GIT_AUTHOR_NAME="+f[0], "GIT_AUTHOR_EMAIL="+f[1], "GIT_COMMITTER_NAME="+f[2], "GIT_COMMITTER_EMAIL="+f[3])
+	if out, err := cmd.CombinedOutput(); err != nil {
+		g.t.Fatalf("amend: %v\n%s", err, out)
+	}
+	git(g.t, w, "push", "-q", "--force", "origin", branch)
+}
+
+// AddForeignPR opens a PR on a new branch shaped like ripple's that no ripple job
+// opened: the branch is a copy of the first PR's branch, commit identity included.
+func (g *GitHub) AddForeignPR(repo, branch, title string) {
+	g.t.Helper()
+	g.mu.Lock()
+	src := g.prs[repo][0]
+	g.mu.Unlock()
+	git(g.t, g.bare(repo), "branch", branch, src.Head)
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.prs[repo] = append(g.prs[repo], &PR{Repo: repo, Head: branch, Base: src.Base, Title: title, Number: len(g.prs[repo]) + 1})
 }
 
 func (g *GitHub) mutatePR(repo string, number int, f func(*PR)) {

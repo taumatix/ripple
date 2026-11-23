@@ -263,7 +263,7 @@ func (e *Engine) runClaimed(ctx context.Context, hold *repoLease, name string, j
 			r.ws.Close()
 		}
 	}()
-	r.execute(plans)
+	r.execute(plans, deps)
 	return r.finished
 }
 
@@ -342,7 +342,7 @@ func (r *runner) plan(jobs []model.Job, deps []model.Dependency) []*prPlan {
 	return order
 }
 
-func (r *runner) execute(plans []*prPlan) {
+func (r *runner) execute(plans []*prPlan, deps []model.Dependency) {
 	e := r.e
 	if until := platform.RateLimitedUntil(e.Platform, r.repo); until.After(e.now()) {
 		// The host asked to be left alone; spend no call on this repo until then.
@@ -362,6 +362,9 @@ func (r *runner) execute(plans []*prPlan) {
 		}
 		return
 	}
+	if closed := r.sweepSuperseded(deps, open); len(closed) > 0 {
+		open = without(open, closed)
+	}
 	heads := map[string]platform.PR{}
 	for _, pr := range open {
 		heads[pr.Head] = pr
@@ -378,6 +381,12 @@ func (r *runner) execute(plans []*prPlan) {
 				}
 			}
 			continue
+		}
+		if count >= limit && p.group == "" && len(p.items) > 0 {
+			// A stale PR of the module this plan updates holds the slot its replacement needs.
+			j := p.items[0].job
+			closed := r.closeStale(supersededBy{pkg: j.Package, version: j.Version}, p.branch, open)
+			open, count = without(open, closed), count-len(closed)
 		}
 		if count >= limit {
 			for _, it := range p.items {
@@ -721,4 +730,18 @@ func (r *runner) followGoVersion(d model.Dependency, target string) error {
 		r.followed = append(r.followed, p)
 	}
 	return nil
+}
+
+// without is open minus the PRs whose heads are in closed.
+func without(open []platform.PR, closed map[string]bool) []platform.PR {
+	if len(closed) == 0 {
+		return open
+	}
+	var out []platform.PR
+	for _, pr := range open {
+		if !closed[pr.Head] {
+			out = append(out, pr)
+		}
+	}
+	return out
 }

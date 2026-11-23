@@ -85,7 +85,7 @@ type Handler struct {
 	ReadTimeout time.Duration
 	// DedupeTTL is how long a handled delivery is remembered and repeats dropped
 	// (answered 202, not handled again). Default 1h; negative disables. A delivery is
-	// a repeat when its X-GitHub-Delivery id was already handled. The table is in memory.
+	// a repeat when its X-GitHub-Delivery id was already handled. This table is in memory; the app also claims the id in the Store.
 	DedupeTTL time.Duration
 	// DedupeBySignature also treats a body whose signature was already handled as a
 	// repeat. The id is an unsigned header, so without this a captured body replayed

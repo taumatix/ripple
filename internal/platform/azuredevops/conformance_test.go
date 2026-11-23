@@ -3,8 +3,10 @@ package azuredevops_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -78,11 +80,16 @@ func (f *adoFixture) FileAt(path, branch, file string) (string, bool) {
 func (f *adoFixture) Calls(path string) int { return f.az.Calls(path) }
 func (f *adoFixture) RateLimitNextPR() bool { f.az.RateLimitOnce = true; return true }
 
+var pushSeq int64
+
 // pushPayload is the git.push body of service-hooks-events.md ("git.push", sample
 // payload), trimmed to the fields the receiver reads.
 func pushPayload(project, repo, updated, defaultBranch, sha string) map[string]any {
+	// Each notification carries its own id; a fixed one would be dropped as a repeat
+	// once the store remembers handled deliveries.
+	n := atomic.AddInt64(&pushSeq, 1)
 	return map[string]any{
-		"id": "a0a0a0a0-bbbb-cccc-dddd-e1e1e1e1e1e1", "eventType": "git.push", "publisherId": "tfs",
+		"id": fmt.Sprintf("a0a0a0a0-bbbb-cccc-dddd-%012d", n), "eventType": "git.push", "publisherId": "tfs",
 		"resource": map[string]any{
 			"commits":    []map[string]any{{"commitId": sha}},
 			"refUpdates": []map[string]any{{"name": updated, "oldObjectId": "d3d3", "newObjectId": "e4e4"}},

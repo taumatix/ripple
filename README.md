@@ -242,8 +242,7 @@ not work, so they do not count against the backlog caps. `ripple events list` sh
 requeue ID` (or `--all`) makes one live again with a fresh 3 attempts, and `ripple events purge [AGE]`
 deletes them early. A *job* ripple gave up on (state failed, shown on the dependency dashboard) is a separate thing: `ripple events jobs REPO` lists them and `ripple events requeue-job KEY` puts one back to pending. The commands read the store named by the same `RIPPLE_STORE` variables, so there is no
 HTTP endpoint, and a running server picks a requeued event up within 30 seconds. The webhook receiver refuses unsigned requests before reading the body,
-buffers at most 4 bodies at once (a signed body over 64 KiB waits for its signature check in a temp file, or in memory with `RIPPLE_WEBHOOK_SPOOL=memory`), and drops a repeated `X-GitHub-Delivery` for an hour (in memory, per
-process; the id is an unsigned header, so this stops redelivery and naive replays, not a rewritten header). See
+buffers at most 4 bodies at once (a signed body over 64 KiB waits for its signature check in a temp file, or in memory with `RIPPLE_WEBHOOK_SPOOL=memory`), and drops a repeated `X-GitHub-Delivery` for an hour (in the store, so a restart or another replica drops it too; the id is an unsigned header, so this stops redelivery and naive replays, not a rewritten header). See
 [ROADMAP.md](ROADMAP.md) for the planned fixes.
 
 ## Upstream contracts

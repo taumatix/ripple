@@ -123,3 +123,71 @@ func TestLatePushAfterRemovalDoesNotReRegister(t *testing.T) {
 		}
 	})
 }
+
+// A removal's tombstone is read for 24 hours and then swept (108): the cursor row is deleted
+// once it is past its ttl, while a fresher tombstone and every other cursor stay.
+func TestExpiredRemovalTombstonesAreSwept(t *testing.T) {
+	forEach(t, func(t *testing.T, st store.Store) {
+		e := newEnv(t, st, defaultLimits())
+		baseRepos(e)
+		start(t, e, "acme/uses-lib")
+		e.pushPayload("acme/uses-lib", "refs/heads/feature", "main", 11, []string{"README.md"}, "")
+		e.eventually("id adopted", func() bool { return e.storedRepoID("acme/uses-lib") == 11 })
+		e.removeRepos("acme/uses-lib")
+		tomb := func() string {
+			v, err := e.st.GetCursor(context.Background(), "removed|acme/uses-lib")
+			if err != nil {
+				t.Fatal(err)
+			}
+			return v
+		}
+		if tomb() == "" {
+			t.Fatal("the removal left no tombstone")
+		}
+		e.clock.Advance(2 * time.Hour)
+		e.tick()
+		if tomb() == "" {
+			t.Fatal("a tombstone inside its 24 hours was swept")
+		}
+		e.clock.Advance(23 * time.Hour)
+		e.tick()
+		if v := tomb(); v != "" {
+			t.Fatalf("an expired tombstone survived the sweep: %q", v)
+		}
+	})
+}
+
+// A delivery handled before a restart is not handled again after it (64): the delivery
+// table is in the Store, not in the process. Redelivering the same id after the restart
+// is dropped; a new id is handled.
+func TestDeliveryDroppedAfterRestart(t *testing.T) {
+	forEach(t, func(t *testing.T, st store.Store) {
+		e := newEnv(t, st, defaultLimits())
+		baseRepos(e)
+		start(t, e, "acme/uses-lib")
+		push := func(id string) {
+			e.extraHeaders = http.Header{"X-GitHub-Delivery": {id}}
+			if c := e.pushPayload("acme/uses-lib", "refs/heads/main", "main", 11, []string{"go.mod"}, ""); c != http.StatusAccepted {
+				t.Fatalf("delivery %s = %d", id, c)
+			}
+		}
+		before := e.scans("acme/uses-lib")
+		push("restart-1")
+		e.eventually("first delivery scanned", func() bool { return e.scans("acme/uses-lib") > before })
+		e.eventually("the event is finished and gone from the queue", func() bool {
+			evs, _ := e.st.ListEvents(context.Background())
+			return len(evs) == 0
+		})
+		handled := e.scans("acme/uses-lib")
+
+		e.stopApp()
+		e.startApp()
+		push("restart-1")
+		time.Sleep(500 * time.Millisecond)
+		if got := e.scans("acme/uses-lib"); got != handled {
+			t.Fatalf("a redelivery after a restart was handled again: %d scans, want %d", got, handled)
+		}
+		push("restart-2")
+		e.eventually("a new delivery is handled", func() bool { return e.scans("acme/uses-lib") > handled })
+	})
+}

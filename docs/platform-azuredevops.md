@@ -43,7 +43,10 @@ repository is re-scanned instead.
 
 Not confirmed against a real organisation: that a repository name is accepted where the docs name a repository id;
 that `autoCompleteSetBy.id` may be the pull request creator's id; the labels endpoint; the commit changes lookup (merge commits, paging); the service hook's
-delivery headers; page-size behaviour; and the fake in `internal/testutil/azuredevops.go` itself, which is
+delivery headers; whether the payload `id` ripple dedupes on is the same across a retry (the vendored
+[troubleshooting page](vendor/azuredevops/service-hooks-troubleshoot.md) gives the schedule: up to eight retries on
+408, 502, 503 and 504, then probation, and says nothing of the id; a retry under a new id is handled again, which
+costs a repeated scan and nothing else); page-size behaviour; and the fake in `internal/testutil/azuredevops.go` itself, which is
 written from the docs, not recorded. Entra ID bearer tokens are not supported (ROADMAP).
 
 ## Archive

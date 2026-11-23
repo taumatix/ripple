@@ -33,12 +33,28 @@ const repoIDCursor = "repoid|"
 // push for that name does not register it again unless it carries a different repository
 // id than the removed one (a new repository that took the name). An explicit re-add
 // (repos_added, unarchive of an unknown repo) clears it. Expired tombstones are never
-// read again but are not swept: one small cursor row per removed repo.
+// read again and are deleted by SweepTombstones.
 const removedCursor = "removed|"
 
 // removedTTL is how long a removal is remembered. A delivery the host retries arrives
 // within hours; a day covers it without keeping a removed repo out for long.
 const removedTTL = 24 * time.Hour
+
+// SweepTombstones deletes the removal tombstones that are past removedTTL, and the empty
+// ones an explicit re-add left, and returns how many. A store that cannot purge cursors
+// (store.CursorPurger) keeps them: they are never read once expired, only unswept.
+func (e *Engine) SweepTombstones(ctx context.Context) (int, error) {
+	p, ok := e.Store.(store.CursorPurger)
+	if !ok {
+		return 0, nil
+	}
+	now := e.now()
+	return p.PurgeCursors(ctx, removedCursor, func(v string) bool {
+		at, _, _ := strings.Cut(v, "|")
+		secs, err := strconv.ParseInt(at, 10, 64)
+		return v == "" || err != nil || now.Sub(time.Unix(secs, 0)) > removedTTL
+	})
+}
 
 // maxRenameHops bounds following a chain of renames (a -> b -> c).
 const maxRenameHops = 8

@@ -148,12 +148,6 @@ Everything else:
     `UPSTREAM.md` and `docs/vendor/ghes`.
 63. **Several GitHub hosts.** One GitHub host (github.com or one GHES) per server. Serving github.com and a GHES together
     needs a second host name in the registry with its own webhook path, App and secret.
-64. **Webhook delivery ids in the Store.** The delivery table is in memory, per process, so a restart or a second
-    replica forgets a handled delivery (queued events still key on it). Persist ids with a TTL, and wire
-    `DedupeBySignature` (opt-in, off by default because a genuine identical redelivery is dropped) into the app
-    and the other signed hosts once a real redelivery has shown identical bodies are rare.
-65. **Webhook retry-id stability, verified.** Whether Bitbucket Cloud's `X-Request-UUID` and Azure DevOps' event
-    `id` stay the same across a retry is unverified; confirm against a real delivery before relying on dedupe.
 67. **Dependency dashboard: a "re-run now" control, and more hosts.** The dashboard (opt-in
     `dependency-dashboard`) is a read-only report. A checkbox that releases a deferred job early needs the
     `issues` webhook, a check of the editor's repository permission (never the issue's text) and an audit
@@ -204,7 +198,6 @@ Everything else:
 107. **Archive events on other hosts.** GitLab (`project_update`), Gitea/Forgejo, Bitbucket and Azure DevOps report no
     archive event in the docs checked (see each `docs/platform-*.md`). Poll the archived flag per host on a refresh,
     or map an event once a host documents one; Forgejo and Bitbucket Data Center were not checked.
-108. **Sweep removal tombstones.** `removed|<repo>` cursor rows are ignored after 24 hours but never deleted.
 109. **Repo ids from install events.** `repos_added` events carry no repository id, so a repo added that way adopts it
     only on its first signed push; a push with a mismatched id is ignored, not resolved by a lookup on the host.
 110. **DynamoDB: failed jobs from before the open-job copies.** The backfill reads the sparse pending index, so a job
@@ -289,3 +282,12 @@ Everything else:
     `Accept` types, 429 handling) and record the result in UPSTREAM.md.
 131. **Docker: package cursor and release dates.** `docker:packages` is one read-modify-write cursor (see 96) and the
     cooldown counts from first sight because tags carry no date; read the image config `created` time instead.
+132. **Webhook retry ids, verified on real hosts.** Delivery ids are now persisted (store delivery table), but whether
+    Bitbucket Cloud's `X-Request-UUID` and Azure DevOps' payload `id` stay the same across a retry is still
+    unverified: the vendored docs state neither (see docs/platform-bitbucket.md, docs/platform-azuredevops.md). A
+    retry under a new id is handled again, which is safe. Needs a real workspace and organisation to observe.
+133. **Wire `DedupeBySignature`.** Still off and not wired into the app or the other signed hosts: a genuine identical
+    redelivery would be dropped. Wait for real redelivery data showing identical bodies are rare.
+134. **Delivery dedupe: hosts without a delivery id, and the DynamoDB cursor Scan.** The persistent claim covers events
+    whose host sets `Delivery`; others rely on the in-memory table. `Dynamo.PurgeCursors` is a filtered Scan of the
+    table (run at most daily) and is unmeasured on a large table; move tombstones to an indexed prefix if it hurts.

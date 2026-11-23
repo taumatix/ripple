@@ -25,6 +25,12 @@ const (
 		"//go:generate go run example.com/lib/v2/cmd/gen@latest\n" +
 		"//go:generate go tool example.com/lib/v2/cmd/gen\n" +
 		"//go:generate go tool gen\n"
+	residualMock = "package main\n\n" +
+		"//go:generate mockgen -destination=mock_lib.go example.com/lib Getter\n" +
+		"//go:generate go run go.uber.org/mock/mockgen -source=lib.go -imports=l=example.com/lib,o=other/pkg\n"
+	residualMockWant = "package main\n\n" +
+		"//go:generate mockgen -destination=mock_lib.go example.com/lib/v2 Getter\n" +
+		"//go:generate go run go.uber.org/mock/mockgen -source=lib.go -imports=l=example.com/lib/v2,o=other/pkg\n"
 	residualBroken     = "//go:build ignore\n\npackage main\n\n//go:generate go run example.com/lib/cmd/gen@v1.0.0\nfunc ( {\n"
 	residualBrokenWant = "//go:build ignore\n\npackage main\n\n//go:generate go run example.com/lib/v2/cmd/gen@v2.0.0\nfunc ( {\n"
 )
@@ -35,6 +41,7 @@ func residualRepo(config string) map[string]string {
 		"main.go": "package main\n\nimport \"" + rLib + "\"\n\nfunc main() { println(lib.Get()) }\n",
 		"gen.go":  residualGen,
 		"bad.go":  residualBroken,
+		"mock.go": residualMock,
 	}
 	if config != "" {
 		files[".ripple.yaml"] = config
@@ -74,6 +81,7 @@ func TestMajorBumpMovesToolDirective(t *testing.T) {
 		// Off by default: the directives are untouched, as before.
 		fileIs(t, e, head, "gen.go", residualGen)
 		fileIs(t, e, head, "bad.go", residualBroken)
+		fileIs(t, e, head, "mock.go", residualMock)
 	})
 }
 
@@ -82,6 +90,7 @@ func TestMajorBumpExtendedDirectives(t *testing.T) {
 		e, head := residualRun(t, st, "updates:\n  - ecosystem: gomod\n    directives: extended\n")
 		fileIs(t, e, head, "gen.go", residualGenWant)
 		fileIs(t, e, head, "bad.go", residualBrokenWant)
+		fileIs(t, e, head, "mock.go", residualMockWant)
 	})
 }
 

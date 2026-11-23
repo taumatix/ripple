@@ -127,7 +127,8 @@ type Update struct {
 	PrivateModules []string `yaml:"private-modules"`
 	// Directives is gomod only: "" (the default) rewrites only a plain "go run <package>"
 	// in //go:generate lines on a major bump; "extended" also rewrites "go run pkg@version"
-	// and "go tool pkg", and reads the directives of files that do not parse.
+	// and "go tool pkg", the import paths of a mockgen command line, and reads the
+	// directives of files that do not parse.
 	Directives string `yaml:"directives"`
 	// Tidy is gomod only: "" (the default) keeps whatever go mod tidy writes; "minimal"
 	// keeps the original go.mod and go.sum and adds only what the update made necessary.

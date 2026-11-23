@@ -260,6 +260,10 @@ func (st *Dynamo) depKeys(d model.Dependency, shards int) item {
 	}
 }
 
+// depVersionSep starts the version suffix of a dependency sort key. Only the second and later
+// versions of one (file, datasource, package) carry it.
+const depVersionSep = "\x1e"
+
 func n(v int64) types.AttributeValue {
 	return &types.AttributeValueMemberN{Value: strconv.FormatInt(v, 10)}
 }
@@ -425,6 +429,9 @@ func (d *Dynamo) ReplaceDependencies(ctx context.Context, repo string, deps []mo
 	seen := map[string]bool{}
 	delta := map[string]int{}
 	shards := map[string]int{}
+	deps = append([]model.Dependency(nil), deps...)
+	SortDependencies(deps)
+	rows := map[string]bool{}
 	for _, dep := range deps {
 		dep.Repo = repo
 		base := pkgBase(dep.Datasource, dep.Package)
@@ -436,8 +443,14 @@ func (d *Dynamo) ReplaceDependencies(ctx context.Context, repo string, deps []mo
 			shards[base] = n
 		}
 		k := d.depKeys(dep, n)
+		if rows[k.SK+"\x1e"+dep.Version] {
+			continue // the same row listed twice
+		}
+		rows[k.SK+"\x1e"+dep.Version] = true
 		if seen[k.SK] {
-			continue
+			// A second version of one package in one file: the first row (lowest version)
+			// keeps the plain key, so rows written before this existed stay valid.
+			k.SK += depVersionSep + dep.Version
 		}
 		seen[k.SK] = true
 		if _, had := have[k.SK]; !had {

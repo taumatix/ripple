@@ -230,3 +230,39 @@ func TestActionsMissingWorkflowsPermissionOpensNoPR(t *testing.T) {
 		onePR(t, e, "acme/app", false)
 	})
 }
+
+// One action at two tag shapes in one workflow is two dependencies, each moved to the
+// newest tag of its own shape in its own PR, on every store.
+func TestActionsTwoShapesInOneFileOpenTwoPRs(t *testing.T) {
+	forEach(t, func(t *testing.T, st store.Store) {
+		e := newEnv(t, st, defaultLimits())
+		actionsUpstream(e, "up/action", "v4", "v5.0.0")
+		ci := "jobs:\n  a:\n    steps:\n      - uses: up/action@v4\n  b:\n    steps:\n      - uses: up/action@v5.0.0\n"
+		e.gh.AddRepo("acme/app", map[string]string{".ripple.yaml": actionsConfig, ".github/workflows/ci.yml": ci})
+		start(t, e, "acme/app")
+		e.clock.Advance(time.Minute)
+		addTags(e, "up/action", "v5", "v5.1.0")
+		e.tick()
+		e.tick()
+
+		prs := e.gh.PRs("acme/app")
+		if len(prs) != 2 {
+			t.Fatalf("want one PR per tag shape, got %+v", prs)
+		}
+		moved := map[string]bool{}
+		for _, pr := range prs {
+			f, _ := e.gh.FileAt("acme/app", pr.Head, ".github/workflows/ci.yml")
+			switch {
+			case strings.Contains(f, "up/action@v5\n") && strings.Contains(f, "up/action@v5.0.0\n"):
+				moved["v4"] = true
+			case strings.Contains(f, "up/action@v4\n") && strings.Contains(f, "up/action@v5.1.0\n"):
+				moved["v5.0.0"] = true
+			default:
+				t.Errorf("PR %s moved something else:\n%s", pr.Head, f)
+			}
+		}
+		if len(moved) != 2 {
+			t.Errorf("both references should have a PR of their own: %v", moved)
+		}
+	})
+}

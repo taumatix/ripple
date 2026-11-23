@@ -6,7 +6,7 @@ Billing is on-demand. `Store.EnsureTable` creates both.
 | Entity | PK | SK | GSI1PK | GSI1SK |
 |---|---|---|---|---|
 | repo | `REPO#<repo>` | `META` | | |
-| dependency | `REPO#<repo>` | `DEP#<file>\x1f<ds>\x1f<pkg>` | `PKG#<ds>#<line>[\x1f<shard>]` | `<repo>\x1f<file>` |
+| dependency | `REPO#<repo>` | `DEP#<file>\x1f<ds>\x1f<pkg>[\x1e<version>]` | `PKG#<ds>#<line>[\x1f<shard>]` | `<repo>\x1f<file>` |
 | release | `PKG#<ds>#<pkg>` | `REL#<version>` | | |
 | job | `JOB#<key>` | `META` | `JOBS#pending[#<shard>]` (only while pending) | `<not_before, fixed width>\x1f<key>` |
 | cursor | `CURSOR#<name>` | `META` | | |

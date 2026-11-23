@@ -29,6 +29,9 @@ type GoVerify struct {
 	// release the module's go.mod names, found by FindGo. It is still run with
 	// GOTOOLCHAIN=local, so nothing is downloaded.
 	GoBinary string
+	// Image, when set, is the container image that carries the Go the module names; a
+	// container sandbox runs the step in it instead of its default image.
+	Image string
 }
 
 type goVerifyKey struct{}

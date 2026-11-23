@@ -84,7 +84,7 @@ func New(ctx context.Context, s *config.Server, log *slog.Logger) (a *App, st st
 	}
 	eng := &engine.Engine{Store: st, Platform: mux, Log: log, Workers: s.Workers,
 		MaxFiles: s.MaxFiles, MaxDependencies: s.MaxDependencies, MaxBackfill: s.MaxBackfill,
-		GoCC: s.GoCC, GoToolchainDir: s.GoToolchainDir, GoProxyUser: s.GoProxyUser, GoProxyToken: s.GoProxyToken,
+		GoCC: s.GoCC, GoToolchainDir: s.GoToolchainDir, GoImages: s.ContainerGoImages, GoProxyUser: s.GoProxyUser, GoProxyToken: s.GoProxyToken,
 		Limits: rules.Limits{MinimumReleaseAge: s.MinimumReleaseAge, OpenPRLimit: s.OpenPRLimit, AllowAutomerge: s.AllowAutomerge}}
 	eng.Lookup = &feed.GoProxyLookup{BaseURL: s.GoProxy, User: s.GoProxyUser, Token: s.GoProxyToken,
 		UserAgent: "ripple (+https://github.com/taumatix/ripple)"}

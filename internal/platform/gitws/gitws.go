@@ -555,6 +555,7 @@ func (w *workspace) RunGo(ctx context.Context, dir string, args ...string) (stri
 	if no, ok := w.o.Sandbox.(sandbox.NetworkOwner); ok && no.OwnsNetwork() {
 		// A container cannot reach a loopback gate: the backend decides the network.
 		pol.Proxy = proxy
+		pol.Image = gv.Image
 		if credentialed {
 			// The container has to authenticate itself, so the credential is go's own
 			// GOPROXY userinfo; it reaches the container through the client's

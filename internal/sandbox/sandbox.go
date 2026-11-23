@@ -35,6 +35,10 @@ type Policy struct {
 	// (NetworkOwner): empty means no network at all. Backends that filter by loopback
 	// port use LoopbackPorts and a Gate instead and ignore it.
 	Proxy string
+	// Image, when set, is the image a container backend runs this command in instead of
+	// its configured one (the Go minor a module names, RIPPLE_CONTAINER_GO_IMAGES).
+	// Backends that run no image ignore it.
+	Image string
 }
 
 // NetworkOwner marks a backend that cannot reach a loopback gate on the host (a

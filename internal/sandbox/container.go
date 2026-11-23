@@ -116,6 +116,9 @@ func (c container) Wrap(p Policy, argv []string) ([]string, error) {
 	if err := checkPolicy(p, argv); err != nil {
 		return nil, err
 	}
+	if strings.HasPrefix(p.Image, "-") {
+		return nil, fmt.Errorf("sandbox: image %q would be read as an option", p.Image)
+	}
 	mounts := mountSet(append([]string{p.Workdir}, p.Writable...))
 	for _, d := range p.Deny {
 		for _, m := range mounts {
@@ -171,7 +174,11 @@ func (c container) Wrap(p Policy, argv []string) ([]string, error) {
 	if filepath.IsAbs(cmd[0]) {
 		cmd[0] = filepath.Base(cmd[0])
 	}
-	return append(append(out, c.o.Image), cmd...), nil
+	image := c.o.Image
+	if p.Image != "" {
+		image = p.Image
+	}
+	return append(append(out, image), cmd...), nil
 }
 
 // Reap kills and removes the container a Wrap'd argv started. The client process being

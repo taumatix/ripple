@@ -84,6 +84,16 @@ jobs:
           go test -tags containerlive -count=1 -v -timeout 20m -run 'TestContainerRuntimeLive|TestContainerConfinedNetworkLive' ./internal/sandbox/ | tee live.log
       - name: build the runner image (git and a pinned Go)
         run: ${{ matrix.runtime }} build -t localhost/ripple-runner:ci -f docker/runner/Dockerfile docker/runner
+      - name: build a runner image per Go minor (RIPPLE_CONTAINER_GO_IMAGES)
+        run: |
+          set -e
+          for minor in 1.26 1.27; do
+            ${{ matrix.runtime }} build --build-arg GO_VERSION=$minor -t localhost/ripple-runner:$minor -f docker/runner/Dockerfile docker/runner
+            v=$(${{ matrix.runtime }} run --rm localhost/ripple-runner:$minor go version)
+            echo "$v"
+            case "$v" in *" go$minor"*) ;; *) echo "image for $minor runs: $v"; exit 1;; esac
+            ${{ matrix.runtime }} run --rm localhost/ripple-runner:$minor git --version
+          done
       - name: live container tests on the runner image and the server's wiring
         env:
           RIPPLE_TEST_CONTAINER_FLAVOUR: ${{ matrix.runtime }}

@@ -13,6 +13,17 @@ import (
 var goReleaseDir = regexp.MustCompile(`^go(1\.[0-9]+)(?:\.([0-9]+))?$`)
 var goLineVersion = regexp.MustCompile(`^(?:go)?(1\.[0-9]+)(?:\.([0-9]+))?$`)
 
+// GoMinor returns the minor ("1.26") of a go or toolchain line ("1.26.1", "go1.26rc1"), or
+// "" when it has none.
+func GoMinor(line string) string {
+	if m := goMinorOf.FindStringSubmatch(line); m != nil {
+		return m[1]
+	}
+	return ""
+}
+
+var goMinorOf = regexp.MustCompile(`^(?:go)?(1\.[0-9]+)(?:$|[.]|rc|beta)`)
+
 // FindGo returns the go binary under dir for the Go release a go.mod names, and the
 // release's version without the "go" prefix. The toolchain line wins and must match
 // exactly; without one the go line selects the newest installed patch of its minor

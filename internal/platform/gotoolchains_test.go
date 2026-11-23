@@ -59,3 +59,11 @@ func TestFindGoSkipsADirectoryWithoutABinary(t *testing.T) {
 		t.Errorf("release %q, want the one that has a binary", rel)
 	}
 }
+
+func TestGoMinor(t *testing.T) {
+	for in, want := range map[string]string{"1.26": "1.26", "1.26.1": "1.26", "go1.25.3": "1.25", "go1.27rc1": "1.27", "1.28beta1": "1.28", "default": "", "": "", "2.0": ""} {
+		if got := GoMinor(in); got != want {
+			t.Errorf("GoMinor(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

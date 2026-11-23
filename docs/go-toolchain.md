@@ -76,6 +76,7 @@ A workflow under a module's own `.github/workflows/` is not followed: GitHub onl
   directive moved above the server's Go is checked by that Go and no longer opens a draft. A module with no
   matching release, or no directory set, uses the server's Go as before. Still `GOTOOLCHAIN=local`: ripple
   downloads nothing and the PR body says which release ran. Not available with the container sandboxes, whose
-  image carries its own Go; the server refuses to start with both.
+  image carries its own Go; the server refuses to start with both. A container sandbox picks the Go by image instead
+  (`RIPPLE_CONTAINER_GO_IMAGES`, [sandbox.md](sandbox.md)).
 
 The release list is fetched only while some repo has opted in.

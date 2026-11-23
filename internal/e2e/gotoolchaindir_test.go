@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/taumatix/ripple/internal/engine"
+	"github.com/taumatix/ripple/internal/sandbox"
 	"github.com/taumatix/ripple/internal/store"
+	"github.com/taumatix/ripple/internal/testutil"
 )
 
 // installFakeGo puts a go.dev-shaped release directory under dir whose bin/go logs its
@@ -99,4 +101,51 @@ func TestMissingReleaseFallsBackToTheServersGo(t *testing.T) {
 			t.Errorf("an unrelated release must not run:\n%s", got)
 		}
 	})
+}
+
+// With a container sandbox the Go the bump names is chosen by image: the go steps run in
+// the image configured for the minor the go.mod names, local git keeps the default image,
+// and the PR body names the image.
+func TestVerifyRunsInTheImageForTheGoMinorTheBumpNames(t *testing.T) {
+	rt := testutil.NewFakeRuntime(t)
+	sb, err := sandbox.DetectWith("docker", func(string) (string, error) { return rt.Bin, nil },
+		sandbox.ContainerOptions{Image: "golang:default"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := localMinor(t)
+	img := fmt.Sprintf("runner:1.%d", n+1)
+	dl := newDL(t)
+	e := newEnvOpts(t, store.NewMemory(), defaultLimits(), opts{goDL: dl, sandbox: sb, engine: func(en *engine.Engine) {
+		en.GoImages = map[string]string{fmt.Sprintf("1.%d", n+1): img, fmt.Sprintf("1.%d", n-5): "runner:old"}
+	}})
+	dl.Set(goVer(n+2, 1), goVer(n+1, 1))
+	e.gh.AddRepo("acme/app", withMode(tcRepo(fmt.Sprintf("1.%d", n-1), ""), "directive"))
+	start(t, e, "acme/app")
+	e.clock.Advance(time.Minute)
+	e.tick()
+	// The fake runtime runs the host's Go, which is below the directive, so the PR is a
+	// draft: what is asserted is which image each step was given.
+	_, body := onePR(t, e, "acme/app", true)
+	var goInImage, gitInDefault int
+	for _, run := range rt.Runs() {
+		j := strings.Join(run, " ")
+		switch {
+		case strings.Contains(j, " "+img+" go "):
+			goInImage++
+		case strings.Contains(j, " golang:default git "):
+			gitInDefault++
+		case strings.Contains(j, " go ") && !strings.Contains(j, " git "):
+			t.Errorf("a go step ran outside %s: %v", img, run)
+		}
+		if strings.Contains(j, "runner:old") {
+			t.Errorf("the image of another minor ran: %v", run)
+		}
+	}
+	if goInImage == 0 || gitInDefault == 0 {
+		t.Errorf("go steps in the image=%d, git steps in the default=%d\n%v", goInImage, gitInDefault, rt.Runs())
+	}
+	if !strings.Contains(body, img) {
+		t.Errorf("body should name the image:\n%s", body)
+	}
 }

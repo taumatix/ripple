@@ -213,3 +213,22 @@ func TestContainerClientEnvPointsGoproxyAtTheSidecar(t *testing.T) {
 		t.Errorf("GOPROXY = %q, want the sidecar and never the job's credentialed URL", env["GOPROXY"])
 	}
 }
+
+// Policy.Image replaces the configured image for that one command, and an image that
+// would be read as an option is refused.
+func TestContainerPolicyImageOverridesTheDefault(t *testing.T) {
+	p := jobPolicy
+	p.Image = "runner:1.26"
+	got := wrapContainer(t, FlavourDocker, ContainerOptions{}, p, "/opt/go/bin/go", "build")
+	if !has(got, "runner:1.26", "go", "build") || has(got, "img:1") {
+		t.Errorf("argv should run runner:1.26 only: %v", got)
+	}
+	b, err := Container(FlavourDocker, "/usr/bin/rt", ContainerOptions{Image: "img:1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.Image = "--privileged"
+	if _, err := b.Wrap(p, []string{"go", "build"}); err == nil {
+		t.Error("an option-shaped image was accepted")
+	}
+}

@@ -61,8 +61,11 @@ auth model, rate limits); the notes below are what I expect, **unverified** unti
     answer, the scheduled-merge status code, whether Forgejo sends `X-Hub-Signature-256`, labels by name on create,
     and the git basic-auth user. Also: Forgejo before 7 cannot be detected (set `RIPPLE_GITEA_FLAVOUR`), and
     `repository` created/deleted webhooks are parsed but unproven.
-13. **Bitbucket Cloud.** Pull requests, repository webhooks, app passwords or OAuth consumers; no native
-    auto-merge, so automerge is a merge-check poll or unsupported (say which).
+13. **Bitbucket Cloud against a real workspace.** The host shipped from vendored docs and a fake only
+    (docs/platform-bitbucket.md "Unverified"). Record the 429 headers, the 202 of a queued merge, `x-token-auth`
+    with an API token, and merge-commit diffstats. Also: auto-merge exists only through merge queues, so a
+    merge-check poll is the open design question if queues stay a paid feature; webhooks are created by hand,
+    so per-workspace webhook registration is a follow-up.
 14. **Azure DevOps.** Service hooks (code pushed, PR events), PAT or Entra token, auto-complete on PRs,
     organisation/project/repo hierarchy instead of owner/repo.
 15. **Bitbucket Server / Data Center.** A different REST API from Bitbucket Cloud; webhooks per

@@ -58,6 +58,17 @@ upstream:
     webhooks: [Push Hook, header X-Gitlab-Token or Standard Webhooks signature (webhook-id, webhook-timestamp, webhook-signature = v1,base64(HMAC-SHA256(key, id.timestamp.body)), key from whsec_ token)]
     unverified: "everything: no real GitLab instance was available. Request and response shapes, the 429 Retry-After handling, auto_merge acceptance and the signature scheme are from the vendored docs; the fake GitLab in internal/testutil is written from them, not recorded. The signature vector was computed with openssl, not taken from GitLab"
     checked: 2026-11-23
+  - name: bitbucket-cloud
+    kind: http-api
+    reference: https://developer.atlassian.com/cloud/bitbucket/rest/intro/
+    docs: https://support.atlassian.com/bitbucket-cloud/docs/manage-webhooks/
+    vendored: docs/vendor/bitbucket-cloud/
+    api-version: "2.0"
+    used: [GET /repositories/{workspace}, GET and POST /repositories/{ws}/{repo}/pullrequests, GET /repositories/{ws}/{repo}/merge-queues, POST /pullrequests/{n}/merge (queue only, async=true), GET /repositories/{ws}/{repo}/diffstat/{commit}]
+    webhooks: [repo:push, "signature X-Hub-Signature = sha256=hex HMAC-SHA256(body); secret optional upstream, required by ripple"]
+    auth: "Authorization: Bearer <access or API token>; git basic auth x-token-auth"
+    unverified: "429 headers; queued-merge 202 and Location; x-token-auth with API tokens; merge-commit diffstat; the fake is written from docs, not recorded"
+    checked: 2026-11-23
 ```
 
 Not pinned, because they are not wire contracts: `git` (any version with `GIT_CONFIG_COUNT`,

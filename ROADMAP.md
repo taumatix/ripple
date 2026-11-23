@@ -184,8 +184,6 @@ Everything else:
     fetches; they fall back to a full checkout, unmeasured. Check each and record which saves anything.
 90. **Partial scan relies on non-cone sparse checkout.** Git marks it deprecated. Move the batched blob
     fetch to `git fetch --stdin` of object ids or `git backfill` once they work on a `--depth 1` clone.
-91. **Go version in more files.** `.mise.toml`, `.devcontainer/devcontainer.json`, `go.work`, `Makefile`
-    variables and workflows in a module subdirectory are not followed by a toolchain bump.
 92. **Supersede against real hosts.** GitHub, GitLab, Gitea/Forgejo, Bitbucket Cloud and Data Center, Gerrit and
     CodeCommit close or abandon a stale PR, written from vendored docs and checked only against fakes. Several
     reads rest on source or assumptions (GitLab and Gitea system-note and timeline wording, CodeCommit commenting

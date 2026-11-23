@@ -265,7 +265,6 @@ func (e *env) install(names ...string) {
 	for _, n := range names {
 		e.waitRepo(n)
 	}
-	e.waitQueueIdle()
 }
 
 // waitQueueIdle waits until the receiver has finished every delivery it accepted. A repo is
@@ -276,12 +275,23 @@ func (e *env) waitQueueIdle() {
 	e.eventually("event queue idle", func() bool { return e.app.Queue.Len() == 0 })
 }
 
-func (e *env) waitRepo(name string) {
+// waitRegistered waits for the repo row only: its scan or backfill may still be running.
+func (e *env) waitRegistered(name string) {
 	e.t.Helper()
 	e.eventually(fmt.Sprintf("repo %s registered", name), func() bool {
 		_, ok, err := e.st.GetRepo(context.Background(), name)
 		return err == nil && ok
 	})
+}
+
+// waitRepo waits until the repo is registered and every accepted delivery has been handled,
+// so its first scan and dependency backfill are over and the test can act on its
+// dependencies. Tests that hold a checkout open (so the queue never drains) use
+// waitRegistered.
+func (e *env) waitRepo(name string) {
+	e.t.Helper()
+	e.waitRegistered(name)
+	e.waitQueueIdle()
 }
 
 func (e *env) eventually(what string, f func() bool) {

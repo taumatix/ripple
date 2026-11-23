@@ -907,7 +907,34 @@ func splitKeyCondition(n *node, hashA, rngA string) (av, *node, error) {
 	if pk == nil {
 		return nil, nil, validation("Query condition missed key schema element: " + hashA)
 	}
+	// DynamoDB Local, the source of truth, refuses an empty string in a key condition, the sort
+	// key's bound as much as the partition key's value; a caller that pages from the start leaves
+	// the bound out. (The fake used to accept it and the store's first page passed on the fake only.)
+	if emptyKeyValue(pk) {
+		return nil, nil, emptyKey(hashA)
+	}
+	if sortCond != nil {
+		for _, a := range sortCond.args[1:] {
+			if a.isVal && emptyKeyValue(a.val) {
+				return nil, nil, emptyKey(rngA)
+			}
+		}
+	}
 	return pk, sortCond, nil
+}
+
+func emptyKeyValue(v av) bool {
+	if s, ok := v["S"].(string); ok {
+		return s == ""
+	}
+	if b, ok := v["B"].(string); ok {
+		return b == ""
+	}
+	return false
+}
+
+func emptyKey(attr string) error {
+	return validation("One or more parameter values are not valid. The AttributeValue for a key attribute cannot contain an empty string value. Key: " + attr)
 }
 
 func equalAV(a, b av) bool { c, ok := compare(a, b); return ok && c == 0 }

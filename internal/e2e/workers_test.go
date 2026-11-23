@@ -53,7 +53,7 @@ func TestNoisyInstallationDoesNotDelayAnother(t *testing.T) {
 		if c := e.post("installation", "quiet-1", sign(body), body); c != http.StatusAccepted {
 			t.Fatalf("quiet delivery: %d", c)
 		}
-		e.waitRepo("quiet/app")
+		e.waitRegistered("quiet/app")
 		for _, n := range noisy {
 			if e.registered(n) {
 				t.Fatalf("%s registered while its checkout is held", n)
@@ -63,7 +63,7 @@ func TestNoisyInstallationDoesNotDelayAnother(t *testing.T) {
 			e.plat.Release(n)
 		}
 		for _, n := range noisy {
-			e.waitRepo(n)
+			e.waitRegistered(n)
 			if c := e.plat.Calls(n); c != 1 {
 				t.Errorf("%s scanned %d times, want 1", n, c)
 			}
@@ -97,12 +97,12 @@ func TestEventBacklogCapAnswers503(t *testing.T) {
 		if c := e.post("installation", "quiet-1", sign(quiet), quiet); c != http.StatusAccepted {
 			t.Fatalf("other installation: %d", c)
 		}
-		e.waitRepo("quiet/app")
+		e.waitRegistered("quiet/app")
 		for _, n := range held {
 			e.plat.Release(n)
 		}
 		for _, n := range held[:3] {
-			e.waitRepo(n)
+			e.waitRegistered(n)
 		}
 		if e.registered(held[3]) {
 			t.Fatal("the refused event was handled")
@@ -112,7 +112,7 @@ func TestEventBacklogCapAnswers503(t *testing.T) {
 		if c := e.post("installation", "busy-2", sign(over), over); c != http.StatusAccepted {
 			t.Fatalf("redelivery: %d", c)
 		}
-		e.waitRepo(held[3])
+		e.waitRegistered(held[3])
 	})
 }
 
@@ -139,7 +139,7 @@ func TestRestartResumesQueuedEvents(t *testing.T) {
 		}
 		e.startApp()
 		for _, n := range names {
-			e.waitRepo(n)
+			e.waitRegistered(n)
 		}
 		e.eventually("queue drained", func() bool { return e.queued() == 0 })
 	})

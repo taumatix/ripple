@@ -52,6 +52,7 @@ func (e *Engine) FanOut(ctx context.Context, rel model.Release) (int, error) {
 		}
 		if inserted {
 			n++
+			e.markDashboard(d.Repo)
 		}
 	}
 	return n, nil

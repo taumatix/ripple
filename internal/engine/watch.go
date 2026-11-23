@@ -27,6 +27,7 @@ type Watcher struct {
 // On first run it starts at the current time rather than replaying history.
 func (w *Watcher) Poll(ctx context.Context) (int, error) {
 	e := w.Engine
+	defer e.flushDashboards(ctx)
 	name := w.Feed.Name()
 	cursor, err := e.Store.GetCursor(ctx, name)
 	if err != nil {

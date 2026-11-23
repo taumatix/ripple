@@ -59,6 +59,7 @@ Optional, each a separate interface in `internal/platform/host.go`; implement it
 |---|---|---|
 | `AutoMerger` | the host can merge on green (GitLab MWPS, Azure auto-complete, Gitea/Forgejo auto-merge) | PRs stay open for review; the job still succeeds |
 | `PRCloser` | the host can tell whether a person touched a PR, comment on it and close it (see below) | a superseded PR stays open next to the new one; the job still succeeds |
+| `IssueTracker` | the host has issues ripple may write (find by label and marker, create, update the body): the dependency dashboard | no dashboard; `ErrNoIssues`, never an error for the job |
 | `RateLimiter` | always, if the host rate-limits. Record the last `Until` per credential scope | one limited host keeps getting calls until each one fails |
 | `Lister` | the host has no install event (CodeCommit, Gerrit, SCM-Manager, a PAT-only setup) | repos register only through the receiver |
 | `LegacyConfig` | never: `.github/ripple.yml` is GitHub's alone | only `.ripple.yaml` at the repo root is read |

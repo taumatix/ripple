@@ -73,6 +73,10 @@ type Engine struct {
 
 	mu    sync.Mutex
 	locks map[string]*sync.Mutex
+	// dirty is the repos whose jobs changed outside their own run, and dashOff the
+	// repos whose issues could not be written until a time; both see dashboard.go.
+	dirty   map[string]bool
+	dashOff map[string]time.Time
 }
 
 func (e *Engine) now() time.Time {
@@ -118,6 +122,7 @@ func RepoConfig(raw []byte) (*config.Repo, error) {
 // the file is fixed.
 func (e *Engine) Scan(ctx context.Context, repo model.Repo) error {
 	defer e.lockRepo(repo.FullName)()
+	defer func() { e.syncDashboard(ctx, repo.FullName) }()
 	ws, err := e.Platform.Checkout(ctx, repo)
 	if err != nil {
 		return fmt.Errorf("scan %s: %w", repo.FullName, err)

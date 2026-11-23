@@ -97,7 +97,6 @@ Everything else:
    `go run <package>`; the rest is reported in the PR body, not changed. Handle `go run pkg@vX` (pick a
    version of the new major), other generators that take import paths (`mockgen`, `stringer -type`), and
    `go tool`; examine directives in files whose body does not parse.
-27. **Dependency dashboard issue.** One issue per repo listing pending, deferred and failed jobs.
 29. **More datasources and feeds, as many ecosystems as Renovate has.** npm replicate, PyPI, crates.io
    sparse index, Maven, NuGet, RubyGems, Packagist, Docker/OCI tags, GitHub releases/tags, Helm, Terraform
    registry. Where a registry has a changes feed, use it; where it has none (OCI registries), fall back to polling
@@ -205,3 +204,18 @@ Everything else:
     signed body over 64 KiB is spooled to a temp file (`MaxInflight` x `MaxBody` of disk). Also set
     `http.Server.ReadHeaderTimeout`/`ReadTimeout` in `cmd`, since the per-body deadline needs a ResponseWriter
     that supports deadlines.
+67. **Dependency dashboard: a "re-run now" control, and more hosts.** The dashboard (opt-in
+    `dependency-dashboard`) is a read-only report. A checkbox that releases a deferred job early needs the
+    `issues` webhook, a check of the editor's repository permission (never the issue's text) and an audit
+    line; do that or leave it out for good. Only GitHub has an issue tracker implementation: GitLab, Gitea and
+    Forgejo issues, and Azure Boards, are the same `platform.IssueTracker` interface. Also list ripple's open PRs
+    and the jobs skipped for an invalid config, so the issue answers "what is ripple waiting on" completely.
+68. **Dashboard bookkeeping gaps.** The set of repos to refresh after a feed poll is in memory, so a restart
+    drops it until the repo's next run or scan. A person's edit to the dashboard body is not noticed until the
+    jobs change (the stored hash is of what ripple last wrote). Turning the key off leaves the issue as it was
+    instead of closing it. A repo with issues unavailable is retried hourly, in memory only.
+69. **DynamoDB per-repo open-job copies.** `ListOpenJobs` reads `REPO#<repo>` / `OPENJOB#<key>` items written on
+    `EnqueueJob` and `UpdateJob`. A job that was already pending before this version is absent from its repo's
+    dashboard until its next write, and a crash between the job write and the copy write leaves a stale copy
+    until the next one. Add a one-off backfill from the job index and reconcile on read. Postgres and DynamoDB
+    paths are covered only by CI.

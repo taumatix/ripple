@@ -68,10 +68,16 @@ func pushRescan(t *testing.T, f Fixture) {
 	e.register("p", "bystander")
 	bystander := e.calls("bystander")
 
-	idle := e.calls("p")
+	idle, idleScans := e.calls("p"), e.plat.Calls(e.name("p"))
 	e.push("p", map[string]string{"README.md": "hello\n"})
 	time.Sleep(300 * time.Millisecond) // the push is queued; give a wrong re-scan time to happen
-	if n := e.calls("p") - idle; n != 0 {
+	if _, fileless := f.(FilelessPushes); fileless {
+		// The host's push event lists no files, so deciding costs API calls; it must
+		// still cost no scan, which is the checkout.
+		if n := e.plat.Calls(e.name("p")) - idleScans; n != 0 {
+			t.Errorf("a push touching no relevant file cost %d platform calls (a re-scan)", n)
+		}
+	} else if n := e.calls("p") - idle; n != 0 {
 		t.Errorf("a push touching no relevant file cost %d calls", n)
 	}
 

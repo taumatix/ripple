@@ -62,6 +62,12 @@ type Fixture interface {
 	RateLimitNextPR() bool
 }
 
+// FilelessPushes is implemented by a Fixture whose host's push event lists no changed
+// files (Bitbucket Cloud). Its platform resolves them with an API call per push, so
+// the suite counts an irrelevant push's cost in platform calls (a scan) and not in
+// API requests; it must still trigger no scan.
+type FilelessPushes interface{ FilelessPushes() }
+
 // Run runs every conformance test against f.
 func Run(t *testing.T, f Fixture) {
 	t.Run("ReleaseOpensOnePRInExactlyTheImportingRepos", func(t *testing.T) { releaseFanOut(t, f) })

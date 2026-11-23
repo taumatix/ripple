@@ -4,6 +4,9 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
 
 ## [Unreleased]
 
+### Added
+- Bitbucket Cloud host (`RIPPLE_BITBUCKET_*`): workspace discovery, `repo:push` webhooks (changed files from the diffstat), pull requests, and auto-merge through merge queues only (otherwise reported unsupported). The platform conformance suite gains an optional `FilelessPushes` marker for hosts whose push payload lists no files. See [docs/platform-bitbucket.md](docs/platform-bitbucket.md).
+
 ### Security
 - OS-level sandbox for `go` and local `git` (`RIPPLE_SANDBOX`: `none` (default), `auto`, `seatbelt`, `bwrap`).
   Under `seatbelt` (macOS) the commands run with every path unreadable and unwritable except the

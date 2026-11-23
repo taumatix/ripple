@@ -65,11 +65,12 @@ Optional, each a separate interface in `internal/platform/host.go`; implement it
 | `LegacyConfig` | never: `.github/ripple.yml` is GitHub's alone | only `.ripple.yaml` at the repo root is read |
 
 `PRCloser.CloseUntouchedPR(repo, pr, comment)` is how ripple closes its own PR when a newer version of the
-same module gets one (ROADMAP entry 24). The engine decides *which* PR is stale (a ripple branch of the same
+same module gets one (the engine retries a failed close on the next run of the repo and closes a stale PR that holds the open-PR limit's slot). The engine decides *which* PR is stale (a ripple branch of the same
 module, strictly older version) and the host decides whether it is *safe*: close only when every commit on the
 branch is ripple's (`gitws.AuthorEmail`), and there is no review, comment or rename; return `false, nil` and
-change nothing otherwise, and return an error, with the PR left open, when any of those reads fails. Comment
-first, then close; do not delete the branch. A host that cannot answer "did a person touch it" reliably should
+change nothing otherwise, and return an error, with the PR left open, when any of those reads fails. Close
+first, then comment (best effort, a failed comment is logged), so a retry never repeats a comment; do not delete
+the branch. Also read what the host can report of an edited description, a rewritten branch and a rename. A host that cannot answer "did a person touch it" reliably should
 not implement it. The conformance suite closes only where the interface is implemented, so a fixture whose
 host implements it must report `Closed` and `Comments` in `PRs`.
 

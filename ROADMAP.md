@@ -112,15 +112,6 @@ Everything else:
 43. **Verify a Go bump with the Go it names.** Verification runs with the server's installed Go
     (`GOTOOLCHAIN=local`), so a directive above it opens a draft and a toolchain bump is checked
     against a different Go. Offer a toolchain image per supported minor; CI stays the real check until then.
-45. **Stale PRs count toward the open-PR limit.** At the limit, a superseded PR holds the slot the newer PR
-    needs, so the newer one is deferred and never supersedes it. Close (or recycle) the stale PR before the
-    limit check when its replacement is the pending plan.
-46. **Close superseded PRs on the other hosts.** Only GitHub implements `platform.PRCloser`; each host needs
-    its own "touched by a person" read (commits, comments, rename) and a conformance fixture reporting `Closed`
-    and `Comments`. Also delete the stale branch once a host's seam does that safely.
-47. **Retry a failed supersede and cover edits.** A close that failed is retried only by the next newer
-    release; a PR that was already open for the new version is never revisited. GitHub's check also misses
-    an edited description and a force-push using ripple's commit identity.
 51. **OSV: should a security PR bypass the open-PR limit and the schedule?** Today only the cooldown is skipped.
     Needs a decision from real use. Trade-offs: bypassing the limit makes a security fix arrive even when a repo
     is at its cap of open PRs (the case where it matters most) but lets one advisory affecting many modules open
@@ -258,3 +249,18 @@ Everything else:
     fetch to `git fetch --stdin` of object ids or `git backfill` once they work on a `--depth 1` clone.
 91. **Go version in more files.** `.mise.toml`, `.devcontainer/devcontainer.json`, `go.work`, `Makefile`
     variables and workflows in a module subdirectory are not followed by a toolchain bump.
+92. **Supersede against real hosts.** GitHub, GitLab, Gitea/Forgejo, Bitbucket Cloud and Data Center, Gerrit and
+    CodeCommit close or abandon a stale PR, written from vendored docs and checked only against fakes. Several
+    reads rest on source or assumptions (GitLab and Gitea system-note and timeline wording, CodeCommit commenting
+    on a closed PR, Gerrit abandon permission). Run each once on a real instance and record it.
+93. **Azure DevOps and SCM-Manager cannot close a superseded PR.** Azure exposes no edit history of a title or
+    description; SCM-Manager's reject, comment and history endpoints are documented only in plugin source. Add
+    the closer when either API gives a reliable "a person touched it" read.
+94. **Edits no host can report.** Not detected: a description edit on Forgejo, Bitbucket Cloud (beyond its
+    activity log), CodeCommit and Gerrit; a changed label, assignee or reviewer on GitLab and Gerrit; a
+    force-push under ripple's own commit identity on Gerrit, Bitbucket Cloud and CodeCommit. A person who does
+    one of these loses nothing only if ripple stored what it opened: record the head SHA and body hash on the
+    job and compare, which would cover every host the same way.
+95. **Supersede re-reads touched PRs every run.** A stale PR a person touched is checked again (about six
+    reads) each time ripple works on the repo, because the retry cannot tell it from a failed close. Remember
+    "touched" on the job, cleared when the PR changes.

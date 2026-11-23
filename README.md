@@ -91,13 +91,15 @@ updates:
 - `automerge: major` is the only way a major update is ever merged automatically; `patch` and
   `minor` never include one.
 - `close-superseded-pull-requests` (default `true`): when a newer release of the same module gets its own
-  ripple PR, ripple closes its older PR for that module with a comment pointing at the new one. It never
-  closes a PR for another module, for an equal or newer version, a group PR, or one whose replacement is a
-  draft. It never closes a PR a person touched: a commit by anyone but ripple, a review, a review comment, a
-  comment, or a rename. Each of those is checked on every close, and a check that fails closes nothing. It
-  does not delete the branch (turn on "automatically delete head branches" in the repository settings), and
-  it does not notice an edited description. Only the GitHub host can close pull requests so far; on the
-  others both PRs stay open. Set it to `false` to keep every PR.
+  ripple PR, ripple closes its older PR for that module with a comment pointing at the new one. At the
+  open-PR limit it closes the stale one first, so the newer PR is not deferred behind it. It only closes a PR
+  its own job record says it opened, never one for another module, for an equal or newer version, a group
+  PR, or one whose replacement is a draft, and never one a person touched (a commit, review, comment,
+  rename, and where the host reports it an edited description or a force-push). Each check runs on every
+  close and a check that fails closes nothing; a close that failed is retried the next time ripple works on the
+  repo. It does not delete the branch. GitHub, GitLab, Gitea/Forgejo, Bitbucket Cloud and Data Center, Gerrit
+  (abandon) and CodeCommit can close; Azure DevOps and SCM-Manager cannot do it safely, so both PRs stay open
+  there (see each `docs/platform-<host>.md`). Set it to `false` to keep every PR, on every host.
 - `dependency-dashboard` (default `false`): keeps one issue per repo, labelled `ripple` and recognised by a
   marker comment on its first line, listing the jobs that are pending (with the time they wait until, for
   a cooldown or schedule), and the ones that failed. It is rewritten at the end of each pass, and not at

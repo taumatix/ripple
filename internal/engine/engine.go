@@ -317,7 +317,11 @@ func (e *Engine) scan(ctx context.Context, repo model.Repo) error {
 
 // Remove forgets a repo (App uninstalled or repo removed from the installation).
 func (e *Engine) Remove(ctx context.Context, name string) error {
-	defer e.lockRepo(name)()
+	ctx, _, release, err := e.leaseRepo(ctx, name)
+	if err != nil {
+		return err
+	}
+	defer release()
 	if err := e.Store.SetCursor(ctx, pausedCursor+name, ""); err != nil {
 		return err
 	}

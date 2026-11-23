@@ -181,3 +181,46 @@ func TestASecurityToolchainPRLeavesATouchedDirectivePRAlone(t *testing.T) {
 		}
 	}
 }
+
+// Entry 127: a security toolchain PR that is open when a higher security toolchain fix
+// arrives edits the same line, so it is closed (untouched, with a reason) and only the
+// higher one stays open. The supersede flow already does this for the same package, which
+// is what this test pins; entry 127 listed it as open.
+func TestAHigherSecurityToolchainPRClosesAnOpenLowerOne(t *testing.T) {
+	forEachFake(t, func(t *testing.T, st store.Store) {
+		e, _, osv, n := conflictEnv(t, st)
+		e.clock.Advance(time.Minute)
+		osv.Publish("GO-2026-7201", e.clock.Now(), osvRecord("GO-2026-7201", "stdlib", fmt.Sprintf(`,{"fixed":"1.%d.5"}`, n-2)))
+		start(t, e, "acme/app")
+		e.tick()
+		var lower testutil.PR
+		for _, p := range e.gh.PRs("acme/app") {
+			if strings.HasPrefix(p.Title, "[security] Update the Go toolchain") {
+				lower = p
+			}
+		}
+		if lower.Number == 0 {
+			t.Fatalf("precondition: want the lower security PR open: %+v", e.gh.PRs("acme/app"))
+		}
+
+		e.clock.Advance(time.Minute)
+		osv.Publish("GO-2026-7200", e.clock.Now(), toolchainFix(n))
+		e.tick()
+		e.tick()
+
+		open := 0
+		for _, p := range e.gh.PRs("acme/app") {
+			switch {
+			case p.Number == lower.Number:
+				if !p.Closed || !strings.Contains(strings.Join(p.Comments, "\n"), "Superseded") {
+					t.Errorf("the lower security PR must be closed with a reason: %+v", p)
+				}
+			case !p.Closed && strings.HasPrefix(p.Title, "[security] Update the Go toolchain"):
+				open++
+			}
+		}
+		if open != 1 {
+			t.Errorf("want exactly the higher security PR open: %+v", e.gh.PRs("acme/app"))
+		}
+	})
+}

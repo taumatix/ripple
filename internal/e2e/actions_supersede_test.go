@@ -83,10 +83,12 @@ func TestActionsSupersedeKeepsTagShapesApart(t *testing.T) {
 		addTags(e, "up/action", "v5", "v5.0.0")
 		e.tick()
 		e.tick()
+		e.eventually("a PR per shape", func() bool { e.tick(); return len(e.gh.PRs("acme/app")) == 2 })
 		e.clock.Advance(time.Minute)
 		addTags(e, "up/action", "v5.1.0")
 		e.tick()
 		e.tick()
+		e.eventually("the v5.0.0 PR superseded", func() bool { e.tick(); return len(e.gh.PRs("acme/app")) == 3 && actionsOpenCount(e) == 2 })
 		if n := actionsOpenCount(e); n != 2 {
 			t.Errorf("the v5 PR and the v5.1.0 PR are both wanted, got %d open: %+v", n, e.gh.PRs("acme/app"))
 		}

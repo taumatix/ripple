@@ -76,8 +76,10 @@ func TestActionsSupersedeKeepsTagShapesApart(t *testing.T) {
 	forEach(t, func(t *testing.T, st store.Store) {
 		e := newEnv(t, st, defaultLimits())
 		actionsUpstream(e, "up/action", "v4", "v4.1.2")
-		ci := "jobs:\n  a:\n    steps:\n      - uses: up/action@v4\n  b:\n    steps:\n      - uses: up/action@v4.1.2\n"
-		e.gh.AddRepo("acme/app", map[string]string{".ripple.yaml": actionsConfig, ".github/workflows/ci.yml": ci})
+		// Two files: the stores keep one dependency per package and file.
+		e.gh.AddRepo("acme/app", map[string]string{".ripple.yaml": actionsConfig,
+			".github/workflows/a.yml": "jobs:\n  a:\n    steps:\n      - uses: up/action@v4\n",
+			".github/workflows/b.yml": "jobs:\n  b:\n    steps:\n      - uses: up/action@v4.1.2\n"})
 		start(t, e, "acme/app")
 		e.clock.Advance(time.Minute)
 		addTags(e, "up/action", "v5", "v5.0.0")

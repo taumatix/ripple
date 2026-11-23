@@ -162,6 +162,9 @@ still runs it, then keeps every original `go.mod` requirement and `go.sum` line 
 added or raised (go.sum lines below a version `go.mod` now selects are dropped), so the PR is the update and
 little else. A module that requires a `go.work` sibling without a `replace` is tidied with the sibling as a
 temporary local replace and built in workspace mode; a workspace-level `vendor/` is refreshed with `go work vendor`.
+`tidy: minimal` stays opt-in on purpose: the default is what `go mod tidy` writes, which a maintainer can
+reproduce by hand, and minimal adds a go.sum risk (a kept requirement whose lines are missing opens a draft).
+No real PR diffs yet show the trade is worth making the default.
 
 A major bump also rewrites the package of a plain `//go:generate go run <package>` and canonical
 `package p // import "..."` comments (both found with go/parser, never by pattern). Directives that

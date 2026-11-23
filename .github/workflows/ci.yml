@@ -36,7 +36,10 @@ jobs:
       - run: test -z "$(gofmt -l .)"
       - run: scripts/check-migration.sh
       - name: test (fails if the service-backed tests were skipped)
-        run: go test -race -count=1 -v ./... | tee test.log
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -race -count=1 -v ./... | tee test.log
       - run: |
           # RIPPLE_REQUIRE_SERVICES already fails a skipped service test; this catches any other skip.
           # The image smoke test skips here by design: the docker job runs it against the built image.

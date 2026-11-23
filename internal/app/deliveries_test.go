@@ -96,3 +96,19 @@ func TestDeliveryTTLNegativeDisablesTheStoreTable(t *testing.T) {
 		t.Fatalf("with the table off a fresh process handles the repeat: %v", queued(t, st))
 	}
 }
+
+// A delivery arriving while the queue loop starts must not race on the queue's defaults:
+// the receiver reads Queue.Now that Queue.Run fills in (run under -race).
+func TestDeliveryWhileQueueStartsDoesNotRace(t *testing.T) {
+	st := store.NewMemory()
+	a := replica(st, 0)
+	a.init() // as App.Run does before it starts anything
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { defer close(done); _ = a.Queue.Run(ctx) }()
+	if c := postSigned(a.Handler(), "race-1"); c != 202 {
+		t.Fatalf("delivery = %d", c)
+	}
+	cancel()
+	<-done
+}

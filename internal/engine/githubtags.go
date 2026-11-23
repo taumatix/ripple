@@ -28,9 +28,15 @@ var actionsPackagesMu sync.Mutex
 // lost update (two replicas racing) only delays a package until the next scan of
 // a repo that uses it.
 func (e *Engine) noteActionPackages(ctx context.Context, deps []model.Dependency) error {
+	return e.notePackages(ctx, model.DatasourceGitHubTags, actionsPackagesCursor, deps)
+}
+
+// notePackages adds the packages of deps on datasource ds to the newline-separated set
+// held in cursor.
+func (e *Engine) notePackages(ctx context.Context, ds, cursor string, deps []model.Dependency) error {
 	var add []string
 	for _, d := range deps {
-		if d.Datasource == model.DatasourceGitHubTags {
+		if d.Datasource == ds {
 			add = append(add, d.Package)
 		}
 	}
@@ -39,7 +45,7 @@ func (e *Engine) noteActionPackages(ctx context.Context, deps []model.Dependency
 	}
 	actionsPackagesMu.Lock()
 	defer actionsPackagesMu.Unlock()
-	raw, err := e.Store.GetCursor(ctx, actionsPackagesCursor)
+	raw, err := e.Store.GetCursor(ctx, cursor)
 	if err != nil {
 		return err
 	}
@@ -59,7 +65,7 @@ func (e *Engine) noteActionPackages(ctx context.Context, deps []model.Dependency
 		all = append(all, p)
 	}
 	sort.Strings(all)
-	return e.Store.SetCursor(ctx, actionsPackagesCursor, strings.Join(all, "\n"))
+	return e.Store.SetCursor(ctx, cursor, strings.Join(all, "\n"))
 }
 
 var tagShapeRE = regexp.MustCompile(`^(v?)([0-9]+(?:\.[0-9]+){0,2})$`)

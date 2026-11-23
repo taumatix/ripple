@@ -18,6 +18,7 @@ import (
 	"github.com/taumatix/ripple/internal/platform"
 	"github.com/taumatix/ripple/internal/platform/github"
 	"github.com/taumatix/ripple/internal/platform/gitws"
+	"github.com/taumatix/ripple/internal/registry"
 	"github.com/taumatix/ripple/internal/rules"
 	"github.com/taumatix/ripple/internal/sandbox"
 	"github.com/taumatix/ripple/internal/store"
@@ -78,6 +79,7 @@ func New(ctx context.Context, s *config.Server, log *slog.Logger) (*App, store.S
 		Limits: rules.Limits{MinimumReleaseAge: s.MinimumReleaseAge, OpenPRLimit: s.OpenPRLimit, AllowAutomerge: s.AllowAutomerge}}
 	eng.Lookup = &feed.GoProxyLookup{BaseURL: s.GoProxy, User: s.GoProxyUser, Token: s.GoProxyToken,
 		UserAgent: "ripple (+https://github.com/taumatix/ripple)"}
+	eng.Registry = &registry.Client{UserAgent: "ripple (+https://github.com/taumatix/ripple)"}
 	a := &App{
 		Engine: eng, Log: log, Secret: []byte(s.WebhookSecret), PollEvery: s.FeedInterval,
 		Hosts: hosts, DefaultHost: github.HostName,
@@ -85,6 +87,7 @@ func New(ctx context.Context, s *config.Server, log *slog.Logger) (*App, store.S
 			Backlog: s.EventBacklog, InstallationBacklog: s.EventInstallationBacklog, DeadRetention: s.EventDeadRetention},
 		Toolchain: &engine.ToolchainWatcher{Engine: eng, Source: &feed.GoDL{BaseURL: s.GoReleasesURL, UserAgent: "ripple (+https://github.com/taumatix/ripple)"}},
 		Actions:   &engine.ActionsWatcher{Engine: eng},
+		Docker:    &engine.DockerWatcher{Engine: eng},
 		Watcher:   &engine.Watcher{Engine: eng, Feed: &feed.GoIndex{BaseURL: s.FeedURL, UserAgent: "ripple (+https://github.com/taumatix/ripple)"}},
 	}
 	wireReplica(eng, a.Queue, s, log)

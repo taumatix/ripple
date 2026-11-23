@@ -71,6 +71,9 @@ type Engine struct {
 	// Lookup, when set, finds the latest release of a module with no stored release, so
 	// backfill reaches a module nobody else imports. Nil asks nothing (see ReleaseLookup).
 	Lookup ReleaseLookup
+	// Registry reads the tags and digests of container images for ecosystem: docker. Nil
+	// leaves the docker manager's dependencies without updates (see DockerWatcher).
+	Registry TagRegistry
 	// Replica names this process among the replicas sharing the Store; empty picks a random
 	// id, which is right unless logs should carry a stable name. LeaseTTL is how long a
 	// repo claim survives without renewal (zero means DefaultLeaseTTL). See docs/replicas.md.
@@ -329,6 +332,9 @@ func (e *Engine) scan(ctx context.Context, repo model.Repo) error {
 		return fmt.Errorf("scan %s: backfill: %w", repo.FullName, err)
 	}
 	if err := e.noteActionPackages(ctx, deps); err != nil {
+		return err
+	}
+	if err := e.notePackages(ctx, model.DatasourceDocker, dockerPackagesCursor, deps); err != nil {
 		return err
 	}
 	if err := e.Store.ReplaceDependencies(ctx, repo.FullName, deps); err != nil {

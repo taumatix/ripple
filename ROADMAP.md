@@ -82,12 +82,11 @@ Everything else:
   store cursor, which DynamoDB caps at 400 KB (roughly 10k repo names). Store it per repo before a host
   with larger installations ships.
 29. **More datasources and feeds, as many ecosystems as Renovate has.** npm replicate, PyPI, crates.io
-   sparse index, Maven, NuGet, RubyGems, Packagist, Docker/OCI tags, GitHub releases/tags, Helm, Terraform
+   sparse index, Maven, NuGet, RubyGems, Packagist, ~~Docker/OCI tags~~ (shipped with 30b, polled per image), GitHub releases/tags, Helm, Terraform
    registry. Where a registry has a changes feed, use it; where it has none (OCI registries), fall back to polling
    only the packages the reverse index says someone imports, never every repo. Each datasource says which of the two it is.
 30. **More managers, toward Renovate parity.** ~~GitHub Actions~~ shipped ([docs/github-actions.md](docs/github-actions.md)).
-   Remaining, by value, each its own entry: 30b Dockerfile (`FROM`, tags and digests, needs an OCI datasource,
-   see 29), 30c npm, 30d Cargo, 30e pip, 30f Helm, and the long tail.
+   ~~30b Dockerfile~~ shipped ([docs/docker.md](docs/docker.md)). Remaining, by value, each its own entry: 30c npm, 30d Cargo, 30e pip, 30f Helm, and the long tail.
 96. **Actions registry cursor.** The packages the actions watcher polls live in one cursor
     (`github-tags:packages`), written read-modify-write: replicas can lose each other's additions until the
     next scan, and a package no repo uses any more is never pruned. Keep it per package in the store.
@@ -281,3 +280,12 @@ Everything else:
     older run than the security job is only held, never closed, unless the security PR opens in a later run with it open.
     A plain, non-advisory release move off a pseudo-version is still not implemented; rule to use: the first release above
     the pseudo-version and released after its timestamp, opt-in.
+128. **Docker: private registries.** Only anonymous pulls work; a private image answers 401/403 and is skipped.
+    Add per-registry credentials (a token or `config.json`-style auth) kept out of logs and PR bodies.
+129. **Docker: compose files, Kubernetes manifests and `ARG` tags.** `image:` keys in compose files, `ARG
+    VERSION=...` used in `FROM image:${VERSION}`, and `COPY --from=image:tag` are not read.
+130. **Docker: verify against real registries.** The client and the fake were written from the spec excerpts
+    (`docs/vendor/registry`); run it against Docker Hub and GHCR once (host, `library/` prefix, index digest
+    `Accept` types, 429 handling) and record the result in UPSTREAM.md.
+131. **Docker: package cursor and release dates.** `docker:packages` is one read-modify-write cursor (see 96) and the
+    cooldown counts from first sight because tags carry no date; read the image config `created` time instead.

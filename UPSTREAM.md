@@ -104,6 +104,16 @@ upstream:
     capabilities: "no auto-merge (not implemented, reported absent), drafts yes, rate limit undocumented"
     unverified: "everything: no real SCM-Manager was available. Bearer on the REST API, git basic auth, webhook header support and changeset branches in the deployed plugin, the 201 Location, merge-commit modifications and the 429 answer are from docs and source; the fake in internal/platform/scmmanager is written from them, not recorded"
     checked: 2026-11-23
+  - name: bitbucket-server
+    kind: http-api
+    reference: https://developer.atlassian.com/server/bitbucket/10.0.swagger.v3.json
+    docs: https://confluence.atlassian.com/bitbucketserver/manage-webhooks-938025878.html
+    vendored: docs/vendor/bitbucket-server/
+    used: [GET /rest/api/1.0/repos?permission=REPO_WRITE, GET and POST /projects/{key}/repos/{slug}/pull-requests, GET and POST .../pull-requests/{id}/merge?version=N with autoMerge, GET .../default-branch, GET .../compare/changes]
+    webhooks: ["repo:refs_changed (no file list, no default branch, at most 5 commits)", "signature X-Hub-Signature = sha256=<hex HMAC-SHA256(body)>; X-Request-Id; X-Event-Key"]
+    auth: "Basic user:token (x-token-auth for project and repository tokens)"
+    unverified: "Retry-After on 429; merge response and merger for autoMerge; draft support by release; path.toString; Basic vs Bearer for project tokens; the fake is written from docs, not recorded"
+    checked: 2026-11-23
 ```
 
 Not pinned, because they are not wire contracts: `git` (any version with `GIT_CONFIG_COUNT`,

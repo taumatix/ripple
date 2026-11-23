@@ -15,6 +15,7 @@ import (
 
 	"github.com/taumatix/ripple/internal/store"
 	"github.com/taumatix/ripple/internal/store/storetest"
+	"github.com/taumatix/ripple/internal/testutil"
 )
 
 func TestMemory(t *testing.T) {
@@ -30,7 +31,7 @@ func suffix() string {
 func TestPostgres(t *testing.T) {
 	dsn := os.Getenv("RIPPLE_TEST_POSTGRES_DSN")
 	if dsn == "" {
-		t.Skip("RIPPLE_TEST_POSTGRES_DSN not set; skipping Postgres store tests (CI runs them against a service container)")
+		testutil.SkipUnlessRequired(t, "RIPPLE_TEST_POSTGRES_DSN not set; skipping Postgres store tests (`make test-services` starts one)")
 	}
 	storetest.Run(t, func(t *testing.T) store.Store {
 		ctx := context.Background()

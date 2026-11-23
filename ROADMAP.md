@@ -18,17 +18,16 @@ Ordered by how much each entry limits real deployments. The top is next.
    that runtime's documentation. Later, behind the plugin mechanism (entry 33): a dependency collector that
    runs as an isolated container for discoveries too complex or too risky to run in-process, with the same
    `Runner` and the same limits.
-3. **Publish a prebuilt image and binaries on each release.** Today the only container route is
-   `docker build` from a checkout, and a tag produces no artifacts. Add a release workflow, triggered by the
-   tag, that builds a multi-arch image (it carries the `go` toolchain) and pushes it to GHCR with the version tag
-   and a digest, plus static binaries attached to the GitHub release. The package must be made public once by
-   hand in the GitHub UI (there is no API for it); until then the README names `go install` as the open path and
-   the image as the shut one. Each release then installs the published image from scratch and runs `ripple version`.
-4. **Hermetic integration tests, and a smoke test of the built image.** The Postgres and DynamoDB store
-   tests skip when no database is reachable, so a local `go test ./...` passes without running them, and
-   the Docker image is built and run only in CI. Make `make test-services` start both services itself (Docker, or Apple `container`
-   on the agent host), fail rather than skip under an opt-in `RIPPLE_REQUIRE_SERVICES=1`, and add a CI step
-   that runs the built image against a fake GitHub with a signed push event and expects exactly one PR.
+3. **Exercise the release workflow for real, and finish the smoke test.** `release.yml` has never run on a tag:
+   the tag trigger, the GHCR push, the release upload and the `verify` job (which installs the published
+   binary and image and runs `ripple version`) are **unverified** until the first release train tags, and
+   the first run may need fixes; check it right after that tag. The dry run (pull request or
+   `workflow_dispatch`) only builds. The GHCR package is private and a human must flip it public once in the UI
+   (no API). The image smoke test (`internal/smoke`) cannot assert the PR's `go.mod` content because the
+   server has no `RIPPLE_GOSUMDB`: add that setting (also what a private-proxy deployment needs), set it
+   off in the smoke test, import the fake module there, and assert the bumped `go.mod` and `go.sum`.
+   Apple `container` has no `--network host`, so the smoke test runs against the image only in CI.
+
 6. **Scan without a full checkout.** The clone filter saves nothing while the scan checks out HEAD
    ([docs/bounds.md](docs/bounds.md)): a huge-blob repo still downloads every blob at HEAD. Clone `--no-checkout`
    (or sparse) and read only the paths the managers match, so a repo's size stops mattering to a scan.

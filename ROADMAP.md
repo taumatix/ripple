@@ -298,11 +298,10 @@ Everything else:
     would remove each other's, and a killed server's job containers keep the network alive until they exit (the next
     start then fails to recreate it). Name it per `RIPPLE_REPLICA` and remove the labelled job containers of that
     replica at start, then test the kill-and-restart case live.
-||||||| parent of 30509f5 (replicas: fence the remaining writes, elect one feed poller, add GET /replica)
-%d. **Replicas: count replicas.** `GET /replica` reports one replica's takeovers and whether it polls the feed, but
+143. **Replicas: count replicas.** `GET /replica` reports one replica's takeovers and whether it polls the feed, but
     no replica can list the live leases (the `Leases` interface has no listing), so a replica count and a takeover
     count across replicas are not available. Add an optional lease listing (Postgres query, DynamoDB query on a lease
     index) and report the number of distinct live owners.
-%d. **Replicas: elect the other pollers.** Only the Go module feed poll is elected; the toolchain, Actions and Docker
+144. **Replicas: elect the other pollers.** Only the Go module feed poll is elected; the toolchain, Actions and Docker
     pollers still run on every replica (safe, wasteful). Give each its own `feed:<name>` lease the way `PollElected`
     does.

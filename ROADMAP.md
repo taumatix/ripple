@@ -209,8 +209,9 @@ Everything else:
     for; that Scan and the listing are verified on the in-process fake, and DynamoDB Local runs them only in CI. A scan
     (not the sweep) still runs one history round, so a repo with over 500 pairs or 100 records is completed only by a sweep
     or a go.mod change; consider a few rounds per scan once real repo sizes are known. Postgres `ListRepos` is CI-only.
-126. **OSV: reconcile older cases.** Jobs made before the `osv-jobs` index are still not found: the sweep's `RepoLister` plus
-    `ListOpenJobs` could find them per repo. A PR body is not rewritten when a record is corrected (the fix version or
+126. **OSV: reconcile older cases.** A pending job made before the `osv-jobs` index is now indexed by a one-time backfill; a
+    done job (and so its open PR) from before the index is still not found, because the store lists only pending and failed
+    jobs per repo. A PR body is not rewritten when a record is corrected (the fix version or
     summary in it can be stale), and a record shared by twin GHSA and GO notes is reconciled per note. The busy-repo retry
     list holds at most 100 ids.
 127. **OSV: conflict and pseudo-version residuals.** The beaten-PR close covers a non-security PR when a security

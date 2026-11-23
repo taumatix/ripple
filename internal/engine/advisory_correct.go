@@ -31,7 +31,7 @@ import (
 //
 // Two indexes make this a lookup instead of a scan, written when a record makes a job or
 // a dashboard entry: osv-jobs:<id> (job keys) and osv-open-ix:<id> (repos). A job made
-// before they existed is not found.
+// before they existed is indexed once by the backfill (advisory_backfill.go); a done one is not found.
 const (
 	advisoryJobsPrefix   = "osv-jobs:"
 	advisoryOpenIxPrefix = "osv-open-ix:"

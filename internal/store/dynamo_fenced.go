@@ -39,10 +39,7 @@ func (d *Dynamo) fencedWrite(ctx context.Context, op string, l Lease, gone bool,
 
 // SetCursorFenced is store.Store.
 func (d *Dynamo) SetCursorFenced(ctx context.Context, n, v string, l Lease) error {
-	m, err := attributevalue.MarshalMap(struct {
-		item
-		Value string
-	}{item{PK: "CURSOR#" + n, SK: "META"}, v})
+	m, err := attributevalue.MarshalMap(cursorItem(n, v))
 	if err != nil {
 		return wrapD("set cursor", err)
 	}

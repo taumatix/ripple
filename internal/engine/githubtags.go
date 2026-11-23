@@ -14,6 +14,7 @@ import (
 	"github.com/taumatix/ripple/internal/model"
 	"github.com/taumatix/ripple/internal/platform"
 	"github.com/taumatix/ripple/internal/rules"
+	"github.com/taumatix/ripple/internal/store"
 )
 
 // actionsPackagesCursor holds the github-tags packages some repo uses, newline
@@ -31,8 +32,8 @@ func (e *Engine) noteActionPackages(ctx context.Context, deps []model.Dependency
 	return e.notePackages(ctx, model.DatasourceGitHubTags, actionsPackagesCursor, deps)
 }
 
-// notePackages adds the packages of deps on datasource ds to the newline-separated set
-// held in cursor.
+// notePackages adds the packages of deps on datasource ds to the polled set of cursor: one
+// cursor per package where the store lists cursors, else the newline-separated list.
 func (e *Engine) notePackages(ctx context.Context, ds, cursor string, deps []model.Dependency) error {
 	var add []string
 	for _, d := range deps {
@@ -41,6 +42,25 @@ func (e *Engine) notePackages(ctx context.Context, ds, cursor string, deps []mod
 		}
 	}
 	if len(add) == 0 {
+		return nil
+	}
+	if cl, ok := e.Store.(store.CursorLister); ok {
+		have, err := cl.ListCursors(ctx, cursor+store.CursorGroupSep)
+		if err != nil {
+			return err
+		}
+		known := map[string]bool{}
+		for _, c := range have {
+			known[c.Name] = true
+		}
+		for _, p := range add {
+			if k := packageKey(cursor, p); !known[k] {
+				if err := e.Store.SetCursor(ctx, k, "1"); err != nil {
+					return err
+				}
+				known[k] = true
+			}
+		}
 		return nil
 	}
 	actionsPackagesMu.Lock()
@@ -78,6 +98,11 @@ func (e *Engine) dropActionPackage(ctx context.Context, pkg string) error {
 	if err != nil || len(deps) > 0 {
 		return err
 	}
+	if cl, ok := e.Store.(store.CursorLister); ok {
+		if err := cl.DeleteCursor(ctx, packageKey(actionsPackagesCursor, pkg)); err != nil {
+			return err
+		}
+	}
 	raw, err := e.Store.GetCursor(ctx, actionsPackagesCursor)
 	if err != nil {
 		return err
@@ -87,6 +112,9 @@ func (e *Engine) dropActionPackage(ctx context.Context, pkg string) error {
 		if p != pkg {
 			keep = append(keep, p)
 		}
+	}
+	if len(keep) == len(strings.Fields(raw)) {
+		return nil
 	}
 	return e.Store.SetCursor(ctx, actionsPackagesCursor, strings.Join(keep, "\n"))
 }
@@ -150,13 +178,13 @@ type ActionsWatcher struct {
 // Poll returns how many jobs were new. It makes no request while no repo uses an action.
 func (w *ActionsWatcher) Poll(ctx context.Context) (int, error) {
 	e := w.Engine
-	raw, err := e.Store.GetCursor(ctx, actionsPackagesCursor)
+	pkgs, err := e.polledPackages(ctx, actionsPackagesCursor)
 	if err != nil {
 		return 0, err
 	}
 	n := 0
 	repos := map[string]*repoState{}
-	for _, pkg := range strings.Fields(raw) {
+	for _, pkg := range pkgs {
 		deps, err := e.Store.ListDependents(ctx, model.DatasourceGitHubTags, pkg)
 		if err != nil {
 			return n, fmt.Errorf("list dependents of %s: %w", pkg, err)

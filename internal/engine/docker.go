@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/taumatix/ripple/internal/model"
 	"github.com/taumatix/ripple/internal/registry"
@@ -53,13 +52,13 @@ func (w *DockerWatcher) Poll(ctx context.Context) (int, error) {
 	if e.Registry == nil {
 		return 0, nil
 	}
-	raw, err := e.Store.GetCursor(ctx, dockerPackagesCursor)
+	pkgs, err := e.polledPackages(ctx, dockerPackagesCursor)
 	if err != nil {
 		return 0, err
 	}
 	n := 0
 	repos := map[string]*repoState{}
-	for _, pkg := range strings.Fields(raw) {
+	for _, pkg := range pkgs {
 		deps, err := e.Store.ListDependents(ctx, model.DatasourceDocker, pkg)
 		if err != nil {
 			return n, fmt.Errorf("list dependents of %s: %w", pkg, err)

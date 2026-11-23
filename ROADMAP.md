@@ -234,7 +234,7 @@ Everything else:
 130. **Docker: verify against real registries.** The client and the fake were written from the spec excerpts
     (`docs/vendor/registry`); run it against Docker Hub and GHCR once (host, `library/` prefix, index digest
     `Accept` types, 429 handling) and record the result in UPSTREAM.md.
-131. **Docker: package cursor and release dates.** `docker:packages` is one read-modify-write cursor (see 151) and the
+131. **Docker: package cursor and release dates.** the polled-package set is one cursor per package now (see 159) and the
     cooldown counts from first sight because tags carry no date; read the image config `created` time instead.
 132. **Webhook retry ids, verified on real hosts.** Delivery ids are now persisted (store delivery table), but whether
     Bitbucket Cloud's `X-Request-UUID` and Azure DevOps' payload `id` stay the same across a retry is still
@@ -276,11 +276,7 @@ Everything else:
     (guard against dependency confusion); supporting it needs credentials and a registry setting per scope. Nothing here has run
     against registry.npmjs.org: the client and fake come from the vendored excerpts (scoped-name encoding, 404 for private
     packages, the `deprecated` shape, a `latest` tag that exists are assumed; see UPSTREAM.md). Also: `npm:packages` is one
-    read-modify-write cursor (see 151), versions carry no publication date (the full document has `time` but is much larger).
-151. **Package cursors: one key per package.** `github-tags:packages` (and `docker:packages`, `npm:packages`) is one
-    read-modify-write cursor: replicas can still lose each other's additions until the next scan of a repo that uses the
-    package. Actions now prune a package no repo uses (entry 96); the rest needs a per-package key and a store method
-    listing cursors by prefix (`internal/store`, all three backends), then `notePackages` moves to it.
+    package set kept per package (see 159), versions carry no publication date (the full document has `time` but is much larger).
 153. **Actions: verify against real GitHub and a real GHES.** The workflows-permission refusal text, the upstream fallback
     (`RIPPLE_ACTIONS_UPSTREAM_URL`, 404 on the host then the configured upstream) and superseding of stale actions PRs were
     written against the fake; none ran against github.com or a GHES (see 61). The supersede sweep and closing of beaten PRs
@@ -311,3 +307,10 @@ Everything else:
     starting together may split the sources; `feed_pollers` counts replicas polling any source and cannot say which one is
     unpolled. Heartbeat the set of sources (needs a `store.ReplicaInfo` field and a column or attribute per store) so the
     fleet view can alert on a source nobody polls. Also: `App.Tick` (cron-driven) now goes through the elections too.
+159. **Package cursors: retire the legacy list, page and bound the listing.** The polled-package sets (`github-tags:packages`,
+    `docker:packages`, `npm:packages`, `cargo:packages`) are now one `<cursor>#<package>` cursor each (`store.CursorLister`), and the
+    watchers read the union with the old newline cursor, which is never written again except to remove a dropped package. Left: a
+    one-time fold of the legacy list into per-package keys so the old cursor can be deleted, pruning for Docker, npm and Cargo (only
+    Actions prune), and measuring the per-poll listing (one index Query on DynamoDB, paginated, but it returns every package) on a
+    large install. Cursors named `<group>#<key>` written before this release carry no index attributes on DynamoDB and are not
+    listed by group; none existed.

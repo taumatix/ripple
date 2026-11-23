@@ -58,7 +58,6 @@ upstream:
     webhooks: [Push Hook, header X-Gitlab-Token or Standard Webhooks signature (webhook-id, webhook-timestamp, webhook-signature = v1,base64(HMAC-SHA256(key, id.timestamp.body)), key from whsec_ token)]
     unverified: "everything: no real GitLab instance was available. Request and response shapes, the 429 Retry-After handling, auto_merge acceptance and the signature scheme are from the vendored docs; the fake GitLab in internal/testutil is written from them, not recorded. The signature vector was computed with openssl, not taken from GitLab"
     checked: 2026-11-23
-||||||| parent of c0a4b93 (Add Bitbucket Cloud host (roadmap 13))
   - name: bitbucket-cloud
     kind: http-api
     reference: https://developer.atlassian.com/cloud/bitbucket/rest/intro/

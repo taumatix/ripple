@@ -43,6 +43,20 @@ func (e *Engine) Rename(ctx context.Context, old, now string, scope int64) error
 	if err != nil || !found {
 		return err
 	}
+	if _, there, err := e.Store.GetRepo(ctx, now); err != nil {
+		return err
+	} else if there {
+		// A push under the new name registered it before this event arrived. Its record is
+		// the fresher one, so it stays; the old one goes and the alias carries the old jobs.
+		if err := e.Store.SetCursor(ctx, renamedCursor+old, now); err != nil {
+			return err
+		}
+		if err := e.Store.DeleteRepo(ctx, old); err != nil {
+			return err
+		}
+		e.log().Info("repository renamed; the new name was already registered", "from", old, "to", now)
+		return nil
+	}
 	deps, err := e.Store.ListRepoDependencies(ctx, old)
 	if err != nil {
 		return err
@@ -95,6 +109,26 @@ func (e *Engine) renamedTo(ctx context.Context, name string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// RenamedTo reports the registered repo that name was renamed to, following the alias
+// chain (bounded by maxRenameHops).
+func (e *Engine) RenamedTo(ctx context.Context, name string) (string, bool) { return e.renamedTo(ctx, name) }
+
+// RegisterFromPush registers a repo the first time a verified push names it, when the
+// host vouched for the repo with an immutable id (the push beat the installation or rename
+// event that would have registered it). It is idempotent: a registered repo is left alone.
+// The branch is left for the host to name and the scan is the same one a repos_added does,
+// so a repo the credential cannot reach fails the scan and the queue's retry bound applies.
+func (e *Engine) RegisterFromPush(ctx context.Context, name string, scope int64) error {
+	if _, found, err := e.Store.GetRepo(ctx, name); err != nil || found {
+		return err
+	}
+	if err := e.ForgetRename(ctx, name); err != nil {
+		return err
+	}
+	e.log().Info("repository registered from a push", "repo", name)
+	return e.Scan(ctx, model.Repo{FullName: name, InstallationID: scope})
 }
 
 // followRename re-keys jobs of a name that no longer exists to the repo it became,

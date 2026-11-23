@@ -322,8 +322,11 @@ func firstNonEmpty(typed, legacy string) string {
 // or the config cares about.
 func (a *App) push(ctx context.Context, name string, ev model.Event) error {
 	repo, ok, err := a.Engine.Store.GetRepo(ctx, name)
-	if err != nil || !ok {
+	if err != nil {
 		return err
+	}
+	if !ok {
+		return a.pushUnknown(ctx, name, ev)
 	}
 	// The payload's default_branch is only a hint that the stored one may be stale (a
 	// missed repository.edited); the engine confirms it with the host before storing.
@@ -353,6 +356,21 @@ func (a *App) push(ctx context.Context, name string, ev model.Event) error {
 	}
 	repo.InstallationID = ev.InstallationID
 	return a.Engine.Scan(ctx, repo)
+}
+
+// pushUnknown handles a verified push for a name ripple does not have. A name that was
+// renamed away from (a late delivery under the old name) is the renamed repo's push. For a
+// host that gave an immutable repository id the push beat the event that registers or
+// renames the repo, so it is registered under the name the push carries; for any other
+// host an unknown repo is ignored, as before.
+func (a *App) pushUnknown(ctx context.Context, name string, ev model.Event) error {
+	if target, ok := a.Engine.RenamedTo(ctx, name); ok {
+		return a.push(ctx, target, ev)
+	}
+	if ev.RepoID == 0 || ev.InstallationID == 0 {
+		return nil
+	}
+	return a.Engine.RegisterFromPush(ctx, name, ev.InstallationID)
 }
 
 // pollToolchain polls the Go release list and returns how many jobs it enqueued.

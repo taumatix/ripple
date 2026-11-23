@@ -211,8 +211,8 @@ Everything else:
     summary in it can be stale), and a record shared by twin GHSA and GO notes is reconciled per note. The busy-repo retry
     list holds at most 100 ids.
 127. **OSV: conflict and pseudo-version residuals.** The beaten-PR close covers a non-security PR when a security
-    toolchain PR opens; a lower security toolchain PR open beside a higher one is not closed, and a toolchain PR opened by an
-    older run than the security job is only held, never closed, unless the security PR opens in a later run with it open.
+    toolchain PR opens (a lower security toolchain PR beside a higher one is closed by the supersede flow, pinned by an e2e
+    test), and a toolchain PR opened by an older run than the security job is only held, never closed, unless the security PR opens in a later run with it open.
     A plain, non-advisory release move off a pseudo-version is still not implemented; rule to use: the first release above
     the pseudo-version and released after its timestamp, opt-in.
 130. **Docker: verify against real registries.** The client and the fake were written from the spec excerpts

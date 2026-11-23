@@ -163,7 +163,8 @@ func newEnvOpts(t *testing.T, st store.Store, lim rules.Limits, o opts) *env {
 	e.newApp = func() *app.App {
 		a := &app.App{Engine: eng, Secret: []byte(secret), Log: slog.New(slog.NewTextHandler(testWriter{t}, nil)),
 			PollEvery: o.pollEvery, Queue: &app.Queue{},
-			Watcher: &engine.Watcher{Engine: eng, Feed: &feed.GoIndex{BaseURL: e.idx.URL}}}
+			Watcher: &engine.Watcher{Engine: eng, Feed: &feed.GoIndex{BaseURL: e.idx.URL}},
+			Actions: &engine.ActionsWatcher{Engine: eng}}
 		if o.goDL != nil {
 			a.Toolchain = &engine.ToolchainWatcher{Engine: eng, Source: &feed.GoDL{BaseURL: o.goDL.URL}}
 		}

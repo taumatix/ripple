@@ -19,6 +19,9 @@ func applicable(d model.Dependency, ds, pkg, version string) (rules.UpdateType, 
 	if ds == model.DatasourceGoToolchain {
 		return applicableToolchain(d, pkg, version)
 	}
+	if ds == model.DatasourceGitHubTags {
+		return applicableTag(d, pkg, version)
+	}
 	if d.Datasource != ds || model.Line(ds, d.Package) != model.Line(ds, pkg) {
 		return "", false
 	}

@@ -122,6 +122,8 @@ type runner struct {
 	ambiguous []string
 	// notes are lines the PR body gets after verification, e.g. what verification did not cover.
 	notes []string
+	// shas caches the commit a github-tags job's tag points at, by "package@tag".
+	shas map[string]string
 }
 
 func (r *runner) finish(j model.Job, state model.JobState, reason, pr string) {
@@ -328,6 +330,9 @@ func (r *runner) plan(jobs []model.Job, deps []model.Dependency) []*prPlan {
 			continue
 		}
 		branch := BranchPrefix + "go/" + slug(j.Package) + "-" + slug(j.Version)
+		if j.Datasource == model.DatasourceGitHubTags {
+			branch = BranchPrefix + "actions/" + slug(j.Package) + "-" + slug(j.Version)
+		}
 		if it.group != "" {
 			branch = BranchPrefix + "group/" + slug(it.group)
 		}
@@ -397,6 +402,15 @@ func (r *runner) execute(plans []*prPlan, deps []model.Dependency) {
 		pr, err := r.openPR(p)
 		if errors.Is(err, ErrLeaseLost) || errors.Is(context.Cause(r.ctx), ErrLeaseLost) {
 			return // another replica owns the repo; its run handles the rest
+		}
+		if errors.Is(err, errWorkflowsPermission) {
+			// Retrying cannot help until someone grants the permission, and granting
+			// it should need no other step: look again tomorrow, with the reason shown.
+			for _, it := range p.items {
+				r.deferJob(it.job, e.now().Add(24*time.Hour), workflowsReason)
+			}
+			e.log().Warn(workflowsReason, "repo", r.repo.FullName, "branch", p.branch)
+			continue
 		}
 		if err != nil {
 			var rl *platform.RateLimitError
@@ -522,8 +536,12 @@ func (r *runner) openPR(p *prPlan) (*platform.PR, error) {
 			body += "\n## Verification failed\n\n" + what + ". This pull request is a draft; it needs a human.\n\n```\n" + failure + "\n```\n"
 		}
 	}
+	body += r.actionNotes(applied)
 	changed, err := r.ws.CommitAndPush(r.ctx, p.branch, title)
 	if err != nil {
+		if touchesWorkflows(applied) && workflowsDenied(err) {
+			return nil, errWorkflowsPermission
+		}
 		return nil, err
 	}
 	if !changed {
@@ -572,7 +590,11 @@ func (r *runner) apply(it item) (bool, error) {
 		if err != nil {
 			return false, err
 		}
-		out, err := m.Apply(content, d, it.job.Package, it.job.Version)
+		version := it.job.Version
+		if d.Datasource == model.DatasourceGitHubTags {
+			version = r.actionVersion(it.job.Package, version)
+		}
+		out, err := m.Apply(content, d, it.job.Package, version)
 		if errors.Is(err, manager.ErrStale) {
 			continue
 		}

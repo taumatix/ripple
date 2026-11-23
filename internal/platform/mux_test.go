@@ -113,3 +113,37 @@ func TestNewMuxRefusesBadHosts(t *testing.T) {
 		t.Error("default host that is not registered accepted")
 	}
 }
+
+type tagFake struct{ autoFake }
+
+func (f *tagFake) ListTags(_ context.Context, via model.Repo, target string) ([]string, error) {
+	f.seen = append(f.seen, "tags "+via.FullName+" "+target)
+	return []string{"v1"}, nil
+}
+func (f *tagFake) TagCommit(context.Context, model.Repo, string, string) (string, error) {
+	return "sha", nil
+}
+func (f *tagFake) ReleaseOf(context.Context, model.Repo, string, string) (platform.TagRelease, bool, error) {
+	return platform.TagRelease{URL: "u"}, true, nil
+}
+
+func TestMuxTagSourceRoutesAndDegrades(t *testing.T) {
+	gh, gl := &tagFake{}, &fakePlatform{}
+	m, err := platform.NewMux("github", &platform.Host{Name: "github", Platform: gh}, &platform.Host{Name: "gitlab", Platform: gl})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if tags, err := m.ListTags(ctx, model.Repo{FullName: "acme/app"}, "up/action"); err != nil || len(tags) != 1 || gh.seen[0] != "tags acme/app up/action" {
+		t.Errorf("ListTags = %v, %v, saw %v", tags, err, gh.seen)
+	}
+	if sha, err := m.TagCommit(ctx, model.Repo{FullName: "acme/app"}, "up/action", "v1"); err != nil || sha != "sha" {
+		t.Errorf("TagCommit = %q, %v", sha, err)
+	}
+	if rel, ok, _ := m.ReleaseOf(ctx, model.Repo{FullName: "acme/app"}, "up/action", "v1"); !ok || rel.URL != "u" {
+		t.Errorf("ReleaseOf = %+v, %v", rel, ok)
+	}
+	if _, err := m.ListTags(ctx, model.Repo{FullName: "gitlab:g/p"}, "up/action"); !errors.Is(err, platform.ErrNoTags) {
+		t.Errorf("a host without the capability: err = %v, want ErrNoTags", err)
+	}
+}

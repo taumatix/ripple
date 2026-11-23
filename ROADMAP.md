@@ -85,8 +85,19 @@ Everything else:
    sparse index, Maven, NuGet, RubyGems, Packagist, Docker/OCI tags, GitHub releases/tags, Helm, Terraform
    registry. Where a registry has a changes feed, use it; where it has none (OCI registries), fall back to polling
    only the packages the reverse index says someone imports, never every repo. Each datasource says which of the two it is.
-30. **More managers, toward Renovate parity.** Dockerfile, GitHub Actions, npm, Cargo, pip, Helm,
-   and the long tail; each manager and datasource pair is its own entry once the first few exist.
+30. **More managers, toward Renovate parity.** ~~GitHub Actions~~ shipped ([docs/github-actions.md](docs/github-actions.md)).
+   Remaining, by value, each its own entry: 30b Dockerfile (`FROM`, tags and digests, needs an OCI datasource,
+   see 29), 30c npm, 30d Cargo, 30e pip, 30f Helm, and the long tail.
+96. **Actions registry cursor.** The packages the actions watcher polls live in one cursor
+    (`github-tags:packages`), written read-modify-write: replicas can lose each other's additions until the
+    next scan, and a package no repo uses any more is never pruned. Keep it per package in the store.
+97. **Actions: supersede and non-matching shapes.** A newer tag opens a second PR beside an open older one,
+    and a dependency whose shape has no newer tag (`v4` with only `v5.0.0` upstream) is silently left alone;
+    supersede like gomod and surface the skip on the dashboard.
+98. **Actions on GHES.** Tags are read from the repo's own host, so an action on github.com is not found from
+    a GHES install; allow a configured upstream host. Also verify the workflows-permission refusal text
+    against a real GitHub push.
+99. **PR footer says "module index".** Pull requests from the actions watcher use the Go module footer.
 33. **Plugin mechanism** for out-of-tree managers, datasources and platforms.
 34. **Presets, org-level defaults and packageRules-like matching.** Later and strictly opt-in: a repo
     file must opt into a preset by name, and none of these may ever change the meaning of a plain

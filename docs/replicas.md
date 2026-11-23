@@ -58,7 +58,7 @@ local clock.
 | Same event delivered to two replicas | The second fails to take `event:<id>` and holds the entry for ttl/3, then finds it gone and drops it. |
 | Stale listing of due jobs | Re-read under the lease; finished jobs are skipped. |
 | Two replicas poll the release feed | One replica is elected (lease `feed:<name>`, ttl twice the poll interval) and polls; the others skip and take over once its claim lapses or it steps down on shutdown. Safe even if two poll: enqueueing a job is insert-if-absent. Only the Go module feed is elected; the toolchain, Actions and Docker pollers still run on every replica. |
-| Events of one repo on different replicas | A claimed event asks the store (`HasOlderEvent`) for an older live event of the same repo and, if there is one, is released and held for ttl/3. Holds as far as replica clocks agree (`Seq` is the receiver's clock) and, on DynamoDB, as far as `gsi1` is current (see ROADMAP). |
+| Events of one repo on different replicas | A claimed event asks the store (`HasOlderEvent`) for an older live event of the same repo and, if there is one, is released and held for ttl/3. Holds as far as replica clocks agree (`Seq` is the receiver's clock) and, on DynamoDB, as far as `gsi1` is current (see ROADMAP 143). |
 | Stale writer after a lost lease | The runner's job writes go through `UpdateJobFenced`: the write applies only while the lease name, owner and token are unchanged, and is refused with `ErrLeaseLost` otherwise. The advisory pass's job advance, a queue replica's event update and delete (`UpdateEventFenced`, `DeleteEventFenced`, on the `event:<id>` lease) and the cursor writes of pause, resume, remove and rename (`SetCursorFenced`, on the repo lease) are fenced the same way, one atomic statement or transaction per store. Not fenced, because idempotent: `ForgetRename`, `AdoptRepoID` and the sweep memo cursors, which write the same value whoever runs them. |
 | Rename, pause, resume, remove, dashboard writes | Take the repo lease (rename takes two, in sorted order) and wait for a holder to finish. The dashboard flush skips a repo another replica holds; the holder syncs it when its run ends. |
 
@@ -78,4 +78,4 @@ The service has no metrics endpoint. `GET /replica` on the webhook port answers 
 `replica` (its name), `feed_poller` (whether it holds the feed election), `lease_takeovers` (leases this
 process took over from a holder that died or stalled since it started; also logged as `lease taken over`) and
 `lease_ttl_seconds`. A count of live replicas is not available: no replica can list the leases of the others
-(see ROADMAP).
+(see ROADMAP 143).

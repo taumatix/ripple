@@ -108,7 +108,6 @@ Everything else:
    only the packages the reverse index says someone imports, never every repo. Each datasource says which of the two it is.
 30. **More managers, toward Renovate parity.** Dockerfile, GitHub Actions, npm, Cargo, pip, Helm,
    and the long tail; each manager and datasource pair is its own entry once the first few exist.
-32. **GHES GraphQL** differences and per-host API base handling.
 33. **Plugin mechanism** for out-of-tree managers, datasources and platforms.
 34. **Presets, org-level defaults and packageRules-like matching.** Later and strictly opt-in: a repo
     file must opt into a preset by name, and none of these may ever change the meaning of a plain
@@ -192,3 +191,11 @@ Everything else:
     is a filter applied after the read, so it still reads the excluded repo's items. A failed *job* is not
     requeueable from `ripple events`. If persisting the dead state fails the event stays live and is retried
     after a restart rather than looping.
+61. **Run the GHES support against a real GHES.** It is written from the docs and a fake. Check on a real instance (a trial
+    licence or a sponsored one): the first release that accepts `2026-03-10`, whether `enablePullRequestAutoMerge` exists
+    and what an absent one answers, a disabled GraphQL/REST status, and the webhook payloads; then record the facts in
+    `UPSTREAM.md` and `docs/vendor/ghes`.
+62. **Detect the GHES release.** `GET /api/v3/meta` returns `installed_version`; read it once at start to log the release,
+    choose the API version up front instead of by a 410, and skip the auto-merge probe on a release known to lack it.
+63. **Several GitHub hosts.** One GitHub host (github.com or one GHES) per server. Serving github.com and a GHES together
+    needs a second host name in the registry with its own webhook path, App and secret.

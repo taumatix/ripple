@@ -55,6 +55,8 @@ type AppAuth struct {
 	APIBase string
 	HTTP    *http.Client
 	Now     func() time.Time
+	// Versions is shared with the Client of the same host; nil sends APIVersion.
+	Versions *Versions
 
 	mu    sync.Mutex
 	cache map[int64]cached
@@ -98,19 +100,28 @@ func (a *AppAuth) Token(ctx context.Context, id int64) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/app/installations/%d/access_tokens", strings.TrimRight(a.APIBase, "/"), id), bytes.NewReader(nil))
-	if err != nil {
-		return "", err
-	}
-	setHeaders(req)
-	req.Header.Set("Authorization", "Bearer "+jwt)
 	hc := a.HTTP
 	if hc == nil {
 		hc = &http.Client{Timeout: 30 * time.Second}
 	}
-	resp, err := hc.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("installation token request: %w", err)
+	var resp *http.Response
+	for {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/app/installations/%d/access_tokens", strings.TrimRight(a.APIBase, "/"), id), bytes.NewReader(nil))
+		if err != nil {
+			return "", err
+		}
+		version := a.Versions.Current()
+		setHeaders(req, version)
+		req.Header.Set("Authorization", "Bearer "+jwt)
+		resp, err = hc.Do(req)
+		if err != nil {
+			return "", fmt.Errorf("installation token request: %w", err)
+		}
+		if resp.StatusCode == http.StatusGone && a.Versions.Lower(version) {
+			resp.Body.Close()
+			continue
+		}
+		break
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))

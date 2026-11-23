@@ -191,3 +191,40 @@ func TestServerGoVerifySettings(t *testing.T) {
 		t.Error("a token with the default public proxy was accepted: it would be sent to proxy.golang.org")
 	}
 }
+
+func TestGitHubDefaultsAreGitHubDotCom(t *testing.T) {
+	s, err := LoadServer(env(base))
+	if err != nil || s.GitHubAPIURL != "https://api.github.com" || s.GitHubGitURL != "https://github.com" || s.GitHubGraphQLURL != "" || s.GitHubAPIVersion != "" {
+		t.Fatalf("%+v, %v", s, err)
+	}
+}
+
+func TestGitHubEnterpriseURLDerivesTheBases(t *testing.T) {
+	s, err := LoadServer(env(with("RIPPLE_GITHUB_ENTERPRISE_URL", "https://ghes.example.com/")))
+	if err != nil || s.GitHubAPIURL != "https://ghes.example.com/api/v3" || s.GitHubGitURL != "https://ghes.example.com" || s.GitHubGraphQLURL != "https://ghes.example.com/api/graphql" {
+		t.Fatalf("%+v, %v", s, err)
+	}
+	s, err = LoadServer(env(with("RIPPLE_GITHUB_ENTERPRISE_URL", "https://ghes.example.com", "RIPPLE_GITHUB_GIT_URL", "https://git.example.com", "RIPPLE_GITHUB_API_VERSION", "2022-11-28")))
+	if err != nil || s.GitHubGitURL != "https://git.example.com" || s.GitHubAPIURL != "https://ghes.example.com/api/v3" || s.GitHubAPIVersion != "2022-11-28" {
+		t.Fatalf("explicit variables must win over the derived ones: %+v, %v", s, err)
+	}
+}
+
+func TestGitHubAPIURLAloneKeepsGraphQLDerivedByTheClient(t *testing.T) {
+	s, err := LoadServer(env(with("RIPPLE_GITHUB_API_URL", "https://ghes.example.com/api/v3/", "RIPPLE_GITHUB_GRAPHQL_URL", "https://gql.example.com/graphql")))
+	if err != nil || s.GitHubAPIURL != "https://ghes.example.com/api/v3" || s.GitHubGraphQLURL != "https://gql.example.com/graphql" {
+		t.Fatalf("%+v, %v", s, err)
+	}
+}
+
+func TestGitHubURLsAreValidated(t *testing.T) {
+	for _, kv := range [][]string{
+		{"RIPPLE_GITHUB_ENTERPRISE_URL", "http://ghes.example.com"},
+		{"RIPPLE_GITHUB_GRAPHQL_URL", "ftp://x"},
+		{"RIPPLE_GITHUB_API_VERSION", "latest"},
+	} {
+		if _, err := LoadServer(env(with(kv...))); err == nil || !strings.Contains(err.Error(), kv[0]) {
+			t.Errorf("%v: err = %v, want one naming %s", kv, err, kv[0])
+		}
+	}
+}

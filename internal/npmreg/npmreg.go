@@ -117,6 +117,23 @@ func (c *Client) Packument(ctx context.Context, name string) (Packument, error) 
 	return pv, nil
 }
 
+// Releases lists the versions ripple may propose: releases (no prerelease) that are
+// not deprecated and not above the "latest" dist-tag when there is one.
+func (p Packument) Releases() []string {
+	var out []string
+	for _, v := range p.Versions {
+		sv := "v" + v.Version
+		if v.Deprecated || !semver.IsValid(sv) || semver.Prerelease(sv) != "" {
+			continue
+		}
+		if p.Latest != "" && semver.IsValid("v"+p.Latest) && semver.Compare(sv, "v"+p.Latest) > 0 {
+			continue
+		}
+		out = append(out, v.Version)
+	}
+	return out
+}
+
 // Newest is the newest version above cur that ripple will propose: a release (no
 // prerelease), not deprecated, and not above the "latest" dist-tag when there is one
 // (a version published beyond latest is on a channel the maintainers did not promote).

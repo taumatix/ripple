@@ -168,3 +168,45 @@ func TestNpmUpToDateOpensNothing(t *testing.T) {
 		}
 	})
 }
+
+// Partial ranges and x-ranges move at the precision written, and a repo that ignores
+// majors still gets the newest minor or patch while a newer major exists.
+func TestNpmPartialRangesAndTargetPerUpdateType(t *testing.T) {
+	forEach(t, func(t *testing.T, st store.Store) {
+		e, reg := npmEnv(t, st)
+		for pkg, v := range map[string]string{"part": "1.2.0", "xr": "2.0.0", "whole": "1.0.0", "held": "1.2.3"} {
+			reg.Publish(pkg, v)
+		}
+		cfg := npmConfig + "    ignore:\n      - dependency: \"*\"\n        update-types: [major]\n"
+		pj := "{\n  \"dependencies\": {\n    \"part\": \"^1.2\",\n    \"xr\": \"2.x\",\n    \"whole\": \"1\",\n    \"held\": \"^1.2.3\"\n  }\n}\n"
+		e.gh.AddRepo("acme/app", map[string]string{".ripple.yaml": cfg, "package.json": pj})
+		start(t, e, "acme/app")
+		if n := len(e.deps("acme/app")); n != 4 {
+			t.Fatalf("partial ranges are tracked, got %+v", e.deps("acme/app"))
+		}
+		e.clock.Advance(time.Minute)
+		reg.Publish("part", "1.7.4")  // ^1.2 -> ^1.7
+		reg.Publish("xr", "2.0.9")    // 2.x already allows it: nothing to change
+		reg.Publish("whole", "1.9.0") // "1" already allows it
+		reg.Publish("held", "1.2.9")  // the minor/patch the repo may take...
+		reg.Publish("held", "2.0.0")  // ...while a major it ignores is newer
+		e.tick()
+		e.tick()
+		prs := e.gh.PRs("acme/app")
+		if len(prs) != 2 {
+			t.Fatalf("want PRs for part and held only, got %d", len(prs))
+		}
+		for _, pr := range prs {
+			got, _ := e.gh.FileAt("acme/app", pr.Head, "package.json")
+			from, to := `"part": "^1.2"`, `"part": "^1.7"`
+			if strings.Contains(pr.Head, "held") {
+				from, to = `"held": "^1.2.3"`, `"held": "^1.2.9"`
+			} else if !strings.Contains(pr.Head, "part") {
+				t.Fatalf("unexpected branch %q", pr.Head)
+			}
+			if want := strings.Replace(pj, from, to, 1); got != want {
+				t.Errorf("%s:\n%s", pr.Head, got)
+			}
+		}
+	})
+}

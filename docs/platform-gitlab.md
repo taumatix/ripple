@@ -62,7 +62,7 @@ paths are validated before they reach a URL, and the API id is the path URL-enco
 
 ## Archive
 
-Only GitHub reports archive and unarchive today (ripple pauses the repo on `archived`, resumes on `unarchived`). GitLab's system hooks list `project_create`, `project_destroy`, `project_rename`, `project_transfer` and `project_update`; no event reports an archive, and the documentation does not say whether archiving fires `project_update` or carries an `archived` field (checked 2026-11-23 against docs.gitlab.com/administration/system_hooks). ripple therefore never pauses a GitLab repo on archive; an archived project's push is refused by GitLab, so nothing is opened until it is unarchived. `project_destroy` still forgets the repo.
+ripple pauses a repo on archive and resumes it on unarchive (no scan, pending jobs kept). GitLab's system hooks list no archive event, and the documentation does not say whether archiving fires `project_update` (checked 2026-11-23, docs.gitlab.com/administration/system_hooks), so ripple reads it from the membership listing instead: each discovery also lists `GET /projects?membership=true&archived=true` (documented in `docs/vendor/gitlab/api_projects.md`) and a project that moves between the two listings is archived or unarchived, not removed or added. It is seen within one discovery interval, not at once. Not verified against a real GitLab; only the fake has run. `project_destroy` still forgets the repo.
 
 ## Superseded pull requests
 

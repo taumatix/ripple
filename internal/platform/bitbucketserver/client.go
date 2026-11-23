@@ -324,8 +324,23 @@ func (c *Client) RequestAutoMerge(ctx context.Context, repo model.Repo, pr platf
 // carries no default branch (the field is write-only in the schema), so it is left
 // empty and filled from the first checkout.
 func (c *Client) ListRepos(ctx context.Context) ([]model.Repo, error) {
+	return c.listRepos(ctx, false)
+}
+
+// ListArchivedRepos is the archived ones (`archived=ARCHIVED`, available since 8.0). A
+// server before 8.0 ignores the filter and has no `archived` field, so the field is
+// required to be true here and such a server lists none.
+func (c *Client) ListArchivedRepos(ctx context.Context) ([]model.Repo, error) {
+	return c.listRepos(ctx, true)
+}
+
+func (c *Client) listRepos(ctx context.Context, archived bool) ([]model.Repo, error) {
 	var out []model.Repo
-	err := c.paged(ctx, model.Repo{}, "/repos?permission=REPO_WRITE", func(raw json.RawMessage) error {
+	path := "/repos?permission=REPO_WRITE"
+	if archived {
+		path += "&archived=ARCHIVED"
+	}
+	err := c.paged(ctx, model.Repo{}, path, func(raw json.RawMessage) error {
 		var rs []struct {
 			Slug     string `json:"slug"`
 			Archived bool   `json:"archived"`
@@ -338,7 +353,7 @@ func (c *Client) ListRepos(ctx context.Context) ([]model.Repo, error) {
 			return err
 		}
 		for _, r := range rs {
-			if r.Archived || (r.State != "" && r.State != "AVAILABLE") || !keyRe.MatchString(r.Project.Key) || !slugRe.MatchString(r.Slug) {
+			if r.Archived != archived || (r.State != "" && r.State != "AVAILABLE") || !keyRe.MatchString(r.Project.Key) || !slugRe.MatchString(r.Slug) {
 				continue
 			}
 			out = append(out, model.Repo{FullName: r.Project.Key + "/" + r.Slug})

@@ -97,3 +97,8 @@ func post(t *testing.T, hook string, secret []byte, event, id string, body []byt
 	resp.Body.Close()
 	return resp.StatusCode
 }
+
+// SetArchived: no archive event is documented; the listing's `archived` filter and field change.
+func (f *fixture) SetArchived(_ *testing.T, _, path string, archived bool) {
+	f.b.SetArchived(path, archived)
+}

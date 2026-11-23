@@ -43,10 +43,11 @@ type Gitea struct {
 	t    *testing.T
 	root string
 
-	mu      sync.Mutex
-	calls   map[string]int
-	prs     map[string][]*PR
-	visible []string
+	mu       sync.Mutex
+	calls    map[string]int
+	prs      map[string][]*PR
+	visible  []string
+	archived map[string]bool
 	// Merges records the raw merge request bodies, in order.
 	Merges []string
 	// VersionCalls counts GET /api/v1/version.
@@ -91,6 +92,16 @@ func (g *Gitea) Show(repos ...string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.visible = append(g.visible, repos...)
+}
+
+// SetArchived archives or unarchives a repository; the listing reports it in `archived`.
+func (g *Gitea) SetArchived(repo string, archived bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.archived == nil {
+		g.archived = map[string]bool{}
+	}
+	g.archived[repo] = archived
 }
 
 // Commit adds a commit on main with files.
@@ -210,11 +221,15 @@ func (g *Gitea) page(w http.ResponseWriter, r *http.Request, n int) (lo, hi int)
 func (g *Gitea) listRepos(w http.ResponseWriter, r *http.Request) {
 	g.mu.Lock()
 	vis := append([]string(nil), g.visible...)
+	arch := map[string]bool{}
+	for k, v := range g.archived {
+		arch[k] = v
+	}
 	g.mu.Unlock()
 	lo, hi := g.page(w, r, len(vis))
 	out := []map[string]any{}
 	for _, n := range vis[lo:hi] {
-		out = append(out, map[string]any{"full_name": n, "default_branch": "main", "archived": false, "empty": false,
+		out = append(out, map[string]any{"full_name": n, "default_branch": "main", "archived": arch[n], "empty": false,
 			"permissions": map[string]bool{"admin": false, "push": true, "pull": true}})
 	}
 	_ = json.NewEncoder(w).Encode(out)

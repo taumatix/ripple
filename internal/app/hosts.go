@@ -103,32 +103,78 @@ func (a *App) discover(ctx context.Context, host string, l platform.Lister) erro
 	if err != nil {
 		return err
 	}
+	var archivedNow []string
+	if al, ok := l.(platform.ArchivedLister); ok {
+		ar, err := al.ListArchivedRepos(ctx)
+		if err != nil {
+			return err
+		}
+		for _, r := range ar {
+			archivedNow = append(archivedNow, r.FullName)
+		}
+	}
 	now := make([]string, 0, len(repos))
 	for _, r := range repos {
 		now = append(now, r.FullName)
 	}
 	sort.Strings(now)
 	now = slices.Compact(now)
+	sort.Strings(archivedNow)
+	archivedNow = slices.Compact(archivedNow)
+	archivedNow = slices.DeleteFunc(archivedNow, func(n string) bool { _, active := slices.BinarySearch(now, n); return active })
+
 	key := "discover/" + host
-	raw, err := a.Queue.Store.GetCursor(ctx, key)
+	archivedKey := "discover-archived/" + host
+	before, err := a.listingCursor(ctx, key)
 	if err != nil {
 		return err
 	}
-	var before []string
-	if raw != "" {
-		if err := json.Unmarshal([]byte(raw), &before); err != nil {
-			return fmt.Errorf("cursor %s: %w", key, err)
+	archivedBefore, err := a.listingCursor(ctx, archivedKey)
+	if err != nil {
+		return err
+	}
+	// A repo that moved between the listings was archived or unarchived; one in neither
+	// listing any more was deleted (or lost to the credential); one in neither before is new.
+	var archived, unarchived []string
+	for _, n := range archivedNow {
+		if _, was := slices.BinarySearch(before, n); was {
+			archived = append(archived, n)
 		}
 	}
-	added, removed := diff(before, now)
-	if len(added)+len(removed) == 0 {
-		return nil
+	for _, n := range now {
+		if _, was := slices.BinarySearch(archivedBefore, n); was {
+			unarchived = append(unarchived, n)
+		}
 	}
-	gen := fmt.Sprintf("list-%x", hashNames(now))
+	var added []string
+	for _, n := range now {
+		_, known := slices.BinarySearch(before, n)
+		_, wasArchived := slices.BinarySearch(archivedBefore, n)
+		if !known && !wasArchived {
+			added = append(added, n)
+		}
+	}
+	var removed []string
+	for _, n := range slices.Concat(before, archivedBefore) {
+		_, active := slices.BinarySearch(now, n)
+		_, arch := slices.BinarySearch(archivedNow, n)
+		if !active && !arch {
+			removed = append(removed, n)
+		}
+	}
+	sort.Strings(removed)
+	removed = slices.Compact(removed)
+	if len(added)+len(removed)+len(archived)+len(unarchived) == 0 {
+		if slices.Equal(archivedBefore, archivedNow) {
+			return nil
+		}
+		return a.setListingCursor(ctx, archivedKey, archivedNow) // first seen archived: only remembered
+	}
+	gen := fmt.Sprintf("list-%x", hashNames(slices.Concat(now, []string{""}, archivedNow)))
 	for _, c := range []struct {
 		kind  platform.EventKind
 		repos []string
-	}{{platform.ReposAdded, added}, {platform.ReposRemoved, removed}} {
+	}{{platform.ReposAdded, added}, {platform.ReposRemoved, removed}, {platform.RepoArchived, archived}, {platform.RepoUnarchived, unarchived}} {
 		if len(c.repos) == 0 {
 			continue
 		}
@@ -136,24 +182,30 @@ func (a *App) discover(ctx context.Context, host string, l platform.Lister) erro
 			return err
 		}
 	}
-	b, _ := json.Marshal(now)
-	return a.Queue.Store.SetCursor(ctx, key, string(b))
+	// The archived listing first: a crash between the two writes repeats the events (their
+	// delivery ids make that a no-op) instead of losing the archive.
+	if err := a.setListingCursor(ctx, archivedKey, archivedNow); err != nil {
+		return err
+	}
+	return a.setListingCursor(ctx, key, now)
 }
 
-// diff returns what is in now and not before, and what is in before and not now;
-// both inputs are sorted.
-func diff(before, now []string) (added, removed []string) {
-	for _, n := range now {
-		if _, found := slices.BinarySearch(before, n); !found {
-			added = append(added, n)
-		}
+// listingCursor is a host's stored listing: a sorted JSON list of names, empty when none.
+func (a *App) listingCursor(ctx context.Context, key string) ([]string, error) {
+	raw, err := a.Queue.Store.GetCursor(ctx, key)
+	if err != nil || raw == "" {
+		return nil, err
 	}
-	for _, b := range before {
-		if _, found := slices.BinarySearch(now, b); !found {
-			removed = append(removed, b)
-		}
+	var names []string
+	if err := json.Unmarshal([]byte(raw), &names); err != nil {
+		return nil, fmt.Errorf("cursor %s: %w", key, err)
 	}
-	return added, removed
+	return names, nil
+}
+
+func (a *App) setListingCursor(ctx context.Context, key string, names []string) error {
+	b, _ := json.Marshal(names)
+	return a.Queue.Store.SetCursor(ctx, key, string(b))
 }
 
 func (a *App) log() *slog.Logger {

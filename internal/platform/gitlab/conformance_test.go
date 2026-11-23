@@ -87,3 +87,9 @@ func (f *glFixture) FileAt(path, branch, file string) (string, bool) {
 }
 func (f *glFixture) Calls(path string) int { return f.gl.Calls(path) }
 func (f *glFixture) RateLimitNextPR() bool { f.gl.RateLimitToken(confToken); return true }
+
+// SetArchived: GitLab sends no archive event, so the fake's membership listing changes
+// and the suite's discovery reads it (archived=true, a documented filter).
+func (f *glFixture) SetArchived(_ *testing.T, _, path string, archived bool) {
+	f.gl.SetArchived(path, archived)
+}

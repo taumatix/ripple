@@ -49,11 +49,12 @@ type BitbucketServer struct {
 	t    *testing.T
 	root string
 
-	mu      sync.Mutex
-	calls   map[string]int
-	lookups map[string]int
-	prs     map[string][]*bbPR
-	visible []string
+	mu       sync.Mutex
+	calls    map[string]int
+	lookups  map[string]int
+	prs      map[string][]*bbPR
+	visible  []string
+	archived map[string]bool
 	// Merges records the raw merge request bodies, in order.
 	Merges []string
 	// failures make a request fail: "METHOD path-suffix" -> status (FailRequest).
@@ -127,6 +128,17 @@ func (b *BitbucketServer) Show(repos ...string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.visible = append(b.visible, repos...)
+}
+
+// SetArchived archives or unarchives a repository. GET /repos answers ACTIVE ones unless
+// ?archived=ARCHIVED or ALL says otherwise (8.0 and later, docs/vendor/bitbucket-server).
+func (b *BitbucketServer) SetArchived(repo string, archived bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.archived == nil {
+		b.archived = map[string]bool{}
+	}
+	b.archived[repo] = archived
 }
 
 // Commit adds a commit on main with files and returns the old and new head.
@@ -264,7 +276,17 @@ func (b *BitbucketServer) listRepos(w http.ResponseWriter, r *http.Request) {
 		b.t.Errorf("repositories listed without permission=REPO_WRITE: %s", r.URL.RawQuery)
 	}
 	b.mu.Lock()
-	vis := append([]string(nil), b.visible...)
+	var vis []string
+	mode := strings.ToUpper(r.URL.Query().Get("archived"))
+	for _, n := range b.visible {
+		if mode == "ALL" || (mode == "ARCHIVED") == b.archived[n] {
+			vis = append(vis, n)
+		}
+	}
+	arch := map[string]bool{}
+	for k, v := range b.archived {
+		arch[k] = v
+	}
 	b.mu.Unlock()
 	lo, hi, env := b.page(r, len(vis))
 	values := []map[string]any{}
@@ -272,7 +294,7 @@ func (b *BitbucketServer) listRepos(w http.ResponseWriter, r *http.Request) {
 		key, slug, _ := strings.Cut(n, "/")
 		// No defaultBranch: the schema marks it writeOnly (docs/vendor/bitbucket-server/openapi-excerpt.json).
 		values = append(values, map[string]any{"slug": slug, "id": 1, "name": slug, "scmId": "git", "state": "AVAILABLE",
-			"archived": false, "project": map[string]any{"key": key, "id": 1, "name": key, "type": "NORMAL"}})
+			"archived": arch[n], "project": map[string]any{"key": key, "id": 1, "name": key, "type": "NORMAL"}})
 	}
 	env["values"] = values
 	_ = json.NewEncoder(w).Encode(env)

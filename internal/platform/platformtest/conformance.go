@@ -279,6 +279,48 @@ func renamed(t *testing.T, f Fixture) {
 	}
 }
 
+// A host that reports archives: the archived repo keeps its index and pending job and
+// opens nothing; unarchived, the deferred job runs and the index is as it was.
+func archived(t *testing.T, f Fixture) {
+	ra, ok := f.(ReportsArchives)
+	if !ok {
+		return // allowed, as for renames; returning keeps CI's "no test may skip" check
+	}
+	e := newEnv(t, f, opts{})
+	e.stub("example.com/lib", "v1.0.0", "v1.1.0")
+	e.addRepo("arch", libRepo("example.com/arch", nil))
+	e.register("arch")
+	name := e.name("arch")
+	ctx := context.Background()
+
+	ra.SetArchived(t, e.hook, f.Path("arch"), true)
+	e.app.Discover(ctx)
+	e.eventually("repo paused", func() bool { return e.app.Engine.Paused(ctx, name) })
+	if _, found, err := e.st.GetRepo(ctx, name); err != nil || !found {
+		t.Fatalf("an archived repo was forgotten: found=%v err=%v", found, err)
+	}
+	if d, err := e.st.ListRepoDependencies(ctx, name); err != nil || len(d) != 1 {
+		t.Fatalf("the index did not survive the archive: %+v %v", d, err)
+	}
+	e.clock.Advance(time.Minute)
+	e.publish("example.com/lib", "v1.1.0")
+	e.tick()
+	if n := len(e.prs("arch")); n != 0 {
+		t.Fatalf("%d PRs opened on an archived repo", n)
+	}
+
+	ra.SetArchived(t, e.hook, f.Path("arch"), false)
+	e.app.Discover(ctx)
+	e.eventually("repo resumed", func() bool { return !e.app.Engine.Paused(ctx, name) })
+	e.tick()
+	if n := len(e.prs("arch")); n != 1 {
+		t.Fatalf("want the deferred release to open 1 PR after the unarchive, got %d", n)
+	}
+	if d, err := e.st.ListRepoDependencies(ctx, name); err != nil || len(d) != 1 {
+		t.Fatalf("index after the unarchive: %+v %v", d, err)
+	}
+}
+
 // A repo that opts in with dependency-dashboard gets one issue listing its deferred
 // job where the host implements platform.IssueTracker. A host that does not keeps the
 // job and reports the capability absent (ErrNoIssues), without an error or a retry.

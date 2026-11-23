@@ -89,6 +89,15 @@ type ReportsRenames interface {
 	RenameRepo(t *testing.T, webhook, from, to string)
 }
 
+// ReportsArchives is implemented by a Fixture whose host lets ripple learn that a
+// repository was archived or unarchived (an event, or a listing that tells archived
+// repos from deleted ones, platform.ArchivedLister). SetArchived changes the fake and,
+// for an event host, delivers the event to webhook; the suite runs discovery after it.
+// A host that cannot leaves this out: an archive then goes unseen, as before.
+type ReportsArchives interface {
+	SetArchived(t *testing.T, webhook, path string, archived bool)
+}
+
 // Run runs every conformance test against f.
 func Run(t *testing.T, f Fixture) {
 	t.Run("ReleaseOpensOnePRInExactlyTheImportingRepos", func(t *testing.T) { releaseFanOut(t, f) })
@@ -99,6 +108,7 @@ func Run(t *testing.T, f Fixture) {
 	t.Run("StalePRClosedOnlyWhereTheHostCan", func(t *testing.T) { supersede(t, f) })
 	t.Run("RateLimitHoldsBackTheHostThenRetries", func(t *testing.T) { rateLimit(t, f) })
 	t.Run("DependencyDashboardOnlyWhereTheHostHasIssues", func(t *testing.T) { dashboard(t, f) })
+	t.Run("ArchivePausesAndUnarchiveResumes", func(t *testing.T) { archived(t, f) })
 	t.Run("RenameKeepsTheIndexWithoutAScan", func(t *testing.T) { renamed(t, f) })
 }
 

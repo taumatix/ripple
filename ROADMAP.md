@@ -233,7 +233,7 @@ Everything else:
 130. **Docker: verify against real registries.** The client and the fake were written from the spec excerpts
     (`docs/vendor/registry`); run it against Docker Hub and GHCR once (host, `library/` prefix, index digest
     `Accept` types, 429 handling) and record the result in UPSTREAM.md.
-131. **Docker: package cursor and release dates.** `docker:packages` is one read-modify-write cursor (see 150) and the
+131. **Docker: package cursor and release dates.** `docker:packages` is one read-modify-write cursor (see 151) and the
     cooldown counts from first sight because tags carry no date; read the image config `created` time instead.
 132. **Webhook retry ids, verified on real hosts.** Delivery ids are now persisted (store delivery table), but whether
     Bitbucket Cloud's `X-Request-UUID` and Azure DevOps' payload `id` stay the same across a retry is still

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -64,6 +65,12 @@ func clean(s string) string {
 
 // renderDashboard is the issue body for jobs at time now.
 func renderDashboard(jobs []model.Job, now time.Time) string {
+	return renderDashboardWith(jobs, nil, now)
+}
+
+// renderDashboardWith also lists advisories ripple cannot propose a fix for. Their ids,
+// packages and versions come from OSV and the repo's go.mod: all untrusted, all cleaned.
+func renderDashboardWith(jobs []model.Job, advisories []openAdvisory, now time.Time) string {
 	var deferred, due, failed []model.Job
 	for _, j := range jobs {
 		switch {
@@ -116,7 +123,18 @@ func renderDashboard(jobs []model.Job, now time.Time) string {
 		}
 		return s
 	})
-	if len(jobs) == 0 {
+	if len(advisories) > 0 {
+		fmt.Fprintf(&b, "\n## Advisories without a fix ripple can propose (%d)\n\nPublished advisories that affect a version this repo uses and that no release fixes (or, where noted, only a pseudo-version does). No pull request is opened for them.\n\n", len(advisories))
+		for _, o := range advisories {
+			line := fmt.Sprintf("- [%s](%s) in `%s` `%s`: %s\n", clean(o.ID), safeAdvisoryURL(o), clean(o.Package), clean(o.Version), clean(o.Why))
+			if b.Len()+len(line) > dashboardBudget {
+				omitted++
+				continue
+			}
+			b.WriteString(line)
+		}
+	}
+	if len(jobs) == 0 && len(advisories) == 0 {
 		b.WriteString("\nNothing is pending, deferred or failed.\n")
 	}
 	if omitted > 0 {
@@ -210,7 +228,11 @@ func (e *Engine) updateDashboard(ctx context.Context, repo model.Repo, lister st
 	if err != nil {
 		return err
 	}
-	body := renderDashboard(jobs, e.now())
+	advisories, err := e.currentOpenAdvisories(ctx, repo.FullName)
+	if err != nil {
+		return err
+	}
+	body := renderDashboardWith(jobs, advisories, e.now())
 	hash := bodyHash(body)
 	cur, err := e.Store.GetCursor(ctx, dashboardCursor(repo.FullName))
 	if err != nil {
@@ -229,7 +251,7 @@ func (e *Engine) updateDashboard(ctx context.Context, repo model.Repo, lister st
 			return err
 		}
 		if !found {
-			if len(jobs) == 0 {
+			if len(jobs) == 0 && len(advisories) == 0 {
 				return nil // nothing to report and nothing reported yet
 			}
 			return e.createDashboard(ctx, repo, body, save)
@@ -252,7 +274,7 @@ func (e *Engine) updateDashboard(ctx context.Context, repo model.Repo, lister st
 			}
 			return err
 		}
-		if len(jobs) == 0 {
+		if len(jobs) == 0 && len(advisories) == 0 {
 			return e.Store.SetCursor(ctx, dashboardCursor(repo.FullName), "")
 		}
 		return e.createDashboard(ctx, repo, body, save)
@@ -286,4 +308,10 @@ func parseDashboardCursor(s string) (int, string) {
 func bodyHash(body string) string {
 	h := sha256.Sum256([]byte(body))
 	return hex.EncodeToString(h[:])
+}
+
+// safeAdvisoryURL is the osv.dev page of the advisory, rebuilt from its id rather than
+// taken from the stored value, so nothing but an osv.dev link can reach the issue.
+func safeAdvisoryURL(o openAdvisory) string {
+	return "https://osv.dev/vulnerability/" + url.PathEscape(clean(o.ID))
 }

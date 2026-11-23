@@ -75,7 +75,10 @@ type Engine struct {
 	locks map[string]*sync.Mutex
 	// dirty is the repos whose jobs changed outside their own run, and dashOff the
 	// repos whose issues could not be written until a time; both see dashboard.go.
-	dirty   map[string]bool
+	dirty map[string]bool
+	// advMu serialises the read-modify-write of a repo's open-advisory list, which the
+	// poller and a scan both write and only a scan does under the repo lock.
+	advMu   sync.Mutex
 	dashOff map[string]time.Time
 	// falseClaims remembers default-branch claims the host contradicted (HealDefaultBranch).
 	falseClaims map[string]time.Time

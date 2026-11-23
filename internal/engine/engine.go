@@ -76,6 +76,11 @@ type Engine struct {
 	// GoProxyUser and GoProxyToken authenticate to the configured module proxy for the
 	// steps that execute no repository code; empty means no credential.
 	GoCC, GoProxyUser, GoProxyToken string
+	// GoToolchainDir holds Go releases (go1.25.3/bin/go, one directory per release, as a
+	// go.dev download unpacks) that verification runs with when a module's go.mod names
+	// one, instead of the server's own Go. Empty, or no matching release, keeps the
+	// server's Go. Nothing is downloaded.
+	GoToolchainDir string
 
 	// parseConfig is a test seam counting repo-file parses; nil means RepoConfig.
 	parseConfig func([]byte) (*config.Repo, error)

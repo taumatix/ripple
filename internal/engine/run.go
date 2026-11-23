@@ -122,6 +122,9 @@ type runner struct {
 	ambiguous []string
 	// notes are lines the PR body gets after verification, e.g. what verification did not cover.
 	notes []string
+	// namedRelease is the Go release from the toolchain directory that verification ran
+	// with, or "" when it ran with the server's own Go.
+	namedRelease string
 	// shas caches the commit a github-tags job's tag points at, by "package@tag".
 	shas map[string]string
 }
@@ -529,6 +532,9 @@ func (r *runner) openPR(p *prPlan) (*platform.PR, error) {
 		}
 		draft = failure != ""
 		p.draft = draft
+		if r.namedRelease != "" {
+			body = strings.Replace(body, serverGoSentence, "ripple checked `go mod tidy`, `go build ./...` and `go vet ./...` with go"+r.namedRelease+" from the server's toolchain directory, the release this go.mod names; CI on this pull request remains the full check.", 1)
+		}
 		if !draft {
 			for _, n := range r.notes {
 				body += "\n" + n + "\n"
@@ -703,6 +709,10 @@ func toolchainRow(d model.Dependency, target string) (name, from, to string) {
 	return "toolchain line", "go" + strings.TrimPrefix(d.Version, "v"), "go" + strings.TrimPrefix(target, "v")
 }
 
+// serverGoSentence is what a toolchain PR says about verification; a run that used a
+// release from the toolchain directory replaces it (see runner.namedGo).
+const serverGoSentence = "ripple checked `go mod tidy`, `go build ./...` and `go vet ./...` with the Go installed on its server (toolchain downloads are off), which need not be the version named above; CI on this pull request is the check against that version."
+
 // toolchainNotes explains, for a PR that moves the go directive or toolchain line,
 // what the change asks of others and what verification did and did not cover.
 func toolchainNotes(items []item) string {
@@ -722,7 +732,7 @@ func toolchainNotes(items []item) string {
 		b.WriteString("\nThe toolchain line only selects the Go used to build this module; dependants do not read it.\n")
 	}
 	if directive || toolchain {
-		b.WriteString("\nripple checked `go mod tidy`, `go build ./...` and `go vet ./...` with the Go installed on its server (toolchain downloads are off), which need not be the version named above; CI on this pull request is the check against that version.\n")
+		b.WriteString("\n" + serverGoSentence + "\n")
 	}
 	return b.String()
 }

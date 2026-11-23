@@ -120,9 +120,6 @@ Everything else:
     repository's build can reach anything that network can. Ship a recipe, then a built-in option, that creates an
     internal network holding only a proxy sidecar; also run `git` and `go` together in one image with a
     documented, pinned Go version so `GOTOOLCHAIN=local` always satisfies the repo's `go` line.
-43. **Verify a Go bump with the Go it names.** Verification runs with the server's installed Go
-    (`GOTOOLCHAIN=local`), so a directive above it opens a draft and a toolchain bump is checked
-    against a different Go. Offer a toolchain image per supported minor; CI stays the real check until then.
 51. **OSV: should a security PR bypass the open-PR limit and the schedule?** Today only the cooldown is skipped.
     Needs a decision from real use. Trade-offs: bypassing the limit makes a security fix arrive even when a repo
     is at its cap of open PRs (the case where it matters most) but lets one advisory affecting many modules open

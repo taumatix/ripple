@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -51,7 +53,9 @@ type Server struct {
 	// reach only the go commands that run no repository code, and need RIPPLE_GOPROXY set to a private proxy. GoCC is the C compiler cgo
 	// verification uses; empty is cc.
 	GoProxyUser, GoProxyToken, GoCC string
-	Sandbox                         string // none, auto, bwrap, seatbelt, container, docker, podman
+	// GoToolchainDir holds Go releases (go1.25.3/bin/go) that verification uses when a go.mod names one.
+	GoToolchainDir string
+	Sandbox        string // none, auto, bwrap, seatbelt, container, docker, podman
 	// Container* configure the container, docker and podman sandboxes (docs/sandbox.md).
 	ContainerImage, ContainerCPUs, ContainerMemory, ContainerPull, ContainerNetwork string
 	Store                                                                           string // memory, postgres, dynamodb
@@ -126,6 +130,7 @@ RIPPLE_OSV_MAX_FETCH          advisory records fetched per poll (default 100)
 RIPPLE_GOPROXY                module proxy used to verify major bumps (default https://proxy.golang.org)
 RIPPLE_GOPROXY_USER           user for RIPPLE_GOPROXY (HTTP basic auth); with RIPPLE_GOPROXY_TOKEN, sent only to repos listing private-modules
 RIPPLE_GOPROXY_TOKEN          password or token for RIPPLE_GOPROXY; needs an https proxy
+RIPPLE_GO_TOOLCHAIN_DIR       directory of Go releases (go1.25.3/bin/go) verification runs with when a go.mod names one; never downloaded
 RIPPLE_GO_CC                  C compiler for repos with cgo: true (default: go's own, gcc or clang)
 RIPPLE_STORE                  memory (default), postgres or dynamodb
 RIPPLE_POSTGRES_DSN           required for postgres
@@ -230,6 +235,7 @@ func LoadServer(getenv func(string) string) (*Server, error) {
 		GoProxyUser:              getenv("RIPPLE_GOPROXY_USER"),
 		GoProxyToken:             getenv("RIPPLE_GOPROXY_TOKEN"),
 		GoCC:                     getenv("RIPPLE_GO_CC"),
+		GoToolchainDir:           getenv("RIPPLE_GO_TOOLCHAIN_DIR"),
 		Sandbox:                  str("RIPPLE_SANDBOX", "none"),
 		ContainerImage:           getenv("RIPPLE_CONTAINER_IMAGE"),
 		ContainerCPUs:            getenv("RIPPLE_CONTAINER_CPUS"),
@@ -332,6 +338,14 @@ func LoadServer(getenv func(string) string) (*Server, error) {
 	}
 	if s.GoProxyToken != "" && getenv("RIPPLE_GOPROXY") == "" {
 		errs = append(errs, errors.New("RIPPLE_GOPROXY_TOKEN: set RIPPLE_GOPROXY to the private proxy; the credential is never sent to the default public proxy"))
+	}
+	if d := s.GoToolchainDir; d != "" {
+		if fi, err := os.Stat(d); err != nil || !fi.IsDir() || !filepath.IsAbs(d) {
+			errs = append(errs, errors.New("RIPPLE_GO_TOOLCHAIN_DIR: must be an absolute path to an existing directory"))
+		}
+	}
+	if s.GoToolchainDir != "" && (s.Sandbox == "container" || s.Sandbox == "docker" || s.Sandbox == "podman") {
+		errs = append(errs, errors.New("RIPPLE_GO_TOOLCHAIN_DIR: a container backend runs the Go its image carries; the directory would be ignored, so set it only with another sandbox"))
 	}
 	switch s.Store {
 	case "memory", "dynamodb":

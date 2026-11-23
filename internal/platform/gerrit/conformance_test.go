@@ -82,9 +82,11 @@ func refUpdatedBody(project, ref, old, head string) map[string]any {
 func (f *gerritFixture) PRs(path string) []platformtest.PR {
 	var out []platformtest.PR
 	for _, c := range f.fake.Changes(path) {
-		if c.Status == "NEW" {
-			out = append(out, platformtest.PR{Head: c.Topic, Base: c.Branch, Draft: c.WIP})
+		pr := platformtest.PR{Head: c.Topic, Base: c.Branch, Draft: c.WIP, Closed: c.Status == "ABANDONED"}
+		if c.AbandonMessage != "" {
+			pr.Comments = []string{c.AbandonMessage}
 		}
+		out = append(out, pr)
 	}
 	return out
 }

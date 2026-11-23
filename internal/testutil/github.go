@@ -120,7 +120,16 @@ func (g *GitHub) AddRepo(repo string, files map[string]string) {
 	git(g.t, bare, "init", "--bare", "-b", "main")
 	// GitHub serves partial clones; so does the fake.
 	git(g.t, bare, "config", "uploadpack.allowFilter", "true")
+	git(g.t, bare, "config", "uploadpack.allowAnySHA1InWant", "true")
 	g.Commit(repo, files)
+}
+
+// DisablePartialClone makes repo's server refuse to filter, as a host that does not
+// implement partial clone does: git then sends every object and warns.
+func (g *GitHub) DisablePartialClone(repo string) {
+	g.t.Helper()
+	git(g.t, g.bare(repo), "config", "uploadpack.allowFilter", "false")
+	git(g.t, g.bare(repo), "config", "uploadpack.allowAnySHA1InWant", "false")
 }
 
 // Commit adds a commit on main with files (a human pushing to the default branch).

@@ -28,6 +28,30 @@ type GitHTTP struct {
 	mu       sync.Mutex
 	rejected int
 	seen     []string
+	sent     int64
+}
+
+// countWriter counts the bytes a response body carries.
+type countWriter struct {
+	http.ResponseWriter
+	n  *int64
+	mu *sync.Mutex
+}
+
+func (c countWriter) Write(p []byte) (int, error) {
+	n, err := c.ResponseWriter.Write(p)
+	c.mu.Lock()
+	*c.n += int64(n)
+	c.mu.Unlock()
+	return n, err
+}
+
+// BytesServed is the total of response body bytes the server has sent, the
+// closest a test gets to "what a clone downloaded".
+func (h *GitHTTP) BytesServed() int64 {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.sent
 }
 
 // ExpireTokens revokes every installation token minted so far, as if their
@@ -83,7 +107,7 @@ func (g *GitHub) ServeGit() *GitHTTP {
 			r.Body, r.ContentLength, r.TransferEncoding = io.NopCloser(bytes.NewReader(body)), int64(len(body)), nil
 			r.Header.Del("Transfer-Encoding")
 		}
-		h.ServeHTTP(w, r)
+		h.ServeHTTP(countWriter{w, &gh.sent, &gh.mu}, r)
 	}))
 	g.t.Cleanup(srv.Close)
 	gh.URL = srv.URL

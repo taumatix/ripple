@@ -63,6 +63,35 @@ func InWorkspaceMode(ctx context.Context) bool {
 	return on
 }
 
+type scanOnlyKey struct{}
+
+// WithScanOnly marks ctx so the Checkout it reaches may return a workspace that is
+// only good for reading: a partial clone with no working tree, whose files arrive
+// as they are read (Walk lists them from the tree, Prefetch fetches the ones a scan
+// will read in one request). Such a workspace refuses writes, commits and go
+// commands. A platform that cannot do that ignores the mark and returns a full
+// checkout, so a caller must not rely on getting the light one.
+func WithScanOnly(ctx context.Context) context.Context {
+	return context.WithValue(ctx, scanOnlyKey{}, true)
+}
+
+// ScanOnly reports whether ctx came from WithScanOnly.
+func ScanOnly(ctx context.Context) bool {
+	on, _ := ctx.Value(scanOnlyKey{}).(bool)
+	return on
+}
+
+// ErrScanFallback is wrapped by errors a scan-only workspace returns when the host
+// could not serve it (no partial clone, a refused fetch). The caller repeats the
+// scan on a full checkout instead of failing.
+var ErrScanFallback = errors.New("scan-only checkout unavailable")
+
+// Prefetcher is a Workspace that can load many files in one request ahead of
+// ReadFile. Prefetch is only an optimisation for a full checkout, where it does nothing.
+type Prefetcher interface {
+	Prefetch(ctx context.Context, paths []string) error
+}
+
 // Workspace is a shallow checkout of a repo's default branch.
 type Workspace interface {
 	DefaultBranch() string

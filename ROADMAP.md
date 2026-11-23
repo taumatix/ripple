@@ -16,9 +16,6 @@ Ordered by how much each entry limits real deployments. The top is next.
    off in the smoke test, import the fake module there, and assert the bumped `go.mod` and `go.sum`.
    Apple `container` has no `--network host`, so the smoke test runs against the image only in CI.
 
-6. **Scan without a full checkout.** The clone filter saves nothing while the scan checks out HEAD
-   ([docs/bounds.md](docs/bounds.md)): a huge-blob repo still downloads every blob at HEAD. Clone `--no-checkout`
-   (or sparse) and read only the paths the managers match, so a repo's size stops mattering to a scan.
 
 Platforms (code hosts). The goal is the whole list Renovate supports, each behind the one `Platform`
 interface, each with the same end-to-end test (a push or release event leads to exactly one PR in

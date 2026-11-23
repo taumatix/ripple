@@ -14,6 +14,7 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
   `RIPPLE_REQUIRE_SERVICES=1`, which turns a skipped service test into a failure; CI sets it too.
 - CI smoke test of the built image over HTTP against a fake GitHub (`internal/smoke`, `make test-smoke`).
 - Bitbucket Cloud host (`RIPPLE_BITBUCKET_*`): workspace discovery, `repo:push` webhooks (changed files from the diffstat), pull requests, and auto-merge through merge queues only (otherwise reported unsupported). The platform conformance suite gains an optional `FilelessPushes` marker for hosts whose push payload lists no files. See [docs/platform-bitbucket.md](docs/platform-bitbucket.md).
+- SCM-Manager host (`RIPPLE_SCMMANAGER_*`, Review plugin 3.11.0 or later): repository discovery by listing, webhook-plugin pushes authenticated by a shared-secret header (the plugin cannot sign), changed files from the modifications API, pull requests including drafts. No auto-merge: SCM-Manager has none. Verified only against a fake. See [docs/platform-scmmanager.md](docs/platform-scmmanager.md).
 
 ### Security
 - OS-level sandbox for `go` and local `git` (`RIPPLE_SANDBOX`: `none` (default), `auto`, `seatbelt`, `bwrap`).

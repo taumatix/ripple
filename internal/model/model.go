@@ -12,6 +12,10 @@ const DatasourceGo = "go"
 // GitHub Action or reusable workflow, named by their owner/repo.
 const DatasourceGitHubTags = "github-tags"
 
+// DatasourceDocker is the tags of a container image on a registry: the versions of
+// a Dockerfile's base image, named "registry/repository" (docker.io/library/nginx).
+const DatasourceDocker = "docker"
+
 // DatasourceGoToolchain is the Go release train itself: the `go` directive
 // (package PackageGoDirective) and the `toolchain` line (PackageGoToolchain) of a
 // go.mod. They are dependencies of the module on the language, not on a module.

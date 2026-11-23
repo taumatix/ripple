@@ -23,6 +23,7 @@ import (
 	"github.com/taumatix/ripple/internal/feed"
 	"github.com/taumatix/ripple/internal/model"
 	"github.com/taumatix/ripple/internal/platform/github"
+	"github.com/taumatix/ripple/internal/registry"
 	"github.com/taumatix/ripple/internal/rules"
 	"github.com/taumatix/ripple/internal/sandbox"
 	"github.com/taumatix/ripple/internal/store"
@@ -124,6 +125,8 @@ type opts struct {
 	// test can count what a clone downloaded. Repos must be added before the env is built? No:
 	// the server reads the same bare repos, so adding them later is fine.
 	gitHTTP bool
+	// registry, when set, is the fake container registry every image host resolves to.
+	registry *testutil.Registry
 	// engine adjusts the engine before it runs (server-side go settings).
 	engine func(e *engine.Engine)
 }
@@ -160,11 +163,14 @@ func newEnvOpts(t *testing.T, st store.Store, lim rules.Limits, o opts) *env {
 	if o.engine != nil {
 		o.engine(eng)
 	}
+	if o.registry != nil {
+		eng.Registry = &registry.Client{HTTP: http.DefaultClient, Insecure: true, BaseURL: func(string) string { return o.registry.URL }}
+	}
 	e.newApp = func() *app.App {
 		a := &app.App{Engine: eng, Secret: []byte(secret), Log: slog.New(slog.NewTextHandler(io.MultiWriter(testWriter{t}, e.logs), nil)),
 			PollEvery: o.pollEvery, Queue: &app.Queue{},
 			Watcher: &engine.Watcher{Engine: eng, Feed: &feed.GoIndex{BaseURL: e.idx.URL}},
-			Actions: &engine.ActionsWatcher{Engine: eng}}
+			Actions: &engine.ActionsWatcher{Engine: eng}, Docker: &engine.DockerWatcher{Engine: eng}}
 		if o.goDL != nil {
 			a.Toolchain = &engine.ToolchainWatcher{Engine: eng, Source: &feed.GoDL{BaseURL: o.goDL.URL}}
 		}

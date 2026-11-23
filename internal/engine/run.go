@@ -127,6 +127,8 @@ type runner struct {
 	namedRelease string
 	// shas caches the commit a github-tags job's tag points at, by "package@tag".
 	shas map[string]string
+	// digests caches the manifest digest of a docker job's tag, by "package:tag".
+	digests map[string]string
 }
 
 func (r *runner) finish(j model.Job, state model.JobState, reason, pr string) {
@@ -340,6 +342,9 @@ func (r *runner) plan(jobs []model.Job, deps []model.Dependency) []*prPlan {
 		branch := BranchPrefix + "go/" + slug(j.Package) + "-" + slug(j.Version)
 		if j.Datasource == model.DatasourceGitHubTags {
 			branch = BranchPrefix + "actions/" + slug(j.Package) + "-" + slug(j.Version)
+		}
+		if j.Datasource == model.DatasourceDocker {
+			branch = BranchPrefix + "docker/" + slug(j.Package) + "-" + slug(j.Version)
 		}
 		if it.group != "" {
 			branch = BranchPrefix + "group/" + slug(it.group)
@@ -606,6 +611,9 @@ func (r *runner) apply(it item) (bool, error) {
 		version := it.job.Version
 		if d.Datasource == model.DatasourceGitHubTags {
 			version = r.actionVersion(it.job.Package, version)
+		}
+		if d.Datasource == model.DatasourceDocker {
+			version = r.imageVersion(it.job.Package, version)
 		}
 		out, err := m.Apply(content, d, it.job.Package, version)
 		if errors.Is(err, manager.ErrStale) {

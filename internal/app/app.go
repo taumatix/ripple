@@ -33,8 +33,11 @@ type App struct {
 	// Actions polls the tags of the GitHub Actions the repos use (ecosystem:
 	// github-actions); nil leaves the feature out.
 	Actions *engine.ActionsWatcher
-	Secret  []byte
-	Log     *slog.Logger
+	// Docker polls the tags of the container images the repos use (ecosystem:
+	// docker); nil leaves the feature out.
+	Docker *engine.DockerWatcher
+	Secret []byte
+	Log    *slog.Logger
 	// PollEvery is the feed poll and job run period; zero disables the loop (tests call Tick).
 	PollEvery time.Duration
 	// Advisories polls OSV when set (RIPPLE_OSV). It runs on its own loop every
@@ -238,6 +241,7 @@ func (a *App) Tick(ctx context.Context) {
 	}
 	a.pollToolchain(ctx)
 	a.pollActions(ctx)
+	a.pollDocker(ctx)
 	a.pollAdvisories(ctx)
 	if _, err := a.Engine.RunDue(ctx); err != nil && ctx.Err() == nil {
 		a.Log.Error("run due jobs", "err", err)
@@ -292,6 +296,9 @@ func (a *App) pollLoop(ctx context.Context) {
 			a.jobs.Wake()
 		}
 		if a.pollActions(ctx) > 0 {
+			a.jobs.Wake()
+		}
+		if a.pollDocker(ctx) > 0 {
 			a.jobs.Wake()
 		}
 		select {
@@ -432,6 +439,21 @@ func (a *App) pollActions(ctx context.Context) int {
 		a.Log.Error("github actions poll", "err", err)
 	case n > 0:
 		a.Log.Info("github actions poll enqueued jobs", "jobs", n)
+	}
+	return n
+}
+
+// pollDocker polls the tags of the container images in use and returns how many jobs it enqueued.
+func (a *App) pollDocker(ctx context.Context) int {
+	if a.Docker == nil {
+		return 0
+	}
+	n, err := a.Docker.Poll(ctx)
+	switch {
+	case err != nil && ctx.Err() == nil:
+		a.Log.Error("container image poll", "err", err)
+	case n > 0:
+		a.Log.Info("container image poll enqueued jobs", "jobs", n)
 	}
 	return n
 }

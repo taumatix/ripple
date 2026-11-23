@@ -82,12 +82,11 @@ Everything else:
   store cursor, which DynamoDB caps at 400 KB (roughly 10k repo names). Store it per repo before a host
   with larger installations ships.
 29. **More datasources and feeds, as many ecosystems as Renovate has.** npm replicate, PyPI, crates.io
-   sparse index, Maven, NuGet, RubyGems, Packagist, Docker/OCI tags, GitHub releases/tags, Helm, Terraform
+   sparse index, Maven, NuGet, RubyGems, Packagist, ~~Docker/OCI tags~~ (shipped with 30b, polled per image), GitHub releases/tags, Helm, Terraform
    registry. Where a registry has a changes feed, use it; where it has none (OCI registries), fall back to polling
    only the packages the reverse index says someone imports, never every repo. Each datasource says which of the two it is.
 30. **More managers, toward Renovate parity.** ~~GitHub Actions~~ shipped ([docs/github-actions.md](docs/github-actions.md)).
-   Remaining, by value, each its own entry: 30b Dockerfile (`FROM`, tags and digests, needs an OCI datasource,
-   see 29), 30c npm, 30d Cargo, 30e pip, 30f Helm, and the long tail.
+   ~~30b Dockerfile~~ shipped ([docs/docker.md](docs/docker.md)). Remaining, by value, each its own entry: 30c npm, 30d Cargo, 30e pip, 30f Helm, and the long tail.
 96. **Actions registry cursor.** The packages the actions watcher polls live in one cursor
     (`github-tags:packages`), written read-modify-write: replicas can lose each other's additions until the
     next scan, and a package no repo uses any more is never pruned. Keep it per package in the store.

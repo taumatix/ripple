@@ -21,6 +21,14 @@ upstream:
     webhooks: [installation, installation_repositories, push, repository, signature X-Hub-Signature-256 = sha256=HMAC-SHA256(body)]
     unverified: "the text of the push refusal without the workflows permission (matched on \"workflow\" and \"permission\"); enablePullRequestAutoMerge mutation shape; that issue events record every PR rename as event \"renamed\" and that App tokens may close a PR and comment with pull-requests: write alone (assumed from the docs); the labels endpoint creating missing labels (assumed); the issues endpoints need the App permission Issues: read and write, and a missing permission is assumed to answer 403 and disabled issues 410 (docs list both codes, not the text; see docs/vendor/github/issues-rest.md); the fake GitHub in tests is written from the docs, not recorded"
     checked: 2026-11-22
+  - name: docker-registry-api
+    kind: http-api
+    reference: https://github.com/opencontainers/distribution-spec/blob/main/spec.md
+    docs: https://distribution.github.io/distribution/spec/auth/token/
+    format: "GET /v2/<name>/tags/list?n&last (Link rel=next), HEAD /v2/<name>/manifests/<tag> (Docker-Content-Digest), anonymous Bearer token from the Www-Authenticate realm"
+    verified-against: "docs/vendor/registry excerpts read 2026-11-23; tests use internal/testutil/registry.go, a fake written from them"
+    unverified: "any real registry: Docker Hub host and library/ prefix, GHCR anonymous pulls, the Accept types for the index digest, rate-limit statuses (see docs/vendor/registry/README.md)"
+    checked: 2026-11-23
   - name: github-enterprise-server
     kind: http-api
     reference: https://docs.github.com/en/enterprise-server@latest/rest

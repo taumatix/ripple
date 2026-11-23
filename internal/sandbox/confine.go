@@ -106,16 +106,15 @@ func confine(ctx context.Context, fl Flavour, o ConfineOptions, run runFn) (*Con
 		return nil, err
 	}
 	runArgs := []string{"run", "-d", "--name", side, "--label", "ripple.job=1", "-e", "RIPPLE_NGINX_CONF=" + conf, "--entrypoint", "sh"}
-	steps := [][]string{}
+	// Start on the default network so the sidecar resolves and reaches the upstream, then join the
+	// internal one. Rootless podman's default is pasta, which cannot be joined to a second network
+	// afterwards ("pasta is not supported", seen in CI), and listing both networks at run time leaves
+	// DNS to the internal network's resolver, which does not forward ("host not found in upstream",
+	// seen in CI): so name podman's default bridge network explicitly.
 	if fl == FlavourPodman {
-		// Rootless podman's default is pasta, which cannot be joined to a second network
-		// afterwards ("pasta is not supported: invalid network mode", seen in CI): name the
-		// default bridge network and the internal one together at run time.
-		steps = append(steps, append(append(runArgs, "--network", "podman,"+name), image, "-c", sidecarScript))
-	} else {
-		// Docker: start on the default network (so the sidecar can reach the upstream), then join the internal one.
-		steps = append(steps, append(runArgs, image, "-c", sidecarScript), []string{"network", "connect", name, side})
+		runArgs = append(runArgs, "--network", "podman")
 	}
+	steps := [][]string{append(runArgs, image, "-c", sidecarScript), {"network", "connect", name, side}}
 	for _, st := range steps {
 		if _, err := run(ctx, st...); err != nil {
 			remove()

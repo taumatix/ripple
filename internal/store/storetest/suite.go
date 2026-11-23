@@ -209,6 +209,64 @@ func Run(t *testing.T, mk func(t *testing.T) store.Store) {
 		}
 	})
 
+	// Spread over many repos and jobs, the order and the limit must be the same as for a
+	// few: stores that shard their indexes (DynamoDB) merge several partitions here.
+	t.Run("many jobs in order", func(t *testing.T) {
+		s := mk(t)
+		base := time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC)
+		const n = 120
+		for i := 0; i < n; i++ {
+			// Not-before times descend with i, so insertion order is the reverse of due order.
+			j := model.Job{Key: model.JobKey(fmt.Sprintf("acme/r%03d", i), "go", "example.com/lib", "v1.0.0"), Repo: fmt.Sprintf("acme/r%03d", i),
+				Datasource: "go", Package: "example.com/lib", Version: "v1.0.0", ReleasedAt: base, State: model.JobPending,
+				NotBefore: base.Add(-time.Duration(i) * time.Second)}
+			if ok, err := s.EnqueueJob(ctx, j); err != nil || !ok {
+				t.Fatalf("enqueue %d: ok=%v err=%v", i, ok, err)
+			}
+		}
+		for _, limit := range []int{1, 7, 50, n, n + 30} {
+			due, err := s.ListDueJobs(ctx, base, limit)
+			want := min(limit, n)
+			if err != nil || len(due) != want {
+				t.Fatalf("limit %d: got %d jobs, err=%v", limit, len(due), err)
+			}
+			for k, j := range due {
+				if wantRepo := fmt.Sprintf("acme/r%03d", n-1-k); j.Repo != wantRepo {
+					t.Fatalf("limit %d: position %d is %s, want %s", limit, k, j.Repo, wantRepo)
+				}
+			}
+		}
+		// Finishing the oldest drops it from the queue wherever it lives.
+		due, _ := s.ListDueJobs(ctx, base, 1)
+		due[0].State = model.JobDone
+		if err := s.UpdateJob(ctx, due[0]); err != nil {
+			t.Fatal(err)
+		}
+		if next, _ := s.ListDueJobs(ctx, base, 1); len(next) != 1 || next[0].Key == due[0].Key {
+			t.Fatalf("done job still first: %v", next)
+		}
+	})
+
+	t.Run("many dependents of one package", func(t *testing.T) {
+		s := mk(t)
+		const n = 60
+		for i := 0; i < n; i++ {
+			r := fmt.Sprintf("acme/r%03d", i)
+			if err := s.ReplaceDependencies(ctx, r, []model.Dependency{dep(r, "go.mod", "example.com/popular", "v1.0.0"), dep(r, "go.mod", "example.com/rare", "v1.0.0")}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		got, err := s.ListDependents(ctx, "go", "example.com/popular")
+		if err != nil || len(got) != n {
+			t.Fatalf("got %d dependents, err=%v", len(got), err)
+		}
+		for i, d := range got {
+			if want := fmt.Sprintf("acme/r%03d", i); d.Repo != want {
+				t.Fatalf("position %d is %s, want %s", i, d.Repo, want)
+			}
+		}
+	})
+
 	t.Run("events", func(t *testing.T) {
 		s := mk(t)
 		at := time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC)

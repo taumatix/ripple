@@ -50,6 +50,7 @@ type Dynamo struct {
 	// adaptiveSeen is set once the table has ever been written with it on, after which
 	// reads and writes consult the per-package shard record even if the option is off.
 	adaptive     int
+	stripes      int
 	adaptiveSeen bool
 	// pkgShards caches each package's recorded shard count for the write path. It only
 	// grows, and a stale (lower) value is safe to write with; reads never use it.
@@ -84,6 +85,13 @@ func WithAdaptiveDependents(perShard int) DynamoOption {
 	return func(d *Dynamo) { d.adaptive = max(perShard, 0) }
 }
 
+// WithCounterStripes spreads the writes of each package's dependents counter over n items
+// (1..MaxShards, default 1: one item). A package imported by very many repos otherwise
+// funnels every counter update through one item, whose partition limit is a write ceiling.
+// The count is the sum over the stripes and the counter item written before striping, so the
+// option can be turned on or off on a live table. It only matters with WithAdaptiveDependents.
+func WithCounterStripes(n int) DynamoOption { return func(d *Dynamo) { d.stripes = clampShards(n) } }
+
 const (
 	gsi1 = "gsi1"
 	sep  = "\x1f"
@@ -91,7 +99,7 @@ const (
 )
 
 func NewDynamo(db *dynamodb.Client, table string, opts ...DynamoOption) *Dynamo {
-	d := &Dynamo{db: db, table: table, jobShards: DefaultJobShards, depShards: DefaultDependentShards, concurrency: DefaultQueryConcurrency, leaseSkew: DefaultLeaseSkew}
+	d := &Dynamo{db: db, table: table, jobShards: DefaultJobShards, depShards: DefaultDependentShards, concurrency: DefaultQueryConcurrency, leaseSkew: DefaultLeaseSkew, stripes: 1}
 	for _, o := range opts {
 		o(d)
 	}

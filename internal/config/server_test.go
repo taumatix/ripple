@@ -168,6 +168,20 @@ func TestServerDynamoConcurrencyAndAdaptive(t *testing.T) {
 	}
 }
 
+func TestServerDynamoCounterStripes(t *testing.T) {
+	if s, err := LoadServer(env(base)); err != nil || s.DynamoCounterStripes != 1 {
+		t.Fatalf("default: %+v %v", s, err)
+	}
+	if s, err := LoadServer(env(with("RIPPLE_DYNAMODB_COUNTER_STRIPES", "8"))); err != nil || s.DynamoCounterStripes != 8 {
+		t.Fatalf("set: %+v %v", s, err)
+	}
+	for _, v := range []string{"0", "65", "x"} {
+		if _, err := LoadServer(env(with("RIPPLE_DYNAMODB_COUNTER_STRIPES", v))); err == nil {
+			t.Errorf("RIPPLE_DYNAMODB_COUNTER_STRIPES=%s accepted", v)
+		}
+	}
+}
+
 func TestServerOSV(t *testing.T) {
 	s, err := LoadServer(env(base))
 	if err != nil || s.OSV || s.OSVInterval != 10*time.Minute || s.OSVMaxFetch != 100 || s.OSVURL != "https://api.osv.dev" {

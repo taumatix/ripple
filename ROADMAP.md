@@ -298,3 +298,10 @@ Everything else:
 137. **One image with git and a pinned Go.** The second half of the old entry 39: the runners are verified with a
     `go`-only image. Document and publish an image carrying both `git` and a pinned Go so `GOTOOLCHAIN=local` always
     satisfies a repo's `go` line, and run the git steps through the live job.
+138. **The `test` CI job hides failing tests.** Its step pipes `go test ... | tee test.log` without `set -o pipefail`,
+    so a failing test leaves the job green (found 2026-11-23 on PR #53: with `pipefail` the job failed on 15 `--- FAIL`
+    lines in `internal/e2e`: `TestPushHealsDefaultBranch` (memory, postgres and dynamodb subtests, about 30 s timeouts),
+    `TestKilledReplicaIsTakenOverWithOnePullRequest/dynamodb`, `TestFencedOutReplicaCannotWriteTheJobOrOpenASecondPR/dynamodb`,
+    `TestRepoFileIgnoreGroupsAutomerge/dynamodb`, and a `WARNING: DATA RACE` between `App.nowTime` and `App.claimDelivery`
+    in `internal/app/app.go`). The same unchanged step also passed a real failure of the fake-runtime container e2e test
+    on podman earlier on that PR. Fix those, then add `set -o pipefail`. The new `container-runtimes` job has it.

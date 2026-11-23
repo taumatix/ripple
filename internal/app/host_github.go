@@ -26,7 +26,7 @@ func buildGitHub(ctx context.Context, d HostDeps) (*platform.Host, error) {
 	g := d.Git
 	v := github.PinnedVersions(s.GitHubAPIVersion)
 	c := &github.Client{
-		APIBase: s.GitHubAPIURL, GitBase: s.GitHubGitURL, GraphQLURL: s.GitHubGraphQLURL, Versions: v, HTTP: d.HTTP, Log: d.Log,
+		APIBase: s.GitHubAPIURL, GitBase: s.GitHubGitURL, GraphQLURL: s.GitHubGraphQLURL, UpstreamAPIBase: s.ActionsUpstreamURL, UpstreamToken: s.ActionsUpstreamToken, Versions: v, HTTP: d.HTTP, Log: d.Log,
 		WorkDir: g.WorkDir, GoProxy: g.GoProxy, GoSumDB: g.GoSumDB, GoCacheDir: g.GoCacheDir, Sandbox: g.Sandbox,
 		Tokens:     &github.AppAuth{AppID: s.GitHubAppID, Key: key, APIBase: s.GitHubAPIURL, HTTP: d.HTTP, Versions: v},
 		AuthorName: "ripple[bot]", AuthorEmail: "ripple@users.noreply.github.com",

@@ -17,6 +17,17 @@ is accepted only for loopback, as for every URL ripple is configured with. Creat
 point its webhook at `https://<ripple>/webhook`; installation tokens come from the same
 `/app/installations/{id}/access_tokens` flow and last an hour.
 
+## Actions that live on github.com
+
+`uses: actions/checkout@v4` on a GHES resolves to github.com through GitHub Connect or a synced copy; ripple
+reads the tags of an action from the GHES first. Set `RIPPLE_ACTIONS_UPSTREAM_URL=https://api.github.com` and a
+repository the GHES does not have (its tags answer 404) is read from there instead: tags, the commit a tag
+points at (for SHA pins) and the release (for the PR's release-notes link). A repository the GHES does have is
+never read from upstream, even for a tag or release only upstream's copy has. Reads are anonymous unless
+`RIPPLE_ACTIONS_UPSTREAM_TOKEN` is set, which is sent to that URL only (anonymous github.com allows 60
+requests an hour per address; one poll reads about three per action). The GHES installation token is never sent
+upstream. The pull request is still opened on the GHES. See [github-actions.md](github-actions.md).
+
 ## Differences handled
 
 | Difference | What ripple does |

@@ -46,7 +46,10 @@ need it.
 
 - The denial is recognised by git's message containing "workflow" and "permission". The exact wording GitHub
   returns is not verified against the real service (the tests use a fake written from its documented text).
-- Tags are read from github.com. With GitHub Enterprise Server the upstream action must be on the same host.
+- Tags are read from the repo's own host. On GitHub Enterprise Server an action that only exists on github.com is
+  found when `RIPPLE_ACTIONS_UPSTREAM_URL` names its API (see
+  [platform-github-enterprise.md](platform-github-enterprise.md)); without it the action is skipped with a
+  warning. Verified against a fake only.
 - Superseding follows the Go modules' rules (`close-superseded-pull-requests`, on by default): a PR for a newer
   tag closes the open older ripple PR of the same action and the same tag shape, unless a person touched it.
   PRs of different shapes (`v5` and `v5.1.0`) are separate dependencies and never close each other.

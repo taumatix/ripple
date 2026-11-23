@@ -38,7 +38,11 @@ type Server struct {
 	GitHubGraphQLURL string
 	GitHubAPIVersion string
 	GitHubGitURL     string
-	FeedURL          string
+	// ActionsUpstreamURL is the GitHub API an action the GitHub host does not have is read
+	// from (https://api.github.com for a GHES); empty reads the host only.
+	// ActionsUpstreamToken lifts that API's anonymous rate limit and goes nowhere else.
+	ActionsUpstreamURL, ActionsUpstreamToken string
+	FeedURL                                  string
 	// GoReleasesURL serves the Go release list (go-toolchain updates).
 	GoReleasesURL string
 	FeedInterval  time.Duration
@@ -129,6 +133,8 @@ RIPPLE_GITHUB_API_URL         default https://api.github.com (GHES: https://HOST
 RIPPLE_GITHUB_GRAPHQL_URL     default derived from the API URL (GHES: https://HOST/api/graphql)
 RIPPLE_GITHUB_API_VERSION     X-GitHub-Api-Version to pin (YYYY-MM-DD); default the newest ripple knows, lowered once on a 410
 RIPPLE_GITHUB_GIT_URL         default https://github.com
+RIPPLE_ACTIONS_UPSTREAM_URL   GitHub API to read an action's tags from when the GitHub host lacks it (GHES: https://api.github.com); default none
+RIPPLE_ACTIONS_UPSTREAM_TOKEN token for RIPPLE_ACTIONS_UPSTREAM_URL only, to lift its anonymous rate limit; optional
 RIPPLE_FEED_URL               default https://index.golang.org
 RIPPLE_FEED_INTERVAL          default 1m
 RIPPLE_GO_RELEASES_URL        Go release list for go-toolchain updates (default https://go.dev/dl/)
@@ -264,6 +270,8 @@ func LoadServer(getenv func(string) string) (*Server, error) {
 		GitHubGitURL:             strings.TrimRight(str("RIPPLE_GITHUB_GIT_URL", ghGit), "/"),
 		GitHubGraphQLURL:         strings.TrimRight(str("RIPPLE_GITHUB_GRAPHQL_URL", ghGraphQL), "/"),
 		GitHubAPIVersion:         getenv("RIPPLE_GITHUB_API_VERSION"),
+		ActionsUpstreamURL:       strings.TrimRight(getenv("RIPPLE_ACTIONS_UPSTREAM_URL"), "/"),
+		ActionsUpstreamToken:     getenv("RIPPLE_ACTIONS_UPSTREAM_TOKEN"),
 		FeedURL:                  strings.TrimRight(str("RIPPLE_FEED_URL", "https://index.golang.org"), "/"),
 		GoReleasesURL:            strings.TrimRight(str("RIPPLE_GO_RELEASES_URL", "https://go.dev/dl/"), "/"),
 		FeedInterval:             dur("RIPPLE_FEED_INTERVAL", "1m"),
@@ -363,6 +371,14 @@ func LoadServer(getenv func(string) string) (*Server, error) {
 		if err := checkURL("RIPPLE_GITHUB_ENTERPRISE_URL", ghes); err != nil {
 			errs = append(errs, err)
 		}
+	}
+	if s.ActionsUpstreamURL != "" {
+		if err := checkURL("RIPPLE_ACTIONS_UPSTREAM_URL", s.ActionsUpstreamURL); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if s.ActionsUpstreamToken != "" && s.ActionsUpstreamURL == "" {
+		errs = append(errs, errors.New("RIPPLE_ACTIONS_UPSTREAM_TOKEN: set RIPPLE_ACTIONS_UPSTREAM_URL; the token is sent nowhere else"))
 	}
 	if s.GitHubGraphQLURL != "" {
 		if err := checkURL("RIPPLE_GITHUB_GRAPHQL_URL", s.GitHubGraphQLURL); err != nil {

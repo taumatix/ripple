@@ -362,3 +362,23 @@ func TestServerContainerConfine(t *testing.T) {
 		}
 	}
 }
+
+func TestActionsUpstream(t *testing.T) {
+	s, err := LoadServer(env(base))
+	if err != nil || s.ActionsUpstreamURL != "" || s.ActionsUpstreamToken != "" {
+		t.Fatalf("off by default: %+v, %v", s, err)
+	}
+	s, err = LoadServer(env(with("RIPPLE_ACTIONS_UPSTREAM_URL", "https://api.github.com/", "RIPPLE_ACTIONS_UPSTREAM_TOKEN", "t")))
+	if err != nil || s.ActionsUpstreamURL != "https://api.github.com" || s.ActionsUpstreamToken != "t" {
+		t.Fatalf("%+v, %v", s, err)
+	}
+	for name, m := range map[string]map[string]string{
+		"plain http":    with("RIPPLE_ACTIONS_UPSTREAM_URL", "http://api.example.com"),
+		"token no url":  with("RIPPLE_ACTIONS_UPSTREAM_TOKEN", "t"),
+		"url with user": with("RIPPLE_ACTIONS_UPSTREAM_URL", "https://u:p@api.github.com"),
+	} {
+		if _, err := LoadServer(env(m)); err == nil || !strings.Contains(err.Error(), "RIPPLE_ACTIONS_UPSTREAM") {
+			t.Errorf("%s: want an error naming the variable, got %v", name, err)
+		}
+	}
+}

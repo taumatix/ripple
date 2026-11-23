@@ -2,7 +2,9 @@ package github
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -21,6 +23,54 @@ func (c *Client) repoURL(target, suffix string) string {
 	return fmt.Sprintf("%s/repos/%s%s", strings.TrimRight(c.APIBase, "/"), target, suffix)
 }
 
+// readRepo is GET /repos/{target}{suffix} on the host, or on UpstreamAPIBase when the host
+// does not have the repository and one is configured. The upstream is asked for nothing else.
+func (c *Client) readRepo(ctx context.Context, via model.Repo, target, suffix string, out any) (int, error) {
+	status, err := c.do(ctx, via, http.MethodGet, c.repoURL(target, suffix), nil, out)
+	if status != http.StatusNotFound || c.UpstreamAPIBase == "" {
+		return status, err
+	}
+	// A 404 may also be a tag or release the host's own copy lacks: only a repository the
+	// host does not have is read from upstream, never a different one's tag or release.
+	if suffix != "" {
+		if pstatus, perr := c.do(ctx, via, http.MethodGet, c.repoURL(target, "/tags?per_page=1"), nil, &[]struct{}{}); perr == nil {
+			return status, err
+		} else if pstatus != http.StatusNotFound {
+			return pstatus, perr
+		}
+	}
+	return c.upstreamGet(ctx, fmt.Sprintf("%s/repos/%s%s", strings.TrimRight(c.UpstreamAPIBase, "/"), target, suffix), out)
+}
+
+// upstreamGet reads public data from UpstreamAPIBase. It never sends an installation
+// token: the host's credentials stay with the host.
+func (c *Client) upstreamGet(ctx context.Context, rawURL string, out any) (int, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return 0, err
+	}
+	setHeaders(req, c.Versions.Current())
+	if c.UpstreamToken != "" {
+		req.Header.Set("Authorization", "Bearer "+c.UpstreamToken)
+	}
+	resp, err := c.client().Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("github upstream GET %s: %w", req.URL.Path, err)
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if resp.StatusCode == http.StatusTooManyRequests || (resp.StatusCode == http.StatusForbidden && (resp.Header.Get("X-RateLimit-Remaining") == "0" || resp.Header.Get("Retry-After") != "")) {
+		return resp.StatusCode, &platform.RateLimitError{Until: retryAt(resp, c.now())}
+	}
+	if resp.StatusCode >= 300 {
+		return resp.StatusCode, fmt.Errorf("github upstream GET %s: status %d: %s", req.URL.Path, resp.StatusCode, snippet(data))
+	}
+	if err := json.Unmarshal(data, out); err != nil {
+		return resp.StatusCode, fmt.Errorf("github upstream GET %s: decode: %w", req.URL.Path, err)
+	}
+	return resp.StatusCode, nil
+}
+
 // ListTags pages through GET /repos/{target}/tags, which is not ordered.
 func (c *Client) ListTags(ctx context.Context, via model.Repo, target string) ([]string, error) {
 	if err := checkRepo(via); err != nil {
@@ -31,7 +81,7 @@ func (c *Client) ListTags(ctx context.Context, via model.Repo, target string) ([
 		var items []struct {
 			Name string `json:"name"`
 		}
-		if _, err := c.do(ctx, via, http.MethodGet, c.repoURL(target, fmt.Sprintf("/tags?per_page=100&page=%d", page)), nil, &items); err != nil {
+		if _, err := c.readRepo(ctx, via, target, fmt.Sprintf("/tags?per_page=100&page=%d", page), &items); err != nil {
 			return nil, err
 		}
 		for _, it := range items {
@@ -58,13 +108,13 @@ func (c *Client) TagCommit(ctx context.Context, via model.Repo, target, tag stri
 		return "", err
 	}
 	var ref refObject
-	if _, err := c.do(ctx, via, http.MethodGet, c.repoURL(target, "/git/ref/tags/"+url.PathEscape(tag)), nil, &ref); err != nil {
+	if _, err := c.readRepo(ctx, via, target, "/git/ref/tags/"+url.PathEscape(tag), &ref); err != nil {
 		return "", err
 	}
 	// An annotated tag may point at another tag: bounded, so a cycle cannot loop.
 	for i := 0; ref.Object.Type == "tag" && i < 5; i++ {
 		var next refObject
-		if _, err := c.do(ctx, via, http.MethodGet, c.repoURL(target, "/git/tags/"+ref.Object.SHA), nil, &next); err != nil {
+		if _, err := c.readRepo(ctx, via, target, "/git/tags/"+ref.Object.SHA, &next); err != nil {
 			return "", err
 		}
 		ref = next
@@ -87,7 +137,7 @@ func (c *Client) ReleaseOf(ctx context.Context, via model.Repo, target, tag stri
 		Draft      bool      `json:"draft"`
 		Prerelease bool      `json:"prerelease"`
 	}
-	status, err := c.do(ctx, via, http.MethodGet, c.repoURL(target, "/releases/tags/"+url.PathEscape(tag)), nil, &rel)
+	status, err := c.readRepo(ctx, via, target, "/releases/tags/"+url.PathEscape(tag), &rel)
 	if status == http.StatusNotFound {
 		return platform.TagRelease{}, false, nil
 	}

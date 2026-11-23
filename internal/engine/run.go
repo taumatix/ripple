@@ -233,14 +233,16 @@ func (r *runner) plan(jobs []model.Job, deps []model.Dependency) []*prPlan {
 	for _, j := range jobs {
 		it := item{job: j, automerge: true, typ: rules.Patch, advisory: r.e.advisoryNoteFor(r.ctx, j)}
 		var notBefore time.Time
-		ignored := false
+		ignored, pseudo := false, false
 		for _, d := range deps {
+			u, haveU := r.cfg.UpdateFor(d.Manager, d.File)
 			typ, ok := applicable(d, j.Datasource, j.Package, j.Version)
-			if !ok {
-				continue
+			if !ok && it.advisory != nil && it.advisory.Pseudo && haveU && u.SecurityPseudoVersions {
+				// The advisory's only fix is a pseudo-version, which the repo opted in to.
+				typ, ok = applicablePseudoFix(d, j.Package, j.Version)
+				pseudo = pseudo || ok
 			}
-			u, ok := r.cfg.UpdateFor(d.Manager, d.File)
-			if !ok {
+			if !ok || !haveU {
 				continue
 			}
 			dec := rules.Evaluate(r.e.Limits, u, d.Package, typ, j.ReleasedAt, now)
@@ -260,6 +262,9 @@ func (r *runner) plan(jobs []model.Job, deps []model.Dependency) []*prPlan {
 			if it.group == "" {
 				it.group = dec.Group
 			}
+		}
+		if pseudo {
+			it.automerge = false // a commit, not a release: a person looks at it
 		}
 		switch {
 		case len(it.deps) == 0 && ignored:

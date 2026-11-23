@@ -111,6 +111,10 @@ type Update struct {
 	// CGO is gomod only: verification compiles cgo files (CGO_ENABLED=1), which needs a C
 	// compiler where ripple runs go. The default, false, builds with cgo off.
 	CGO bool `yaml:"cgo"`
+	// SecurityPseudoVersions is gomod only: when an OSV advisory is fixed only by a
+	// pseudo-version (a commit, no release), open a security PR for it. The default,
+	// false, proposes nothing and lists the advisory on the dependency dashboard.
+	SecurityPseudoVersions bool `yaml:"security-pseudo-versions"`
 	// PrivateModules is gomod only: module path patterns (GONOSUMDB syntax) that the
 	// server's module proxy serves and the public checksum database does not know. Only a
 	// repo that lists them is given the server's proxy credential.
@@ -272,7 +276,7 @@ func (c *checker) add(n *yaml.Node, format string, a ...any) {
 
 var (
 	rootKeys     = []string{"version", "open-pull-requests-limit", "close-superseded-pull-requests", "backfill-new-dependencies", "dependency-dashboard", "updates"}
-	updateKeys   = []string{"ecosystem", "directory", "schedule", "cooldown", "ignore", "groups", "automerge", "go-toolchain", "cgo", "private-modules", "directives", "tidy", "files", "patterns", "package"}
+	updateKeys   = []string{"ecosystem", "directory", "schedule", "cooldown", "ignore", "groups", "automerge", "go-toolchain", "cgo", "security-pseudo-versions", "private-modules", "directives", "tidy", "files", "patterns", "package"}
 	scheduleKeys = []string{"days", "from", "to", "timezone"}
 	ignoreKeys   = []string{"dependency", "update-types"}
 	groupKeys    = []string{"patterns", "update-types"}
@@ -451,7 +455,7 @@ func (c *checker) update(n *yaml.Node, u *Update, where string) {
 			}
 		}
 	case "regex":
-		for _, k := range []string{"cgo", "private-modules", "directives", "tidy"} {
+		for _, k := range []string{"cgo", "security-pseudo-versions", "private-modules", "directives", "tidy"} {
 			if v := f[k]; v != nil {
 				c.add(v, "%s.%s is only valid with ecosystem: gomod", where, k)
 			}

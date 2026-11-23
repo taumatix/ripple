@@ -83,8 +83,9 @@ func New(ctx context.Context, s *config.Server, log *slog.Logger) (*App, store.S
 	}
 	if s.OSV {
 		eng.Advisories = true
-		a.Advisories = &engine.AdvisoryWatcher{Engine: eng, MaxFetch: s.OSVMaxFetch,
-			Source: &advisory.Client{APIURL: s.OSVURL, DumpURL: s.OSVDumpURL, HTTP: &http.Client{Timeout: 20 * time.Second}}}
+		osvClient := &advisory.Client{APIURL: s.OSVURL, DumpURL: s.OSVDumpURL, HTTP: &http.Client{Timeout: 20 * time.Second}}
+		eng.AdvisoryHistory = osvClient
+		a.Advisories = &engine.AdvisoryWatcher{Engine: eng, MaxFetch: s.OSVMaxFetch, Source: osvClient}
 		a.AdvisoryEvery = s.OSVInterval
 	}
 	return a, st, nil

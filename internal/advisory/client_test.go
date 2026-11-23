@@ -2,7 +2,9 @@ package advisory
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -132,5 +134,128 @@ func TestPositionRoundTrip(t *testing.T) {
 	}
 	if _, err := ParsePosition("junk"); err == nil {
 		t.Fatal("junk accepted")
+	}
+}
+
+// batchServer answers POST /v1/querybatch like the documented API: results in query order,
+// ids only, and a next_page_token when a query has more than pageSize ids.
+func batchServer(t *testing.T, answers map[string][]string, pageSize int) (*Client, *[]map[string]any) {
+	t.Helper()
+	var reqs []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/querybatch" {
+			http.NotFound(w, r)
+			return
+		}
+		var in struct {
+			Queries []struct {
+				Package   struct{ Name, Ecosystem string }
+				Version   string
+				PageToken string `json:"page_token"`
+			}
+		}
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		if len(in.Queries) > 1000 {
+			http.Error(w, "too many", 400)
+			return
+		}
+		type res struct {
+			Vulns []map[string]string `json:"vulns,omitempty"`
+			Next  string              `json:"next_page_token,omitempty"`
+		}
+		var results []res
+		for _, q := range in.Queries {
+			reqs = append(reqs, map[string]any{"name": q.Package.Name, "eco": q.Package.Ecosystem, "version": q.Version, "token": q.PageToken})
+			ids := answers[q.Package.Name+"@"+q.Version]
+			start := 0
+			if q.PageToken != "" {
+				fmt.Sscanf(q.PageToken, "%d", &start)
+			}
+			end := min(start+pageSize, len(ids))
+			var r res
+			for _, id := range ids[start:end] {
+				r.Vulns = append(r.Vulns, map[string]string{"id": id, "modified": "2026-11-01T00:00:00Z"})
+			}
+			if end < len(ids) {
+				r.Next = fmt.Sprint(end)
+			}
+			results = append(results, r)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"results": results})
+	}))
+	t.Cleanup(srv.Close)
+	return &Client{APIURL: srv.URL}, &reqs
+}
+
+func TestQueryBatchKeepsOrderStripsVAndFollowsPages(t *testing.T) {
+	c, reqs := batchServer(t, map[string][]string{
+		"example.com/a@1.0.0": {"GO-1", "GO-2", "GO-3"},
+		"stdlib@1.21.0":       {"GO-9"},
+	}, 2)
+	got, err := c.QueryBatch(context.Background(), []Query{
+		{"example.com/a", "v1.0.0"}, {"example.com/clean", "v2.0.0"}, {"stdlib", "v1.21.0"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := [][]string{{"GO-1", "GO-2", "GO-3"}, nil, {"GO-9"}}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("got %v want %v", got, want)
+	}
+	for _, r := range *reqs {
+		if r["eco"] != "Go" || strings.HasPrefix(r["version"].(string), "v") {
+			t.Fatalf("bad request %v", r)
+		}
+	}
+}
+
+func TestQueryBatchChunksAtOneThousand(t *testing.T) {
+	c, reqs := batchServer(t, nil, 10)
+	qs := make([]Query, 2500)
+	for i := range qs {
+		qs[i] = Query{fmt.Sprintf("example.com/m%d", i), "v1.0.0"}
+	}
+	got, err := c.QueryBatch(context.Background(), qs)
+	if err != nil || len(got) != 2500 || len(*reqs) != 2500 {
+		t.Fatalf("err=%v got=%d reqs=%d", err, len(got), len(*reqs))
+	}
+}
+
+func TestQueryBatchErrors(t *testing.T) {
+	for name, h := range map[string]http.HandlerFunc{
+		"status":  func(w http.ResponseWriter, r *http.Request) { http.Error(w, "x", 503) },
+		"short":   func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(`{"results":[]}`)) },
+		"garbage": func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(`<html>`)) },
+		"bad id": func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(`{"results":[{"vulns":[{"id":"../x"}]}]}`))
+		},
+		"too big": func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write(make([]byte, maxBatchBytes+10)) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			srv := httptest.NewServer(h)
+			defer srv.Close()
+			c := &Client{APIURL: srv.URL}
+			if _, err := c.QueryBatch(context.Background(), []Query{{"example.com/a", "v1.0.0"}}); err == nil {
+				t.Fatal("want an error")
+			}
+		})
+	}
+}
+
+// The default line cap covers the whole Go list (about 10k lines on 2026-11-23), so a
+// poll after a long outage is not truncated.
+func TestModifiedDefaultCapCoversTheWholeGoList(t *testing.T) {
+	var b strings.Builder
+	base := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	for i := 12000; i > 0; i-- {
+		fmt.Fprintf(&b, "%s,GO-2026-%05d\n", base.Add(time.Duration(i)*time.Minute).Format(time.RFC3339), i)
+	}
+	c, _ := fakeOSV(t, []byte(b.String()), nil)
+	got, truncated, err := c.Modified(context.Background(), Position{Time: base})
+	if err != nil || truncated || len(got) != 12000 {
+		t.Fatalf("err=%v truncated=%v entries=%d", err, truncated, len(got))
 	}
 }

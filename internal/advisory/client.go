@@ -2,6 +2,7 @@ package advisory
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -17,13 +18,21 @@ import (
 const (
 	// DefaultDumpURL is the public bucket the OSV project documents for bulk access.
 	DefaultDumpURL = "https://storage.googleapis.com/osv-vulnerabilities"
-	// DefaultAPIURL is the OSV API; only GET /v1/vulns/{id} is used.
+	// DefaultAPIURL is the OSV API; GET /v1/vulns/{id} and POST /v1/querybatch are used.
 	DefaultAPIURL = "https://api.osv.dev"
 
-	defaultMaxLines = 2000
+	// defaultMaxLines bounds one Modified call. The Go file is ~10k lines (~450KB) on
+	// 2026-11-23, so this reads all of it on a first poll after a long outage; maxCSVBytes
+	// still bounds the read.
+	defaultMaxLines = 20000
 	maxCSVBytes     = 4 << 20
 	maxVulnBytes    = 1 << 20
-	userAgent       = "ripple-osv-poller (+https://github.com/taumatix/ripple)"
+
+	// querybatch limits: OSV documents at most 1000 queries per request.
+	maxBatchQueries   = 1000
+	maxBatchBytes     = 8 << 20
+	maxBatchPageRound = 5
+	userAgent         = "ripple-osv-poller (+https://github.com/taumatix/ripple)"
 )
 
 // ErrNotFound is returned by Vuln for an id OSV does not know (HTTP 404).
@@ -81,7 +90,7 @@ type Client struct {
 	DumpURL  string       // default DefaultDumpURL
 	APIURL   string       // default DefaultAPIURL
 	HTTP     *http.Client // default: 20s timeout
-	MaxLines int          // CSV lines read per Modified call; default 2000
+	MaxLines int          // CSV lines read per Modified call; default 20000
 }
 
 func (c *Client) httpc() *http.Client {
@@ -200,4 +209,118 @@ func (c *Client) Vuln(ctx context.Context, id string) (*Vuln, error) {
 		return nil, fmt.Errorf("advisory: asked for %s, got %q", id, v.ID)
 	}
 	return &v, nil
+}
+
+// Query asks which advisories affect Name at Version. Version may carry a leading "v".
+type Query struct {
+	Name    string // a module path, "stdlib" or "toolchain"
+	Version string
+}
+
+type batchQuery struct {
+	Package struct {
+		Name      string `json:"name"`
+		Ecosystem string `json:"ecosystem"`
+	} `json:"package"`
+	Version   string `json:"version"`
+	PageToken string `json:"page_token,omitempty"`
+}
+
+type batchResult struct {
+	Vulns []struct {
+		ID string `json:"id"`
+	} `json:"vulns"`
+	NextPageToken string `json:"next_page_token"`
+}
+
+// QueryBatch asks POST /v1/querybatch which advisories affect each query and returns
+// the ids per query, in the order of qs. It sends at most 1000 queries per request and
+// follows next_page_token for a bounded number of rounds; a query whose pages outlast
+// that is returned with the ids it got. Only ids come back: fetch a record with Vuln.
+func (c *Client) QueryBatch(ctx context.Context, qs []Query) ([][]string, error) {
+	out := make([][]string, len(qs))
+	for lo := 0; lo < len(qs); lo += maxBatchQueries {
+		hi := min(lo+maxBatchQueries, len(qs))
+		if err := c.queryChunk(ctx, qs[lo:hi], out[lo:hi]); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+func (c *Client) queryChunk(ctx context.Context, qs []Query, out [][]string) error {
+	base := c.APIURL
+	if base == "" {
+		base = DefaultAPIURL
+	}
+	pending := make([]batchQuery, len(qs))
+	index := make([]int, len(qs))
+	for i, q := range qs {
+		pending[i].Package.Name = q.Name
+		pending[i].Package.Ecosystem = Ecosystem
+		pending[i].Version = strings.TrimPrefix(q.Version, "v")
+		index[i] = i
+	}
+	seen := make([]map[string]bool, len(qs))
+	for round := 0; len(pending) > 0 && round < maxBatchPageRound; round++ {
+		body, err := json.Marshal(map[string]any{"queries": pending})
+		if err != nil {
+			return err
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(base, "/")+"/v1/querybatch", bytes.NewReader(body))
+		if err != nil {
+			return err
+		}
+		req.Header.Set("User-Agent", userAgent)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := c.httpc().Do(req)
+		if err != nil {
+			return err
+		}
+		raw, err := io.ReadAll(io.LimitReader(resp.Body, maxBatchBytes+1))
+		resp.Body.Close()
+		if err != nil {
+			return err
+		}
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("advisory: POST /v1/querybatch: %s", resp.Status)
+		}
+		if len(raw) > maxBatchBytes {
+			return fmt.Errorf("advisory: querybatch response exceeds %d bytes", maxBatchBytes)
+		}
+		var parsed struct {
+			Results []batchResult `json:"results"`
+		}
+		if err := json.Unmarshal(raw, &parsed); err != nil {
+			return fmt.Errorf("advisory: querybatch response: %w", err)
+		}
+		if len(parsed.Results) != len(pending) {
+			return fmt.Errorf("advisory: querybatch answered %d of %d queries", len(parsed.Results), len(pending))
+		}
+		var next []batchQuery
+		var nextIndex []int
+		for i, r := range parsed.Results {
+			qi := index[i]
+			for _, v := range r.Vulns {
+				if !idRE.MatchString(v.ID) {
+					return fmt.Errorf("advisory: querybatch returned id %q", v.ID)
+				}
+				if seen[qi] == nil {
+					seen[qi] = map[string]bool{}
+				}
+				if !seen[qi][v.ID] {
+					seen[qi][v.ID] = true
+					out[qi] = append(out[qi], v.ID)
+				}
+			}
+			if r.NextPageToken != "" {
+				q := pending[i]
+				q.PageToken = r.NextPageToken
+				next = append(next, q)
+				nextIndex = append(nextIndex, qi)
+			}
+		}
+		pending, index = next, nextIndex
+	}
+	return nil
 }

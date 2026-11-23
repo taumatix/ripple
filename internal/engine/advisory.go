@@ -31,6 +31,8 @@ type advisoryNote struct {
 	Severity string `json:"severity,omitempty"`
 	CVSS     string `json:"cvss,omitempty"`
 	URL      string `json:"url"`
+	// Pseudo marks a job whose target is a pseudo-version: no release fixes the advisory.
+	Pseudo bool `json:"pseudo,omitempty"`
 }
 
 func newNote(v *advisory.Vuln) advisoryNote {
@@ -63,83 +65,156 @@ func (e *Engine) advisoryNoteFor(ctx context.Context, j model.Job) *advisoryNote
 	return &n
 }
 
-// FanOutAdvisory turns one OSV record into jobs: for every repo whose go.mod
-// resolves a named module to an affected version, a job for the lowest fixed version
-// above it that skips the cooldown (the repo's ignore rules, schedule, groups and
-// automerge still apply). A repo already past the fix, a record with no fixed event,
-// and a fix ripple would not propose (a pseudo-version) produce nothing. It is
-// idempotent. It returns how many jobs were newly enqueued or made due.
+// FanOutAdvisory turns one OSV record into jobs, for every repo that depends on what it
+// names:
+//
+//   - A module in a go.mod at an affected version gets a job for the lowest release that
+//     fixes it, which skips the cooldown (the repo's ignore rules, schedule, groups and
+//     automerge still apply).
+//   - A `toolchain` line, in a repo that opted in with go-toolchain, gets a job for the
+//     patch release that fixes a stdlib or toolchain entry. A repo that did not opt in
+//     has no toolchain dependency in the index, so it gets nothing, as before.
+//   - An advisory with no release to move to (unfixed, a last_affected ceiling) makes no
+//     job. One fixed only by a pseudo-version makes a job only where the entry sets
+//     security-pseudo-versions. Where neither happens and the repo has a dependency
+//     dashboard, the advisory is listed there instead.
+//
+// A repo already past the fix produces nothing. It is idempotent. It returns how many
+// jobs were newly enqueued or made due.
 func (e *Engine) FanOutAdvisory(ctx context.Context, v *advisory.Vuln) (int, error) {
-	if v.Withdrawn() {
-		return 0, nil
-	}
-	note, err := json.Marshal(newNote(v))
-	if err != nil {
-		return 0, err
-	}
-	n := 0
 	repos := map[string]*repoState{}
+	if v.Withdrawn() {
+		return 0, e.forgetOpenAdvisories(ctx, v)
+	}
+	n := newNote(v)
+	total := 0
 	for _, mod := range v.Modules() {
 		deps, err := e.Store.ListDependents(ctx, model.DatasourceGo, mod)
 		if err != nil {
-			return n, fmt.Errorf("list dependents of %s: %w", mod, err)
+			return total, fmt.Errorf("list dependents of %s: %w", mod, err)
 		}
-		for _, d := range deps {
-			if d.Package != mod { // the index answers for the whole major line
-				continue
+		k, err := e.applyAdvisory(ctx, v, n, deps, repos)
+		total += k
+		if err != nil {
+			return total, err
+		}
+	}
+	if v.HasToolchain() {
+		deps, err := e.Store.ListDependents(ctx, model.DatasourceGoToolchain, model.PackageGoToolchain)
+		if err != nil {
+			return total, fmt.Errorf("list dependents of the go toolchain: %w", err)
+		}
+		k, err := e.applyAdvisory(ctx, v, n, deps, repos)
+		total += k
+		if err != nil {
+			return total, err
+		}
+	}
+	return total, nil
+}
+
+// verdictFor is what the record says about dependency d, or false when the record does
+// not name what d is: a module path other than d's (the index answers for the whole
+// major line), or a datasource the record has no entry kind for.
+func verdictFor(v *advisory.Vuln, d model.Dependency) (advisory.Verdict, bool) {
+	switch {
+	case d.Datasource == model.DatasourceGo:
+		return v.Assess(d.Package, d.Version), true
+	case d.Datasource == model.DatasourceGoToolchain && d.Package == model.PackageGoToolchain:
+		return v.AssessToolchain(d.Version), v.HasToolchain()
+	}
+	return advisory.Verdict{}, false
+}
+
+// applyAdvisory applies one record to the given dependency rows (which must belong to
+// the module or toolchain the record names; others are skipped).
+func (e *Engine) applyAdvisory(ctx context.Context, v *advisory.Vuln, note advisoryNote, deps []model.Dependency, repos map[string]*repoState) (int, error) {
+	named := map[string]bool{}
+	for _, m := range v.Modules() {
+		named[m] = true
+	}
+	n := 0
+	for _, d := range deps {
+		ver, ok := verdictFor(v, d)
+		if !ok || !ver.Affected || (d.Datasource == model.DatasourceGo && !named[d.Package]) {
+			continue
+		}
+		rs, err := e.repoState(ctx, repos, d.Repo)
+		if err != nil {
+			return n, err
+		}
+		if !rs.found || rs.cfgErr != nil {
+			continue
+		}
+		u, ok := rs.cfg.UpdateFor(d.Manager, d.File)
+		if !ok {
+			continue
+		}
+		fixed, pseudo := ver.Fixed, false
+		if fixed == "" && ver.Pseudo != "" && u.SecurityPseudoVersions && d.Datasource == model.DatasourceGo {
+			fixed, pseudo = ver.Pseudo, true
+		}
+		if fixed == "" {
+			why := "no release fixes it yet"
+			if ver.Pseudo != "" {
+				why = "only a pseudo-version fixes it (" + ver.Pseudo + "); set security-pseudo-versions to propose it"
 			}
-			fixed, ok := v.FixFor(mod, d.Version)
-			if !ok {
-				continue
-			}
-			typ, ok := applicable(d, model.DatasourceGo, mod, fixed)
-			if !ok {
-				continue
-			}
-			rs, err := e.repoState(ctx, repos, d.Repo)
-			if err != nil {
+			if err := e.recordOpenAdvisory(ctx, rs, d, openAdvisory{ID: v.ID, Datasource: d.Datasource, Package: d.Package, Version: d.Version, Why: why}); err != nil {
 				return n, err
 			}
-			if !rs.found || rs.cfgErr != nil {
-				continue
-			}
-			u, ok := rs.cfg.UpdateFor(d.Manager, d.File)
-			if !ok {
-				continue
-			}
-			dec := rules.EvaluateSecurity(e.Limits, u, mod, typ, e.now())
-			if !dec.Enabled {
-				continue
-			}
-			key := model.JobKey(d.Repo, model.DatasourceGo, mod, fixed)
-			// The note goes first: a job must never be due without it. A GHSA record and
-			// its Go-database twin both arrive; the one that carries a severity is kept.
-			if err := e.keepNote(ctx, key, v, string(note)); err != nil {
+			continue
+		}
+		var typ rules.UpdateType
+		if pseudo {
+			typ, ok = applicablePseudoFix(d, d.Package, fixed)
+		} else {
+			typ, ok = applicable(d, d.Datasource, d.Package, fixed)
+		}
+		if !ok {
+			continue
+		}
+		dec := rules.EvaluateSecurity(e.Limits, u, d.Package, typ, e.now())
+		if !dec.Enabled {
+			continue
+		}
+		key := model.JobKey(d.Repo, d.Datasource, d.Package, fixed)
+		jobNote := note
+		jobNote.Pseudo = pseudo
+		raw, err := json.Marshal(jobNote)
+		if err != nil {
+			return n, err
+		}
+		// The note goes first: a job must never be due without it. A GHSA record and
+		// its Go-database twin both arrive; the one that carries a severity is kept.
+		if err := e.keepNote(ctx, key, v, string(raw)); err != nil {
+			return n, err
+		}
+		if err := e.clearOpenAdvisory(ctx, d.Repo, v.ID, d.Datasource, d.Package); err != nil {
+			return n, err
+		}
+		inserted, err := e.Store.EnqueueJob(ctx, model.Job{
+			Key: key, Repo: d.Repo, Datasource: d.Datasource, Package: d.Package, Version: fixed,
+			ReleasedAt: e.now(), State: model.JobPending, NotBefore: dec.NotBefore,
+		})
+		if err != nil {
+			return n, err
+		}
+		if inserted {
+			n++
+			e.markDashboard(d.Repo)
+			continue
+		}
+		// The feed got there first and queued the same bump behind the cooldown.
+		j, found, err := e.Store.GetJob(ctx, key)
+		if err != nil {
+			return n, err
+		}
+		if found && j.State == model.JobPending && j.NotBefore.After(dec.NotBefore) {
+			j.NotBefore = dec.NotBefore
+			if err := e.Store.UpdateJob(ctx, j); err != nil {
 				return n, err
 			}
-			inserted, err := e.Store.EnqueueJob(ctx, model.Job{
-				Key: key, Repo: d.Repo, Datasource: model.DatasourceGo, Package: mod, Version: fixed,
-				ReleasedAt: e.now(), State: model.JobPending, NotBefore: dec.NotBefore,
-			})
-			if err != nil {
-				return n, err
-			}
-			if inserted {
-				n++
-				continue
-			}
-			// The feed got there first and queued the same bump behind the cooldown.
-			j, found, err := e.Store.GetJob(ctx, key)
-			if err != nil {
-				return n, err
-			}
-			if found && j.State == model.JobPending && j.NotBefore.After(dec.NotBefore) {
-				j.NotBefore = dec.NotBefore
-				if err := e.Store.UpdateJob(ctx, j); err != nil {
-					return n, err
-				}
-				n++
-			}
+			n++
 		}
 	}
 	return n, nil
@@ -254,6 +329,9 @@ func securityText(items []item, title, body string) (string, string) {
 		}
 		seen[a.ID] = true
 		fmt.Fprintf(&b, "- [%s](%s) in `%s`, fixed in `%s`", a.ID, a.URL, it.job.Package, it.job.Version)
+		if a.Pseudo {
+			b.WriteString(" (a pseudo-version: no release fixes this advisory, so this pins a commit; review it)")
+		}
 		if a.Severity != "" {
 			fmt.Fprintf(&b, ", severity %s", a.Severity)
 		}

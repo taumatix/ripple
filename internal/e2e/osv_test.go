@@ -34,8 +34,9 @@ func sampleFor(t *testing.T, name, id, mod, fixed string) []byte {
 func withOSV(osv *testutil.OSV, maxFetch int) opts {
 	return opts{tweak: func(a *app.App) {
 		a.Engine.Advisories = true
-		a.Advisories = &engine.AdvisoryWatcher{Engine: a.Engine, MaxFetch: maxFetch,
-			Source: &advisory.Client{DumpURL: osv.DumpURL(), APIURL: osv.APIURL()}}
+		c := &advisory.Client{DumpURL: osv.DumpURL(), APIURL: osv.APIURL()}
+		a.Engine.AdvisoryHistory = c // as wire.go does
+		a.Advisories = &engine.AdvisoryWatcher{Engine: a.Engine, MaxFetch: maxFetch, Source: c}
 	}}
 }
 

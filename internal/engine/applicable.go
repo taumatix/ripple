@@ -2,6 +2,7 @@ package engine
 
 import (
 	"golang.org/x/mod/module"
+	"golang.org/x/mod/semver"
 
 	"github.com/taumatix/ripple/internal/model"
 	"github.com/taumatix/ripple/internal/rules"
@@ -48,4 +49,24 @@ func applicableToolchain(d model.Dependency, pkg, version string) (rules.UpdateT
 		return "", false
 	}
 	return typ, true
+}
+
+// applicablePseudoFix judges a security job whose target is a pseudo-version, the only
+// fix an advisory has. Classify refuses those (a pseudo-version is no release), so this
+// is the one place they are accepted, and only for the same module path, from a release
+// of the same major, to a later version. It is never a major update.
+func applicablePseudoFix(d model.Dependency, pkg, version string) (rules.UpdateType, bool) {
+	if d.Datasource != model.DatasourceGo || d.Package != pkg || !module.IsPseudoVersion(version) {
+		return "", false
+	}
+	if !semver.IsValid(d.Version) || module.IsPseudoVersion(d.Version) || semver.Prerelease(d.Version) != "" {
+		return "", false
+	}
+	if semver.Major(d.Version) != semver.Major(version) || semver.Compare(version, d.Version) <= 0 {
+		return "", false
+	}
+	if semver.MajorMinor(version) != semver.MajorMinor(d.Version) {
+		return rules.Minor, true
+	}
+	return rules.Patch, true
 }

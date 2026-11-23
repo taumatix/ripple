@@ -46,3 +46,17 @@ func TestPrivateModulesAndCgoRejected(t *testing.T) {
 		t.Error("cgo: maybe accepted")
 	}
 }
+
+func TestSecurityPseudoVersionsIsGomodOnlyAndOffByDefault(t *testing.T) {
+	c, err := Parse([]byte("updates:\n  - ecosystem: gomod\n    security-pseudo-versions: true\n"))
+	if err != nil || !c.Updates[0].SecurityPseudoVersions {
+		t.Fatalf("err=%v %+v", err, c)
+	}
+	c, err = Parse([]byte("updates:\n  - ecosystem: gomod\n"))
+	if err != nil || c.Updates[0].SecurityPseudoVersions {
+		t.Fatalf("default: err=%v", err)
+	}
+	if _, err := Parse([]byte("updates:\n  - ecosystem: regex\n    security-pseudo-versions: true\n    files: [Makefile]\n    patterns: ['(?P<name>a) (?P<version>b)']\n")); err == nil || !strings.Contains(err.Error(), "security-pseudo-versions") {
+		t.Errorf("with regex: %v", err)
+	}
+}

@@ -6,6 +6,7 @@ package advisory
 import (
 	"sort"
 
+	"golang.org/x/mod/module"
 	"golang.org/x/mod/semver"
 )
 
@@ -93,40 +94,102 @@ func (v *Vuln) Modules() []string {
 	return out
 }
 
-// FixFor says which version fixes the advisory for module at cur (a go.mod version
+// isToolchain reports whether an entry names the Go standard library or the toolchain.
+func (a *Affected) isToolchain() bool {
+	n := a.Package.Name
+	return a.Package.Ecosystem == Ecosystem && (n == "stdlib" || n == "toolchain")
+}
+
+// HasToolchain reports whether the record names stdlib or toolchain.
+func (v *Vuln) HasToolchain() bool {
+	for i := range v.Affected {
+		if v.Affected[i].isToolchain() {
+			return true
+		}
+	}
+	return false
+}
+
+// Verdict is what a record says about one package at one version.
+//
+// Affected with neither Fixed nor Pseudo set means the advisory has no fix to move to
+// (unfixed, or only a last_affected ceiling).
+type Verdict struct {
+	// Affected reports whether the version lies in an affected range.
+	Affected bool
+	// Fixed is the lowest release (not pseudo-version) above the version that fixes it.
+	Fixed string
+	// Pseudo is the lowest pseudo-version fix above the version; set even when Fixed is,
+	// because the caller decides whether a pseudo-version is any use.
+	Pseudo string
+}
+
+// FixFor says which release fixes the advisory for module at cur (a go.mod version
 // such as "v1.2.3"). ok is false when the advisory does not affect cur, or affects it
-// with no fixed event to move to (unfixed, or only a last_affected ceiling).
+// with no release to move to (unfixed, only a last_affected ceiling, or only a
+// pseudo-version fix: see Assess).
 //
 // The affected test is the Evaluation algorithm of the OSV schema. A record with
 // several ranges (backported fixes) gives the fix of the range cur lies in, and of
 // those the lowest, so a v1 user is moved to the v1 backport, not to v2.
 func (v *Vuln) FixFor(mod, cur string) (fixed string, ok bool) {
+	a := v.Assess(mod, cur)
+	return a.Fixed, a.Fixed != ""
+}
+
+// Assess evaluates the record for module mod at cur.
+func (v *Vuln) Assess(mod, cur string) Verdict {
+	return v.assess(cur, func(a *Affected) bool { return a.isModule() && a.Package.Name == mod })
+}
+
+// AssessToolchain evaluates the record for the Go toolchain at cur (a version such as
+// "v1.25.3"), reading the stdlib and toolchain entries.
+func (v *Vuln) AssessToolchain(cur string) Verdict {
+	return v.assess(cur, func(a *Affected) bool { return a.isToolchain() })
+}
+
+func (v *Vuln) assess(cur string, match func(*Affected) bool) Verdict {
+	var out Verdict
 	if !semver.IsValid(cur) {
-		return "", false
+		return out
 	}
-	best := ""
+	lower := func(best, f string) string {
+		if best == "" || semver.Compare(f, best) < 0 {
+			return f
+		}
+		return best
+	}
 	for i := range v.Affected {
 		a := &v.Affected[i]
-		if !a.isModule() || a.Package.Name != mod {
+		if !match(a) {
 			continue
 		}
 		for _, r := range a.Ranges {
 			if r.Type != "SEMVER" {
 				continue
 			}
-			if f, hit := r.fixFor(cur); hit && (best == "" || semver.Compare(f, best) < 0) {
-				best = f
+			hit, fixed, pseudo := r.assess(cur)
+			if !hit {
+				continue
+			}
+			out.Affected = true
+			if fixed != "" {
+				out.Fixed = lower(out.Fixed, fixed)
+			}
+			if pseudo != "" {
+				out.Pseudo = lower(out.Pseudo, pseudo)
 			}
 		}
 	}
-	return best, best != ""
+	return out
 }
 
 // sv turns an OSV SEMVER value (no leading "v") into a Go semantic version.
 func sv(s string) string { return "v" + s }
 
-// fixFor evaluates one range at cur and returns the lowest fixed event above cur.
-func (r Range) fixFor(cur string) (string, bool) {
+// assess evaluates one range at cur: whether cur is affected, the lowest release fix
+// above it and the lowest pseudo-version fix above it.
+func (r Range) assess(cur string) (affected bool, fixed, pseudo string) {
 	hasLimit, belowLimit := false, false
 	for _, e := range r.Events {
 		if e.Limit != "" {
@@ -137,7 +200,7 @@ func (r Range) fixFor(cur string) (string, bool) {
 		}
 	}
 	if hasLimit && !belowLimit {
-		return "", false
+		return false, "", ""
 	}
 	evs := append([]Event(nil), r.Events...)
 	key := func(e Event) string {
@@ -166,16 +229,20 @@ func (r Range) fixFor(cur string) (string, bool) {
 		}
 	}
 	if !vulnerable {
-		return "", false
+		return false, "", ""
 	}
-	best := ""
 	for _, e := range evs {
 		if e.Fixed == "" || !semver.IsValid(sv(e.Fixed)) || semver.Compare(sv(e.Fixed), cur) <= 0 {
 			continue
 		}
-		if best == "" || semver.Compare(sv(e.Fixed), best) < 0 {
-			best = sv(e.Fixed)
+		f := sv(e.Fixed)
+		best := &fixed
+		if module.IsPseudoVersion(f) {
+			best = &pseudo
+		}
+		if *best == "" || semver.Compare(f, *best) < 0 {
+			*best = f
 		}
 	}
-	return best, best != ""
+	return true, fixed, pseudo
 }

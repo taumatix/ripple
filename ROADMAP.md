@@ -203,10 +203,6 @@ Everything else:
 120. **Backfill reads the GSI consistently.** `ListDependents` is still an eventually consistent GSI read on
     DynamoDB, so a release fanned out in that window can miss a repo that registered a moment before. The carried
     backfill closes it only for dependencies new to the repo, not for the window itself.
-121. **Backfill lookup residuals.** The proxy lookup asks `@latest` only, so a prerelease-only or retracted-latest
-    module is missed; it is not cached across repos (every repo with the same new module asks again, up to 20 per
-    scan); a module that skipped more than three majors is found only by the feed; and it was verified against a
-    fake proxy, not the real one.
 123. **Dashboard: share the sets.** The refresh set
     (`dashboard-dirty`) and the repo list that drives the hourly read-back (`dashboard-watch`) are
     read-modify-write cursors, so two replicas marking at once can lose an entry; the loss heals at the repo's

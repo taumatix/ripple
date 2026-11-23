@@ -56,3 +56,23 @@ func TestBackfillWithoutLookupLeavesAnUnrecordedModuleAlone(t *testing.T) {
 		}
 	})
 }
+
+// A module whose newest release retracts itself is brought to the newest version that is not
+// retracted, not to the retracted one.
+func TestBackfillLookupSkipsARetractedLatest(t *testing.T) {
+	forEach(t, func(t *testing.T, st store.Store) {
+		e := backfillEnv(t, st, "")
+		e.app.Engine.Lookup = &feed.GoProxyLookup{BaseURL: e.proxy.URL}
+		stubModule(e, "example.com/retr", "v1.0.0", "v1.1.0")
+		e.proxy.Publish("example.com/retr", "v1.2.0", map[string]string{
+			"x.go":   "package x\n",
+			"go.mod": "module example.com/retr\n\ngo 1.21\n\nretract v1.2.0 // published by mistake\n",
+		})
+		e.importAll("example.com/retr")
+		e.tick()
+		prs := e.gh.PRs(backfillApp)
+		if len(prs) != 1 || !strings.Contains(prs[0].Title, "example.com/retr") || !strings.HasSuffix(prs[0].Title, " v1.1.0") {
+			t.Fatalf("want one PR to example.com/retr v1.1.0, got %+v", prs)
+		}
+	})
+}

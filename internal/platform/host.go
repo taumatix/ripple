@@ -121,6 +121,12 @@ const (
 	ReposRemoved EventKind = "repos_removed"
 	// Push: the default branch may have changed; Files lists the changed paths.
 	Push EventKind = "push"
+	// RepoRenamed: the repo moved to NewRepo (a rename or a transfer); Repos holds
+	// the old name. Optional: only a host that reports renames sends it.
+	RepoRenamed EventKind = "repo_renamed"
+	// DefaultBranchChanged: the repo's default branch is now DefaultBranch. Optional,
+	// like RepoRenamed. Existing PRs are left alone; the repo is re-scanned.
+	DefaultBranchChanged EventKind = "default_branch_changed"
 )
 
 // Event is one host notification in the host-neutral form the event queue stores.
@@ -139,6 +145,8 @@ type Event struct {
 	Ref           string
 	DefaultBranch string
 	Files         []string
+	// RepoRenamed only: the new native repo name.
+	NewRepo string
 }
 
 // Sink consumes events. An error makes the receiver answer 503, which tells a host

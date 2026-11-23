@@ -135,8 +135,22 @@ func (a *App) enqueue(ctx context.Context, host string, ev platform.Event) error
 			a.log().Warn("repository name with a colon from the default host; dropped", "host", host, "repo", repo)
 			continue
 		}
+		ref := ev.Ref
+		switch ev.Kind {
+		case platform.RepoRenamed:
+			if ev.NewRepo == "" || (host == a.defaultHost() && strings.Contains(ev.NewRepo, ":")) {
+				a.log().Warn("rename without a usable new name; dropped", "host", host, "repo", repo)
+				continue
+			}
+			ref = a.repoName(host, ev.NewRepo)
+		case platform.DefaultBranchChanged:
+			if ev.DefaultBranch == "" {
+				continue
+			}
+			ref = "refs/heads/" + ev.DefaultBranch
+		}
 		evs = append(evs, model.Event{ID: fmt.Sprintf("%s/%d", prefix, i), InstallationID: ev.Scope,
-			Kind: string(ev.Kind), Repo: a.repoName(host, repo), Ref: ev.Ref, Files: ev.Files})
+			Kind: string(ev.Kind), Repo: a.repoName(host, repo), Ref: ref, Files: ev.Files})
 	}
 	return a.Queue.Add(ctx, evs...)
 }
@@ -274,11 +288,18 @@ func (a *App) pollLoop(ctx context.Context) {
 func (a *App) process(ctx context.Context, ev model.Event) error {
 	switch ev.Kind {
 	case "repos_added":
+		if err := a.Engine.ForgetRename(ctx, ev.Repo); err != nil {
+			return err
+		}
 		return a.Engine.Scan(ctx, model.Repo{FullName: ev.Repo, InstallationID: ev.InstallationID})
 	case "repos_removed":
 		return a.Engine.Remove(ctx, ev.Repo)
 	case "push":
 		return a.push(ctx, ev.Repo, ev)
+	case string(platform.RepoRenamed):
+		return a.Engine.Rename(ctx, ev.Repo, ev.Ref, ev.InstallationID)
+	case string(platform.DefaultBranchChanged):
+		return a.Engine.SetDefaultBranch(ctx, ev.Repo, strings.TrimPrefix(ev.Ref, "refs/heads/"), ev.InstallationID)
 	}
 	a.Log.Warn("unknown queued event kind; dropped", "kind", ev.Kind, "event", ev.ID)
 	return nil

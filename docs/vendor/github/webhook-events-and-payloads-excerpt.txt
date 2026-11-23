@@ -1,0 +1,69 @@
+# vendored from https://docs.github.com/en/webhooks/webhook-events-and-payloads (text extracted from the HTML, fetched 2026-11-23; sections 'push' and 'repository'). The static page lists only the first action of each event (repository: archived); the other actions' payloads are in the schema files here.
+
+push
+This event occurs when there is a push to a repository branch. This includes when a commit is pushed, when a commit tag is pushed,
+when a branch is deleted, when a tag is deleted, or when a repository is created from a template. To subscribe to only branch
+and tag deletions, use the delete webhook event.
+To subscribe to this event, a GitHub App must have at least read-level access for the "Contents" repository permission.
+Events will not be created if more than 5000 branches are pushed at once. Events will not be created for tags when more than three tags are pushed at once.
+Availability for push
+Repositories
+Organizations
+GitHub Apps
+Webhook payload object for push
+Webhook request body parametersName, Type, Description
+after string Required
+The SHA of the most recent commit on ref after the push.
+base_ref string or null Required
+before string Required
+The SHA of the most recent commit on ref before the push.
+commits array of objects Required
+An array of commit objects describing the pushed commits. (Pushed commits are all commits that are included in the compare between the before commit and the after commit.) The array includes a maximum of 2048 commits. If necessary, you can use the Commits API to fetch additional commits.
+Properties of commits
+compare string Required
+URL that shows the changes in this ref update, from the before commit to the after commit. For a newly created ref that is directly based on the default branch, this is the comparison between the head of the default branch and the after commit. Otherwise, this shows all commits until the after commit.
+created boolean Required
+Whether this push created the ref.
+deleted boolean Required
+Whether this push deleted the ref.
+enterprise object 
+An enterprise on GitHub. Webhook payloads contain the enterprise property when the webhook is configured
+on an enterprise account or an organization that's part of an enterprise account. For more information,
+see "About enterprise accounts."
+forced boolean Required
+Whether this push was a force push of the ref.
+head_commit object or null Required
+Properties of head_commit
+installation object 
+The GitHub App installation. Webhook payloads contain the installation property when the event is configured
+for and sent to a GitHub App. For more information,
+see "Using webhooks with GitHub Apps."
+organization object 
+A GitHub organization. Webhook payloads contain the organization property when the webhook is configured for an
+...
+repository
+This event occurs when there is activity relating to repositories. For more information, see "About repositories." For information about the APIs to manage repositories, see the GraphQL documentation or "Repositories" in the REST API documentation.
+To subscribe to this event, a GitHub App must have at least read-level access for the "Metadata" repository permission.
+Availability for repository
+Enterprises
+Repositories
+Organizations
+GitHub Apps
+Webhook payload object for repository
+Action type: archived
+A repository was archived.
+Webhook request body parametersName, Type, Description
+action string Required
+Value: archived 
+enterprise object 
+An enterprise on GitHub. Webhook payloads contain the enterprise property when the webhook is configured
+on an enterprise account or an organization that's part of an enterprise account. For more information,
+see "About enterprise accounts."
+installation object 
+The GitHub App installation. Webhook payloads contain the installation property when the event is configured
+for and sent to a GitHub App. For more information,
+see "Using webhooks with GitHub Apps."
+organization object 
+A GitHub organization. Webhook payloads contain the organization property when the webhook is configured for an
+organization, or when the event occurs from activity in a repository owned by an organization.
+repository object Required

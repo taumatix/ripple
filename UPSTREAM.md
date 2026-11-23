@@ -18,7 +18,7 @@ upstream:
     api-version: "2026-03-10"
     header: "X-GitHub-Api-Version: 2026-03-10"
     used: [POST /app/installations/{id}/access_tokens, GET and POST /repos/{owner}/{repo}/pulls (draft), POST /repos/{owner}/{repo}/issues/{n}/labels, GET /repos/{owner}/{repo}/pulls/{n} and PATCH (state: closed), GET .../pulls/{n}/commits|reviews|comments, GET and POST .../issues/{n}/comments, GET .../issues/{n}/events (a "renamed" event), POST /graphql (enablePullRequestAutoMerge)]
-    webhooks: [installation, installation_repositories, push, signature X-Hub-Signature-256 = sha256=HMAC-SHA256(body)]
+    webhooks: [installation, installation_repositories, push, repository, signature X-Hub-Signature-256 = sha256=HMAC-SHA256(body)]
     unverified: "enablePullRequestAutoMerge mutation shape; that issue events record every PR rename as event \"renamed\" and that App tokens may close a PR and comment with pull-requests: write alone (assumed from the docs); the labels endpoint creating missing labels (assumed); the fake GitHub in tests is written from the docs, not recorded"
     checked: 2026-11-22
   - name: go-release-list

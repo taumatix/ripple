@@ -31,5 +31,5 @@ type Sink struct{ platform.Sink }
 
 func (s Sink) Handle(ctx context.Context, e webhook.Event) error {
 	return s.HandleEvent(ctx, platform.Event{Kind: platform.EventKind(e.Kind), Scope: e.InstallationID, Delivery: e.Delivery,
-		Repos: e.Repos, Ref: e.Ref, DefaultBranch: e.DefaultBranch, Files: e.Files})
+		Repos: e.Repos, Ref: e.Ref, DefaultBranch: e.DefaultBranch, Files: e.Files, NewRepo: e.NewRepo})
 }

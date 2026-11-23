@@ -123,12 +123,19 @@ func (g *GitHub) AddRepo(repo string, files map[string]string) {
 
 // Commit adds a commit on main with files (a human pushing to the default branch).
 // A content of the form "symlink:<target>" commits a symbolic link instead.
-func (g *GitHub) Commit(repo string, files map[string]string) {
+func (g *GitHub) Commit(repo string, files map[string]string) { g.CommitOn(repo, "main", files) }
+
+// CommitOn adds a commit on branch, which is created from the current head when absent.
+func (g *GitHub) CommitOn(repo, branch string, files map[string]string) {
 	g.t.Helper()
 	work := g.t.TempDir()
 	git(g.t, work, "clone", "-q", g.bare(repo), "w")
 	w := filepath.Join(work, "w")
-	git(g.t, w, "checkout", "-q", "-B", "main")
+	if g.hasBranch(repo, branch) {
+		git(g.t, w, "checkout", "-q", "-B", branch, "origin/"+branch)
+	} else {
+		git(g.t, w, "checkout", "-q", "-B", branch)
+	}
 	for p, c := range files {
 		full := filepath.Join(w, p)
 		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
@@ -147,7 +154,7 @@ func (g *GitHub) Commit(repo string, files map[string]string) {
 	}
 	git(g.t, w, "add", "-A")
 	git(g.t, w, "commit", "-q", "-m", "test commit")
-	git(g.t, w, "push", "-q", "origin", "main")
+	git(g.t, w, "push", "-q", "origin", branch)
 }
 
 // FileAt returns the content of path on branch, or ok=false when absent.
@@ -169,12 +176,41 @@ func (g *GitHub) hasBranch(repo, branch string) bool {
 	return cmd.Run() == nil
 }
 
-// Branches lists branches of the repo other than main.
+// RenameRepo renames a repository the way GitHub does: the new name serves the git
+// data and the API, the old one answers 404, and the pull requests move with it.
+func (g *GitHub) RenameRepo(from, to string) {
+	g.t.Helper()
+	if err := os.MkdirAll(filepath.Dir(g.bare(to)), 0o755); err != nil {
+		g.t.Fatal(err)
+	}
+	if err := os.Rename(g.bare(from), g.bare(to)); err != nil {
+		g.t.Fatal(err)
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	for _, p := range g.prs[from] {
+		p.Repo = to
+	}
+	g.prs[to], g.calls[to] = g.prs[from], g.calls[from]
+	delete(g.prs, from)
+	delete(g.calls, from)
+}
+
+// SetDefaultBranch renames the default branch of repo from its current name to
+// branch, as the repository settings page does (open PRs keep the base they have).
+func (g *GitHub) SetDefaultBranch(repo, branch string) {
+	g.t.Helper()
+	old := strings.TrimSpace(git(g.t, g.bare(repo), "symbolic-ref", "--short", "HEAD"))
+	git(g.t, g.bare(repo), "branch", "-m", old, branch)
+}
+
+// Branches lists branches of the repo other than its default branch.
 func (g *GitHub) Branches(repo string) []string {
+	def := strings.TrimSpace(git(g.t, g.bare(repo), "symbolic-ref", "--short", "HEAD"))
 	out := git(g.t, g.bare(repo), "for-each-ref", "--format=%(refname:short)", "refs/heads/")
 	var bs []string
 	for _, b := range strings.Fields(out) {
-		if b != "main" {
+		if b != def {
 			bs = append(bs, b)
 		}
 	}

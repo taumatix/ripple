@@ -23,6 +23,7 @@ type issueState struct {
 	disabled map[string]bool
 	forbid   map[string]bool
 	writes   map[string]int
+	labels   map[string]bool
 }
 
 func (g *GitHub) is() *issueState {
@@ -206,4 +207,33 @@ func (g *GitHub) handleIssues(w http.ResponseWriter, r *http.Request, repo strin
 	default:
 		g.fail(w, http.StatusNotFound, "unknown route %s %s", r.Method, r.URL.Path)
 	}
+}
+
+// handleLabelCreate serves POST /repos/o/r/labels: 201, or 422 when the label exists.
+// The fake keeps issue labels as given on create, unlike GitHub, which drops labels
+// that do not exist; the client therefore creates labels first, and this records them.
+func (g *GitHub) handleLabelCreate(w http.ResponseWriter, r *http.Request, repo string) {
+	var in struct{ Name string }
+	_ = json.NewDecoder(r.Body).Decode(&in)
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	st := g.is()
+	if st.disabled[repo] {
+		g.fail(w, http.StatusGone, "Issues are disabled for this repo")
+		return
+	}
+	if st.forbid[repo] {
+		g.fail(w, http.StatusForbidden, "Resource not accessible by integration")
+		return
+	}
+	if st.labels == nil {
+		st.labels = map[string]bool{}
+	}
+	if st.labels[repo+"\x00"+in.Name] {
+		g.fail(w, http.StatusUnprocessableEntity, "already_exists")
+		return
+	}
+	st.labels[repo+"\x00"+in.Name] = true
+	w.WriteHeader(http.StatusCreated)
+	_, _ = w.Write([]byte(`{}`))
 }

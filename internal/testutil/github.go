@@ -362,7 +362,7 @@ func (g *GitHub) handleGraphQL(w http.ResponseWriter, r *http.Request) {
 
 func (g *GitHub) handleRepo(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/repos/"), "/")
-	if len(parts) < 3 || !(parts[2] == "pulls" || parts[2] == "issues") {
+	if len(parts) < 3 || !(parts[2] == "pulls" || parts[2] == "issues" || parts[2] == "labels") {
 		g.fail(w, http.StatusNotFound, "unknown route %s", r.URL.Path)
 		return
 	}
@@ -386,6 +386,10 @@ func (g *GitHub) handleRepo(w http.ResponseWriter, r *http.Request) {
 	}
 	if failing {
 		g.fail(w, http.StatusInternalServerError, "injected failure")
+		return
+	}
+	if parts[2] == "labels" && len(parts) == 3 && r.Method == http.MethodPost {
+		g.handleLabelCreate(w, r, repo)
 		return
 	}
 	if parts[2] == "issues" && len(parts) < 5 {

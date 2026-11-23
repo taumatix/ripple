@@ -268,15 +268,15 @@ Everything else:
     next run or write, but a per-item store write would remove it. Read-back finds the issue by its marker, so an
     edit that removes the marker is repaired by number and one that deletes the issue is recreated, both
     covered only against the fake.
-124. **OSV: sweep residuals.** The DynamoDB repo index (`REPOS` items) is built by one Scan the first time a listing is asked
+125. **OSV: sweep residuals.** The DynamoDB repo index (`REPOS` items) is built by one Scan the first time a listing is asked
     for; that Scan and the listing are verified on the in-process fake, and DynamoDB Local runs them only in CI. A scan
     (not the sweep) still runs one history round, so a repo with over 500 pairs or 100 records is completed only by a sweep
     or a go.mod change; consider a few rounds per scan once real repo sizes are known. Postgres `ListRepos` is CI-only.
-125. **OSV: reconcile older cases.** Jobs made before the `osv-jobs` index are still not found: the sweep's `RepoLister` plus
+126. **OSV: reconcile older cases.** Jobs made before the `osv-jobs` index are still not found: the sweep's `RepoLister` plus
     `ListOpenJobs` could find them per repo. A PR body is not rewritten when a record is corrected (the fix version or
     summary in it can be stale), and a record shared by twin GHSA and GO notes is reconciled per note. The busy-repo retry
     list holds at most 100 ids.
-126. **OSV: conflict and pseudo-version residuals.** The beaten-PR close covers a non-security PR when a security
+127. **OSV: conflict and pseudo-version residuals.** The beaten-PR close covers a non-security PR when a security
     toolchain PR opens; a lower security toolchain PR open beside a higher one is not closed, and a toolchain PR opened by an
     older run than the security job is only held, never closed, unless the security PR opens in a later run with it open.
     A plain, non-advisory release move off a pseudo-version is still not implemented; rule to use: the first release above

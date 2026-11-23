@@ -34,6 +34,9 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
 - Bitbucket Cloud host (`RIPPLE_BITBUCKET_*`): workspace discovery, `repo:push` webhooks (changed files from the diffstat), pull requests, and auto-merge through merge queues only (otherwise reported unsupported). The platform conformance suite gains an optional `FilelessPushes` marker for hosts whose push payload lists no files. See [docs/platform-bitbucket.md](docs/platform-bitbucket.md).
 - SCM-Manager host (`RIPPLE_SCMMANAGER_*`, Review plugin 3.11.0 or later): repository discovery by listing, webhook-plugin pushes authenticated by a shared-secret header (the plugin cannot sign), changed files from the modifications API, pull requests including drafts. No auto-merge: SCM-Manager has none. Verified only against a fake. See [docs/platform-scmmanager.md](docs/platform-scmmanager.md).
 
+### Fixed
+- Container backends: a command that timed out left its container behind, stopped, about half the time under Apple's CLI (`--rm` is the killed client's job); the reaper now always removes it. The live test checks only its own container and reports debris from other runs.
+
 ### Security
 - OS-level sandbox for `go` and local `git` (`RIPPLE_SANDBOX`: `none` (default), `auto`, `seatbelt`, `bwrap`).
   Under `seatbelt` (macOS) the commands run with every path unreadable and unwritable except the

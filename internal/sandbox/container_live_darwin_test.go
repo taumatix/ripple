@@ -36,12 +36,16 @@ func liveContainer(t *testing.T) (Backend, string) {
 	return b, bin
 }
 
+// lastWrapped is the argv of the most recent runLive, so a test can name its container.
+var lastWrapped []string
+
 func runLive(t *testing.T, b Backend, p Policy, timeout time.Duration, argv ...string) (string, error) {
 	t.Helper()
 	w, err := b.Wrap(p, argv)
 	if err != nil {
 		t.Fatal(err)
 	}
+	lastWrapped = w
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, w[0], w[1:]...)
@@ -105,12 +109,72 @@ func TestAppleContainerLive(t *testing.T) {
 		}
 	}
 
-	// A timeout kills the client, not the container; Reap must stop it.
+	// A timeout kills the client, not the container; Reap must stop it and remove it.
+	// Apple's --rm is carried out by the client, which the timeout has just SIGKILLed,
+	// so without an explicit remove roughly half of the killed containers stayed behind
+	// as "stopped" (measured; see Reap). Only this run's container is checked: debris
+	// from another session is reported but is not this test's failure.
 	if _, err := runLive(t, b, p, 4*time.Second, "sleep", "300"); err == nil {
 		t.Fatal("sleep finished")
 	}
-	out, _ := exec.Command(bin, "ls", "-a").CombinedOutput()
-	if strings.Contains(string(out), "ripple-") {
-		t.Errorf("a container survived its timeout:\n%s", out)
+	mine := ""
+	for i, a := range lastWrapped {
+		if a == "--name" && i+1 < len(lastWrapped) {
+			mine = lastWrapped[i+1]
+		}
 	}
+	if mine == "" {
+		t.Fatalf("no container name in %v", lastWrapped)
+	}
+	t.Cleanup(func() { _ = exec.Command(bin, "rm", "-f", mine).Run() })
+	out, _ := exec.Command(bin, "ls", "-a").CombinedOutput()
+	for _, l := range strings.Split(string(out), "\n") {
+		switch {
+		case strings.HasPrefix(l, mine):
+			t.Errorf("the container survived its timeout (Reap left it): %s\nall containers:\n%s", l, out)
+		case strings.HasPrefix(l, "ripple-"):
+			t.Logf("note: a container from another run is present: %s", l)
+		}
+	}
+}
+
+// Reap straight after the client dies, which is what a timeout in the engine does (the
+// test above waits out WaitDelay first and so rarely hits it). Measured by hand with
+// the CLI: when the client is SIGKILLed and the container then killed at once, about
+// half of the containers stayed "stopped" because --rm is the client's job, not the
+// service's.
+func TestAppleContainerReapAfterClientKilled(t *testing.T) {
+	b, bin := liveContainer(t)
+	work, _ := filepath.EvalSymlinks(t.TempDir())
+	p := Policy{Workdir: work, Writable: []string{work}, Env: []string{"HOME=" + work}}
+	for i := 0; i < 8; i++ {
+		w, err := b.Wrap(p, []string{"sleep", "300"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		name := w[slicesIndex(w, "--name")+1]
+		t.Cleanup(func() { _ = exec.Command(bin, "rm", "-f", name).Run() })
+		cmd := exec.Command(w[0], w[1:]...)
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(time.Duration(500+i*400) * time.Millisecond) // from still starting to running
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		b.(Reaper).Reap(w)
+		time.Sleep(2 * time.Second) // let the service settle before looking
+		out, _ := exec.Command(bin, "ls", "-a").CombinedOutput()
+		if strings.Contains(string(out), name) {
+			t.Errorf("run %d: Reap left %s behind:\n%s", i, name, out)
+		}
+	}
+}
+
+func slicesIndex(s []string, v string) int {
+	for i, x := range s {
+		if x == v {
+			return i
+		}
+	}
+	return -1
 }

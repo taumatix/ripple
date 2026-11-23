@@ -157,7 +157,6 @@ func TestServerOSV(t *testing.T) {
 	}
 }
 
-
 func TestServerGoVerifySettings(t *testing.T) {
 	s, err := LoadServer(env(base))
 	if err != nil || s.GoProxyUser != "" || s.GoProxyToken != "" || s.GoCC != "" {
@@ -172,7 +171,7 @@ func TestServerGoVerifySettings(t *testing.T) {
 	if _, err := LoadServer(env(with("RIPPLE_GOPROXY", "http://proxy.corp.example.com", "RIPPLE_GOPROXY_TOKEN", "tok"))); err == nil {
 		t.Error("a token with a plain-http proxy was accepted")
 	}
-	if _, err := LoadServer(env(with("RIPPLE_GOPROXY_TOKEN", "tok"))); err != nil {
-		t.Errorf("a token with the default https proxy: %v", err)
+	if _, err := LoadServer(env(with("RIPPLE_GOPROXY_TOKEN", "tok"))); err == nil {
+		t.Error("a token with the default public proxy was accepted: it would be sent to proxy.golang.org")
 	}
 }

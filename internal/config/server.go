@@ -41,7 +41,7 @@ type Server struct {
 	OSVMaxFetch int
 	GoProxy     string
 	// GoProxyUser and GoProxyToken are the credential for GoProxy (HTTP basic auth). They
-	// reach only the go commands that run no repository code. GoCC is the C compiler cgo
+	// reach only the go commands that run no repository code, and need RIPPLE_GOPROXY set to a private proxy. GoCC is the C compiler cgo
 	// verification uses; empty is cc.
 	GoProxyUser, GoProxyToken, GoCC string
 	Sandbox                         string // none, auto, bwrap, seatbelt, container, docker, podman
@@ -249,6 +249,9 @@ func LoadServer(getenv func(string) string) (*Server, error) {
 	}
 	if u, err := url.Parse(s.GoProxy); s.GoProxyToken != "" && err == nil && u.Scheme != "https" {
 		errs = append(errs, errors.New("RIPPLE_GOPROXY_TOKEN: the go command sends a credential only over https, so RIPPLE_GOPROXY must be an https URL"))
+	}
+	if s.GoProxyToken != "" && getenv("RIPPLE_GOPROXY") == "" {
+		errs = append(errs, errors.New("RIPPLE_GOPROXY_TOKEN: set RIPPLE_GOPROXY to the private proxy; the credential is never sent to the default public proxy"))
 	}
 	switch s.Store {
 	case "memory", "dynamodb":

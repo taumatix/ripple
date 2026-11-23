@@ -155,7 +155,7 @@ a pure-Go fallback builds green without compiling its C; the PR then says the C 
 PR says it could not verify (a draft for a major bump), never a silent pass. Under a container backend the image
 brings the compiler. `private-modules:` lists module patterns (`example.com/team/*`, `*.corp.example.com`)
 kept out of the checksum database. A proxy that needs credentials takes `RIPPLE_GOPROXY_USER` and
-`RIPPLE_GOPROXY_TOKEN` (https only); only `go mod tidy`, `vendor` and `work sync` get them, never `build` or
+`RIPPLE_GOPROXY_TOKEN` (https only, with `RIPPLE_GOPROXY` set to that proxy); only `go mod tidy`, `vendor` and `work sync` get them, never `build` or
 `vet`, and they stay out of go's environment, argv, logs and PRs. Details in [docs/sandbox.md](docs/sandbox.md).
 
 Not covered yet: `go work vendor` for a workspace-level `vendor/` and the remaining directive shapes

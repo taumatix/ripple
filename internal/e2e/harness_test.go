@@ -265,6 +265,15 @@ func (e *env) install(names ...string) {
 	for _, n := range names {
 		e.waitRepo(n)
 	}
+	e.waitQueueIdle()
+}
+
+// waitQueueIdle waits until the receiver has finished every delivery it accepted. A repo is
+// registered before its first scan and dependency backfill complete, so a test that polls
+// the feed right after waitRepo can see no dependents yet and enqueue no job.
+func (e *env) waitQueueIdle() {
+	e.t.Helper()
+	e.eventually("event queue idle", func() bool { return e.app.Queue.Len() == 0 })
 }
 
 func (e *env) waitRepo(name string) {

@@ -58,7 +58,13 @@ When a scan finds a dependency (module, or the toolchain line) this repo has not
 repo only, as the poller would. Checked pairs are stored per repo, only after the batch succeeded: an outage is
 retried by the next scan, and an unchanged `go.mod` costs no request. A failure is logged (`advisory history not
 checked`) and never fails the scan. This also covers an advisory missed during a long outage, but only for a version
-newly seen in a repo (the ROADMAP names the sweep that is left).
+newly seen in a repo, and by the sweep below.
+
+When the poll reads the whole line cap (`truncated`, 20000 lines) an outage may have outrun it, so ripple sweeps: it
+lists repos in pages (`RepoLister`: memory and Postgres; DynamoDB has no cheap listing and is not swept), and each poll
+re-checks 10 repos (a fixed batch, not configurable yet) with a fresh history check, the position kept in the
+`osv-sweep` cursor until every repo was visited. A repo busy with a run is retried next poll. A huge repo is still bound
+by the per-scan query and fetch caps above.
 
 ## Failure behaviour
 

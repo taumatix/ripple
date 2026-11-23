@@ -259,6 +259,9 @@ type AdvisoryWatcher struct {
 	Engine   *Engine
 	Source   AdvisorySource
 	MaxFetch int // record requests per poll; zero means DefaultAdvisoryMaxFetch
+	// SweepBatch is how many repos a poll re-checks while a sweep runs (see
+	// advisory_sweep.go); zero means DefaultSweepBatch.
+	SweepBatch int
 
 	failID string
 	failN  int
@@ -287,6 +290,9 @@ func (w *AdvisoryWatcher) Poll(ctx context.Context) (int, error) {
 	}
 	if truncated {
 		e.log().Warn("osv: more changed records than one poll reads; the oldest were skipped", "after", raw)
+		if err := w.beginSweep(ctx); err != nil {
+			return 0, err
+		}
 	}
 	max := w.MaxFetch
 	if max <= 0 {
@@ -323,7 +329,7 @@ func (w *AdvisoryWatcher) Poll(ctx context.Context) (int, error) {
 			return jobs, err
 		}
 	}
-	return jobs, nil
+	return jobs, w.sweepStep(ctx)
 }
 
 // withSecurityLabel adds the "security" label when any item fixes an advisory.

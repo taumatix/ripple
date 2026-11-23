@@ -328,3 +328,21 @@ WHERE key=$1 AND EXISTS (SELECT 1 FROM leases WHERE name=$7 AND owner=$8 AND tok
 	}
 	return nil
 }
+
+// ListRepos is store.RepoLister.
+func (p *Postgres) ListRepos(ctx context.Context, after string, limit int) ([]string, error) {
+	rows, err := p.pool.Query(ctx, `SELECT full_name FROM repos WHERE full_name > $1 ORDER BY full_name LIMIT $2`, after, limit)
+	if err != nil {
+		return nil, wrap("list repos", err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			return nil, wrap("list repos", err)
+		}
+		out = append(out, n)
+	}
+	return out, wrap("list repos", rows.Err())
+}

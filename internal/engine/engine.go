@@ -113,7 +113,14 @@ func (e *Engine) log() *slog.Logger {
 // lockRepo serialises scans and PR runs per repo so a push re-scan cannot race a
 // branch push.
 func (e *Engine) lockRepo(name string) func() {
+	m := e.repoMutex(name)
+	m.Lock()
+	return m.Unlock
+}
+
+func (e *Engine) repoMutex(name string) *sync.Mutex {
 	e.mu.Lock()
+	defer e.mu.Unlock()
 	if e.locks == nil {
 		e.locks = map[string]*sync.Mutex{}
 	}
@@ -122,9 +129,7 @@ func (e *Engine) lockRepo(name string) func() {
 		m = &sync.Mutex{}
 		e.locks[name] = m
 	}
-	e.mu.Unlock()
-	m.Lock()
-	return m.Unlock
+	return m
 }
 
 // RepoConfig parses a stored repo file; nil or empty bytes mean the defaults.

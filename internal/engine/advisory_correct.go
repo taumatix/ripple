@@ -119,14 +119,12 @@ func (e *Engine) reconcileRepo(ctx context.Context, v *advisory.Vuln, repoName s
 	if len(stale) == 0 {
 		return
 	}
-	wctx, cancel := context.WithTimeout(ctx, correctWait)
-	defer cancel()
-	hold, err := e.acquireRepo(wctx, repoName, true)
-	if err != nil || hold == nil {
-		e.log().Warn("osv: repo busy; a corrected advisory's work is left as it is", "repo", repoName, "id", v.ID, "err", err)
+	release := e.tryRepo(ctx, repoName)
+	if release == nil {
+		e.log().Warn("osv: repo busy; a corrected advisory's work is left as it is", "repo", repoName, "id", v.ID)
 		return
 	}
-	defer hold.Release()
+	defer release()
 	repo, found, err := e.Store.GetRepo(ctx, repoName)
 	if err != nil || !found {
 		return
@@ -205,6 +203,31 @@ func (e *Engine) corrected(v *advisory.Vuln, j model.Job, deps []model.Dependenc
 		}
 	}
 	return seen
+}
+
+// tryRepo takes the repo's in-process lock and lease for a short job of the advisory
+// poller, which must not wait out a PR run that may take minutes. It returns nil when
+// the repo stays busy for correctWait (or the lease cannot be read).
+func (e *Engine) tryRepo(ctx context.Context, name string) (release func()) {
+	m := e.repoMutex(name)
+	deadline := time.Now().Add(correctWait)
+	for !m.TryLock() {
+		if time.Now().After(deadline) || ctx.Err() != nil {
+			return nil
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	wctx, cancel := context.WithTimeout(ctx, time.Until(deadline))
+	defer cancel()
+	hold, err := e.acquireRepo(wctx, name, true)
+	if err != nil || hold == nil {
+		m.Unlock()
+		return nil
+	}
+	return func() {
+		hold.Release()
+		m.Unlock()
+	}
 }
 
 // reconcileDashboards drops the dashboard entries of the record that no longer apply.

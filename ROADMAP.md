@@ -50,8 +50,12 @@ auth model, rate limits); the notes below are what I expect, **unverified** unti
 
 11. **GitLab** (gitlab.com and self-managed). Merge requests, project/group webhooks, `Private-Token` or
    OAuth, merge-when-pipeline-succeeds. Subgroups and per-project tokens are the awkward part.
-12. **Gitea and Forgejo.** One client with two flavours: Forgejo forked Gitea and their APIs diverge
-   slowly. Webhook signature headers and the auto-merge call differ; detect the flavour from the version endpoint.
+12. **Gitea/Forgejo against real instances.** The host shipped from vendored docs and a fake only
+    (docs/platform-gitea.md "Unverified"). Run the conformance flow against a real Gitea and a real Forgejo
+    (no containers on the agent host: use codeberg.org or a CI service container), recording the real rate-limit
+    answer, the scheduled-merge status code, whether Forgejo sends `X-Hub-Signature-256`, labels by name on create,
+    and the git basic-auth user. Also: Forgejo before 7 cannot be detected (set `RIPPLE_GITEA_FLAVOUR`), and
+    `repository` created/deleted webhooks are parsed but unproven.
 13. **Bitbucket Cloud.** Pull requests, repository webhooks, app passwords or OAuth consumers; no native
     auto-merge, so automerge is a merge-check poll or unsupported (say which).
 14. **Azure DevOps.** Service hooks (code pushed, PR events), PAT or Entra token, auto-complete on PRs,

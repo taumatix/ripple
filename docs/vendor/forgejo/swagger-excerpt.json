@@ -1,0 +1,1359 @@
+{
+ "_fetched": "2026-11-23",
+ "_note": "excerpt of the OpenAPI document: only the paths and definitions ripple uses",
+ "_source": "https://codeberg.org/swagger.v1.json",
+ "definitions": {
+  "CreatePullRequestOption": {
+   "description": "CreatePullRequestOption options when creating a pull request",
+   "properties": {
+    "assignee": {
+     "type": "string",
+     "x-go-name": "Assignee"
+    },
+    "assignees": {
+     "items": {
+      "type": "string"
+     },
+     "type": "array",
+     "x-go-name": "Assignees"
+    },
+    "base": {
+     "type": "string",
+     "x-go-name": "Base"
+    },
+    "body": {
+     "type": "string",
+     "x-go-name": "Body"
+    },
+    "due_date": {
+     "format": "date-time",
+     "type": "string",
+     "x-go-name": "Deadline"
+    },
+    "head": {
+     "type": "string",
+     "x-go-name": "Head"
+    },
+    "labels": {
+     "items": {
+      "format": "int64",
+      "type": "integer"
+     },
+     "type": "array",
+     "x-go-name": "Labels"
+    },
+    "milestone": {
+     "format": "int64",
+     "type": "integer",
+     "x-go-name": "Milestone"
+    },
+    "title": {
+     "type": "string",
+     "x-go-name": "Title"
+    }
+   },
+   "type": "object",
+   "x-go-package": "forgejo.org/modules/structs"
+  },
+  "IssueLabelsOption": {
+   "description": "IssueLabelsOption a collection of labels",
+   "properties": {
+    "labels": {
+     "description": "Labels can be a list of integers representing label IDs\nor a list of strings representing label names",
+     "items": {},
+     "type": "array",
+     "x-go-name": "Labels"
+    },
+    "updated_at": {
+     "format": "date-time",
+     "type": "string",
+     "x-go-name": "Updated"
+    }
+   },
+   "type": "object",
+   "x-go-package": "forgejo.org/modules/structs"
+  },
+  "MergePullRequestOption": {
+   "description": "MergePullRequestForm form for merging Pull Request",
+   "properties": {
+    "Do": {
+     "enum": [
+      "merge",
+      "rebase",
+      "rebase-merge",
+      "squash",
+      "fast-forward-only",
+      "manually-merged"
+     ],
+     "type": "string"
+    },
+    "MergeCommitID": {
+     "type": "string"
+    },
+    "MergeMessageField": {
+     "type": "string"
+    },
+    "MergeTitleField": {
+     "type": "string"
+    },
+    "delete_branch_after_merge": {
+     "type": "boolean",
+     "x-go-name": "DeleteBranchAfterMerge"
+    },
+    "force_merge": {
+     "type": "boolean",
+     "x-go-name": "ForceMerge"
+    },
+    "head_commit_id": {
+     "type": "string",
+     "x-go-name": "HeadCommitID"
+    },
+    "merge_when_checks_succeed": {
+     "type": "boolean",
+     "x-go-name": "MergeWhenChecksSucceed"
+    }
+   },
+   "required": [
+    "Do"
+   ],
+   "type": "object",
+   "x-go-name": "MergePullRequestForm",
+   "x-go-package": "forgejo.org/services/forms"
+  },
+  "PayloadCommit": {
+   "description": "PayloadCommit represents a commit",
+   "properties": {
+    "added": {
+     "items": {
+      "type": "string"
+     },
+     "type": "array",
+     "x-go-name": "Added"
+    },
+    "author": {
+     "$ref": "#/definitions/PayloadUser"
+    },
+    "committer": {
+     "$ref": "#/definitions/PayloadUser"
+    },
+    "id": {
+     "description": "sha1 hash of the commit",
+     "type": "string",
+     "x-go-name": "ID"
+    },
+    "message": {
+     "type": "string",
+     "x-go-name": "Message"
+    },
+    "modified": {
+     "items": {
+      "type": "string"
+     },
+     "type": "array",
+     "x-go-name": "Modified"
+    },
+    "removed": {
+     "items": {
+      "type": "string"
+     },
+     "type": "array",
+     "x-go-name": "Removed"
+    },
+    "timestamp": {
+     "format": "date-time",
+     "type": "string",
+     "x-go-name": "Timestamp"
+    },
+    "url": {
+     "type": "string",
+     "x-go-name": "URL"
+    },
+    "verification": {
+     "$ref": "#/definitions/PayloadCommitVerification"
+    }
+   },
+   "type": "object",
+   "x-go-package": "forgejo.org/modules/structs"
+  },
+  "PullRequest": {
+   "description": "PullRequest represents a pull request",
+   "properties": {
+    "additions": {
+     "format": "int64",
+     "type": "integer",
+     "x-go-name": "Additions"
+    },
+    "allow_maintainer_edit": {
+     "type": "boolean",
+     "x-go-name": "AllowMaintainerEdit"
+    },
+    "assignee": {
+     "$ref": "#/definitions/User"
+    },
+    "assignees": {
+     "items": {
+      "$ref": "#/definitions/User"
+     },
+     "type": "array",
+     "x-go-name": "Assignees"
+    },
+    "base": {
+     "$ref": "#/definitions/PRBranchInfo"
+    },
+    "body": {
+     "type": "string",
+     "x-go-name": "Body"
+    },
+    "changed_files": {
+     "format": "int64",
+     "type": "integer",
+     "x-go-name": "ChangedFiles"
+    },
+    "closed_at": {
+     "format": "date-time",
+     "type": "string",
+     "x-go-name": "Closed"
+    },
+    "comments": {
+     "format": "int64",
+     "type": "integer",
+     "x-go-name": "Comments"
+    },
+    "created_at": {
+     "format": "date-time",
+     "type": "string",
+     "x-go-name": "Created"
+    },
+    "deletions": {
+     "format": "int64",
+     "type": "integer",
+     "x-go-name": "Deletions"
+    },
+    "diff_url": {
+     "type": "string",
+     "x-go-name": "DiffURL"
+    },
+    "draft": {
+     "type": "boolean",
+     "x-go-name": "Draft"
+    },
+    "due_date": {
+     "format": "date-time",
+     "type": "string",
+     "x-go-name": "Deadline"
+    },
+    "flow": {
+     "format": "int64",
+     "type": "integer",
+     "x-go-name": "Flow"
+    },
+    "head": {
+     "$ref": "#/definitions/PRBranchInfo"
+    },
+    "html_url": {
+     "type": "string",
+     "x-go-name": "HTMLURL"
+    },
+    "id": {
+     "format": "int64",
+     "type": "integer",
+     "x-go-name": "ID"
+    },
+    "is_locked": {
+     "type": "boolean",
+     "x-go-name": "IsLocked"
+    },
+    "labels": {
+     "items": {
+      "$ref": "#/definitions/Label"
+     },
+     "type": "array",
+     "x-go-name": "Labels"
+    },
+    "merge_base": {
+     "type": "string",
+     "x-go-name": "MergeBase"
+    },
+    "merge_commit_sha": {
+     "type": "string",
+     "x-go-name": "MergedCommitID"
+    },
+    "mergeable": {
+     "type": "boolean",
+     "x-go-name": "Mergeable"
+    },
+    "merged": {
+     "type": "boolean",
+     "x-go-name": "HasMerged"
+    },
+    "merged_at": {
+     "format": "date-time",
+     "type": "string",
+     "x-go-name": "Merged"
+    },
+    "merged_by": {
+     "$ref": "#/definitions/User"
+    },
+    "milestone": {
+     "$ref": "#/definitions/Milestone"
+    },
+    "number": {
+     "format": "int64",
+     "type": "integer",
+     "x-go-name": "Index"
+    },
+    "patch_url": {
+     "type": "string",
+     "x-go-name": "PatchURL"
+    },
+    "pin_order": {
+     "format": "int64",
+     "type": "integer",
+     "x-go-name": "PinOrder"
+    },
+    "requested_reviewers": {
+     "items": {
+      "$ref": "#/definitions/User"
+     },
+     "type": "array",
+     "x-go-name": "RequestedReviewers"
+    },
+    "requested_reviewers_teams": {
+     "items": {
+      "$ref": "#/definitions/Team"
+     },
+     "type": "array",
+     "x-go-name": "RequestedReviewersTeams"
+    },
+    "review_comments": {
+     "description": "number of review comments made on the diff of a PR review (not including comments on commits or issues in a PR)",
+     "format": "int64",
+     "type": "integer",
+     "x-go-name": "ReviewComments"
+    },
+    "state": {
+     "$ref": "#/definitions/StateType"
+    },
+    "title": {
+     "type": "string",
+     "x-go-name": "Title"
+    },
+    "updated_at": {
+     "format": "date-time",
+     "type": "string",
+     "x-go-name": "Updated"
+    },
+    "url": {
+     "type": "string",
+     "x-go-name": "URL"
+    },
+    "user": {
+     "$ref": "#/definitions/User"
+    }
+   },
+   "type": "object",
+   "x-go-package": "forgejo.org/modules/structs"
+  },
+  "Repository": {
+   "description": "Repository represents a repository",
+   "properties": {
+    "allow_fast_forward_only_merge": {
+     "type": "boolean",
+     "x-go-name": "AllowFastForwardOnly"
+    },
+    "allow_merge_commits": {
+     "type": "boolean",
+     "x-go-name": "AllowMerge"
+    },
+    "allow_rebase": {
+     "type": "boolean",
+     "x-go-name": "AllowRebase"
+    },
+    "allow_rebase_explicit": {
+     "type": "boolean",
+     "x-go-name": "AllowRebaseMerge"
+    },
+    "allow_rebase_update": {
+     "type": "boolean",
+     "x-go-name": "AllowRebaseUpdate"
+    },
+    "allow_squash_merge": {
+     "type": "boolean",
+     "x-go-name": "AllowSquash"
+    },
+    "archived": {
+     "type": "boolean",
+     "x-go-name": "Archived"
+    },
+    "archived_at": {
+     "format": "date-time",
+     "type": "string",
+     "x-go-name": "ArchivedAt"
+    },
+    "avatar_url": {
+     "type": "string",
+     "x-go-name": "AvatarURL"
+    },
+    "clone_url": {
+     "type": "string",
+     "x-go-name": "CloneURL"
+    },
+    "created_at": {
+     "format": "date-time",
+     "type": "string",
+     "x-go-name": "Created"
+    },
+    "default_allow_maintainer_edit": {
+     "type": "boolean",
+     "x-go-name": "DefaultAllowMaintainerEdit"
+    },
+    "default_branch": {
+     "type": "string",
+     "x-go-name": "DefaultBranch"
+    },
+    "default_delete_branch_after_merge": {
+     "type": "boolean",
+     "x-go-name": "DefaultDeleteBranchAfterMerge"
+    },
+    "default_merge_style": {
+     "type": "string",
+     "x-go-name": "DefaultMergeStyle"
+    },
+    "default_update_style": {
+     "type": "string",
+     "x-go-name": "DefaultUpdateStyle"
+    },
+    "description": {
+     "type": "string",
+     "x-go-name": "Description"
+    },
+    "empty": {
+     "type": "boolean",
+     "x-go-name": "Empty"
+    },
+    "external_tracker": {
+     "$ref": "#/definitions/ExternalTracker"
+    },
+    "external_wiki": {
+     "$ref": "#/definitions/ExternalWiki"
+    },
+    "fork": {
+     "type": "boolean",
+     "x-go-name": "Fork"
+    },
+    "forks_count": {
+     "format": "int64",
+     "type": "integer",
+     "x-go-name": "Forks"
+    },
+    "full_name": {
+     "type": "string",
+     "x-go-name": "FullName"
+    },
+    "globally_editable_wiki": {
+     "type": "boolean",
+     "x-go-name": "GloballyEditableWiki"
+    },
+    "has_actions": {
+     "type": "boolean",
+     "x-go-name": "HasActions"
+    },
+    "has_issues": {
+     "type": "boolean",
+     "x-go-name": "HasIssues"
+    },
+    "has_packages": {
+     "type": "boolean",
+     "x-go-name": "HasPackages"
+    },
+    "has_projects": {
+     "type": "boolean",
+     "x-go-name": "HasProjects"
+    },
+    "has_pull_requests": {
+     "type": "boolean",
+     "x-go-name": "HasPullRequests"
+    },
+    "has_releases": {
+     "type": "boolean",
+     "x-go-name": "HasReleases"
+    },
+    "has_wiki": {
+     "description": "is the wiki enabled",
+     "type": "boolean",
+     "x-go-name": "HasWiki"
+    },
+    "has_wiki_contents": {
+     "description": "have wiki pages ever been created",
+     "type": "boolean",
+     "x-go-name": "HasWikiContents"
+    },
+    "html_url": {
+     "type": "string",
+     "x-go-name": "HTMLURL"
+    },
+    "id": {
+     "format": "int64",
+     "type": "integer",
+     "x-go-name": "ID"
+    },
+    "ignore_whitespace_conflicts": {
+     "type": "boolean",
+     "x-go-name": "IgnoreWhitespaceConflicts"
+    },
+    "internal": {
+     "type": "boolean",
+     "x-go-name": "Internal"
+    },
+    "internal_tracker": {
+     "$ref": "#/definitions/InternalTracker"
+    },
+    "language": {
+     "type": "string",
+     "x-go-name": "Language"
+    },
+    "languages_url": {
+     "type": "string",
+     "x-go-name": "LanguagesURL"
+    },
+    "link": {
+     "type": "string",
+     "x-go-name": "Link"
+    },
+    "mirror": {
+     "type": "boolean",
+     "x-go-name": "Mirror"
+    },
+    "mirror_interval": {
+     "type": "string",
+     "x-go-name": "MirrorInterval"
+    },
+    "mirror_updated": {
+     "format": "date-time",
+     "type": "string",
+     "x-go-name": "MirrorUpdated"
+    },
+    "name": {
+     "type": "string",
+     "x-go-name": "Name"
+    },
+    "object_format_name": {
+     "description": "ObjectFormatName of the underlying git repository",
+     "enum": [
+      "sha1",
+      "sha256"
+     ],
+     "type": "string",
+     "x-go-name": "ObjectFormatName"
+    },
+    "open_issues_count": {
+     "format": "int64",
+     "type": "integer",
+     "x-go-name": "OpenIssues"
+    },
+    "open_pr_counter": {
+     "format": "int64",
+     "type": "integer",
+     "x-go-name": "OpenPulls"
+    },
+    "original_url": {
+     "type": "string",
+     "x-go-name": "OriginalURL"
+    },
+    "owner": {
+     "$ref": "#/definitions/User"
+    },
+    "parent": {
+     "$ref": "#/definitions/Repository"
+    },
+    "permissions": {
+     "$ref": "#/definitions/Permission"
+    },
+    "private": {
+     "type": "boolean",
+     "x-go-name": "Private"
+    },
+    "release_counter": {
+     "format": "int64",
+     "type": "integer",
+     "x-go-name": "Releases"
+    },
+    "repo_transfer": {
+     "$ref": "#/definitions/RepoTransfer"
+    },
+    "size": {
+     "format": "int64",
+     "type": "integer",
+     "x-go-name": "Size"
+    },
+    "ssh_url": {
+     "type": "string",
+     "x-go-name": "SSHURL"
+    },
+    "stars_count": {
+     "format": "int64",
+     "type": "integer",
+     "x-go-name": "Stars"
+    },
+    "template": {
+     "type": "boolean",
+     "x-go-name": "Template"
+    },
+    "topics": {
+     "items": {
+      "type": "string"
+     },
+     "type": "array",
+     "x-go-name": "Topics"
+    },
+    "updated_at": {
+     "format": "date-time",
+     "type": "string",
+     "x-go-name": "Updated"
+    },
+    "url": {
+     "type": "string",
+     "x-go-name": "URL"
+    },
+    "watchers_count": {
+     "format": "int64",
+     "type": "integer",
+     "x-go-name": "Watchers"
+    },
+    "website": {
+     "type": "string",
+     "x-go-name": "Website"
+    },
+    "wiki_branch": {
+     "type": "string",
+     "x-go-name": "WikiBranch"
+    },
+    "wiki_clone_url": {
+     "type": "string",
+     "x-go-name": "WikiCloneURL"
+    },
+    "wiki_ssh_url": {
+     "type": "string",
+     "x-go-name": "WikiSSHURL"
+    }
+   },
+   "type": "object",
+   "x-go-package": "forgejo.org/modules/structs"
+  },
+  "ServerVersion": {
+   "description": "ServerVersion wraps the version of the server",
+   "properties": {
+    "version": {
+     "type": "string",
+     "x-go-name": "Version"
+    }
+   },
+   "type": "object",
+   "x-go-package": "forgejo.org/modules/structs"
+  }
+ },
+ "info": {
+  "description": "This documentation describes the Forgejo API.",
+  "license": {
+   "name": "This file is distributed under the MIT license for the purpose of interoperability",
+   "url": "http://opensource.org/licenses/MIT"
+  },
+  "title": "Forgejo API",
+  "version": "17.0.0-121-39320c0+gitea-1.22.0"
+ },
+ "paths": {
+  "/repos/{owner}/{repo}/issues/{index}/labels": {
+   "delete": {
+    "operationId": "issueClearLabels",
+    "parameters": [
+     {
+      "description": "owner of the repo",
+      "in": "path",
+      "name": "owner",
+      "required": true,
+      "type": "string"
+     },
+     {
+      "description": "name of the repo",
+      "in": "path",
+      "name": "repo",
+      "required": true,
+      "type": "string"
+     },
+     {
+      "description": "index of the issue",
+      "format": "int64",
+      "in": "path",
+      "name": "index",
+      "required": true,
+      "type": "integer"
+     },
+     {
+      "in": "body",
+      "name": "body",
+      "schema": {
+       "$ref": "#/definitions/DeleteLabelsOption"
+      }
+     }
+    ],
+    "produces": [
+     "application/json"
+    ],
+    "responses": {
+     "204": {
+      "$ref": "#/responses/empty"
+     },
+     "403": {
+      "$ref": "#/responses/forbidden"
+     },
+     "404": {
+      "$ref": "#/responses/notFound"
+     }
+    },
+    "summary": "Remove all labels from an issue",
+    "tags": [
+     "issue"
+    ]
+   },
+   "get": {
+    "operationId": "issueGetLabels",
+    "parameters": [
+     {
+      "description": "owner of the repo",
+      "in": "path",
+      "name": "owner",
+      "required": true,
+      "type": "string"
+     },
+     {
+      "description": "name of the repo",
+      "in": "path",
+      "name": "repo",
+      "required": true,
+      "type": "string"
+     },
+     {
+      "description": "index of the issue",
+      "format": "int64",
+      "in": "path",
+      "name": "index",
+      "required": true,
+      "type": "integer"
+     }
+    ],
+    "produces": [
+     "application/json"
+    ],
+    "responses": {
+     "200": {
+      "$ref": "#/responses/LabelListWithoutPagination"
+     },
+     "404": {
+      "$ref": "#/responses/notFound"
+     }
+    },
+    "summary": "Get an issue's labels",
+    "tags": [
+     "issue"
+    ]
+   },
+   "post": {
+    "consumes": [
+     "application/json"
+    ],
+    "operationId": "issueAddLabel",
+    "parameters": [
+     {
+      "description": "owner of the repo",
+      "in": "path",
+      "name": "owner",
+      "required": true,
+      "type": "string"
+     },
+     {
+      "description": "name of the repo",
+      "in": "path",
+      "name": "repo",
+      "required": true,
+      "type": "string"
+     },
+     {
+      "description": "index of the issue",
+      "format": "int64",
+      "in": "path",
+      "name": "index",
+      "required": true,
+      "type": "integer"
+     },
+     {
+      "in": "body",
+      "name": "body",
+      "schema": {
+       "$ref": "#/definitions/IssueLabelsOption"
+      }
+     }
+    ],
+    "produces": [
+     "application/json"
+    ],
+    "responses": {
+     "200": {
+      "$ref": "#/responses/LabelListWithoutPagination"
+     },
+     "403": {
+      "$ref": "#/responses/forbidden"
+     },
+     "404": {
+      "$ref": "#/responses/notFound"
+     }
+    },
+    "summary": "Add a label to an issue",
+    "tags": [
+     "issue"
+    ]
+   },
+   "put": {
+    "consumes": [
+     "application/json"
+    ],
+    "operationId": "issueReplaceLabels",
+    "parameters": [
+     {
+      "description": "owner of the repo",
+      "in": "path",
+      "name": "owner",
+      "required": true,
+      "type": "string"
+     },
+     {
+      "description": "name of the repo",
+      "in": "path",
+      "name": "repo",
+      "required": true,
+      "type": "string"
+     },
+     {
+      "description": "index of the issue",
+      "format": "int64",
+      "in": "path",
+      "name": "index",
+      "required": true,
+      "type": "integer"
+     },
+     {
+      "in": "body",
+      "name": "body",
+      "schema": {
+       "$ref": "#/definitions/IssueLabelsOption"
+      }
+     }
+    ],
+    "produces": [
+     "application/json"
+    ],
+    "responses": {
+     "200": {
+      "$ref": "#/responses/LabelListWithoutPagination"
+     },
+     "403": {
+      "$ref": "#/responses/forbidden"
+     },
+     "404": {
+      "$ref": "#/responses/notFound"
+     }
+    },
+    "summary": "Replace an issue's labels",
+    "tags": [
+     "issue"
+    ]
+   }
+  },
+  "/repos/{owner}/{repo}/pulls": {
+   "get": {
+    "operationId": "repoListPullRequests",
+    "parameters": [
+     {
+      "description": "Owner of the repo",
+      "in": "path",
+      "name": "owner",
+      "required": true,
+      "type": "string"
+     },
+     {
+      "description": "Name of the repo",
+      "in": "path",
+      "name": "repo",
+      "required": true,
+      "type": "string"
+     },
+     {
+      "default": "open",
+      "description": "State of pull request",
+      "enum": [
+       "open",
+       "closed",
+       "all"
+      ],
+      "in": "query",
+      "name": "state",
+      "type": "string"
+     },
+     {
+      "description": "Type of sort",
+      "enum": [
+       "oldest",
+       "recentupdate",
+       "recentclose",
+       "leastupdate",
+       "mostcomment",
+       "leastcomment",
+       "priority"
+      ],
+      "in": "query",
+      "name": "sort",
+      "type": "string"
+     },
+     {
+      "description": "ID of the milestone",
+      "format": "int64",
+      "in": "query",
+      "name": "milestone",
+      "type": "integer"
+     },
+     {
+      "collectionFormat": "multi",
+      "description": "Label IDs",
+      "in": "query",
+      "items": {
+       "format": "int64",
+       "type": "integer"
+      },
+      "name": "labels",
+      "type": "array"
+     },
+     {
+      "description": "Filter by pull request author",
+      "in": "query",
+      "name": "poster",
+      "type": "string"
+     },
+     {
+      "description": "Filter by base branch name",
+      "in": "query",
+      "name": "base",
+      "type": "string"
+     },
+     {
+      "description": "Filter by head branch name",
+      "in": "query",
+      "name": "head",
+      "type": "string"
+     },
+     {
+      "default": 1,
+      "description": "Page number of results to return (1-based)",
+      "in": "query",
+      "minimum": 1,
+      "name": "page",
+      "type": "integer"
+     },
+     {
+      "description": "Page size of results",
+      "in": "query",
+      "minimum": 0,
+      "name": "limit",
+      "type": "integer"
+     }
+    ],
+    "produces": [
+     "application/json"
+    ],
+    "responses": {
+     "200": {
+      "$ref": "#/responses/PullRequestList"
+     },
+     "400": {
+      "$ref": "#/responses/error"
+     },
+     "404": {
+      "$ref": "#/responses/notFound"
+     },
+     "500": {
+      "$ref": "#/responses/error"
+     }
+    },
+    "summary": "List a repo's pull requests. If a pull request is selected but fails to be retrieved for any reason, it will be a null value in the list of results.",
+    "tags": [
+     "repository"
+    ]
+   },
+   "post": {
+    "consumes": [
+     "application/json"
+    ],
+    "operationId": "repoCreatePullRequest",
+    "parameters": [
+     {
+      "description": "owner of the repo",
+      "in": "path",
+      "name": "owner",
+      "required": true,
+      "type": "string"
+     },
+     {
+      "description": "name of the repo",
+      "in": "path",
+      "name": "repo",
+      "required": true,
+      "type": "string"
+     },
+     {
+      "in": "body",
+      "name": "body",
+      "schema": {
+       "$ref": "#/definitions/CreatePullRequestOption"
+      }
+     }
+    ],
+    "produces": [
+     "application/json"
+    ],
+    "responses": {
+     "201": {
+      "$ref": "#/responses/PullRequest"
+     },
+     "404": {
+      "$ref": "#/responses/notFound"
+     },
+     "409": {
+      "$ref": "#/responses/error"
+     },
+     "413": {
+      "$ref": "#/responses/quotaExceeded"
+     },
+     "422": {
+      "$ref": "#/responses/validationError"
+     },
+     "423": {
+      "$ref": "#/responses/repoArchivedError"
+     }
+    },
+    "summary": "Create a pull request",
+    "tags": [
+     "repository"
+    ]
+   }
+  },
+  "/repos/{owner}/{repo}/pulls/{index}/merge": {
+   "delete": {
+    "operationId": "repoCancelScheduledAutoMerge",
+    "parameters": [
+     {
+      "description": "owner of the repo",
+      "in": "path",
+      "name": "owner",
+      "required": true,
+      "type": "string"
+     },
+     {
+      "description": "name of the repo",
+      "in": "path",
+      "name": "repo",
+      "required": true,
+      "type": "string"
+     },
+     {
+      "description": "index of the pull request to merge",
+      "format": "int64",
+      "in": "path",
+      "name": "index",
+      "required": true,
+      "type": "integer"
+     }
+    ],
+    "produces": [
+     "application/json"
+    ],
+    "responses": {
+     "204": {
+      "$ref": "#/responses/empty"
+     },
+     "403": {
+      "$ref": "#/responses/forbidden"
+     },
+     "404": {
+      "$ref": "#/responses/notFound"
+     },
+     "423": {
+      "$ref": "#/responses/repoArchivedError"
+     }
+    },
+    "summary": "Cancel the scheduled auto merge for the given pull request",
+    "tags": [
+     "repository"
+    ]
+   },
+   "get": {
+    "operationId": "repoPullRequestIsMerged",
+    "parameters": [
+     {
+      "description": "owner of the repo",
+      "in": "path",
+      "name": "owner",
+      "required": true,
+      "type": "string"
+     },
+     {
+      "description": "name of the repo",
+      "in": "path",
+      "name": "repo",
+      "required": true,
+      "type": "string"
+     },
+     {
+      "description": "index of the pull request",
+      "format": "int64",
+      "in": "path",
+      "name": "index",
+      "required": true,
+      "type": "integer"
+     }
+    ],
+    "produces": [
+     "application/json"
+    ],
+    "responses": {
+     "204": {
+      "description": "pull request has been merged"
+     },
+     "404": {
+      "description": "pull request has not been merged"
+     }
+    },
+    "summary": "Check if a pull request has been merged",
+    "tags": [
+     "repository"
+    ]
+   },
+   "post": {
+    "operationId": "repoMergePullRequest",
+    "parameters": [
+     {
+      "description": "owner of the repo",
+      "in": "path",
+      "name": "owner",
+      "required": true,
+      "type": "string"
+     },
+     {
+      "description": "name of the repo",
+      "in": "path",
+      "name": "repo",
+      "required": true,
+      "type": "string"
+     },
+     {
+      "description": "index of the pull request to merge",
+      "format": "int64",
+      "in": "path",
+      "name": "index",
+      "required": true,
+      "type": "integer"
+     },
+     {
+      "in": "body",
+      "name": "body",
+      "schema": {
+       "$ref": "#/definitions/MergePullRequestOption"
+      }
+     }
+    ],
+    "produces": [
+     "application/json"
+    ],
+    "responses": {
+     "200": {
+      "$ref": "#/responses/empty"
+     },
+     "404": {
+      "$ref": "#/responses/notFound"
+     },
+     "405": {
+      "$ref": "#/responses/empty"
+     },
+     "409": {
+      "$ref": "#/responses/error"
+     },
+     "413": {
+      "$ref": "#/responses/quotaExceeded"
+     },
+     "423": {
+      "$ref": "#/responses/repoArchivedError"
+     }
+    },
+    "summary": "Merge a pull request",
+    "tags": [
+     "repository"
+    ]
+   }
+  },
+  "/user/repos": {
+   "get": {
+    "operationId": "userCurrentListRepos",
+    "parameters": [
+     {
+      "description": "page number of results to return (1-based)",
+      "in": "query",
+      "name": "page",
+      "type": "integer"
+     },
+     {
+      "description": "page size of results",
+      "in": "query",
+      "name": "limit",
+      "type": "integer"
+     },
+     {
+      "description": "order the repositories",
+      "enum": [
+       "name",
+       "id",
+       "newest",
+       "oldest",
+       "recentupdate",
+       "leastupdate",
+       "reversealphabetically",
+       "alphabetically",
+       "reversesize",
+       "size",
+       "reversegitsize",
+       "gitsize",
+       "reverselfssize",
+       "lfssize",
+       "moststars",
+       "feweststars",
+       "mostforks",
+       "fewestforks"
+      ],
+      "in": "query",
+      "name": "order_by",
+      "type": "string"
+     }
+    ],
+    "produces": [
+     "application/json"
+    ],
+    "responses": {
+     "200": {
+      "$ref": "#/responses/RepositoryList"
+     },
+     "401": {
+      "$ref": "#/responses/unauthorized"
+     },
+     "403": {
+      "$ref": "#/responses/forbidden"
+     },
+     "422": {
+      "$ref": "#/responses/validationError"
+     }
+    },
+    "summary": "List the repos that the authenticated user owns",
+    "tags": [
+     "user"
+    ]
+   },
+   "post": {
+    "consumes": [
+     "application/json"
+    ],
+    "operationId": "createCurrentUserRepo",
+    "parameters": [
+     {
+      "in": "body",
+      "name": "body",
+      "schema": {
+       "$ref": "#/definitions/CreateRepoOption"
+      }
+     }
+    ],
+    "produces": [
+     "application/json"
+    ],
+    "responses": {
+     "201": {
+      "$ref": "#/responses/Repository"
+     },
+     "400": {
+      "$ref": "#/responses/error"
+     },
+     "401": {
+      "$ref": "#/responses/unauthorized"
+     },
+     "403": {
+      "$ref": "#/responses/forbidden"
+     },
+     "409": {
+      "description": "The repository with the same name already exists."
+     },
+     "413": {
+      "$ref": "#/responses/quotaExceeded"
+     },
+     "422": {
+      "$ref": "#/responses/validationError"
+     }
+    },
+    "summary": "Create a repository",
+    "tags": [
+     "repository",
+     "user"
+    ]
+   }
+  },
+  "/version": {
+   "get": {
+    "operationId": "getVersion",
+    "produces": [
+     "application/json"
+    ],
+    "responses": {
+     "200": {
+      "$ref": "#/responses/ServerVersion"
+     }
+    },
+    "summary": "Returns the version of the running application",
+    "tags": [
+     "miscellaneous"
+    ]
+   }
+  }
+ },
+ "securityDefinitions": {
+  "AuthorizationHeaderToken": {
+   "description": "API tokens must be prepended with \"token\" followed by a space.",
+   "in": "header",
+   "name": "Authorization",
+   "type": "apiKey"
+  },
+  "BasicAuth": {
+   "type": "basic"
+  },
+  "SudoHeader": {
+   "description": "Sudo API request as the user provided as the key. Admin privileges are required.",
+   "in": "header",
+   "name": "Sudo",
+   "type": "apiKey"
+  },
+  "SudoParam": {
+   "description": "Sudo API request as the user provided as the key. Admin privileges are required.",
+   "in": "query",
+   "name": "sudo",
+   "type": "apiKey"
+  },
+  "TOTPHeader": {
+   "description": "Must be used in combination with BasicAuth if two-factor authentication is enabled.",
+   "in": "header",
+   "name": "X-FORGEJO-OTP",
+   "type": "apiKey"
+  }
+ }
+}

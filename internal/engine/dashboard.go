@@ -41,6 +41,11 @@ const (
 	dashboardMaxField = 200
 	// dashboardBackoff is how long a repo whose issues cannot be written is left alone.
 	dashboardBackoff = time.Hour
+	// dashboardVerify is how often an unchanged dashboard is read back to see whether a
+	// person edited it. One read per repo per interval, and only while jobs are open.
+	dashboardVerify = time.Hour
+	dirtyCursor     = "dashboard-dirty"
+	watchCursor     = "dashboard-watch"
 )
 
 // clean makes an untrusted field safe to put inside a Markdown code span on one line.
@@ -87,7 +92,7 @@ func renderDashboardWith(jobs []model.Job, advisories []openAdvisory, now time.T
 	}
 	var b strings.Builder
 	b.WriteString(DashboardMarker + "\n# Dependency dashboard\n\n")
-	b.WriteString("ripple keeps this issue up to date. It is a report: edits to it are ignored, and it is rewritten when the lists below change.\n")
+	b.WriteString("ripple keeps this issue up to date. It is a report: edits to it are undone, and it is rewritten when the lists below change.\n")
 	omitted := 0
 	section := func(title, hint string, js []model.Job, detail func(model.Job) string) {
 		if len(js) == 0 {
@@ -145,8 +150,32 @@ func renderDashboardWith(jobs []model.Job, advisories []openAdvisory, now time.T
 
 func dashboardCursor(repo string) string { return "dashboard:" + repo }
 
+// setDashboardCursor stores repo's dashboard cursor and keeps watchCursor, the list of
+// repos that have a dashboard, in step. The list is how a flush finds the dashboards due
+// to be read back without listing every repo.
+func (e *Engine) setDashboardCursor(ctx context.Context, repo, val string) error {
+	if err := e.Store.SetCursor(ctx, dashboardCursor(repo), val); err != nil {
+		return err
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	watch := e.cursorSet(ctx, watchCursor)
+	if watch[repo] == (val != "") {
+		return nil
+	}
+	if val != "" {
+		watch[repo] = true
+	} else {
+		delete(watch, repo)
+	}
+	return e.saveCursorSet(ctx, watchCursor, watch)
+}
+
+func dashboardOffCursor(repo string) string { return "dashboard-off:" + repo }
+
 // markDashboard remembers that repo's jobs changed outside a run of its own, so the
-// next flushDashboards looks at it.
+// next flushDashboards looks at it. The set is also kept in the store, so a process
+// that stops before it flushes does not lose the refresh.
 func (e *Engine) markDashboard(repo string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -154,20 +183,80 @@ func (e *Engine) markDashboard(repo string) {
 		e.dirty = map[string]bool{}
 	}
 	e.dirty[repo] = true
+	ctx := context.Background()
+	set := e.storedDirty(ctx)
+	set[repo] = true
+	e.saveDirty(ctx, set)
 }
 
-// flushDashboards syncs every repo marked since the last flush. It never fails a pass.
-func (e *Engine) flushDashboards(ctx context.Context) {
-	e.mu.Lock()
-	repos := make([]string, 0, len(e.dirty))
-	for r := range e.dirty {
+func (e *Engine) storedDirty(ctx context.Context) map[string]bool {
+	return e.cursorSet(ctx, dirtyCursor)
+}
+
+func (e *Engine) saveDirty(ctx context.Context, set map[string]bool) {
+	if err := e.saveCursorSet(ctx, dirtyCursor, set); err != nil {
+		e.log().Warn("save dashboard refresh set", "err", err)
+	}
+}
+
+// cursorSet reads a set of repo names kept one per line in a cursor.
+func (e *Engine) cursorSet(ctx context.Context, name string) map[string]bool {
+	set := map[string]bool{}
+	v, err := e.Store.GetCursor(ctx, name)
+	if err != nil {
+		e.log().Warn("read dashboard cursor set", "cursor", name, "err", err)
+		return set
+	}
+	for _, r := range strings.Fields(v) {
+		set[r] = true
+	}
+	return set
+}
+
+func (e *Engine) saveCursorSet(ctx context.Context, name string, set map[string]bool) error {
+	repos := make([]string, 0, len(set))
+	for r := range set {
 		repos = append(repos, r)
 	}
-	e.dirty = nil
-	e.mu.Unlock()
 	sort.Strings(repos)
-	for _, r := range repos {
+	return e.Store.SetCursor(ctx, name, strings.Join(repos, "\n"))
+}
+
+// flushDashboards syncs every repo marked since the last flush, by this process or by
+// one that stopped before flushing. It never fails a pass.
+func (e *Engine) flushDashboards(ctx context.Context) {
+	e.mu.Lock()
+	set := e.storedDirty(ctx)
+	for r := range e.dirty {
+		set[r] = true
+	}
+	e.dirty = nil
+	if len(set) > 0 {
+		e.saveDirty(ctx, nil)
+	}
+	watch := e.cursorSet(ctx, watchCursor)
+	e.mu.Unlock()
+	// A dashboard not read back for a while is looked at too: a person may have edited it.
+	for r := range watch {
+		cur, err := e.Store.GetCursor(ctx, dashboardCursor(r))
+		if err != nil {
+			continue
+		}
+		if _, _, checked := parseDashboardCursor(cur); !e.now().Before(checked.Add(dashboardVerify)) {
+			set[r] = true
+		}
+	}
+	repos := make([]string, 0, len(set))
+	for r := range set {
+		repos = append(repos, r)
+	}
+	sort.Strings(repos)
+	for i, r := range repos {
 		if ctx.Err() != nil {
+			// Shutting down: keep what was not reached for the next process.
+			for _, rest := range repos[i:] {
+				e.markDashboard(rest)
+			}
 			return
 		}
 		e.flushDashboard(ctx, r)
@@ -187,21 +276,25 @@ func (e *Engine) syncDashboard(ctx context.Context, name string) {
 	if _, ok := e.Platform.(platform.IssueTracker); !ok {
 		return
 	}
-	e.mu.Lock()
-	off := e.dashOff[name]
-	e.mu.Unlock()
-	if e.now().Before(off) {
-		return
+	if v, err := e.Store.GetCursor(ctx, dashboardOffCursor(name)); err == nil && v != "" {
+		if sec, perr := strconv.ParseInt(v, 10, 64); perr == nil && e.now().Before(time.Unix(sec, 0)) {
+			return
+		}
 	}
 	repo, found, err := e.Store.GetRepo(ctx, name)
 	if err != nil || !found {
 		return
 	}
 	cfg, err := RepoConfig(repo.Config)
-	if err != nil || !cfg.DependencyDashboard {
+	if err != nil {
 		return
 	}
-	if err := e.updateDashboard(ctx, repo, lister); err != nil {
+	if cfg.DependencyDashboard {
+		err = e.updateDashboard(ctx, repo, lister)
+	} else {
+		err = e.closeDashboard(ctx, repo)
+	}
+	if err != nil {
 		switch {
 		case errors.Is(err, platform.ErrNoIssues):
 		case errors.Is(err, platform.ErrIssuesUnavailable):
@@ -212,6 +305,10 @@ func (e *Engine) syncDashboard(ctx context.Context, name string) {
 			_, again := e.dashOff[name]
 			e.dashOff[name] = e.now().Add(dashboardBackoff)
 			e.mu.Unlock()
+			until := strconv.FormatInt(e.now().Add(dashboardBackoff).Unix(), 10)
+			if serr := e.Store.SetCursor(ctx, dashboardOffCursor(name), until); serr != nil {
+				e.log().Warn("save dashboard backoff", "repo", name, "err", serr)
+			}
 			if !again {
 				e.log().Warn("dependency dashboard skipped: issues are disabled or the App may not write them", "repo", name, "err", err)
 			}
@@ -219,6 +316,25 @@ func (e *Engine) syncDashboard(ctx context.Context, name string) {
 			e.log().Warn("dependency dashboard not updated", "repo", name, "err", err)
 		}
 	}
+}
+
+// closeDashboard closes the issue ripple opened for repo once its dependency-dashboard
+// key is off, and forgets it, so a later pass makes no call. A repo that never had a
+// dashboard (no cursor) costs nothing. An issue that is already gone or closed is done.
+func (e *Engine) closeDashboard(ctx context.Context, repo model.Repo) error {
+	cur, err := e.Store.GetCursor(ctx, dashboardCursor(repo.FullName))
+	if err != nil {
+		return err
+	}
+	number, _, _ := parseDashboardCursor(cur)
+	if number == 0 {
+		return nil
+	}
+	err = platform.CloseIssue(ctx, e.Platform, repo, number)
+	if err != nil && !errors.Is(err, platform.ErrIssueGone) && !errors.Is(err, platform.ErrNoIssues) {
+		return err
+	}
+	return e.setDashboardCursor(ctx, repo.FullName, "")
 }
 
 func (e *Engine) updateDashboard(ctx context.Context, repo model.Repo, lister store.OpenJobLister) error {
@@ -236,12 +352,29 @@ func (e *Engine) updateDashboard(ctx context.Context, repo model.Repo, lister st
 	if err != nil {
 		return err
 	}
-	number, last := parseDashboardCursor(cur)
+	number, last, checked := parseDashboardCursor(cur)
 	if number > 0 && last == hash {
-		return nil // unchanged: no API call
+		if e.now().Before(checked.Add(dashboardVerify)) {
+			return nil // unchanged and read back recently: no API call
+		}
+		// Read the issue back: a person may have edited it, and the hash only says what
+		// ripple last wrote.
+		iss, found, err := platform.FindIssue(ctx, e.Platform, repo, DashboardLabel, DashboardMarker)
+		if err != nil {
+			return err
+		}
+		if found && iss.Body == body {
+			return e.setDashboardCursor(ctx, repo.FullName, strconv.Itoa(iss.Number)+":"+hash+":"+strconv.FormatInt(e.now().Unix(), 10))
+		}
+		if found {
+			number = iss.Number
+		}
+		// Not found by its marker means a person removed the marker line, or the issue is
+		// gone: write the body by number, which restores the marker, and let the gone
+		// case below find or create it.
 	}
 	save := func(n int) error {
-		return e.Store.SetCursor(ctx, dashboardCursor(repo.FullName), strconv.Itoa(n)+":"+hash)
+		return e.setDashboardCursor(ctx, repo.FullName, strconv.Itoa(n)+":"+hash+":"+strconv.FormatInt(e.now().Unix(), 10))
 	}
 	if number == 0 {
 		iss, found, err := platform.FindIssue(ctx, e.Platform, repo, DashboardLabel, DashboardMarker)
@@ -273,7 +406,7 @@ func (e *Engine) updateDashboard(ctx context.Context, repo model.Repo, lister st
 			return err
 		}
 		if len(jobs) == 0 && len(advisories) == 0 {
-			return e.Store.SetCursor(ctx, dashboardCursor(repo.FullName), "")
+			return e.setDashboardCursor(ctx, repo.FullName, "")
 		}
 		return e.createDashboard(ctx, repo, body, save)
 	}
@@ -291,16 +424,23 @@ func (e *Engine) createDashboard(ctx context.Context, repo model.Repo, body stri
 	return save(iss.Number)
 }
 
-func parseDashboardCursor(s string) (int, string) {
-	n, h, ok := strings.Cut(s, ":")
+// parseDashboardCursor reads "number:hash[:checkedUnix]". An older cursor has no time,
+// which reads as long ago and so is verified once.
+func parseDashboardCursor(s string) (int, string, time.Time) {
+	n, rest, ok := strings.Cut(s, ":")
 	if !ok {
-		return 0, ""
+		return 0, "", time.Time{}
 	}
 	num, err := strconv.Atoi(n)
 	if err != nil {
-		return 0, ""
+		return 0, "", time.Time{}
 	}
-	return num, h
+	h, ts, _ := strings.Cut(rest, ":")
+	var checked time.Time
+	if sec, err := strconv.ParseInt(ts, 10, 64); err == nil {
+		checked = time.Unix(sec, 0)
+	}
+	return num, h, checked
 }
 
 func bodyHash(body string) string {

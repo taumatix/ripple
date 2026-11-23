@@ -71,6 +71,7 @@ var (
 	_ platform.Platform     = (*Client)(nil)
 	_ platform.AutoMerger   = (*Client)(nil)
 	_ platform.PRCloser     = (*Client)(nil)
+	_ platform.IssueCloser  = (*Client)(nil)
 	_ platform.RateLimiter  = (*Client)(nil)
 	_ platform.LegacyConfig = (*Client)(nil)
 )

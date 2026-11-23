@@ -171,10 +171,6 @@ Everything else:
     line; do that or leave it out for good. Only GitHub has an issue tracker implementation: GitLab, Gitea and
     Forgejo issues, and Azure Boards, are the same `platform.IssueTracker` interface. Also list ripple's open PRs
     and the jobs skipped for an invalid config, so the issue answers "what is ripple waiting on" completely.
-68. **Dashboard bookkeeping gaps.** The set of repos to refresh after a feed poll is in memory, so a restart
-    drops it until the repo's next run or scan. A person's edit to the dashboard body is not noticed until the
-    jobs change (the stored hash is of what ripple last wrote). Turning the key off leaves the issue as it was
-    instead of closing it. A repo with issues unavailable is retried hourly, in memory only.
 69. **DynamoDB per-repo open-job copies.** `ListOpenJobs` reads `REPO#<repo>` / `OPENJOB#<key>` items written on
     `EnqueueJob` and `UpdateJob`. A job that was already pending before this version is absent from its repo's
     dashboard until its next write, and a crash between the job write and the copy write leaves a stale copy
@@ -274,3 +270,10 @@ Everything else:
     (`RIPPLE_WEBHOOK_SPOOL=memory`), because an HMAC cannot be checked before its last byte and each receiver
     unmarshals the whole payload. Extracting only the fields ripple acts on while the stream is hashed, and
     discarding the result of a forgery, would hold neither; it means a token-level parse per host's payload.
+111. **Dashboard: reopen and share the sets.** Turning the key back on after ripple closed the issue creates a
+    new one rather than reopening the old, and a person's own close is still never reopened. The refresh set
+    (`dashboard-dirty`) and the repo list that drives the hourly read-back (`dashboard-watch`) are
+    read-modify-write cursors, so two replicas marking at once can lose an entry; the loss heals at the repo's
+    next run or write, but a per-item store write would remove it. Read-back finds the issue by its marker, so an
+    edit that removes the marker is repaired by number and one that deletes the issue is recreated, both
+    covered only against the fake.

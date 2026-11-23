@@ -333,6 +333,9 @@ func (w *AdvisoryWatcher) Poll(ctx context.Context) (int, error) {
 			return jobs, err
 		}
 	}
+	if err := w.backfillStep(ctx); err != nil {
+		e.log().Warn("osv: job index backfill", "err", err)
+	}
 	return jobs, w.sweepStep(ctx)
 }
 

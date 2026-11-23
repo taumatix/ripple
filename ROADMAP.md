@@ -130,17 +130,15 @@ Everything else:
 47. **Retry a failed supersede and cover edits.** A close that failed is retried only by the next newer
     release; a PR that was already open for the new version is never revisited. GitHub's check also misses
     an edited description and a force-push using ripple's commit identity.
-48. **OSV: advisories with no usable fix.** About 9% of recorded Go `fixed` values are pseudo-versions and many
-    advisories have no fix; both produce nothing today. Decide whether to open a tracking issue, or to propose
-    the pseudo-version for repos that opt in.
-49. **OSV: `stdlib` and `toolchain` advisories** are ignored as go.mod modules; they belong to the Go toolchain
-    bump work (entry 21), which can read the same records.
-50. **OSV: history for new registrations and gaps.** A repo registered after an advisory was published, or an
-    advisory modified while ripple was down for longer than one poll's line cap, is never examined. On
-    registration, check the repo's dependencies with `POST /v1/querybatch` (backfill of releases for new dependencies has shipped; this is the advisory side).
 51. **OSV: should a security PR bypass the open-PR limit and the schedule?** Today only the cooldown is skipped.
-    Needs a decision from real use.
-52. **OSV: a run against real OSV** to turn the `unverified` list in `UPSTREAM.md` into recorded fact.
+    Needs a decision from real use. Trade-offs: bypassing the limit makes a security fix arrive even when a repo
+    is at its cap of open PRs (the case where it matters most) but lets one advisory affecting many modules open
+    many PRs at once; bypassing the schedule removes the "not on a Friday" protection for the one PR type
+    that is most often wanted at once, but merges ripple would not otherwise open out of hours. Options:
+    bypass only the limit; bypass both for severity HIGH or CRITICAL; or per-repo opt-in. Not decided here.
+52. **OSV: finish the live run.** Four read-only requests on 2026-11-23 settled the querybatch version
+    format and the stdlib and toolchain names (UPSTREAM.md `verified-live`). Still open: a ripple run pointed
+    at real OSV end to end, pagination of a real querybatch, rate limits, CSV ordering, and the 404 delay.
 53. **Backfill residuals.** A new dependency beyond `DefaultMaxBackfill` (10 per scan) is never backfilled, and
     only a release of the exact module path is found: a newer major path on the same line is not. Make the
     bound a server setting (`RIPPLE_MAX_BACKFILL`), carry the unserved remainder to the next scan instead of
@@ -236,3 +234,14 @@ Everything else:
     below the version go.mod selects. It is verified by a build and vet, but a kept requirement whose go.sum
     lines are missing opens a draft. Look at real PR diffs, then decide whether to flip the default
     (a behaviour change, so a minor release with a note) or document it as permanently opt-in.
+80. **OSV: sweep repos after a gap.** The history check covers only a version newly seen in a repo. An advisory
+    modified during an outage longer than the poll's 20000-line cap is still missed for repos whose `go.mod`
+    has not changed. Needs a repo lister on the Store (it has none), then re-check every repo's dependencies in
+    bounded batches.
+81. **OSV: conflicting toolchain PRs.** An advisory PR and a `go-toolchain: directive` PR can both edit the
+    same `go.mod` line. Make the directive job lift past a pending security toolchain bump, or the reverse.
+82. **OSV: open advisories go stale on corrected records.** A record corrected so the version is no longer
+    affected is dropped only when the repo's version changes or the record is withdrawn. Re-evaluate the stored entry
+    when the record is modified.
+83. **OSV: a pseudo-version dependency is never moved.** A repo on a pseudo-version of a module gets no
+    advisory PR. Decide whether to propose the module's first release above that commit.

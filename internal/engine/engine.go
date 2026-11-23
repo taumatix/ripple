@@ -57,6 +57,9 @@ type Engine struct {
 	// Advisories is set when OSV is enabled: the runner then looks up the advisory
 	// note of each job (see FanOutAdvisory) to label the PR and skip the cooldown.
 	Advisories bool
+	// AdvisoryHistory, when set, lets a scan ask OSV about the advisories that already
+	// cover what a repo uses (see checkAdvisoryHistory). Nil leaves the poller the only source.
+	AdvisoryHistory AdvisoryQuerier
 	// MaxBackfill bounds the jobs one scan creates for dependencies new to the repo; zero
 	// means DefaultMaxBackfill.
 	MaxBackfill int
@@ -78,8 +81,9 @@ type Engine struct {
 	dirty map[string]bool
 	// advMu serialises the read-modify-write of a repo's open-advisory list, which the
 	// poller and a scan both write and only a scan does under the repo lock.
-	advMu   sync.Mutex
-	dashOff map[string]time.Time
+	advMu     sync.Mutex
+	histCache map[string]cachedVuln
+	dashOff   map[string]time.Time
 	// falseClaims remembers default-branch claims the host contradicted (HealDefaultBranch).
 	falseClaims map[string]time.Time
 }
@@ -235,6 +239,10 @@ func (e *Engine) Scan(ctx context.Context, repo model.Repo) error {
 	}
 	if err := e.Store.ReplaceDependencies(ctx, repo.FullName, deps); err != nil {
 		return err
+	}
+	if err := e.checkAdvisoryHistory(ctx, repo.FullName, cfg, deps); err != nil {
+		// OSV being down must not fail a scan: the pairs stay unchecked and the next scan retries.
+		e.log().Warn("advisory history not checked", "repo", repo.FullName, "err", err)
 	}
 	e.log().Info("scanned", "repo", repo.FullName, "dependencies", len(deps))
 	return nil

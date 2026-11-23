@@ -157,10 +157,11 @@ upstream:
     docs: https://google.github.io/osv.dev/api/
     api-version: "OSV schema 1.9.2 (records seen on 2026-11-23); API v1"
     vendored: docs/vendor/osv/
-    used: [GET https://storage.googleapis.com/osv-vulnerabilities/Go/modified_id.csv (newest first, read until the stored position), "GET https://api.osv.dev/v1/vulns/{id}"]
-    unused: [POST /v1/query, POST /v1/querybatch, all.zip]
+    used: [GET https://storage.googleapis.com/osv-vulnerabilities/Go/modified_id.csv (newest first, read until the stored position), "GET https://api.osv.dev/v1/vulns/{id}", "POST https://api.osv.dev/v1/querybatch (ids only, at most 1000 queries and 5 page rounds per request, version without a v prefix)"]
+    unused: [POST /v1/query, all.zip]
     rate-limits: "none documented; ripple makes one list request and at most RIPPLE_OSV_MAX_FETCH record requests per RIPPLE_OSV_INTERVAL"
-    unverified: "tested against a fake serving recorded payloads, never against a running ripple pointed at real OSV; any rate limit or abuse blocking of api.osv.dev; whether modified_id.csv is ever rewritten out of order; the delay between an id appearing in the CSV and /v1/vulns/{id} serving it (a 404 is skipped, so an advisory could be missed); database_specific.severity is a GitHub field outside the OSV schema; an 'introduced' only range that carries a 'limit'; SEMVER ranges of records that mix ecosystems"
+    verified-live: "2026-11-23, four read-only requests (one querybatch of five queries, one record, the list size, the list): querybatch accepts the version with and without a v prefix for Go and answers alike; stdlib and toolchain are both queryable names (stdlib 1.21.0: 90 ids; toolchain 1.21.0: 28); a stdlib record carries introduced 1.21.0-0 events (GO-2023-2041); modified_id.csv was 453940 bytes and 9989 lines"
+    unverified: "tested against a fake (querybatch included, whose matching is ripple's own code, not OSV's), never against a running ripple pointed at real OSV; that real querybatch ever returns next_page_token for Go; querybatch limits beyond the documented 1000 queries; the same stdlib and toolchain records appearing under both names; any rate limit or abuse blocking of api.osv.dev; whether modified_id.csv is ever rewritten out of order; the delay between an id appearing in the CSV and /v1/vulns/{id} serving it (a 404 is skipped, so an advisory could be missed); database_specific.severity is a GitHub field outside the OSV schema; an 'introduced' only range that carries a 'limit'; SEMVER ranges of records that mix ecosystems"
     checked: 2026-11-23
 ```
 

@@ -244,3 +244,18 @@ func TestQueryBatchErrors(t *testing.T) {
 		})
 	}
 }
+
+// The default line cap covers the whole Go list (about 10k lines on 2026-11-23), so a
+// poll after a long outage is not truncated.
+func TestModifiedDefaultCapCoversTheWholeGoList(t *testing.T) {
+	var b strings.Builder
+	base := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	for i := 12000; i > 0; i-- {
+		fmt.Fprintf(&b, "%s,GO-2026-%05d\n", base.Add(time.Duration(i)*time.Minute).Format(time.RFC3339), i)
+	}
+	c, _ := fakeOSV(t, []byte(b.String()), nil)
+	got, truncated, err := c.Modified(context.Background(), Position{Time: base})
+	if err != nil || truncated || len(got) != 12000 {
+		t.Fatalf("err=%v truncated=%v entries=%d", err, truncated, len(got))
+	}
+}

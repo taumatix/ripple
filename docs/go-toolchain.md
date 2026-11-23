@@ -14,6 +14,12 @@ updates:
 | `toolchain` | the `toolchain` line follows the newest patch of its own minor; once that minor is out of support it moves to the oldest supported minor |
 | `directive` | everything `toolchain` does, plus the `go` line moves to the oldest supported minor when its own minor is out of support |
 
+## Security advisories
+
+With OSV on ([osv.md](osv.md)), an advisory for `stdlib` or `toolchain` moves the `toolchain` line to the lowest
+fixed Go release, skipping the cooldown, only in a repo that opted in with `go-toolchain:`. A repo with only a `go`
+directive is not touched. If a directive PR would lift the same file's toolchain line, the two can conflict (ROADMAP).
+
 ## Choices, and why
 
 - **The two lines mean different things.** `go` is the least Go version the module needs: a

@@ -28,6 +28,7 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
 - Fan-out loads and parses a repo's config once per release instead of once per dependency row.
 
 ### Added
+- Gitea and Forgejo host (`RIPPLE_GITEA_*`): one client, flavour detected from `/api/v1/version`, repo discovery by listing plus push webhooks, "merge when checks succeed". Written from vendored docs and a fake, not a real instance; see [docs/platform-gitea.md](docs/platform-gitea.md).
 - A major bump now also rewrites `//go:generate go run <package>` lines and canonical `// import "..."`
   comments, and lists directives that still mention the old path in the PR body. `manager.RewriteGo` returns
   that report; `RewriteGoImports` keeps its signature.

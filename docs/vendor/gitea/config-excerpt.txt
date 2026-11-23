@@ -1,0 +1,6 @@
+# cheat-sheet lines for pagination, work-in-progress prefixes and merge style; source https://docs.gitea.com/administration/config-cheat-sheet, fetched 2026-11-23
+WORK_IN_PROGRESS_PREFIXES: WIP:,[WIP]: List of prefixes used in Pull Request
+DEFAULT_MERGE_STYLE: merge: Set default merge style for repository creating, valid options: merge, rebase, rebase-merge, squash, fast-forward-only
+DEFAULT_PAGING_NUM: 10: The default paging number of releases user interface
+MAX_RESPONSE_ITEMS: 50: Max number of items in a page.
+DEFAULT_PAGING_NUM: 30: Default paging number of API.

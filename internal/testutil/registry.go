@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // Registry is a fake container registry speaking the Docker Registry HTTP API v2
@@ -28,6 +29,7 @@ type Registry struct {
 	repos    map[string]map[string]string // repo -> tag -> manifest digest
 	pageSize int                          // tags per page; 0 serves all in one
 	denied   map[string]bool              // repos whose token request is refused
+	created  map[string]time.Time         // "repo:tag" -> image config creation time
 	reqs     []string
 }
 
@@ -35,7 +37,7 @@ const registryToken = "anon-token"
 
 func NewRegistry(t testing.TB) *Registry {
 	t.Helper()
-	r := &Registry{repos: map[string]map[string]string{}, denied: map[string]bool{}}
+	r := &Registry{repos: map[string]map[string]string{}, denied: map[string]bool{}, created: map[string]time.Time{}}
 	r.srv = httptest.NewServer(http.HandlerFunc(r.serve))
 	r.URL = r.srv.URL
 	t.Cleanup(r.srv.Close)
@@ -54,6 +56,54 @@ func (r *Registry) AddTag(repo, tag string) string {
 	d := "sha256:" + hex.EncodeToString(sum[:])
 	r.repos[repo][tag] = d
 	return d
+}
+
+// AddTagCreated is AddTag for an image whose config says it was created at t. A GET of
+// its manifest answers an OCI index (an attestation entry first, then linux/amd64), the
+// platform manifest by digest, and the config blob, like a multi-platform image.
+func (r *Registry) AddTagCreated(repo, tag string, t time.Time) string {
+	d := r.AddTag(repo, tag)
+	r.mu.Lock()
+	r.created[repo+":"+tag] = t
+	r.mu.Unlock()
+	return d
+}
+
+func derived(kind, digest string) string {
+	sum := sha256.Sum256([]byte(kind + ":" + digest))
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+// serveImage answers GETs of an image's index, platform manifest and config blob
+// for a tag added with AddTagCreated; it reports false for any other reference.
+func (r *Registry) serveImage(w http.ResponseWriter, repo, ref string, blob bool) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for tag, d := range r.repos[repo] {
+		created, ok := r.created[repo+":"+tag]
+		if !ok {
+			continue
+		}
+		plat, cfg := derived("plat", d), derived("cfg", d)
+		switch {
+		case !blob && ref == tag:
+			w.Header().Set("Content-Type", "application/vnd.oci.image.index.v1+json")
+			w.Header().Set("Docker-Content-Digest", d)
+			json.NewEncoder(w).Encode(map[string]any{"schemaVersion": 2, "manifests": []any{
+				map[string]any{"digest": derived("att", d), "platform": map[string]string{"os": "unknown", "architecture": "unknown"}},
+				map[string]any{"digest": plat, "platform": map[string]string{"os": "linux", "architecture": "amd64"}},
+			}})
+			return true
+		case !blob && ref == plat:
+			w.Header().Set("Content-Type", "application/vnd.oci.image.manifest.v1+json")
+			json.NewEncoder(w).Encode(map[string]any{"schemaVersion": 2, "config": map[string]any{"digest": cfg}})
+			return true
+		case blob && ref == cfg:
+			json.NewEncoder(w).Encode(map[string]any{"architecture": "amd64", "created": created.UTC().Format(time.RFC3339Nano)})
+			return true
+		}
+	}
+	return false
 }
 
 // PageSize makes tags/list answer at most n tags per page with a Link header.
@@ -93,12 +143,15 @@ func (r *Registry) serve(w http.ResponseWriter, req *http.Request) {
 	}
 	i := strings.LastIndex(strings.TrimSuffix(rest, "/"), "/tags/")
 	j := strings.LastIndex(rest, "/manifests/")
+	k := strings.LastIndex(rest, "/blobs/")
 	var repo string
 	switch {
 	case i >= 0 && strings.HasSuffix(rest, "/tags/list"):
 		repo = rest[:i]
 	case j >= 0:
 		repo = rest[:j]
+	case k >= 0:
+		repo = rest[:k]
 	default:
 		http.NotFound(w, req)
 		return
@@ -116,8 +169,17 @@ func (r *Registry) serve(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, `{"errors":[{"code":"NAME_UNKNOWN"}]}`, http.StatusNotFound)
 		return
 	}
+	if k >= 0 {
+		if !r.serveImage(w, repo, rest[k+len("/blobs/"):], true) {
+			http.Error(w, `{"errors":[{"code":"BLOB_UNKNOWN"}]}`, http.StatusNotFound)
+		}
+		return
+	}
 	if j >= 0 {
 		ref := rest[j+len("/manifests/"):]
+		if req.Method == http.MethodGet && r.serveImage(w, repo, ref, false) {
+			return
+		}
 		r.mu.Lock()
 		d, ok := tags[ref]
 		r.mu.Unlock()

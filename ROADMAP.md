@@ -231,9 +231,7 @@ Everything else:
     Add per-registry credentials (a token or `config.json`-style auth) kept out of logs and PR bodies.
 130. **Docker: verify against real registries.** The client and the fake were written from the spec excerpts
     (`docs/vendor/registry`); run it against Docker Hub and GHCR once (host, `library/` prefix, index digest
-    `Accept` types, 429 handling) and record the result in UPSTREAM.md.
-131. **Docker: package cursor and release dates.** the polled-package set is one cursor per package now (see 159) and the
-    cooldown counts from first sight because tags carry no date; read the image config `created` time instead.
+    `Accept` types, 429 handling, the `created` read through an index and a blob redirect) and record the result in UPSTREAM.md.
 132. **Webhook retry ids, verified on real hosts.** Delivery ids are now persisted (store delivery table), but whether
     Bitbucket Cloud's `X-Request-UUID` and Azure DevOps' payload `id` stay the same across a retry is still
     unverified: the vendored docs state neither (see docs/platform-bitbucket.md, docs/platform-azuredevops.md). A

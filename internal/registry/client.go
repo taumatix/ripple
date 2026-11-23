@@ -175,6 +175,80 @@ func (c *Client) Digest(ctx context.Context, pkg, tag string) (string, error) {
 	return d, nil
 }
 
+const manifestAccept = "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json"
+
+type manifestDoc struct {
+	Manifests []struct {
+		Digest   string `json:"digest"`
+		Platform struct {
+			OS, Architecture string
+		} `json:"platform"`
+	} `json:"manifests"`
+	Config struct {
+		Digest string `json:"digest"`
+	} `json:"config"`
+}
+
+func (c *Client) manifest(ctx context.Context, base, repo, ref string) (manifestDoc, error) {
+	var m manifestDoc
+	resp, err := c.do(ctx, http.MethodGet, base+"/v2/"+repo+"/manifests/"+url.PathEscape(ref), repo, manifestAccept)
+	if err != nil {
+		return m, err
+	}
+	defer resp.Body.Close()
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxBody)).Decode(&m); err != nil {
+		return m, fmt.Errorf("registry: manifest %s: %w", ref, err)
+	}
+	return m, nil
+}
+
+// Created returns the creation time recorded in the image config of pkg:tag: the
+// manifest (the linux/amd64 entry of an index, else the first real platform), its
+// config blob's "created". A zero time with a nil error means the image records none.
+func (c *Client) Created(ctx context.Context, pkg, tag string) (time.Time, error) {
+	ref, ok := ParsePackage(pkg)
+	if !ok {
+		return time.Time{}, fmt.Errorf("registry: %q is not a registry/repository name", pkg)
+	}
+	base := c.base(ref.Registry)
+	m, err := c.manifest(ctx, base, ref.Repo, tag)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if len(m.Manifests) > 0 {
+		pick := ""
+		for _, e := range m.Manifests {
+			if !digestRE.MatchString(e.Digest) || e.Platform.OS == "unknown" || e.Platform.OS == "" {
+				continue // attestations and malformed entries
+			}
+			if pick == "" || (e.Platform.OS == "linux" && e.Platform.Architecture == "amd64") {
+				pick = e.Digest
+			}
+		}
+		if pick == "" {
+			return time.Time{}, nil
+		}
+		if m, err = c.manifest(ctx, base, ref.Repo, pick); err != nil {
+			return time.Time{}, err
+		}
+	}
+	if !digestRE.MatchString(m.Config.Digest) {
+		return time.Time{}, nil
+	}
+	resp, err := c.do(ctx, http.MethodGet, base+"/v2/"+ref.Repo+"/blobs/"+m.Config.Digest, ref.Repo, "application/json")
+	if err != nil {
+		return time.Time{}, err
+	}
+	defer resp.Body.Close()
+	var cfg struct {
+		Created time.Time `json:"created"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxBody)).Decode(&cfg); err != nil {
+		return time.Time{}, fmt.Errorf("registry: image config of %s:%s: %w", pkg, tag, err)
+	}
+	return cfg.Created, nil
+}
+
 // do issues a request, answering one anonymous Bearer challenge. The caller closes the body.
 func (c *Client) do(ctx context.Context, method, target, repo, accept string) (*http.Response, error) {
 	if !c.Insecure && !strings.HasPrefix(target, "https://") {

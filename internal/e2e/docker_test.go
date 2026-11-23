@@ -170,3 +170,36 @@ func TestDockerComposeManifestArgAndCopyFromMove(t *testing.T) {
 		}
 	})
 }
+
+func TestDockerCooldownCountsFromTheImageCreationTime(t *testing.T) {
+	forEach(t, func(t *testing.T, st store.Store) {
+		e, reg := dockerEnv(t, st)
+		reg.AddTag("library/nginx", "1.25")
+		reg.AddTag("library/redis", "7.0")
+		cfg := "updates:\n  - ecosystem: docker\n    cooldown: 3d\n"
+		e.gh.AddRepo("acme/app", map[string]string{".ripple.yaml": cfg, "Dockerfile": "FROM nginx:1.25\nFROM redis:7.0\n"})
+		start(t, e, "acme/app")
+		e.clock.Advance(time.Minute)
+		now := e.clock.Now()
+		// First seen just now, but built long ago: past the cooldown at once.
+		reg.AddTagCreated("library/nginx", "1.26", now.Add(-10*24*time.Hour))
+		// Built an hour ago: still inside the cooldown.
+		reg.AddTagCreated("library/redis", "7.2", now.Add(-time.Hour))
+		e.tick()
+		e.tick()
+
+		prs := e.gh.PRs("acme/app")
+		if len(prs) != 1 {
+			t.Fatalf("only the old image clears the cooldown, got %d PRs", len(prs))
+		}
+		if got, _ := e.gh.FileAt("acme/app", prs[0].Head, "Dockerfile"); got != "FROM nginx:1.26\nFROM redis:7.0\n" {
+			t.Errorf("%s", got)
+		}
+		e.clock.Advance(3 * 24 * time.Hour)
+		e.tick()
+		e.tick()
+		if n := len(e.gh.PRs("acme/app")); n != 2 {
+			t.Errorf("the redis PR opens once its cooldown, counted from creation, passed: %d PRs", n)
+		}
+	})
+}

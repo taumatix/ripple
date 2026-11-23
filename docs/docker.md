@@ -42,7 +42,7 @@ Docker Hub, GHCR and any registry speaking the Docker Registry HTTP API v2, **an
 is answered with an anonymous token). Credentials are not supported: a private image answers 401/403 or 404, is
 logged and left alone, and the others in the repo still move. The registry host comes from the repo's Dockerfile,
 so the client refuses hosts that resolve to non-public addresses and plain-http realms or redirects. The
-cooldown runs from when ripple first saw the tag, as a registry publishes no release date.
+cooldown counts from the image's `created` time (read from its config: the index, the linux/amd64 manifest, then the config blob); when the registry cannot say, it counts from when ripple first saw the tag.
 
 Only images some repo uses are polled, once per poll, never a whole registry. Branches are `ripple/docker/...`.
 See [UPSTREAM.md](../UPSTREAM.md) for what was not verified against a real registry.

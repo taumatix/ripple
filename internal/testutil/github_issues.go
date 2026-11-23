@@ -23,12 +23,13 @@ type issueState struct {
 	disabled map[string]bool
 	forbid   map[string]bool
 	writes   map[string]int
+	requests map[string]int
 	labels   map[string]bool
 }
 
 func (g *GitHub) is() *issueState {
 	if g.issueState == nil {
-		g.issueState = &issueState{issues: map[string][]*Issue{}, disabled: map[string]bool{}, forbid: map[string]bool{}, writes: map[string]int{}}
+		g.issueState = &issueState{issues: map[string][]*Issue{}, disabled: map[string]bool{}, forbid: map[string]bool{}, writes: map[string]int{}, requests: map[string]int{}}
 	}
 	return g.issueState
 }
@@ -60,6 +61,13 @@ func (g *GitHub) Issues(repo string) []Issue {
 	return out
 }
 
+// IssueRequests counts every request to repo's issues endpoints, refused ones included.
+func (g *GitHub) IssueRequests(repo string) int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.is().requests[repo]
+}
+
 // IssueWrites counts the issue creations and updates addressed to repo.
 func (g *GitHub) IssueWrites(repo string) int {
 	g.mu.Lock()
@@ -84,6 +92,17 @@ func (g *GitHub) HumanCloseIssue(repo string, number int) {
 	for _, i := range g.is().issues[repo] {
 		if i.Number == number {
 			i.Closed = true
+		}
+	}
+}
+
+// HumanEditIssue replaces an issue's body as a person editing it would.
+func (g *GitHub) HumanEditIssue(repo string, number int, body string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	for _, i := range g.is().issues[repo] {
+		if i.Number == number {
+			i.Body = body
 		}
 	}
 }
@@ -121,6 +140,7 @@ func (g *GitHub) handleIssues(w http.ResponseWriter, r *http.Request, repo strin
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	st := g.is()
+	st.requests[repo]++
 	if st.disabled[repo] {
 		g.fail(w, http.StatusGone, "Issues are disabled for this repo")
 		return
@@ -199,6 +219,9 @@ func (g *GitHub) handleIssues(w http.ResponseWriter, r *http.Request, repo strin
 			st.writes[repo]++
 			if b, ok := in["body"].(string); ok {
 				i.Body = b
+			}
+			if state, ok := in["state"].(string); ok {
+				i.Closed = state == "closed"
 			}
 			_ = json.NewEncoder(w).Encode(issueJSON(i))
 			return

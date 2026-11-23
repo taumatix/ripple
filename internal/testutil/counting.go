@@ -139,6 +139,15 @@ func (c *CountingPlatform) UpdateIssueBody(ctx context.Context, r model.Repo, nu
 	return platform.UpdateIssueBody(ctx, c.Inner, r, number, body)
 }
 
+// CloseIssue forwards to Inner, or answers platform.ErrNoIssues without counting a call.
+func (c *CountingPlatform) CloseIssue(ctx context.Context, r model.Repo, number int) error {
+	if _, ok := c.Inner.(platform.IssueCloser); !ok {
+		return platform.ErrNoIssues
+	}
+	c.hit(r.FullName)
+	return platform.CloseIssue(ctx, c.Inner, r, number)
+}
+
 // ListTags, TagCommit and ReleaseOf forward to Inner without counting a call (the
 // repo they name is another repository's, read through the dependent's credential),
 // or answer platform.ErrNoTags when Inner cannot read tags.

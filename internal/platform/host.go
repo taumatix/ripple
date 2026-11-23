@@ -233,6 +233,24 @@ type IssueTracker interface {
 	UpdateIssueBody(ctx context.Context, repo model.Repo, number int, body string) error
 }
 
+// IssueCloser is the optional capability to close an issue ripple opened, used when a
+// repo turns its dependency dashboard off. It is separate from IssueTracker so a host
+// that can keep the dashboard but not close it stays valid.
+type IssueCloser interface {
+	// CloseIssue closes the issue and changes nothing else. Closing a closed issue
+	// is not an error; ErrIssueGone when the issue is not there.
+	CloseIssue(ctx context.Context, repo model.Repo, number int) error
+}
+
+// CloseIssue is p's CloseIssue, or ErrNoIssues when p cannot close issues.
+func CloseIssue(ctx context.Context, p Platform, repo model.Repo, number int) error {
+	c, ok := p.(IssueCloser)
+	if !ok {
+		return ErrNoIssues
+	}
+	return c.CloseIssue(ctx, repo, number)
+}
+
 // FindIssue is p's FindIssue, or ErrNoIssues.
 func FindIssue(ctx context.Context, p Platform, repo model.Repo, label, marker string) (Issue, bool, error) {
 	t, ok := p.(IssueTracker)

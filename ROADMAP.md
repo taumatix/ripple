@@ -155,20 +155,12 @@ Everything else:
     and the other signed hosts once a real redelivery has shown identical bodies are rare.
 65. **Webhook retry-id stability, verified.** Whether Bitbucket Cloud's `X-Request-UUID` and Azure DevOps' event
     `id` stay the same across a retry is unverified; confirm against a real delivery before relying on dedupe.
-66. **Webhook bodies off the disk, and a server read timeout.** A forged body is no longer held in memory but a
-    signed body over 64 KiB is spooled to a temp file (`MaxInflight` x `MaxBody` of disk). Also set
-    `http.Server.ReadHeaderTimeout`/`ReadTimeout` in `cmd`, since the per-body deadline needs a ResponseWriter
-    that supports deadlines.
 67. **Dependency dashboard: a "re-run now" control, and more hosts.** The dashboard (opt-in
     `dependency-dashboard`) is a read-only report. A checkbox that releases a deferred job early needs the
     `issues` webhook, a check of the editor's repository permission (never the issue's text) and an audit
     line; do that or leave it out for good. Only GitHub has an issue tracker implementation: GitLab, Gitea and
     Forgejo issues, and Azure Boards, are the same `platform.IssueTracker` interface. Also list ripple's open PRs
     and the jobs skipped for an invalid config, so the issue answers "what is ripple waiting on" completely.
-68. **Dashboard bookkeeping gaps.** The set of repos to refresh after a feed poll is in memory, so a restart
-    drops it until the repo's next run or scan. A person's edit to the dashboard body is not noticed until the
-    jobs change (the stored hash is of what ripple last wrote). Turning the key off leaves the issue as it was
-    instead of closing it. A repo with issues unavailable is retried hourly, in memory only.
 76. **Remove the `Ref` overload on `model.Event`.** `Ref` is still populated beside the typed fields and marked
     deprecated. Remove the fallback in the minor release after the one that introduced it, once no queue holds old
     rows (`ripple:deprecated event-ref-overload` in MIGRATION.md).
@@ -273,3 +265,14 @@ Everything else:
     module is missed; it is not cached across repos (every repo with the same new module asks again, up to 20 per
     scan); a module that skipped more than three majors is found only by the feed; and it was verified against a
     fake proxy, not the real one.
+122. **Webhook bodies: stream the parse.** A signed body is still held whole, on disk (default) or in memory
+    (`RIPPLE_WEBHOOK_SPOOL=memory`), because an HMAC cannot be checked before its last byte and each receiver
+    unmarshals the whole payload. Extracting only the fields ripple acts on while the stream is hashed, and
+    discarding the result of a forgery, would hold neither; it means a token-level parse per host's payload.
+123. **Dashboard: reopen and share the sets.** Turning the key back on after ripple closed the issue creates a
+    new one rather than reopening the old, and a person's own close is still never reopened. The refresh set
+    (`dashboard-dirty`) and the repo list that drives the hourly read-back (`dashboard-watch`) are
+    read-modify-write cursors, so two replicas marking at once can lose an entry; the loss heals at the repo's
+    next run or write, but a per-item store write would remove it. Read-back finds the issue by its marker, so an
+    edit that removes the marker is repaired by number and one that deletes the issue is recreated, both
+    covered only against the fake.

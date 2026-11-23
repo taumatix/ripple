@@ -104,9 +104,11 @@ updates:
 - `dependency-dashboard` (default `false`): keeps one issue per repo, labelled `ripple` and recognised by a
   marker comment on its first line, listing the jobs that are pending (with the time they wait until, for
   a cooldown or schedule), and the ones that failed. It is rewritten at the end of each pass, and not at
-  all when the text is unchanged. Edits to it are ignored: it is a report, not a control. It needs the App's
-  Issues read and write permission and issues enabled on the repo; without either ripple logs once and goes on.
-  A closed dashboard keeps being updated and is never reopened. GitHub only.
+  all when the text is unchanged. It is a report, not a control: ripple reads the issue back about once an hour and
+  rewrites it if a person edited it, and nothing in it is acted on. It needs the App's Issues read and write
+  permission and issues enabled on the repo; without either ripple logs once and goes on, and tries again
+  after an hour even across a restart. A closed dashboard keeps being updated and is never reopened. Set the key
+  to `false` and ripple closes the issue (once) and leaves it alone. GitHub only.
 - `backfill-new-dependencies` (default `true`): a repo that starts importing a module only hears about
   releases published afterwards, so when a scan finds a dependency the repo did not have, ripple compares it
   with the newest release already stored from the feed, for its own module path and for the next three majors
@@ -238,9 +240,9 @@ delivery is lost unless redelivered from the App's Recent Deliveries page. A fai
 count and times, for `RIPPLE_EVENT_DEAD_RETENTION` (default 30d), after which it is purged. Dead events are
 not work, so they do not count against the backlog caps. `ripple events list` shows them, `ripple events
 requeue ID` (or `--all`) makes one live again with a fresh 3 attempts, and `ripple events purge [AGE]`
-deletes them early; the commands read the store named by the same `RIPPLE_STORE` variables, so there is no
+deletes them early. A *job* ripple gave up on (state failed, shown on the dependency dashboard) is a separate thing: `ripple events jobs REPO` lists them and `ripple events requeue-job KEY` puts one back to pending. The commands read the store named by the same `RIPPLE_STORE` variables, so there is no
 HTTP endpoint, and a running server picks a requeued event up within 30 seconds. The webhook receiver refuses unsigned requests before reading the body,
-buffers at most 4 bodies at once, and drops a repeated `X-GitHub-Delivery` for an hour (in memory, per
+buffers at most 4 bodies at once (a signed body over 64 KiB waits for its signature check in a temp file, or in memory with `RIPPLE_WEBHOOK_SPOOL=memory`), and drops a repeated `X-GitHub-Delivery` for an hour (in memory, per
 process; the id is an unsigned header, so this stops redelivery and naive replays, not a rewritten header). See
 [ROADMAP.md](ROADMAP.md) for the planned fixes.
 

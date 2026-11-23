@@ -91,6 +91,9 @@ type Server struct {
 	EventBacklog                int
 	EventInstallationBacklog    int
 	EventDeadRetention          time.Duration
+	// WebhookSpool is "disk" (default) or "memory": where a signed webhook body over 64 KiB
+	// waits for its signature check. See webhook.SpoolMode.
+	WebhookSpool string
 	// Replica names this process among the replicas sharing the store (empty: a random id)
 	// and LeaseTTL is how long its claims on events and repos last without renewal.
 	Replica  string
@@ -159,6 +162,8 @@ RIPPLE_EVENT_INSTALLATION_BACKLOG  the same cap for one installation (default 10
 RIPPLE_REPLICA                this process's name among replicas sharing one store (default: random per start); shows in logs
 RIPPLE_LEASE_TTL              how long a replica's claim on an event or repo lasts without renewal, so how long a dead replica's
                               work waits for another (Go duration, default 30s, minimum 10s)
+RIPPLE_WEBHOOK_SPOOL          disk (default) or memory: where a signed webhook body over 64 KiB waits for its signature check; memory never
+                              writes a temp file but a forged body then costs up to 4 x 25 MB of memory instead of that much disk
 RIPPLE_EVENT_DEAD_RETENTION   how long an event that failed 3 times is kept for "ripple events" before it is purged (default 30d)
 `
 
@@ -276,6 +281,7 @@ func LoadServer(getenv func(string) string) (*Server, error) {
 		EventBacklog:                num("RIPPLE_EVENT_BACKLOG", 10_000, 1),
 		EventInstallationBacklog:    num("RIPPLE_EVENT_INSTALLATION_BACKLOG", 1_000, 1),
 		EventDeadRetention:          dur("RIPPLE_EVENT_DEAD_RETENTION", "30d"),
+		WebhookSpool:                str("RIPPLE_WEBHOOK_SPOOL", "disk"),
 		Replica:                     getenv("RIPPLE_REPLICA"),
 		LeaseTTL:                    DefaultLeaseTTL,
 	}
@@ -318,6 +324,9 @@ func LoadServer(getenv func(string) string) (*Server, error) {
 		if v == "" {
 			errs = append(errs, fmt.Errorf("%s is required", k))
 		}
+	}
+	if s.WebhookSpool != "disk" && s.WebhookSpool != "memory" {
+		errs = append(errs, fmt.Errorf("RIPPLE_WEBHOOK_SPOOL: %q is not disk or memory", s.WebhookSpool))
 	}
 	if s.EventDeadRetention <= 0 {
 		errs = append(errs, errors.New("RIPPLE_EVENT_DEAD_RETENTION must be positive"))

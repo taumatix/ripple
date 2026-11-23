@@ -60,6 +60,7 @@ Optional, each a separate interface in `internal/platform/host.go`; implement it
 | `AutoMerger` | the host can merge on green (GitLab MWPS, Azure auto-complete, Gitea/Forgejo auto-merge) | PRs stay open for review; the job still succeeds |
 | `PRCloser` | the host can tell whether a person touched a PR, comment on it and close it (see below) | a superseded PR stays open next to the new one; the job still succeeds |
 | `IssueTracker` | the host has issues ripple may write (find by label and marker, create, update the body): the dependency dashboard | no dashboard; `ErrNoIssues`, never an error for the job |
+| `IssueCloser` | the host can close an issue ripple opened (the dashboard, when a repo turns the key off); closing a closed issue is not an error | the issue is left open for a person to close |
 | `RateLimiter` | always, if the host rate-limits. Record the last `Until` per credential scope | one limited host keeps getting calls until each one fails |
 | `Lister` | the host has no install event (CodeCommit, Gerrit, SCM-Manager, a PAT-only setup) | repos register only through the receiver |
 | `LegacyConfig` | never: `.github/ripple.yml` is GitHub's alone | only `.ripple.yaml` at the repo root is read |
@@ -92,7 +93,7 @@ credential scope the event belongs to (0 if there is one credential); the queue 
 between scopes. `model.Repo.InstallationID` carries that scope back to your client.
 Do not re-implement the hardening: `internal/webhook` provides `Guard` (read slots, per-body read deadline,
 `ReadBody` for header-authenticated hosts, `ReadVerified` for an HMAC over the body, which streams the digest so a
-forged body is not held in memory and spools anything over 64 KiB to a temp file) and `Dedupe` (a TTL table;
+forged body is not held in memory and spools anything over 64 KiB to a temp file, or holds it in memory under `RIPPLE_WEBHOOK_SPOOL=memory`) and `Dedupe` (a TTL table;
 key it on the host's own delivery header, and `Release` the key if the sink fails so a redelivery is handled).
 Embed a `Guard`, set `MaxInflight` from the receiver, and call `ReadBody`/`ReadVerified` where you read the body.
 Where the scheme cannot be checked before the whole body (CodeCommit's SNS signature covers parsed JSON fields),

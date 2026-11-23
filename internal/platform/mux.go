@@ -142,6 +142,14 @@ func (m *Mux) CreateIssue(ctx context.Context, repo model.Repo, spec IssueSpec) 
 	return CreateIssue(ctx, p, r, spec)
 }
 
+func (m *Mux) CloseIssue(ctx context.Context, repo model.Repo, number int) error {
+	p, r, err := m.route(repo)
+	if err != nil {
+		return err
+	}
+	return CloseIssue(ctx, p, r, number)
+}
+
 func (m *Mux) UpdateIssueBody(ctx context.Context, repo model.Repo, number int, body string) error {
 	p, r, err := m.route(repo)
 	if err != nil {

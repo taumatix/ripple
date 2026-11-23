@@ -101,7 +101,7 @@ func TestEventsCommand(t *testing.T) {
 	if code := run([]string{"events", "list"}, &out, &errw, noenv); code != 0 || !strings.Contains(out.String(), "no dead events") {
 		t.Fatalf("list: exit %d, out %q, stderr %q", code, out.String(), errw.String())
 	}
-	for _, args := range [][]string{{"events"}, {"events", "requeue"}, {"events", "list", "x"}, {"events", "frob"}, {"events", "purge", "nonsense"}} {
+	for _, args := range [][]string{{"events"}, {"events", "requeue"}, {"events", "list", "x"}, {"events", "frob"}, {"events", "purge", "nonsense"}, {"events", "jobs"}, {"events", "requeue-job"}, {"events", "jobs", "a", "b"}} {
 		errw.Reset()
 		if code := run(args, &out, &errw, noenv); code != 2 {
 			t.Errorf("%v: exit %d, want 2 (%q)", args, code, errw.String())
@@ -110,5 +110,13 @@ func TestEventsCommand(t *testing.T) {
 	errw.Reset()
 	if code := run([]string{"events", "requeue", "missing"}, &out, &errw, noenv); code != 1 || !strings.Contains(errw.String(), "not a dead event") {
 		t.Fatalf("requeue missing: exit %d, stderr %q", code, errw.String())
+	}
+	out.Reset()
+	if code := run([]string{"events", "jobs", "acme/app"}, &out, &errw, noenv); code != 0 || !strings.Contains(out.String(), "no failed jobs") {
+		t.Fatalf("jobs: exit %d, out %q", code, out.String())
+	}
+	errw.Reset()
+	if code := run([]string{"events", "requeue-job", "missing"}, &out, &errw, noenv); code != 1 || !strings.Contains(errw.String(), "not a failed job") {
+		t.Fatalf("requeue-job missing: exit %d, stderr %q", code, errw.String())
 	}
 }

@@ -294,6 +294,19 @@ func TestServerReplicaAndLeaseTTL(t *testing.T) {
 	}
 }
 
+func TestServerWebhookSpool(t *testing.T) {
+	s, err := LoadServer(env(base))
+	if err != nil || s.WebhookSpool != "disk" {
+		t.Fatalf("default: %q, %v", s.WebhookSpool, err)
+	}
+	if s, err = LoadServer(env(with("RIPPLE_WEBHOOK_SPOOL", "memory"))); err != nil || s.WebhookSpool != "memory" {
+		t.Fatalf("memory: %q, %v", s.WebhookSpool, err)
+	}
+	if _, err = LoadServer(env(with("RIPPLE_WEBHOOK_SPOOL", "ram"))); err == nil {
+		t.Fatal("RIPPLE_WEBHOOK_SPOOL=ram accepted")
+	}
+}
+
 func TestServerGoToolchainDir(t *testing.T) {
 	if s, err := LoadServer(env(base)); err != nil || s.GoToolchainDir != "" {
 		t.Fatalf("default: %+v, %v", s, err)

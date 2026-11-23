@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"sync"
@@ -37,6 +38,26 @@ const (
 	ReadForged
 )
 
+// SpoolMode says where ReadVerified keeps a signed body that is larger than SpoolAbove
+// while it waits for the last byte of its signature.
+type SpoolMode int
+
+const (
+	// SpoolDefault takes the process default, DefaultSpool, which is SpoolDisk unless set.
+	SpoolDefault SpoolMode = iota
+	// SpoolDisk spills to a temporary file in SpoolDir: memory stays small whatever a
+	// forged body does, at the cost of up to MaxInflight x max bytes of disk.
+	SpoolDisk
+	// SpoolMemory never touches the disk (for a read-only root or a tiny temp dir): the
+	// body is held in memory up to max, so a forged body costs up to MaxInflight x max
+	// bytes of memory instead. Choose it when that is smaller than the disk you have.
+	SpoolMemory
+)
+
+// DefaultSpool is the mode a Guard with Spool SpoolDefault uses. The server sets it once
+// at start from RIPPLE_WEBHOOK_SPOOL; leave it alone elsewhere.
+var DefaultSpool = SpoolDisk
+
 // Guard is the host-neutral part of a webhook receiver's hardening: a cap on how many
 // request bodies are being read at once, a cap on each body, a deadline on how long one
 // may take, and, for signed bodies, verification that does not hold a forged body in
@@ -59,6 +80,9 @@ type Guard struct {
 	SpoolAbove int
 	// SpoolDir is where spilled bodies go; default os.TempDir().
 	SpoolDir string
+	// Spool chooses between spilling to SpoolDir and holding the whole body in memory;
+	// default DefaultSpool (disk).
+	Spool SpoolMode
 
 	once sync.Once
 	sem  chan struct{}
@@ -151,6 +175,9 @@ func (g *Guard) ReadVerified(w http.ResponseWriter, r *http.Request, max int64, 
 	mac := hmac.New(sha256.New, key)
 	mac.Write(prefix)
 	sp := &spool{limit: g.SpoolAbove, dir: g.SpoolDir}
+	if g.Spool == SpoolMemory || (g.Spool == SpoolDefault && DefaultSpool == SpoolMemory) {
+		sp.limit = math.MaxInt
+	}
 	defer sp.discard()
 	src := http.MaxBytesReader(w, r.Body, max)
 	buf := make([]byte, readChunk)

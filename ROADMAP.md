@@ -87,16 +87,6 @@ Everything else:
    only the packages the reverse index says someone imports, never every repo. Each datasource says which of the two it is.
 30. **More managers, toward Renovate parity.** ~~GitHub Actions~~ shipped ([docs/github-actions.md](docs/github-actions.md)).
    ~~30b Dockerfile~~ shipped ([docs/docker.md](docs/docker.md)). ~~30c npm~~ shipped ([docs/npm.md](docs/npm.md)). Remaining, by value, each its own entry: 30d Cargo, 30e pip, 30f Helm, and the long tail.
-96. **Actions registry cursor.** The packages the actions watcher polls live in one cursor
-    (`github-tags:packages`), written read-modify-write: replicas can lose each other's additions until the
-    next scan, and a package no repo uses any more is never pruned. Keep it per package in the store.
-97. **Actions: supersede and non-matching shapes.** A newer tag opens a second PR beside an open older one,
-    and a dependency whose shape has no newer tag (`v4` with only `v5.0.0` upstream) is silently left alone;
-    supersede like gomod and surface the skip on the dashboard.
-98. **Actions on GHES.** Tags are read from the repo's own host, so an action on github.com is not found from
-    a GHES install; allow a configured upstream host. Also verify the workflows-permission refusal text
-    against a real GitHub push.
-99. **PR footer says "module index".** Pull requests from the actions watcher use the Go module footer.
 33. **Plugin mechanism** for out-of-tree managers, datasources and platforms.
 34. **Presets, org-level defaults and packageRules-like matching.** Later and strictly opt-in: a repo
     file must opt into a preset by name, and none of these may ever change the meaning of a plain
@@ -243,7 +233,7 @@ Everything else:
 130. **Docker: verify against real registries.** The client and the fake were written from the spec excerpts
     (`docs/vendor/registry`); run it against Docker Hub and GHCR once (host, `library/` prefix, index digest
     `Accept` types, 429 handling) and record the result in UPSTREAM.md.
-131. **Docker: package cursor and release dates.** `docker:packages` is one read-modify-write cursor (see 96) and the
+131. **Docker: package cursor and release dates.** `docker:packages` is one read-modify-write cursor (see 151) and the
     cooldown counts from first sight because tags carry no date; read the image config `created` time instead.
 132. **Webhook retry ids, verified on real hosts.** Delivery ids are now persisted (store delivery table), but whether
     Bitbucket Cloud's `X-Request-UUID` and Azure DevOps' payload `id` stay the same across a retry is still
@@ -288,8 +278,8 @@ Everything else:
     (guard against dependency confusion); supporting it needs credentials and a registry setting per scope. Nothing here has run
     against registry.npmjs.org: the client and fake come from the vendored excerpts (scoped-name encoding, 404 for private
     packages, the `deprecated` shape, a `latest` tag that exists are assumed; see UPSTREAM.md). Also: `npm:packages` is one
-    read-modify-write cursor (see 96), versions carry no publication date (the full document has `time` but is much larger),
-    and the PR footer still says "module index" (see 99).
+    read-modify-write cursor (see 151), versions carry no publication date (the full document has `time` but is much larger),
+    and the PR footer still says "module index" (see 152).
 150. **Replicas: a consistent older-event check on DynamoDB.** Events are now numbered by the store (shipped), but
     `HasOlderEvent` on DynamoDB still reads the eventually consistent `gsi1`, so an older event written a moment ago can be
     missed (DynamoDB refuses `ConsistentRead` on a GSI); Postgres and the memory store have no such window. Write a base-table
@@ -298,3 +288,13 @@ Everything else:
     backfill it for events from before, and make the check a consistent Query on it. Needs DynamoDB Local to verify the
     transactions; the in-process fake covers them locally. Also: the sequence counter item is one hot key (one write per event;
     fine at webhook rates, unmeasured), and Postgres numbers a duplicate delivery too (a gap, harmless).
+151. **Package cursors: one key per package.** `github-tags:packages` (and `docker:packages`, `npm:packages`) is one
+    read-modify-write cursor: replicas can still lose each other's additions until the next scan of a repo that uses the
+    package. Actions now prune a package no repo uses (entry 96); the rest needs a per-package key and a store method
+    listing cursors by prefix (`internal/store`, all three backends), then `notePackages` moves to it.
+152. **PR footer for Docker and npm.** Actions PRs now say "a new tag appeared upstream", but Docker and npm PRs still use the
+    Go module footer ("appeared in the module index"); `footerSource` in `internal/engine/run.go` needs a case each.
+153. **Actions: verify against real GitHub and a real GHES.** The workflows-permission refusal text, the upstream fallback
+    (`RIPPLE_ACTIONS_UPSTREAM_URL`, 404 on the host then the configured upstream) and superseding of stale actions PRs were
+    written against the fake; none ran against github.com or a GHES (see 61). The supersede sweep and closing of beaten PRs
+    for actions rely on the branch name `ripple/actions/<slug>-<tag>`.

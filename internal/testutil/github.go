@@ -52,14 +52,18 @@ type GitHub struct {
 	APIURL  string
 	GitBase string
 	Auth    *github.AppAuth
+	// PublicReads lets a GET carrying no installation token (none, or any non-"ghs_"
+	// bearer) through, as api.github.com answers an anonymous read of a public repo.
+	PublicReads bool
 
 	t    *testing.T
 	root string
 	key  *rsa.PrivateKey
 
-	mu    sync.Mutex
-	calls map[string]int
-	prs   map[string][]*PR
+	mu      sync.Mutex
+	bearers []string
+	calls   map[string]int
+	prs     map[string][]*PR
 	// issueState holds the issues API's records; see github_issues.go.
 	issueState *issueState
 	// refState holds the tags and releases API's records; see github_refs.go.
@@ -343,7 +347,10 @@ func (g *GitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"token": tok, "expires_at": time.Now().Add(ttl).UTC().Format(time.RFC3339)})
 		return
 	}
-	if !strings.HasPrefix(auth, "ghs_fake") {
+	g.mu.Lock()
+	g.bearers = append(g.bearers, auth)
+	g.mu.Unlock()
+	if !strings.HasPrefix(auth, "ghs_fake") && !(g.PublicReads && r.Method == http.MethodGet && !strings.HasPrefix(auth, "ghs_")) {
 		g.fail(w, http.StatusUnauthorized, "not an installation token")
 		return
 	}
@@ -692,4 +699,11 @@ func prJSON(repo string, p *PR) map[string]any {
 		"title": p.Title, "draft": p.Draft,
 		"head": map[string]any{"ref": p.Head, "repo": map[string]any{"full_name": repo}}, "base": map[string]any{"ref": p.Base},
 	}
+}
+
+// Bearers are the Authorization values (without "Bearer ") of the requests received, in order.
+func (g *GitHub) Bearers() []string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return append([]string(nil), g.bearers...)
 }

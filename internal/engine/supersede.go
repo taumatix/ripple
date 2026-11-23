@@ -26,17 +26,65 @@ func staleVersion(head, pkg string) (string, bool) {
 	return tail, true
 }
 
+// staleActionVersion is staleVersion for a github-tags branch
+// (BranchPrefix+"actions/"+slug(pkg)+"-"+slug(tag)): the tag, and its shape. Only a PR of
+// the same shape is superseded, because v4->v5 and v4.1.2->v5.1.0 are updates of two
+// different dependencies of one action and neither replaces the other.
+func staleActionVersion(head, pkg string) (tag, shape string, ok bool) {
+	tail, found := strings.CutPrefix(head, BranchPrefix+"actions/"+slug(pkg)+"-")
+	if !found || slug(tail) != tail {
+		return "", "", false
+	}
+	if _, shape, ok = tagShape(tail); !ok {
+		return "", "", false
+	}
+	return tail, shape, true
+}
+
 // supersededBy is the PR (or, before it exists, the version) that replaces the
-// stale ones of pkg. url is empty while the replacement is still to be opened.
+// stale ones of pkg. url is empty while the replacement is still to be opened. ds is
+// the datasource of the package; the zero value is the Go module datasource.
 type supersededBy struct {
+	ds                string
 	pkg, version, url string
+}
+
+func (b supersededBy) actions() bool { return b.ds == model.DatasourceGitHubTags }
+
+// staleOf reports the version old updates by.pkg to when head is a ripple branch of that
+// package and strictly older than by.version (and, for actions, of the same shape).
+func (b supersededBy) staleOf(head string) (string, bool) {
+	if !b.actions() {
+		v, ok := staleVersion(head, b.pkg)
+		return v, ok && semver.Compare(v, b.version) < 0
+	}
+	v, shape, ok := staleActionVersion(head, b.pkg)
+	if !ok {
+		return "", false
+	}
+	sv, byShape, _ := tagShape(b.version)
+	oldSV, _, _ := tagShape(v)
+	return v, shape == byShape && semver.Compare(oldSV, sv) < 0
+}
+
+// replaceable reports whether version can replace older PRs: a release for Go, a
+// plain tag for actions.
+func (b supersededBy) replaceable() bool {
+	if b.actions() {
+		_, _, ok := tagShape(b.version)
+		return ok
+	}
+	return semver.IsValid(b.version) && semver.Prerelease(b.version) == ""
 }
 
 // ownedByRipple reports whether ripple's own record says old is the PR it opened for
 // pkg at version: a finished job under that key whose PR is this one. A branch name
 // or a title proves nothing, since anyone can push one shaped like ripple's.
-func (r *runner) ownedByRipple(pkg, version string, old platform.PR) bool {
-	key := model.JobKey(r.repo.FullName, model.DatasourceGo, pkg, version)
+func (r *runner) ownedByRipple(ds, pkg, version string, old platform.PR) bool {
+	if ds == "" {
+		ds = model.DatasourceGo
+	}
+	key := model.JobKey(r.repo.FullName, ds, pkg, version)
 	j, ok, err := r.e.Store.GetJob(r.ctx, key)
 	if err != nil {
 		r.e.log().Warn("stale pull request not checked: reading its job failed", "repo", r.repo.FullName, "job", key, "err", err)
@@ -48,8 +96,11 @@ func (r *runner) ownedByRipple(pkg, version string, old platform.PR) bool {
 // isRipplesReplacement reports whether newest is the PR of a ripple job for pkg at
 // version, though that job may not have recorded the PR yet (a crash between opening
 // the PR and finishing the job): a branch no job was ever created for is not.
-func (r *runner) isRipplesReplacement(pkg, version string, newest platform.PR) bool {
-	j, ok, err := r.e.Store.GetJob(r.ctx, model.JobKey(r.repo.FullName, model.DatasourceGo, pkg, version))
+func (r *runner) isRipplesReplacement(ds, pkg, version string, newest platform.PR) bool {
+	if ds == "" {
+		ds = model.DatasourceGo
+	}
+	j, ok, err := r.e.Store.GetJob(r.ctx, model.JobKey(r.repo.FullName, ds, pkg, version))
 	return err == nil && ok && (j.PRURL == "" || j.PRURL == newest.URL)
 }
 
@@ -62,13 +113,13 @@ func (r *runner) isRipplesReplacement(pkg, version string, newest platform.PR) b
 // branch.
 func (r *runner) closeStale(by supersededBy, exceptHead string, open []platform.PR) map[string]bool {
 	closed := map[string]bool{}
-	if !r.cfg.ClosesSuperseded() || !semver.IsValid(by.version) || semver.Prerelease(by.version) != "" {
+	if !r.cfg.ClosesSuperseded() || !by.replaceable() {
 		return closed
 	}
 	touched := r.touchedPRs()
 	for _, old := range open {
-		oldVersion, ok := staleVersion(old.Head, by.pkg)
-		if !ok || old.Head == exceptHead || semver.Compare(oldVersion, by.version) >= 0 || !r.ownedByRipple(by.pkg, oldVersion, old) {
+		oldVersion, ok := by.staleOf(old.Head)
+		if !ok || old.Head == exceptHead || !r.ownedByRipple(by.ds, by.pkg, oldVersion, old) {
 			continue
 		}
 		if touched[old.URL] {
@@ -103,7 +154,8 @@ func (r *runner) supersede(p *prPlan, pr platform.PR, open []platform.PR) {
 	if p.group != "" || len(p.items) == 0 {
 		return
 	}
-	r.closeStale(supersededBy{pkg: p.items[0].job.Package, version: p.items[0].job.Version, url: pr.URL}, p.branch, open)
+	j := p.items[0].job
+	r.closeStale(supersededBy{ds: j.Datasource, pkg: j.Package, version: j.Version, url: pr.URL}, p.branch, open)
 }
 
 // sweepSuperseded retries what an earlier run failed to close: for every module the
@@ -117,6 +169,12 @@ func (r *runner) sweepSuperseded(deps []model.Dependency, open []platform.PR) ma
 	r.forgetClosedTouchedPRs(open)
 	seen := map[string]bool{}
 	for _, d := range deps {
+		if d.Datasource == model.DatasourceGitHubTags {
+			for head := range r.sweepActions(d.Package, seen, open) {
+				closed[head] = true
+			}
+			continue
+		}
 		if d.Datasource != model.DatasourceGo || seen[d.Package] {
 			continue
 		}
@@ -135,10 +193,53 @@ func (r *runner) sweepSuperseded(deps []model.Dependency, open []platform.PR) ma
 				newest, newestVersion = pr, v
 			}
 		}
-		if !stale || !r.isRipplesReplacement(d.Package, newestVersion, newest) {
+		if !stale || !r.isRipplesReplacement(model.DatasourceGo, d.Package, newestVersion, newest) {
 			continue
 		}
 		for head := range r.closeStale(supersededBy{pkg: d.Package, version: newestVersion, url: newest.URL}, newest.Head, open) {
+			closed[head] = true
+		}
+	}
+	return closed
+}
+
+// sweepActions is the sweep for one action: per tag shape, the newest open ripple PR
+// replaces the older open ones.
+func (r *runner) sweepActions(pkg string, seen map[string]bool, open []platform.PR) map[string]bool {
+	closed := map[string]bool{}
+	if seen["actions:"+pkg] {
+		return closed
+	}
+	seen["actions:"+pkg] = true
+	type best struct {
+		pr    platform.PR
+		tag   string
+		sv    string
+		count int
+	}
+	byShape := map[string]*best{}
+	for _, pr := range open {
+		tag, shape, ok := staleActionVersion(pr.Head, pkg)
+		if !ok {
+			continue
+		}
+		sv, _, _ := tagShape(tag)
+		b := byShape[shape]
+		if b == nil {
+			b = &best{}
+			byShape[shape] = b
+		}
+		b.count++
+		if b.count == 1 || semver.Compare(sv, b.sv) > 0 {
+			b.pr, b.tag, b.sv = pr, tag, sv
+		}
+	}
+	for _, b := range byShape {
+		if b.count < 2 || !r.isRipplesReplacement(model.DatasourceGitHubTags, pkg, b.tag, b.pr) {
+			continue
+		}
+		by := supersededBy{ds: model.DatasourceGitHubTags, pkg: pkg, version: b.tag, url: b.pr.URL}
+		for head := range r.closeStale(by, b.pr.Head, open) {
 			closed[head] = true
 		}
 	}

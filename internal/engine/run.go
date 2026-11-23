@@ -411,7 +411,7 @@ func (r *runner) execute(plans []*prPlan, deps []model.Dependency) {
 		if count >= limit && p.group == "" && len(p.items) > 0 {
 			// A stale PR of the module this plan updates holds the slot its replacement needs.
 			j := p.items[0].job
-			closed := r.closeStale(supersededBy{pkg: j.Package, version: j.Version}, p.branch, open)
+			closed := r.closeStale(supersededBy{ds: j.Datasource, pkg: j.Package, version: j.Version}, p.branch, open)
 			open, count = without(open, closed), count-len(closed)
 		}
 		if count >= limit {
@@ -697,6 +697,24 @@ func releaseNotes(pkg, version string) string {
 	return fmt.Sprintf("https://pkg.go.dev/%s@%s", pkg, version)
 }
 
+// footerSource says where the new version was seen: the Go module index, unless the PR
+// updates GitHub Actions, whose versions are tags of the action's repository.
+func footerSource(items []item) string {
+	actions := 0
+	for _, it := range items {
+		if it.job.Datasource == model.DatasourceGitHubTags {
+			actions++
+		}
+	}
+	switch {
+	case actions == 0:
+		return "the new version appeared in the module index"
+	case actions == len(items):
+		return "a new tag appeared upstream"
+	}
+	return "a new version appeared upstream"
+}
+
 func describe(p *prPlan, items []item) (title, body string) {
 	var b strings.Builder
 	sort.Slice(items, func(i, j int) bool { return items[i].job.Package < items[j].job.Package })
@@ -716,7 +734,7 @@ func describe(p *prPlan, items []item) (title, body string) {
 			fmt.Fprintf(&b, "\n**Breaking: major version update.** `%s` moves to `%s`; go.mod and the import paths in the Go files were rewritten. Release notes: %s\n", it.deps[0].Package, it.job.Package, releaseNotes(it.job.Package, it.job.Version))
 		}
 	}
-	b.WriteString("\nOpened by [ripple](https://github.com/taumatix/ripple) when the new version appeared in the module index. Configure it in `.ripple.yaml`.\n")
+	b.WriteString("\nOpened by [ripple](https://github.com/taumatix/ripple) when " + footerSource(items) + ". Configure it in `.ripple.yaml`.\n")
 	if len(items) == 1 && p.group == "" {
 		if items[0].job.Datasource == model.DatasourceGoToolchain {
 			_, _, to := toolchainRow(items[0].deps[0], items[0].job.Version)

@@ -46,6 +46,13 @@ type Client struct {
 	Credentials platform.Credentials
 	HTTP        *http.Client
 	Log         *slog.Logger
+	// UpstreamAPIBase, when set, is where the tags, commits and releases of an action
+	// that the host itself does not have are read, typically https://api.github.com for a
+	// GHES. The host is asked first: an action it has wins, as with GitHub Connect. Only
+	// reads of public data go there, anonymously unless UpstreamToken is set.
+	UpstreamAPIBase string
+	// UpstreamToken is sent to UpstreamAPIBase only, to lift its anonymous rate limit.
+	UpstreamToken string
 	// AuthorName and AuthorEmail identify commits.
 	AuthorName, AuthorEmail string
 	// WorkDir is where checkouts are created; empty means the OS temp dir.

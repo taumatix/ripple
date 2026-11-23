@@ -126,6 +126,8 @@ type opts struct {
 	// test can count what a clone downloaded. Repos must be added before the env is built? No:
 	// the server reads the same bare repos, so adding them later is fine.
 	gitHTTP bool
+	// upstream, when set, is the fake GitHub (api.github.com) an action the host lacks is read from.
+	upstream *testutil.GitHub
 	// registry, when set, is the fake container registry every image host resolves to.
 	registry *testutil.Registry
 	// npm, when set, is the fake npm registry the engine reads package versions from.
@@ -160,6 +162,9 @@ func newEnvOpts(t *testing.T, st store.Store, lim rules.Limits, o opts) *env {
 	gh := &github.Client{APIBase: apiBase, GitBase: e.gh.GitBase, Tokens: tokens, Versions: versions, WorkDir: t.TempDir(),
 		GoProxy: e.proxy.URL, GoSumDB: "off", GoCacheDir: goCache(t), Sandbox: o.sandbox, Now: e.clock.Now,
 		Log: slog.New(slog.NewTextHandler(testWriter{t}, nil))}
+	if o.upstream != nil {
+		gh.UpstreamAPIBase = o.upstream.APIURL
+	}
 	e.plat = &testutil.CountingPlatform{Inner: gh}
 	e.client, e.limits = gh, lim
 	eng := &engine.Engine{Store: st, Platform: e.plat, Limits: lim, Now: e.clock.Now, Workers: 2, Log: slog.New(slog.NewTextHandler(io.MultiWriter(testWriter{t}, e.logs), nil))}

@@ -162,3 +162,16 @@ func (e *Engine) currentOpenAdvisories(ctx context.Context, repo string) ([]open
 	})
 	return out, nil
 }
+
+// listOpenAdvisory is recordOpenAdvisory plus the index that lets a corrected record find
+// the repos it listed on (see advisory_correct.go). The index is written without advMu
+// held: indexAdd takes it.
+func (e *Engine) listOpenAdvisory(ctx context.Context, rs *repoState, d model.Dependency, o openAdvisory) error {
+	if err := e.recordOpenAdvisory(ctx, rs, d, o); err != nil {
+		return err
+	}
+	if !rs.cfg.DependencyDashboard {
+		return nil
+	}
+	return e.indexAdd(ctx, advisoryOpenIxPrefix+o.ID, d.Repo)
+}

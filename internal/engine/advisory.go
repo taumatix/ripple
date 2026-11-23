@@ -85,6 +85,9 @@ func (e *Engine) advisoryNoteFor(ctx context.Context, j model.Job) *advisoryNote
 // jobs were newly enqueued or made due.
 func (e *Engine) FanOutAdvisory(ctx context.Context, v *advisory.Vuln) (int, error) {
 	repos := map[string]*repoState{}
+	// Once the fan-out is done, what an earlier text of the record made is reconciled
+	// with what it says now (entry 82).
+	defer e.reconcileCorrected(ctx, v)
 	if v.Withdrawn() {
 		return 0, e.forgetOpenAdvisories(ctx, v)
 	}
@@ -161,7 +164,7 @@ func (e *Engine) applyAdvisory(ctx context.Context, v *advisory.Vuln, note advis
 			if ver.Pseudo != "" {
 				why = "only a pseudo-version fixes it (" + ver.Pseudo + "); set security-pseudo-versions to propose it"
 			}
-			if err := e.recordOpenAdvisory(ctx, rs, d, openAdvisory{ID: v.ID, Datasource: d.Datasource, Package: d.Package, Version: d.Version, Why: why}); err != nil {
+			if err := e.listOpenAdvisory(ctx, rs, d, openAdvisory{ID: v.ID, Datasource: d.Datasource, Package: d.Package, Version: d.Version, Why: why}); err != nil {
 				return n, err
 			}
 			continue
@@ -177,7 +180,7 @@ func (e *Engine) applyAdvisory(ctx context.Context, v *advisory.Vuln, note advis
 				if pt, can := applicablePseudoCurrent(d, d.Package, fixed); can {
 					if !u.SecurityFromPseudoVersions {
 						why := "the dependency is at a pseudo-version and " + fixed + " fixes it; set security-from-pseudo-versions to propose the move"
-						if err := e.recordOpenAdvisory(ctx, rs, d, openAdvisory{ID: v.ID, Datasource: d.Datasource, Package: d.Package, Version: d.Version, Why: why}); err != nil {
+						if err := e.listOpenAdvisory(ctx, rs, d, openAdvisory{ID: v.ID, Datasource: d.Datasource, Package: d.Package, Version: d.Version, Why: why}); err != nil {
 							return n, err
 						}
 						continue
@@ -203,6 +206,9 @@ func (e *Engine) applyAdvisory(ctx context.Context, v *advisory.Vuln, note advis
 		// The note goes first: a job must never be due without it. A GHSA record and
 		// its Go-database twin both arrive; the one that carries a severity is kept.
 		if err := e.keepNote(ctx, key, v, string(raw)); err != nil {
+			return n, err
+		}
+		if err := e.indexAdd(ctx, advisoryJobsPrefix+v.ID, key); err != nil {
 			return n, err
 		}
 		if err := e.clearOpenAdvisory(ctx, d.Repo, v.ID, d.Datasource, d.Package); err != nil {

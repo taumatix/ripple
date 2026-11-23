@@ -33,6 +33,12 @@ If the release feed already queued the same bump behind its cooldown, the adviso
   `gomod` entry: ripple then proposes the lowest fixing release above the commit, on the same major, never automerged,
   and the PR says it leaves a pseudo-version. A release that is not an advisory fix still never replaces a
   pseudo-version.
+- **Corrected records.** When OSV corrects a record so that it no longer affects the version a repo uses (or withdraws
+  it), ripple finishes the job that was waiting for it as skipped, closes the PR it opened for it with a comment saying
+  why, and drops its dashboard entry. A PR a person touched stays open, and so does every PR when
+  `close-superseded-pull-requests: false`. A dependency that already reached the fix is not "corrected": that work was
+  done. Jobs made before this release are not found, and a PR body is not rewritten. A record whose fix was raised is
+  handled by the superseded-PR flow, which replaces the old PR when the new one opens.
 - **Toolchain precedence.** A security `toolchain` job and a `go` directive job both rewrite the toolchain line of one
   go.mod. The security job goes first (the higher fixed version first); the other waits, with a reason naming the PR,
   until it is merged or closed. A PR already open is not closed for this: whoever merges second resolves the conflict.

@@ -533,8 +533,17 @@ func safeAdvisoryURL(o openAdvisory) string {
 // flushDashboard syncs one repo's dashboard under its lease, so a replica that is not the
 // holder never writes the issue. A repo another replica holds is skipped: its holder syncs
 // the dashboard when its scan or run ends, from the same stored state.
+//
+// A repo this process is scanning or running is skipped the same way, and stays marked for
+// the next flush: waiting for its lock would hold the feed poll (which flushes as it ends)
+// for as long as a slow job takes.
 func (e *Engine) flushDashboard(ctx context.Context, name string) {
-	defer e.lockRepo(name)()
+	m := e.repoMutex(name)
+	if !m.TryLock() {
+		e.markDashboard(name)
+		return
+	}
+	defer m.Unlock()
 	hold, err := e.acquireRepo(ctx, name, false)
 	if err != nil {
 		if ctx.Err() == nil {

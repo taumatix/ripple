@@ -261,19 +261,19 @@ Everything else:
 95. **Supersede re-reads touched PRs every run.** A stale PR a person touched is checked again (about six
     reads) each time ripple works on the repo, because the retry cannot tell it from a failed close. Remember
     "touched" on the job, cleared when the PR changes.
-96. **Replicas: a store-assigned event sequence.** Event order across replicas now holds only as far as
+100. **Replicas: a store-assigned event sequence.** Event order across replicas now holds only as far as
     each replica's clock does: `Seq` is the receiving replica's `UnixNano`, so skewed clocks can order two events
     of a repo wrongly, and the claim-time `HasOlderEvent` check trusts that order. On DynamoDB the check reads the
     eventually consistent `gsi1`, so an older event written a moment ago can be missed; Postgres and the memory
     store have no such window. Assign `Seq` in the store (a Postgres sequence, a DynamoDB counter item) and make
     the DynamoDB check consistent.
-97. **Replicas: soak against real databases.** The shared suite races goroutines on one store handle and the
+101. **Replicas: soak against real databases.** The shared suite races goroutines on one store handle and the
     e2e runs two replicas; neither is a real multi-node Postgres or DynamoDB under load, or with a skewed clock.
     Run three replicas against both with a clock offset and check one PR per job and ordered events.
-98. **Replicas: the remaining unfenced writes.** The job rows the runner writes are fenced on the repo lease;
+102. **Replicas: the remaining unfenced writes.** The job rows the runner writes are fenced on the repo lease;
     the advisory pass's `UpdateJob` (`advisory.go`), event `UpdateEvent`/`DeleteEvent` by a replica whose event
     lease lapsed, and the cursor writes of pause, remove and rename run under a lease but are not fenced by the
     store. Extend fencing to them, or show each is idempotent.
-99. **Replicas: metrics and one feed poller.** Expose a replica-count and lease-takeover metric (today only the
+103. **Replicas: metrics and one feed poller.** Expose a replica-count and lease-takeover metric (today only the
     `replica` start-up and `lease taken over` log lines exist) and elect one replica for the release-feed poll
     (two polling is safe, since job enqueue is insert-if-absent, but wasteful).

@@ -191,3 +191,28 @@ func TestDeliveryDroppedAfterRestart(t *testing.T) {
 		e.eventually("a new delivery is handled", func() bool { return e.scans("acme/uses-lib") > handled })
 	})
 }
+
+// An installation_repositories delivery carries each added repository's id
+// (docs/vendor/github, installation_repositories.added.schema.json), so the repo is
+// registered with it: the first rename needs no signed push to be followed by id.
+func TestInstallEventStoresRepoID(t *testing.T) {
+	forEach(t, func(t *testing.T, st store.Store) {
+		e := newEnv(t, st, defaultLimits())
+		baseRepos(e)
+		repos := []map[string]any{{"id": 31, "full_name": "acme/uses-lib"}}
+		if code := e.deliver("installation_repositories", map[string]any{"action": "added", "installation": map[string]any{"id": 7},
+			"repositories_added": repos}, ""); code != http.StatusAccepted {
+			t.Fatalf("installation_repositories webhook: %d", code)
+		}
+		e.waitRepo("acme/uses-lib")
+		if id := e.storedRepoID("acme/uses-lib"); id != 31 {
+			t.Fatalf("stored id %d, want 31", id)
+		}
+
+		// The rename event never arrives: the push under the new name is tied by that id.
+		e.gh.RenameRepo("acme/uses-lib", "acme/renamed")
+		e.pushPayload("acme/renamed", "refs/heads/feature", "main", 31, []string{"README.md"}, "")
+		e.waitRepo("acme/renamed")
+		e.repoGone("acme/uses-lib")
+	})
+}

@@ -66,11 +66,15 @@ func TestHandlerParsesEvents(t *testing.T) {
 	}
 	post("installation_repositories", `{"action":"removed","installation":{"id":7},"repositories_removed":[{"full_name":"acme/web"}]}`, "")
 	post("installation_repositories", `{"action":"added","installation":{"id":7},"repositories_added":[{"full_name":"acme/new"}]}`, "")
+	post("installation_repositories", `{"action":"added","installation":{"id":7},"repositories_added":[{"id":5,"full_name":"acme/a"},{"full_name":"acme/b"},{"id":6,"full_name":"acme/c"}]}`, "")
+	post("installation", `{"action":"created","installation":{"id":7},"repositories":[{"id":9,"node_id":"x","full_name":"acme/d"}]}`, "")
 	post("push", `{"ref":"refs/heads/main","installation":{"id":7},"repository":{"id":4242,"full_name":"acme/web","default_branch":"main"},"commits":[{"added":["a.txt"],"modified":["go.mod"],"removed":[]},{"modified":["go.mod","x"]}]}`, "")
 	want := []Event{
 		{Kind: "repos_added", InstallationID: 7, Repos: []string{"acme/web", "acme/api"}},
 		{Kind: "repos_removed", InstallationID: 7, Repos: []string{"acme/web"}},
 		{Kind: "repos_added", InstallationID: 7, Repos: []string{"acme/new"}},
+		{Kind: "repos_added", InstallationID: 7, Repos: []string{"acme/a", "acme/b", "acme/c"}, RepoIDs: []int64{5, 0, 6}},
+		{Kind: "repos_added", InstallationID: 7, Repos: []string{"acme/d"}, RepoIDs: []int64{9}},
 		{Kind: "push", InstallationID: 7, Repos: []string{"acme/web"}, Ref: "refs/heads/main", DefaultBranch: "main", RepoID: 4242, Files: []string{"a.txt", "go.mod", "x"}},
 	}
 	if !reflect.DeepEqual(got, want) {

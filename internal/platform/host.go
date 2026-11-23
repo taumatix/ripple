@@ -161,6 +161,9 @@ type Event struct {
 	// none. A host sets it only when it vouches for it (a verified delivery): ripple
 	// registers an unknown repo from a push only when it is non-zero.
 	RepoID int64
+	// RepoIDs is, for ReposAdded, the vouched id of each of Repos at the same index
+	// (0 for one the payload gave none); nil when the host gives none.
+	RepoIDs []int64
 }
 
 // Sink consumes events. An error makes the receiver answer 503, which tells a host

@@ -191,8 +191,12 @@ func (a *App) enqueue(ctx context.Context, host string, ev platform.Event) (retE
 			}
 			ref = "refs/heads/" + ev.DefaultBranch
 		}
+		repoID := ev.RepoID
+		if ev.Kind == platform.ReposAdded && i < len(ev.RepoIDs) {
+			repoID = ev.RepoIDs[i]
+		}
 		me := model.Event{ID: fmt.Sprintf("%s/%d", prefix, i), InstallationID: ev.Scope,
-			Kind: string(ev.Kind), Repo: a.repoName(host, repo), Ref: ref, Files: ev.Files, DefaultBranch: ev.DefaultBranch, RepoID: ev.RepoID}
+			Kind: string(ev.Kind), Repo: a.repoName(host, repo), Ref: ref, Files: ev.Files, DefaultBranch: ev.DefaultBranch, RepoID: repoID}
 		if ev.Kind == platform.RepoRenamed {
 			me.NewRepo = ref
 		}
@@ -454,7 +458,7 @@ func (a *App) process(ctx context.Context, ev model.Event) error {
 		if err := a.Engine.ForgetRename(ctx, ev.Repo); err != nil {
 			return err
 		}
-		return a.Engine.Scan(ctx, model.Repo{FullName: ev.Repo, InstallationID: ev.InstallationID})
+		return a.Engine.Scan(ctx, model.Repo{FullName: ev.Repo, InstallationID: ev.InstallationID, RepoID: ev.RepoID})
 	case "repos_removed":
 		return a.Engine.Remove(ctx, ev.Repo)
 	case string(platform.RepoArchived):

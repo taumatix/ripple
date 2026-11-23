@@ -26,6 +26,8 @@ func TestConformance(t *testing.T) {
 type ghFixture struct {
 	gh     *testutil.GitHub
 	secret []byte
+	// enterprise marks deliveries with the headers a GHES adds (docs/vendor/ghes).
+	enterprise bool
 }
 
 const installation = 7
@@ -51,6 +53,12 @@ func (f *ghFixture) deliver(t *testing.T, hook, event string, payload any) {
 	req.Header.Set("X-GitHub-Event", event)
 	req.Header.Set("X-Hub-Signature-256", webhook.Sign(f.secret, body))
 	req.Header.Set("Content-Type", "application/json")
+	if f.enterprise {
+		req.Header.Set("User-Agent", "GitHub-Hookshot/abc1234")
+		req.Header.Set("X-GitHub-Enterprise-Version", "3.22.0")
+		req.Header.Set("X-GitHub-Enterprise-Host", "ghes.example.com")
+		req.Header.Set("X-Hub-Signature", "sha1=0000000000000000000000000000000000000000")
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)

@@ -58,6 +58,8 @@ type env struct {
 	hook  string
 	ticks int
 	logs  *syncBuf
+	// extraHeaders are added to every webhook delivery (a GHES's own headers).
+	extraHeaders http.Header
 
 	newApp  func() *app.App
 	stopApp func()
@@ -110,6 +112,8 @@ type opts struct {
 	sandbox sandbox.Backend
 	// goDL, when set, is the Go release list the app polls for go-toolchain updates.
 	goDL *testutil.GoDL
+	// ghes, when set, serves the host from a fake GHES (/api/v3 and /api/graphql only).
+	ghes *testutil.GHES
 	// tweak edits each App newApp builds, a restart included, before it runs.
 	tweak func(a *app.App)
 	// engine adjusts the engine before it runs (server-side go settings).
@@ -123,8 +127,19 @@ func newEnv(t *testing.T, st store.Store, lim rules.Limits) *env {
 
 func newEnvOpts(t *testing.T, st store.Store, lim rules.Limits, o opts) *env {
 	t.Helper()
-	e := &env{t: t, st: st, gh: testutil.NewGitHub(t), idx: testutil.NewIndex(t), clock: &clock{t: t0}, proxy: testutil.NewGoProxy(t), logs: &syncBuf{}}
-	gh := &github.Client{APIBase: e.gh.APIURL, GitBase: e.gh.GitBase, Tokens: e.gh.Auth, WorkDir: t.TempDir(),
+	e := &env{t: t, st: st, idx: testutil.NewIndex(t), clock: &clock{t: t0}, proxy: testutil.NewGoProxy(t), logs: &syncBuf{}}
+	apiBase, tokens, versions := "", github.TokenSource(nil), (*github.Versions)(nil)
+	if o.ghes != nil {
+		e.gh, apiBase, tokens = o.ghes.GitHub, o.ghes.APIURL, o.ghes.Auth
+		versions = &github.Versions{}
+		o.ghes.Auth.Versions = versions
+		e.extraHeaders = http.Header{"User-Agent": {"GitHub-Hookshot/abc1234"}, "X-GitHub-Enterprise-Version": {"3.22.0"},
+			"X-GitHub-Enterprise-Host": {"ghes.example.com"}, "X-Hub-Signature": {"sha1=0000000000000000000000000000000000000000"}}
+	} else {
+		e.gh = testutil.NewGitHub(t)
+		apiBase, tokens = e.gh.APIURL, e.gh.Auth
+	}
+	gh := &github.Client{APIBase: apiBase, GitBase: e.gh.GitBase, Tokens: tokens, Versions: versions, WorkDir: t.TempDir(),
 		GoProxy: e.proxy.URL, GoSumDB: "off", GoCacheDir: goCache(t), Sandbox: o.sandbox, Now: e.clock.Now,
 		Log: slog.New(slog.NewTextHandler(testWriter{t}, nil))}
 	e.plat = &testutil.CountingPlatform{Inner: gh}
@@ -201,6 +216,9 @@ func (e *env) deliver(event string, payload any, sig string) int {
 	req.Header.Set("X-GitHub-Event", event)
 	req.Header.Set("X-Hub-Signature-256", sig)
 	req.Header.Set("Content-Type", "application/json")
+	for k, v := range e.extraHeaders {
+		req.Header[k] = v
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		e.t.Fatal(err)

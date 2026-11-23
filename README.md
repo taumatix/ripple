@@ -51,7 +51,7 @@ export RIPPLE_STORE=postgres RIPPLE_POSTGRES_DSN=postgres://...
 ripple serve
 ```
 
-`ripple config validate --server` lists every variable. Service-wide defaults (feed URL, open-PR
+`ripple config validate --server` lists every variable. For GitHub Enterprise Server set `RIPPLE_GITHUB_ENTERPRISE_URL`, see [docs/platform-github-enterprise.md](docs/platform-github-enterprise.md). Service-wide defaults (feed URL, open-PR
 limit, minimum release age, whether automerge is allowed) live there, not in repo files.
 
 ## Configuration

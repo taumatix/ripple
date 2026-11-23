@@ -10,7 +10,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -33,6 +32,13 @@ type Client struct {
 	APIBase string
 	// GitBase is the clone URL prefix, e.g. https://github.com; the clone URL is GitBase/owner/repo.git
 	GitBase string
+	// GraphQLURL overrides the GraphQL endpoint; empty derives it from APIBase
+	// (GraphQLURL func): api.github.com/graphql, or HOST/api/graphql for a GHES
+	// base of HOST/api/v3.
+	GraphQLURL string
+	// Versions is the X-GitHub-Api-Version policy; nil sends APIVersion and falls
+	// back to FallbackAPIVersion if the server answers 410. Share it with AppAuth.
+	Versions *Versions
 	// Tokens mints installation tokens (AppAuth) or returns a fixed one (StaticToken).
 	Tokens TokenSource
 	// Credentials, when set, replaces Tokens as the credential source for API calls
@@ -98,9 +104,9 @@ func (c *Client) noteLimit(inst int64, until time.Time) {
 	}
 }
 
-func setHeaders(r *http.Request) {
+func setHeaders(r *http.Request, version string) {
 	r.Header.Set("Accept", "application/vnd.github+json")
-	r.Header.Set("X-GitHub-Api-Version", APIVersion)
+	r.Header.Set("X-GitHub-Api-Version", version)
 	r.Header.Set("User-Agent", "ripple")
 }
 
@@ -123,23 +129,42 @@ func (c *Client) do(ctx context.Context, repo model.Repo, method, rawURL string,
 	if err != nil {
 		return 0, err
 	}
-	var body io.Reader
+	var payload []byte
 	if in != nil {
-		b, _ := json.Marshal(in)
-		body = bytes.NewReader(b)
+		payload, _ = json.Marshal(in)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, rawURL, body)
-	if err != nil {
-		return 0, err
-	}
-	setHeaders(req)
-	req.Header.Set("Authorization", "Bearer "+cred.Secret)
-	if in != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	resp, err := c.client().Do(req)
-	if err != nil {
-		return 0, fmt.Errorf("github %s %s: %w", method, req.URL.Path, err)
+	var (
+		req  *http.Request
+		resp *http.Response
+	)
+	for {
+		var body io.Reader
+		if in != nil {
+			body = bytes.NewReader(payload)
+		}
+		req, err = http.NewRequestWithContext(ctx, method, rawURL, body)
+		if err != nil {
+			return 0, err
+		}
+		version := c.Versions.Current()
+		setHeaders(req, version)
+		req.Header.Set("Authorization", "Bearer "+cred.Secret)
+		if in != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		resp, err = c.client().Do(req)
+		if err != nil {
+			return 0, fmt.Errorf("github %s %s: %w", method, req.URL.Path, err)
+		}
+		if resp.StatusCode == http.StatusGone && c.Versions.Lower(version) {
+			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+			resp.Body.Close()
+			if c.Log != nil {
+				c.Log.Warn("github host does not support the API version; falling back", "host", req.URL.Host, "from", version, "to", c.Versions.Current())
+			}
+			continue
+		}
+		break
 	}
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
@@ -340,17 +365,27 @@ func (c *Client) RequestAutoMerge(ctx context.Context, repo model.Repo, pr platf
 		return errors.New("pull request has no node id")
 	}
 	var out struct {
-		Errors []struct{ Message string } `json:"errors"`
+		Errors []struct {
+			Message string
+			Type    string
+		} `json:"errors"`
 	}
-	u, err := url.JoinPath(c.APIBase, "graphql")
+	status, err := c.do(ctx, repo, http.MethodPost, c.graphQLURL(), map[string]any{"query": automergeMutation, "variables": map[string]string{"id": pr.ID}}, &out)
 	if err != nil {
-		return err
-	}
-	if _, err := c.do(ctx, repo, http.MethodPost, u, map[string]any{"query": automergeMutation, "variables": map[string]string{"id": pr.ID}}, &out); err != nil {
+		// A host without GraphQL (disabled, or a path ripple was not told about)
+		// answers 404: there is nothing to ask, which is not a failure.
+		if status == http.StatusNotFound || status == http.StatusGone {
+			return fmt.Errorf("%w: GraphQL endpoint %s answered %d", platform.ErrNoAutoMerge, c.graphQLURL(), status)
+		}
 		return err
 	}
 	if len(out.Errors) > 0 {
-		return fmt.Errorf("enable auto-merge: %s", out.Errors[0].Message)
+		m := out.Errors[0]
+		// An older GHES schema validates the mutation away instead of failing.
+		if m.Type == "undefinedField" || strings.Contains(m.Message, "enablePullRequestAutoMerge") && strings.Contains(m.Message, "doesn't exist") {
+			return fmt.Errorf("%w: %s", platform.ErrNoAutoMerge, m.Message)
+		}
+		return fmt.Errorf("enable auto-merge: %s", m.Message)
 	}
 	return nil
 }

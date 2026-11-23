@@ -28,8 +28,13 @@ type Server struct {
 	GitHubAppID   string
 	GitHubKeyFile string
 	GitHubAPIURL  string
-	GitHubGitURL  string
-	FeedURL       string
+	// GitHubGraphQLURL overrides the GraphQL endpoint; empty means derived from
+	// GitHubAPIURL (platform/github.GraphQLURL). GitHubAPIVersion pins
+	// X-GitHub-Api-Version; empty sends the newest and falls back on 410.
+	GitHubGraphQLURL string
+	GitHubAPIVersion string
+	GitHubGitURL     string
+	FeedURL          string
 	// GoReleasesURL serves the Go release list (go-toolchain updates).
 	GoReleasesURL string
 	FeedInterval  time.Duration
@@ -83,7 +88,11 @@ const ServerEnv = `RIPPLE_LISTEN                 listen address (default :8080)
 RIPPLE_WEBHOOK_SECRET         GitHub App webhook secret (required)
 RIPPLE_GITHUB_APP_ID          GitHub App id (required)
 RIPPLE_GITHUB_KEY_FILE        path to the App private key PEM (required)
-RIPPLE_GITHUB_API_URL         default https://api.github.com
+RIPPLE_GITHUB_ENTERPRISE_URL  a GitHub Enterprise Server root such as https://ghes.example.com: sets the API
+                              (/api/v3), GraphQL (/api/graphql) and git bases; the three below override it
+RIPPLE_GITHUB_API_URL         default https://api.github.com (GHES: https://HOST/api/v3)
+RIPPLE_GITHUB_GRAPHQL_URL     default derived from the API URL (GHES: https://HOST/api/graphql)
+RIPPLE_GITHUB_API_VERSION     X-GitHub-Api-Version to pin (YYYY-MM-DD); default the newest ripple knows, lowered once on a 410
 RIPPLE_GITHUB_GIT_URL         default https://github.com
 RIPPLE_FEED_URL               default https://index.golang.org
 RIPPLE_FEED_INTERVAL          default 1m
@@ -169,13 +178,20 @@ func LoadServer(getenv func(string) string) (*Server, error) {
 		}
 		return n
 	}
+	ghes := strings.TrimRight(getenv("RIPPLE_GITHUB_ENTERPRISE_URL"), "/")
+	ghAPI, ghGit, ghGraphQL := "https://api.github.com", "https://github.com", ""
+	if ghes != "" {
+		ghAPI, ghGit, ghGraphQL = ghes+"/api/v3", ghes, ghes+"/api/graphql"
+	}
 	s := &Server{
 		Listen:                str("RIPPLE_LISTEN", ":8080"),
 		WebhookSecret:         getenv("RIPPLE_WEBHOOK_SECRET"),
 		GitHubAppID:           getenv("RIPPLE_GITHUB_APP_ID"),
 		GitHubKeyFile:         getenv("RIPPLE_GITHUB_KEY_FILE"),
-		GitHubAPIURL:          strings.TrimRight(str("RIPPLE_GITHUB_API_URL", "https://api.github.com"), "/"),
-		GitHubGitURL:          strings.TrimRight(str("RIPPLE_GITHUB_GIT_URL", "https://github.com"), "/"),
+		GitHubAPIURL:          strings.TrimRight(str("RIPPLE_GITHUB_API_URL", ghAPI), "/"),
+		GitHubGitURL:          strings.TrimRight(str("RIPPLE_GITHUB_GIT_URL", ghGit), "/"),
+		GitHubGraphQLURL:      strings.TrimRight(str("RIPPLE_GITHUB_GRAPHQL_URL", ghGraphQL), "/"),
+		GitHubAPIVersion:      getenv("RIPPLE_GITHUB_API_VERSION"),
 		FeedURL:               strings.TrimRight(str("RIPPLE_FEED_URL", "https://index.golang.org"), "/"),
 		GoReleasesURL:         strings.TrimRight(str("RIPPLE_GO_RELEASES_URL", "https://go.dev/dl/"), "/"),
 		FeedInterval:          dur("RIPPLE_FEED_INTERVAL", "1m"),
@@ -247,6 +263,21 @@ func LoadServer(getenv func(string) string) (*Server, error) {
 	}
 	if s.FeedInterval <= 0 {
 		errs = append(errs, errors.New("RIPPLE_FEED_INTERVAL must be positive"))
+	}
+	if ghes != "" {
+		if err := checkURL("RIPPLE_GITHUB_ENTERPRISE_URL", ghes); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if s.GitHubGraphQLURL != "" {
+		if err := checkURL("RIPPLE_GITHUB_GRAPHQL_URL", s.GitHubGraphQLURL); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if v := s.GitHubAPIVersion; v != "" {
+		if _, err := time.Parse("2006-01-02", v); err != nil {
+			errs = append(errs, fmt.Errorf("RIPPLE_GITHUB_API_VERSION: %q is not a YYYY-MM-DD version", v))
+		}
 	}
 	for k, v := range map[string]string{"RIPPLE_GITHUB_API_URL": s.GitHubAPIURL, "RIPPLE_GITHUB_GIT_URL": s.GitHubGitURL, "RIPPLE_FEED_URL": s.FeedURL, "RIPPLE_GO_RELEASES_URL": s.GoReleasesURL, "RIPPLE_GOPROXY": s.GoProxy} {
 		if err := checkURL(k, v); err != nil {

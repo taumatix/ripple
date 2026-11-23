@@ -21,6 +21,15 @@ Each confined command runs in a fresh container of `RIPPLE_CONTAINER_IMAGE`, whi
 so local git commands would fail there; the Debian `golang:1.27` has both. Because the image's Go decides what
 `GOTOOLCHAIN=local` can satisfy, build the runner with a Go at least as new as the highest `go` line of the repositories you
 update. Publishing a prebuilt image is not done yet (ROADMAP).
+
+**One image per Go minor.** With `RIPPLE_CONTAINER_GO_IMAGES=1.26=ripple-runner:1.26,1.27=ripple-runner:1.27` (`<minor>=<image>`
+pairs), a go.mod that names a configured minor, by its `toolchain` line or else its `go` line (the newest across the modules
+of a workspace), has its `go mod`, `build` and `vet` steps run in that image, so a directive bump above the default
+image's Go is checked by the Go it asks for instead of opening a draft. Local git, and a go.mod naming a minor with no image,
+use `RIPPLE_CONTAINER_IMAGE`, which is still required. The PR body names the image. `make runner-images MINORS="1.26 1.27"`
+builds `ripple-runner:<minor>` from `docker/runner/Dockerfile` (`RUNTIME=podman` or `container` for the others).
+Only an exact minor matches: a module on 1.25 does not borrow the 1.26 image. Only with a container, docker or podman
+sandbox; the host sandboxes use `RIPPLE_GO_TOOLCHAIN_DIR`. A `GOTOOLCHAIN` download is still off.
 `argv[0]` is run by its base name from the image's `PATH`, and the image's Go version must satisfy the
 repositories' `go` lines because `GOTOOLCHAIN=local`. The `go` and `git` binaries on the host are not used.
 

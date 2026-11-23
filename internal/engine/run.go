@@ -125,6 +125,9 @@ type runner struct {
 	// namedRelease is the Go release from the toolchain directory that verification ran
 	// with, or "" when it ran with the server's own Go.
 	namedRelease string
+	// namedImage is the container image chosen for the go.mod's Go minor; empty when the
+	// sandbox's default image ran.
+	namedImage string
 	// shas caches the commit a github-tags job's tag points at, by "package@tag".
 	shas map[string]string
 	// digests caches the manifest digest of a docker job's tag, by "package:tag".
@@ -564,6 +567,9 @@ func (r *runner) openPR(p *prPlan) (*platform.PR, error) {
 		p.draft = draft
 		if r.namedRelease != "" {
 			body = strings.Replace(body, serverGoSentence, "ripple checked `go mod tidy`, `go build ./...` and `go vet ./...` with go"+r.namedRelease+" from the server's toolchain directory, the release this go.mod names; CI on this pull request remains the full check.", 1)
+		}
+		if r.namedImage != "" {
+			body = strings.Replace(body, serverGoSentence, "ripple checked `go mod tidy`, `go build ./...` and `go vet ./...` with the Go in the container image `"+r.namedImage+"`, the one configured for the Go minor this go.mod names; CI on this pull request remains the full check.", 1)
 		}
 		if !draft {
 			for _, n := range r.notes {

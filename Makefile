@@ -1,4 +1,4 @@
-.PHONY: build vet test test-gomod test-services test-smoke test-smoke-binary check-migration
+.PHONY: runner-images build vet test test-gomod test-services test-smoke test-smoke-binary check-migration
 build:
 	go build ./...
 vet:
@@ -25,3 +25,10 @@ test-smoke-binary:
 
 check-migration:
 	scripts/check-migration.sh
+
+# One runner image per Go minor, tagged ripple-runner:<minor>, for RIPPLE_CONTAINER_GO_IMAGES
+# (docs/sandbox.md). RUNTIME is docker, podman or Apple's `container`; MINORS the Go minors served.
+RUNTIME ?= docker
+MINORS ?= 1.26 1.27
+runner-images:
+	for m in $(MINORS); do $(RUNTIME) build --build-arg GO_VERSION=$$m -t ripple-runner:$$m -f docker/runner/Dockerfile docker/runner || exit 1; done

@@ -405,3 +405,19 @@ func TestLoadServerRegistryAuthFile(t *testing.T) {
 		t.Errorf("default is anonymous: %q %v", s.RegistryAuthFile, err)
 	}
 }
+
+func TestServerContainerGoImages(t *testing.T) {
+	ok := with("RIPPLE_SANDBOX", "docker", "RIPPLE_CONTAINER_IMAGE", "img", "RIPPLE_CONTAINER_GO_IMAGES", "1.25=r:1.25, 1.26=r:1.26")
+	s, err := LoadServer(env(ok))
+	if err != nil || s.ContainerGoImages["1.25"] != "r:1.25" || s.ContainerGoImages["1.26"] != "r:1.26" || len(s.ContainerGoImages) != 2 {
+		t.Fatalf("%+v, %v", s.ContainerGoImages, err)
+	}
+	for name, v := range map[string]string{"no minor": "r:1", "patch": "1.26.1=r", "empty image": "1.26=", "twice": "1.26=a,1.26=b", "option": "1.26=--privileged"} {
+		if _, err := LoadServer(env(with("RIPPLE_SANDBOX", "docker", "RIPPLE_CONTAINER_IMAGE", "img", "RIPPLE_CONTAINER_GO_IMAGES", v))); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	if _, err := LoadServer(env(with("RIPPLE_CONTAINER_GO_IMAGES", "1.26=r"))); err == nil {
+		t.Error("accepted without a container sandbox")
+	}
+}

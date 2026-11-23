@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -66,6 +67,9 @@ type Server struct {
 	Sandbox        string // none, auto, bwrap, seatbelt, container, docker, podman
 	// Container* configure the container, docker and podman sandboxes (docs/sandbox.md).
 	ContainerImage, ContainerCPUs, ContainerMemory, ContainerPull, ContainerNetwork string
+	// ContainerGoImages maps a Go minor ("1.26") to the image that carries it
+	// (RIPPLE_CONTAINER_GO_IMAGES), so a go.mod naming that minor is verified by that Go.
+	ContainerGoImages map[string]string
 	// ContainerConfine makes the server create an internal runtime network and a proxy sidecar
 	// at start, so a container's only way out is RIPPLE_GOPROXY (docker and podman).
 	ContainerConfine bool
@@ -155,6 +159,7 @@ RIPPLE_GOPROXY_USER           user for RIPPLE_GOPROXY (HTTP basic auth); with RI
 RIPPLE_GOPROXY_TOKEN          password or token for RIPPLE_GOPROXY; needs an https proxy
 RIPPLE_REGISTRY_AUTH_FILE     Docker config.json with logins for private container registries (ecosystem: docker); read once at start
 RIPPLE_GO_TOOLCHAIN_DIR       directory of Go releases (go1.25.3/bin/go) verification runs with when a go.mod names one; never downloaded
+RIPPLE_CONTAINER_GO_IMAGES    minor=image pairs (1.25=runner:1.25,1.26=runner:1.26): the container image that verifies a go.mod naming that Go minor
 RIPPLE_GO_CC                  C compiler for repos with cgo: true (default: go's own, gcc or clang)
 RIPPLE_STORE                  memory (default), postgres or dynamodb
 RIPPLE_POSTGRES_DSN           required for postgres
@@ -434,8 +439,18 @@ func LoadServer(getenv func(string) string) (*Server, error) {
 	if s.ContainerConfine {
 		errs = append(errs, checkConfine(s)...)
 	}
+	if v := getenv("RIPPLE_CONTAINER_GO_IMAGES"); v != "" {
+		m, err := parseGoImages(v)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("RIPPLE_CONTAINER_GO_IMAGES: %w", err))
+		}
+		s.ContainerGoImages = m
+		if s.Sandbox != "container" && s.Sandbox != "docker" && s.Sandbox != "podman" {
+			errs = append(errs, errors.New("RIPPLE_CONTAINER_GO_IMAGES: only a container, docker or podman sandbox runs an image; with another sandbox use RIPPLE_GO_TOOLCHAIN_DIR"))
+		}
+	}
 	if s.GoToolchainDir != "" && (s.Sandbox == "container" || s.Sandbox == "docker" || s.Sandbox == "podman") {
-		errs = append(errs, errors.New("RIPPLE_GO_TOOLCHAIN_DIR: a container backend runs the Go its image carries; the directory would be ignored, so set it only with another sandbox"))
+		errs = append(errs, errors.New("RIPPLE_GO_TOOLCHAIN_DIR: a container backend runs the Go its image carries; the directory would be ignored, so set it only with another sandbox (or choose images with RIPPLE_CONTAINER_GO_IMAGES)"))
 	}
 	switch s.Store {
 	case "memory", "dynamodb":
@@ -459,4 +474,22 @@ func sortErrs(e []error) {
 			e[j], e[j-1] = e[j-1], e[j]
 		}
 	}
+}
+
+var goMinorKey = regexp.MustCompile(`^1\.[0-9]+$`)
+
+// parseGoImages reads "1.25=img,1.26=img": a Go minor and the image that carries it.
+func parseGoImages(v string) (map[string]string, error) {
+	out := map[string]string{}
+	for _, el := range strings.Split(v, ",") {
+		minor, img, ok := strings.Cut(strings.TrimSpace(el), "=")
+		if !ok || !goMinorKey.MatchString(minor) || img == "" || strings.ContainsAny(img, " \t\n") || strings.HasPrefix(img, "-") {
+			return nil, fmt.Errorf("%q: want <go minor>=<image>, such as 1.26=runner:1.26", el)
+		}
+		if _, dup := out[minor]; dup {
+			return nil, fmt.Errorf("go %s is given twice", minor)
+		}
+		out[minor] = img
+	}
+	return out, nil
 }

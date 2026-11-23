@@ -184,10 +184,6 @@ Everything else:
     estimate that avoids summing the stripes on every write is a heuristic. Measure write throttling on one hot
     package with and without stripes, choose a default or document how to size `n` from the dependent count, and
     consider batching the counter per scan (already one ADD per package per scan) before striping.
-116. **Container image per Go minor, and downloads.** `RIPPLE_GO_TOOLCHAIN_DIR` runs an operator-installed release
-    on the host sandbox only; a container sandbox ignores it, and `GOTOOLCHAIN` downloads through the module proxy
-    stay off. Offer an image per minor, or a proxy-fed download with a checksum check, so a bump above the
-    installed Go does not stay a draft there. Verified only with a fake `go` script.
 118. **Workspace-only graphs against a real repo.** A requirement on a sibling at a version no proxy serves
     still opens a draft: with the workspace on, Go reads the sibling's `.mod` at the required version and gets a 404
     (reproduced against the fake proxy). `go work sync` is skipped for such workspaces and a member's own `vendor/`
@@ -341,3 +337,10 @@ Everything else:
     comes from the vendored READMEs and flag declarations, and is checked by rewriting text; no rewritten
     `go:generate` line has been run with the real tool. Run `go generate` in a sandbox job over a repo using
     each, and add `-write_command_comment` and the other flags newer mockgen releases add as they are documented.
+171. **Go toolchain downloads, and published runner images.** The per-minor images (`RIPPLE_CONTAINER_GO_IMAGES`) are
+    built by the operator, and the host sandboxes still only run releases an operator installed in
+    `RIPPLE_GO_TOOLCHAIN_DIR`. A proxy-fed download (`golang.org/toolchain@v0.0.1-go<version>.<os>-<arch>` through
+    `RIPPLE_GOPROXY`, checked against the checksum database by `go mod download`, unpacked as `go<version>/bin/go`) would
+    remove the manual install; publish `ripple-runner:<minor>` images from CI too. The image selection was verified
+    against the fake runtime only; CI builds each minor and runs `go version` in it but no real runtime has run a
+    ripple verification in a per-minor image.

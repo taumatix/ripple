@@ -284,6 +284,7 @@ func (r *runner) goVerify(members []string, args []string) platform.GoVerify {
 	}
 	sort.Strings(v.Private)
 	v.GoBinary = r.namedGo(members)
+	v.Image = r.namedGoImage(members)
 	netStep := args[0] == "mod" || args[0] == "work"
 	if netStep && r.e.GoProxyToken != "" {
 		v.Username, v.Token, v.Credentialed = r.e.GoProxyUser, r.e.GoProxyToken, true
@@ -322,6 +323,37 @@ func (r *runner) namedGo(members []string) string {
 	if best != "" {
 		r.namedRelease = bestRel
 	}
+	return best
+}
+
+// namedGoImage is the configured container image for the newest Go minor the go.mod files
+// of members name (the toolchain line, else the go line); "" when none is configured,
+// and the sandbox's default image runs.
+func (r *runner) namedGoImage(members []string) string {
+	if len(r.e.GoImages) == 0 {
+		return ""
+	}
+	best, bestMinor := "", ""
+	for _, m := range members {
+		data, err := r.ws.ReadFile(path.Join(m, "go.mod"))
+		if err != nil {
+			continue
+		}
+		f, err := modfile.ParseLax("go.mod", data, nil)
+		if err != nil || f.Go == nil {
+			continue
+		}
+		line := f.Go.Version
+		if f.Toolchain != nil && f.Toolchain.Name != "default" {
+			line = f.Toolchain.Name
+		}
+		minor := platform.GoMinor(line)
+		img := r.e.GoImages[minor]
+		if img != "" && (best == "" || semver.Compare("v"+minor, "v"+bestMinor) > 0) {
+			best, bestMinor = img, minor
+		}
+	}
+	r.namedImage = best
 	return best
 }
 

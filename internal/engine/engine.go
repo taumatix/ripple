@@ -100,6 +100,9 @@ type Engine struct {
 	// one, instead of the server's own Go. Empty, or no matching release, keeps the
 	// server's Go. Nothing is downloaded.
 	GoToolchainDir string
+	// GoImages maps a Go minor ("1.26") to the container image that carries it. With a
+	// container sandbox, verification of a go.mod naming that minor runs in that image.
+	GoImages map[string]string
 
 	// parseConfig is a test seam counting repo-file parses; nil means RepoConfig.
 	parseConfig func([]byte) (*config.Repo, error)

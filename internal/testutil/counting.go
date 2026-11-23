@@ -138,3 +138,18 @@ func (c *CountingPlatform) UpdateIssueBody(ctx context.Context, r model.Repo, nu
 	c.hit(r.FullName)
 	return platform.UpdateIssueBody(ctx, c.Inner, r, number, body)
 }
+
+// ListTags, TagCommit and ReleaseOf forward to Inner without counting a call (the
+// repo they name is another repository's, read through the dependent's credential),
+// or answer platform.ErrNoTags when Inner cannot read tags.
+func (c *CountingPlatform) ListTags(ctx context.Context, via model.Repo, target string) ([]string, error) {
+	return platform.ListTags(ctx, c.Inner, via, target)
+}
+
+func (c *CountingPlatform) TagCommit(ctx context.Context, via model.Repo, target, tag string) (string, error) {
+	return platform.TagCommit(ctx, c.Inner, via, target, tag)
+}
+
+func (c *CountingPlatform) ReleaseOf(ctx context.Context, via model.Repo, target, tag string) (platform.TagRelease, bool, error) {
+	return platform.ReleaseOf(ctx, c.Inner, via, target, tag)
+}

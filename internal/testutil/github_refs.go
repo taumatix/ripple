@@ -77,6 +77,11 @@ done
 	}
 }
 
+// AllowWorkflowPush removes what DenyWorkflowPush installed.
+func (g *GitHub) AllowWorkflowPush(repo string) {
+	_ = os.Remove(filepath.Join(g.bare(repo), "hooks", "pre-receive"))
+}
+
 // handleRefs serves /tags, /git/ref/tags/{tag}, /git/tags/{sha} and
 // /releases/tags/{tag}; parts is the path after /repos/ split on "/".
 func (g *GitHub) handleRefs(w http.ResponseWriter, r *http.Request, repo string, parts []string) {

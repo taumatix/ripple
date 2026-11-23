@@ -30,8 +30,11 @@ type App struct {
 	// Toolchain polls the Go release list for repos that opted into go-toolchain
 	// updates; nil leaves the feature out.
 	Toolchain *engine.ToolchainWatcher
-	Secret    []byte
-	Log       *slog.Logger
+	// Actions polls the tags of the GitHub Actions the repos use (ecosystem:
+	// github-actions); nil leaves the feature out.
+	Actions *engine.ActionsWatcher
+	Secret  []byte
+	Log     *slog.Logger
 	// PollEvery is the feed poll and job run period; zero disables the loop (tests call Tick).
 	PollEvery time.Duration
 	// Advisories polls OSV when set (RIPPLE_OSV). It runs on its own loop every
@@ -227,6 +230,7 @@ func (a *App) Tick(ctx context.Context) {
 		a.Log.Info("feed poll enqueued jobs", "jobs", n)
 	}
 	a.pollToolchain(ctx)
+	a.pollActions(ctx)
 	a.pollAdvisories(ctx)
 	if _, err := a.Engine.RunDue(ctx); err != nil && ctx.Err() == nil {
 		a.Log.Error("run due jobs", "err", err)
@@ -278,6 +282,9 @@ func (a *App) pollLoop(ctx context.Context) {
 			a.jobs.Wake()
 		}
 		if a.pollToolchain(ctx) > 0 {
+			a.jobs.Wake()
+		}
+		if a.pollActions(ctx) > 0 {
 			a.jobs.Wake()
 		}
 		select {
@@ -379,6 +386,21 @@ func (a *App) pushUnknown(ctx context.Context, name string, ev model.Event) erro
 		return nil
 	}
 	return a.Engine.RegisterFromPush(ctx, name, ev.InstallationID)
+}
+
+// pollActions polls the tags of the GitHub Actions in use and returns how many jobs it enqueued.
+func (a *App) pollActions(ctx context.Context) int {
+	if a.Actions == nil {
+		return 0
+	}
+	n, err := a.Actions.Poll(ctx)
+	switch {
+	case err != nil && ctx.Err() == nil:
+		a.Log.Error("github actions poll", "err", err)
+	case n > 0:
+		a.Log.Info("github actions poll enqueued jobs", "jobs", n)
+	}
+	return n
 }
 
 // pollToolchain polls the Go release list and returns how many jobs it enqueued.

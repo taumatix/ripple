@@ -40,7 +40,7 @@ func (e *Engine) backfill(ctx context.Context, repo string, cfg *config.Repo, pr
 	var fresh []model.Dependency
 	for _, d := range deps {
 		k := d.Datasource + "|" + d.Package
-		if known[k] || d.Datasource == model.DatasourceGoToolchain {
+		if known[k] || d.Datasource == model.DatasourceGoToolchain || d.Datasource == model.DatasourceGitHubTags {
 			continue
 		}
 		known[k] = true

@@ -121,3 +121,29 @@ func TestGitHubActionsApplyMissing(t *testing.T) {
 		t.Error("a rename must be refused")
 	}
 }
+
+func TestGitHubActionsApplyBothFormsAndNoGuessedSHA(t *testing.T) {
+	in := "steps:\n  - uses: a/b@v1\n  - uses: a/b@" + sha40 + " # v1\n"
+	m := GitHubActions{}
+	dep := model.Dependency{Package: "a/b", Version: "v1"}
+	out, err := m.Apply([]byte(in), dep, "", "v2@"+strings.Repeat("c", 40))
+	if err != nil || string(out) != "steps:\n  - uses: a/b@v2\n  - uses: a/b@"+strings.Repeat("c", 40)+" # v2\n" {
+		t.Errorf("both forms: %q, %v", out, err)
+	}
+	if _, err := m.Apply([]byte(in), dep, "", "v2"); err == nil {
+		t.Error("a pinned line with no resolved commit must be an error, not a guess")
+	}
+}
+
+func TestGitHubActionsApplyKeepsYAMLValid(t *testing.T) {
+	m := GitHubActions{}
+	dep := model.Dependency{Package: "a/b", Version: "v1"}
+	// The new ref is spliced into a plain scalar; one that would break the document is refused.
+	if _, err := m.Apply([]byte("steps:\n  - uses: a/b@v1\n"), dep, "", "v2: x"); err == nil {
+		t.Error("a rewrite that no longer parses as YAML must be refused")
+	}
+	// A template the original already could not parse is not ripple's to judge.
+	if _, err := m.Apply([]byte("{{ .x }}\nsteps:\n  - uses: a/b@v1\n"), dep, "", "v2"); err != nil {
+		t.Errorf("unparseable input: %v", err)
+	}
+}

@@ -301,6 +301,9 @@ func (e *Engine) scan(ctx context.Context, repo model.Repo) error {
 	if err := e.backfill(ctx, repo.FullName, cfg, prev, deps); err != nil {
 		return fmt.Errorf("scan %s: backfill: %w", repo.FullName, err)
 	}
+	if err := e.noteActionPackages(ctx, deps); err != nil {
+		return err
+	}
 	if err := e.Store.ReplaceDependencies(ctx, repo.FullName, deps); err != nil {
 		return err
 	}

@@ -37,7 +37,8 @@ func OpenStore(ctx context.Context, s *config.Server) (store.Store, error) {
 			if s.DynamoEndpoint != "" {
 				o.BaseEndpoint = &s.DynamoEndpoint
 			}
-		}), s.DynamoTable, store.WithJobShards(s.DynamoJobShards), store.WithDependentShards(s.DynamoDependentShards))
+		}), s.DynamoTable, store.WithJobShards(s.DynamoJobShards), store.WithDependentShards(s.DynamoDependentShards),
+			store.WithQueryConcurrency(s.DynamoQueryConcurrency), store.WithAdaptiveDependents(s.DynamoAdaptiveDependents))
 		if err := d.EnsureTable(ctx); err != nil {
 			return nil, err
 		}

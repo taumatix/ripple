@@ -260,6 +260,9 @@ func (p *parser) operand() (operand, error) {
 	t := p.next()
 	switch t.kind {
 	case "id":
+		if reserved[strings.ToUpper(t.text)] {
+			return operand{}, validation("Invalid expression: Attribute name is a reserved keyword; reserved keyword: " + t.text)
+		}
 		return operand{attr: t.text}, nil
 	case "name":
 		n, ok := p.sc.names[t.text]
@@ -454,3 +457,21 @@ func parseProjection(src string, sc *scope) ([]string, error) {
 	}
 	return out, nil
 }
+
+// reserved holds the DynamoDB reserved words the store's attribute names could plausibly hit
+// (the full list has about 570, in the developer guide's "Reserved words in DynamoDB"). A
+// word here used bare in an expression is a ValidationException, so the store must alias it
+// with an expression attribute name. The list is deliberately a subset: a missing word is a
+// gap the DynamoDB Local run still catches, but a word wrongly listed would fail valid code.
+var reserved = func() map[string]bool {
+	m := map[string]bool{}
+	for _, w := range strings.Fields(`ABORT ADD ALL ALTER AND ANY AS ASC ATTRIBUTE BEGIN BETWEEN BY CASE COLUMN COMMENT COMMIT
+		CONNECTION COUNT CREATE CURRENT DATA DATABASE DATE DAY DELETE DESC DOMAIN DROP ELSE END EXISTS EXPIRE FALSE FILE
+		FILTER FIRST FOR FROM GROUP HASH HOUR IF IN INDEX INSERT INTO IS ITEM ITEMS KEY KEYS LAST LEVEL LIMIT LIST LOCAL LOCATION
+		MAX MIN MINUTE MONTH NAME NOT NULL NUMBER OF ON ONLY OR ORDER OWNER PATH PERCENT PRIMARY RANGE REGION REPLACE RETURN
+		ROLE ROW ROWS SCAN SECOND SELECT SET SIZE STATE STATUS STRING TABLE TIME TIMESTAMP TO TOKEN TRUE TYPE UPDATE USER USERS
+		VALUE VALUES VIEW WHEN WHERE WITH YEAR ZONE`) {
+		m[w] = true
+	}
+	return m
+}()

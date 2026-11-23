@@ -4,7 +4,8 @@
 //
 // It implements the operations the store uses: CreateTable, DescribeTable, DeleteTable,
 // PutItem, GetItem, DeleteItem, UpdateItem (SET and ADD), Query (table and global secondary
-// index), BatchWriteItem and TransactWriteItems (Put, Delete and ConditionCheck). Semantics
+// index), Scan (base table), BatchGetItem, BatchWriteItem and TransactWriteItems (Put, Delete and
+// ConditionCheck). Semantics
 // follow the API reference:
 //
 //   - Query returns items in sort-key order and evaluates at most Limit items and at most 1 MB
@@ -19,11 +20,12 @@
 //     name or value is a ValidationException.
 //
 // Where it differs from DynamoDB (see docs/store-dynamodb.md): the index is updated
-// synchronously, so it is never eventually consistent; there is no throttling or partition
-// limit; item and page sizes are an estimate; reserved words are not rejected; items with
-// equal index keys come back ordered by table key (DynamoDB leaves that unspecified);
-// Scan, BatchGetItem and the rest of the expression language are not
-// implemented and answer with a ValidationException naming the gap.
+// synchronously unless a test calls HoldIndex, which freezes it as a lagging index would;
+// there is no partition limit and throttling happens only when a test asks (ThrottleNext);
+// item and page sizes are an estimate; only a subset of the reserved words is rejected;
+// items with equal index keys come back ordered by table key (DynamoDB leaves that
+// unspecified); Scan covers the base table in key order only; the rest of the expression
+// language is not implemented and answers with a ValidationException naming the gap.
 package dynamofake
 
 import (
@@ -59,6 +61,12 @@ type Fake struct {
 	maxQ    int
 	queries int
 	dropOne bool
+	// dropGet makes the next BatchGetItem leave its last key unprocessed.
+	dropGet bool
+	// held is each table's contents as of HoldIndex; index Queries read it while set.
+	held     map[string]map[string]map[string]av
+	throttle map[string]int
+	calls    map[string]int
 }
 
 type table struct {
@@ -69,7 +77,7 @@ type table struct {
 
 // New starts a fake endpoint, closed when the test ends if the caller defers Close.
 func New() *Fake {
-	f := &Fake{tables: map[string]*table{}}
+	f := &Fake{tables: map[string]*table{}, throttle: map[string]int{}, calls: map[string]int{}}
 	f.srv = httptest.NewServer(http.HandlerFunc(f.serve))
 	return f
 }
@@ -96,6 +104,38 @@ func (f *Fake) ResetQueryStats() { f.mu.Lock(); f.queries, f.maxQ = 0, 0; f.mu.U
 // DropOneFromNextBatch makes the next BatchWriteItem leave its last request unprocessed, as
 // DynamoDB does under throttling, so the caller's retry path runs.
 func (f *Fake) DropOneFromNextBatch() { f.mu.Lock(); f.dropOne = true; f.mu.Unlock() }
+
+// DropOneFromNextBatchGet makes the next BatchGetItem leave its last key unprocessed, as
+// DynamoDB does under throttling or when the response would exceed 16 MB.
+func (f *Fake) DropOneFromNextBatchGet() { f.mu.Lock(); f.dropGet = true; f.mu.Unlock() }
+
+// HoldIndex freezes what every global secondary index shows at the table's current contents,
+// as a lagging index does: index Queries answer from that snapshot, while the table itself
+// (GetItem, base-table Query, Scan) stays current. ReleaseIndex ends it. Tables created
+// while held are live.
+func (f *Fake) HoldIndex() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.held = map[string]map[string]map[string]av{}
+	for name, t := range f.tables {
+		snap := make(map[string]map[string]av, len(t.items))
+		for k, it := range t.items {
+			snap[k] = it // items are replaced on write, never mutated in place
+		}
+		f.held[name] = snap
+	}
+}
+
+// ReleaseIndex makes the indexes current again.
+func (f *Fake) ReleaseIndex() { f.mu.Lock(); f.held = nil; f.mu.Unlock() }
+
+// ThrottleNext makes the next n calls of the named operation (for example "Query") fail with
+// ProvisionedThroughputExceededException; n of 0 clears it. The SDK retries that error
+// before giving up, so a small n is absorbed and a large one surfaces.
+func (f *Fake) ThrottleNext(op string, n int) { f.mu.Lock(); f.throttle[op] = n; f.mu.Unlock() }
+
+// Calls reports how many requests of the named operation arrived, throttled ones included.
+func (f *Fake) Calls(op string) int { f.mu.Lock(); defer f.mu.Unlock(); return f.calls[op] }
 
 // Items returns a copy of every item in the table (for assertions on the stored layout).
 func (f *Fake) Items(tableName string) []map[string]any {
@@ -138,6 +178,24 @@ func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 	op := strings.TrimPrefix(r.Header.Get("X-Amz-Target"), "DynamoDB_20120810.")
 	var out any
 	var err error
+	f.mu.Lock()
+	f.calls[op]++
+	throttled := f.throttle[op] > 0
+	if throttled {
+		f.throttle[op]--
+	}
+	f.mu.Unlock()
+	switch {
+	case throttled:
+		err = &apiError{typ: "com.amazonaws.dynamodb.v20120810#ProvisionedThroughputExceededException",
+			msg: "The level of configured provisioned throughput for the table was exceeded."}
+	default:
+		out, err = f.dispatch(op, body)
+	}
+	f.respond(w, out, err)
+}
+
+func (f *Fake) dispatch(op string, body []byte) (out any, err error) {
 	switch op {
 	case "CreateTable":
 		out, err = f.createTable(body)
@@ -159,9 +217,17 @@ func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 		out, err = f.batchWrite(body)
 	case "TransactWriteItems":
 		out, err = f.transactWrite(body)
+	case "BatchGetItem":
+		out, err = f.batchGet(body)
+	case "Scan":
+		out, err = f.scan(body)
 	default:
 		err = validation("dynamofake does not implement " + op)
 	}
+	return out, err
+}
+
+func (f *Fake) respond(w http.ResponseWriter, out any, err error) {
 	w.Header().Set("Content-Type", "application/x-amz-json-1.0")
 	if err != nil {
 		ae, ok := err.(*apiError)
@@ -685,7 +751,13 @@ func (f *Fake) query(body []byte) (any, error) {
 		it map[string]av
 	}
 	var cands []map[string]av
-	for _, it := range t.items {
+	source := t.items
+	if in.IndexName != "" && f.held != nil {
+		if snap, ok := f.held[in.TableName]; ok {
+			source = snap
+		}
+	}
+	for _, it := range source {
 		if v, ok := it[hashA]; ok && equalAV(v, pkVal) {
 			if _, ok := it[rngA]; !ok {
 				continue // sparse: an item without both index keys is not in the index
@@ -936,4 +1008,178 @@ func (f *Fake) transactWrite(body []byte) (any, error) {
 		}
 	}
 	return map[string]any{}, nil
+}
+
+// MaxBatchGet is the most keys one BatchGetItem takes.
+const MaxBatchGet = 100
+
+func (f *Fake) batchGet(body []byte) (any, error) {
+	var in struct {
+		RequestItems map[string]struct {
+			Keys                     []map[string]av
+			ProjectionExpression     string
+			ExpressionAttributeNames map[string]string
+			ConsistentRead           bool
+		}
+	}
+	if err := decode(body, &in); err != nil {
+		return nil, err
+	}
+	n := 0
+	for _, r := range in.RequestItems {
+		n += len(r.Keys)
+	}
+	if n == 0 || n > MaxBatchGet {
+		return nil, validation("Too many items requested for the BatchGetItem call (limit 100, at least 1)")
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	drop := f.dropGet
+	f.dropGet = false
+	responses := map[string][]map[string]av{}
+	unprocessed := map[string]any{}
+	seen := map[string]bool{}
+	left := n
+	for name, r := range in.RequestItems {
+		t, err := f.lookup(name)
+		if err != nil {
+			return nil, err
+		}
+		sc := newScope(r.ExpressionAttributeNames, nil)
+		var proj []string
+		if r.ProjectionExpression != "" {
+			if proj, err = parseProjection(r.ProjectionExpression, sc); err != nil {
+				return nil, err
+			}
+		}
+		if err := sc.checkUnused(); err != nil {
+			return nil, err
+		}
+		var dropped []map[string]av
+		for _, key := range r.Keys {
+			k, err := keyOf(t, key)
+			if err != nil {
+				return nil, err
+			}
+			if seen[name+"\x00"+k] {
+				return nil, validation("Provided list of item keys contains duplicates")
+			}
+			seen[name+"\x00"+k] = true
+			left--
+			if drop && left == 0 {
+				dropped = append(dropped, key)
+				continue
+			}
+			if it, ok := t.items[k]; ok {
+				responses[name] = append(responses[name], project(it, proj))
+			}
+		}
+		if dropped != nil {
+			unprocessed[name] = map[string]any{"Keys": dropped}
+		}
+	}
+	return map[string]any{"Responses": responses, "UnprocessedKeys": unprocessed}, nil
+}
+
+// scan reads the base table in (PK, SK) order. DynamoDB leaves Scan order unspecified; the
+// fixed order lets a test page through it deterministically. Limit, FilterExpression, the
+// 1 MB page and Select=COUNT behave as for Query. Parallel segments and index scans are
+// not implemented.
+func (f *Fake) scan(body []byte) (any, error) {
+	var in struct {
+		TableName                 string
+		IndexName                 string
+		FilterExpression          string
+		ProjectionExpression      string
+		Select                    string
+		Limit                     *int
+		TotalSegments, Segment    *int
+		ExclusiveStartKey         map[string]av
+		ExpressionAttributeNames  map[string]string
+		ExpressionAttributeValues map[string]av
+	}
+	if err := decode(body, &in); err != nil {
+		return nil, err
+	}
+	if in.IndexName != "" || in.TotalSegments != nil || in.Segment != nil {
+		return nil, validation("dynamofake Scan supports the base table without parallel segments")
+	}
+	sc := newScope(in.ExpressionAttributeNames, in.ExpressionAttributeValues)
+	var filter *node
+	var proj []string
+	var err error
+	if in.FilterExpression != "" {
+		if filter, err = parseCondition(in.FilterExpression, sc); err != nil {
+			return nil, err
+		}
+	}
+	if in.ProjectionExpression != "" {
+		if proj, err = parseProjection(in.ProjectionExpression, sc); err != nil {
+			return nil, err
+		}
+	}
+	if err := sc.checkUnused(); err != nil {
+		return nil, err
+	}
+	if in.Limit != nil && *in.Limit < 1 {
+		return nil, validation("1 validation error detected: Value '0' at 'limit' failed to satisfy constraint: Member must have value greater than or equal to 1")
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	t, err := f.lookup(in.TableName)
+	if err != nil {
+		return nil, err
+	}
+	all := make([]map[string]av, 0, len(t.items))
+	for _, it := range t.items {
+		all = append(all, it)
+	}
+	cmp := func(a, b map[string]av) int {
+		if c, _ := compare(a[t.hash], b[t.hash]); c != 0 {
+			return c
+		}
+		c, _ := compare(a[t.rng], b[t.rng])
+		return c
+	}
+	sort.Slice(all, func(i, j int) bool { return cmp(all[i], all[j]) < 0 })
+	if in.ExclusiveStartKey != nil {
+		if in.ExclusiveStartKey[t.hash] == nil || in.ExclusiveStartKey[t.rng] == nil {
+			return nil, validation("The provided starting key is invalid")
+		}
+		i := sort.Search(len(all), func(i int) bool { return cmp(all[i], in.ExclusiveStartKey) > 0 })
+		all = all[i:]
+	}
+	var items []map[string]av
+	scanned, bytes := 0, 0
+	var lek map[string]av
+	for _, it := range all {
+		sz := sizeOfItem(it)
+		if scanned > 0 && bytes+sz > PageBytes {
+			break
+		}
+		scanned++
+		bytes += sz
+		if filter == nil || filter.eval(it) {
+			items = append(items, it)
+		}
+		if in.Limit != nil && scanned >= *in.Limit {
+			break
+		}
+	}
+	if scanned < len(all) || (in.Limit != nil && scanned >= *in.Limit) {
+		last := all[scanned-1]
+		lek = map[string]av{t.hash: last[t.hash], t.rng: last[t.rng]}
+	}
+	out := map[string]any{"Count": len(items), "ScannedCount": scanned}
+	if lek != nil {
+		out["LastEvaluatedKey"] = lek
+	}
+	if in.Select != "COUNT" {
+		res := make([]map[string]av, 0, len(items))
+		for _, it := range items {
+			res = append(res, project(it, proj))
+		}
+		out["Items"] = res
+	}
+	return out, nil
 }

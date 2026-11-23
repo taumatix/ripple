@@ -129,8 +129,9 @@ func confine(ctx context.Context, fl Flavour, o ConfineOptions, run runFn) (*Con
 			break
 		}
 		if time.Now().After(deadline) || ctx.Err() != nil {
+			logs, _ := run(context.Background(), "logs", side)
 			remove()
-			return nil, fmt.Errorf("sandbox: proxy sidecar %s did not come up: %w", side, err)
+			return nil, fmt.Errorf("sandbox: proxy sidecar %s did not come up: %w\nsidecar log: %s", side, err, strings.TrimSpace(logs))
 		}
 		time.Sleep(500 * time.Millisecond)
 	}

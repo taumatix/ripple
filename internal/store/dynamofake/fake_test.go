@@ -232,7 +232,7 @@ func TestRejectionsMatchDynamoDB(t *testing.T) {
 			return err
 		}},
 		"unimplemented operation": {"ValidationException", func() error {
-			_, err := db.Scan(ctx, &dynamodb.ScanInput{TableName: tn})
+			_, err := db.ListTables(ctx, &dynamodb.ListTablesInput{})
 			return err
 		}},
 	}
@@ -380,5 +380,181 @@ func TestTransactWriteIsAllOrNothing(t *testing.T) {
 	del := types.TransactWriteItem{Delete: &types.Delete{TableName: aws.String("t"), Key: map[string]types.AttributeValue{"PK": sv("J"), "SK": sv("M")}}}
 	if _, err := db.TransactWriteItems(ctx, &dynamodb.TransactWriteItemsInput{TransactItems: []types.TransactWriteItem{write, del}}); apiCode(err) != "ValidationException" {
 		t.Fatalf("two actions on one item: %v", err)
+	}
+}
+
+func TestBatchGetItemReadsKeysAndEnforcesLimits(t *testing.T) {
+	db, f := client(t)
+	var keys []map[string]types.AttributeValue
+	for i := 0; i < 3; i++ {
+		put(t, db, map[string]types.AttributeValue{"PK": sv("p"), "SK": sv(fmt.Sprint(i)), "V": sv("v")})
+		keys = append(keys, map[string]types.AttributeValue{"PK": sv("p"), "SK": sv(fmt.Sprint(i))})
+	}
+	keys = append(keys, map[string]types.AttributeValue{"PK": sv("p"), "SK": sv("absent")})
+	get := func(ks []map[string]types.AttributeValue) (*dynamodb.BatchGetItemOutput, error) {
+		return db.BatchGetItem(context.Background(), &dynamodb.BatchGetItemInput{RequestItems: map[string]types.KeysAndAttributes{
+			"t": {Keys: ks, ConsistentRead: aws.Bool(true)}}})
+	}
+	out, err := get(keys)
+	if err != nil || len(out.Responses["t"]) != 3 || len(out.UnprocessedKeys) != 0 {
+		t.Fatalf("got %d items, unprocessed %d, err %v; want the 3 present keys and no error for the absent one", len(out.Responses["t"]), len(out.UnprocessedKeys), err)
+	}
+	if _, err := get(append(keys, keys[0])); apiCode(err) != "ValidationException" {
+		t.Fatalf("duplicate keys: %v, want ValidationException", err)
+	}
+	var many []map[string]types.AttributeValue
+	for i := 0; i < 101; i++ {
+		many = append(many, map[string]types.AttributeValue{"PK": sv("p"), "SK": sv(fmt.Sprint(i))})
+	}
+	if _, err := get(many); apiCode(err) != "ValidationException" {
+		t.Fatalf("101 keys: %v, want ValidationException", err)
+	}
+	f.DropOneFromNextBatchGet()
+	out, err = get(keys[:3])
+	if err != nil || len(out.Responses["t"]) != 2 || len(out.UnprocessedKeys["t"].Keys) != 1 {
+		t.Fatalf("hook: %d items, %d unprocessed, err %v; want 2 and 1", len(out.Responses["t"]), len(out.UnprocessedKeys["t"].Keys), err)
+	}
+}
+
+func TestScanFiltersAndPaginatesWithoutLossOrRepeats(t *testing.T) {
+	db, _ := client(t)
+	for i := 0; i < 10; i++ {
+		kind := "a"
+		if i%3 == 0 {
+			kind = "b"
+		}
+		put(t, db, map[string]types.AttributeValue{"PK": sv(fmt.Sprintf("p%d", i%2)), "SK": sv(fmt.Sprint(i)), "Kind": sv(kind)})
+	}
+	var got []string
+	var start map[string]types.AttributeValue
+	pages := 0
+	for {
+		out, err := db.Scan(context.Background(), &dynamodb.ScanInput{TableName: aws.String("t"), Limit: aws.Int32(3), ExclusiveStartKey: start,
+			FilterExpression: aws.String("Kind = :b"), ExpressionAttributeValues: map[string]types.AttributeValue{":b": sv("b")}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		pages++
+		for _, it := range out.Items {
+			got = append(got, str(it, "SK"))
+		}
+		if start = out.LastEvaluatedKey; start == nil {
+			break
+		}
+	}
+	if len(got) != 4 || pages != 4 {
+		t.Fatalf("scan found %v in %d pages, want the 4 'b' items (0,3,6,9) over 4 pages of 3 evaluated", got, pages)
+	}
+	out, err := db.Scan(context.Background(), &dynamodb.ScanInput{TableName: aws.String("t"), Select: types.SelectCount})
+	if err != nil || out.Count != 10 || len(out.Items) != 0 {
+		t.Fatalf("Select=COUNT: %+v %v", out, err)
+	}
+	if _, err := db.Scan(context.Background(), &dynamodb.ScanInput{TableName: aws.String("t"), IndexName: aws.String("gsi1")}); apiCode(err) != "ValidationException" {
+		t.Fatalf("index scan is not implemented and must say so, got %v", err)
+	}
+}
+
+// DynamoDB rejects a reserved word used bare in an expression; the store must alias it.
+func TestReservedWordsMustBeAliased(t *testing.T) {
+	db, _ := client(t)
+	put(t, db, map[string]types.AttributeValue{"PK": sv("p"), "SK": sv("s"), "Name": sv("n")})
+	q := func(filter string, names map[string]string) error {
+		_, err := db.Query(context.Background(), &dynamodb.QueryInput{TableName: aws.String("t"),
+			KeyConditionExpression: aws.String("PK = :p"), FilterExpression: aws.String(filter), ExpressionAttributeNames: names,
+			ExpressionAttributeValues: map[string]types.AttributeValue{":p": sv("p"), ":n": sv("n")}})
+		return err
+	}
+	if err := q("Name = :n", nil); apiCode(err) != "ValidationException" || !strings.Contains(err.Error(), "reserved keyword") {
+		t.Fatalf("bare reserved word: %v, want a ValidationException naming a reserved keyword", err)
+	}
+	if err := q("#n = :n", map[string]string{"#n": "Name"}); err != nil {
+		t.Fatalf("aliased reserved word: %v", err)
+	}
+	if err := q("Nickname = :n", nil); err != nil {
+		t.Fatalf("a word that is not reserved: %v", err)
+	}
+}
+
+// A held index answers from the moment it was held, as a lagging GSI does; the table is not stale.
+func TestHeldIndexServesStaleReads(t *testing.T) {
+	db, f := client(t)
+	idx := func() int {
+		out, err := db.Query(context.Background(), &dynamodb.QueryInput{TableName: aws.String("t"), IndexName: aws.String("gsi1"), Select: types.SelectCount,
+			KeyConditionExpression: aws.String("GSI1PK = :g"), ExpressionAttributeValues: map[string]types.AttributeValue{":g": sv("g")}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return int(out.Count)
+	}
+	put(t, db, map[string]types.AttributeValue{"PK": sv("a"), "SK": sv("s"), "GSI1PK": sv("g"), "GSI1SK": sv("1")})
+	f.HoldIndex()
+	put(t, db, map[string]types.AttributeValue{"PK": sv("b"), "SK": sv("s"), "GSI1PK": sv("g"), "GSI1SK": sv("2")})
+	if _, err := db.DeleteItem(context.Background(), &dynamodb.DeleteItemInput{TableName: aws.String("t"),
+		Key: map[string]types.AttributeValue{"PK": sv("a"), "SK": sv("s")}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := idx(); got != 1 {
+		t.Fatalf("held index sees %d, want the 1 item present when it was held (a deleted, b not yet visible)", got)
+	}
+	if out, _ := db.GetItem(context.Background(), &dynamodb.GetItemInput{TableName: aws.String("t"), ConsistentRead: aws.Bool(true),
+		Key: map[string]types.AttributeValue{"PK": sv("b"), "SK": sv("s")}}); out.Item == nil {
+		t.Fatal("the table itself must not be stale")
+	}
+	f.ReleaseIndex()
+	if got := idx(); got != 1 {
+		t.Fatalf("released index sees %d, want 1 (only b remains)", got)
+	}
+	put(t, db, map[string]types.AttributeValue{"PK": sv("c"), "SK": sv("s"), "GSI1PK": sv("g"), "GSI1SK": sv("3")})
+	if got := idx(); got != 2 {
+		t.Fatalf("released index is live again: %d, want 2", got)
+	}
+}
+
+// ThrottleNext answers with ProvisionedThroughputExceededException, which the SDK retries.
+func TestThrottleNextIsRetriedByTheClientThenSurfaces(t *testing.T) {
+	db, f := client(t)
+	put(t, db, map[string]types.AttributeValue{"PK": sv("p"), "SK": sv("s")})
+	get := func() error {
+		_, err := db.GetItem(context.Background(), &dynamodb.GetItemInput{TableName: aws.String("t"),
+			Key: map[string]types.AttributeValue{"PK": sv("p"), "SK": sv("s")}})
+		return err
+	}
+	before := f.Calls("GetItem")
+	f.ThrottleNext("GetItem", 1)
+	if err := get(); err != nil {
+		t.Fatalf("one throttle must be absorbed by the SDK's retries: %v", err)
+	}
+	if got := f.Calls("GetItem") - before; got != 2 {
+		t.Fatalf("%d GetItem calls, want 2 (throttled, then served)", got)
+	}
+	f.ThrottleNext("GetItem", 100)
+	if err := get(); apiCode(err) != "ProvisionedThroughputExceededException" {
+		t.Fatalf("persistent throttling: %v, want ProvisionedThroughputExceededException", err)
+	}
+	f.ThrottleNext("GetItem", 0)
+	if err := get(); err != nil {
+		t.Fatalf("throttle cleared: %v", err)
+	}
+}
+
+// UPDATED_OLD returns only the targeted attributes that existed before the update, and nothing at all
+// for a new item: that absence is how a caller learns it created the counter.
+func TestUpdateItemUpdatedOld(t *testing.T) {
+	db, _ := client(t)
+	upd := func() *dynamodb.UpdateItemOutput {
+		out, err := db.UpdateItem(context.Background(), &dynamodb.UpdateItemInput{TableName: aws.String("t"),
+			Key:              map[string]types.AttributeValue{"PK": sv("c"), "SK": sv("META")},
+			UpdateExpression: aws.String("ADD Deps :d"), ReturnValues: types.ReturnValueUpdatedOld,
+			ExpressionAttributeValues: map[string]types.AttributeValue{":d": nv("2")}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	if first := upd(); len(first.Attributes) != 0 {
+		t.Fatalf("a created item returned old attributes %v", first.Attributes)
+	}
+	if second := upd(); second.Attributes["Deps"].(*types.AttributeValueMemberN).Value != "2" {
+		t.Fatalf("old Deps = %v, want 2", second.Attributes)
 	}
 }

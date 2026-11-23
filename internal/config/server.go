@@ -17,6 +17,7 @@ const (
 	DefaultDynamoJobShards        = 8
 	DefaultDynamoDependentShards  = 1
 	DefaultDynamoQueryConcurrency = 4
+	DefaultDynamoCounterStripes   = 1
 	MaxDynamoShards               = 64
 )
 
@@ -66,11 +67,13 @@ type Server struct {
 	// DynamoAdaptiveDependents, when above zero, shards a package's dependents by how many it
 	// has: the shard count doubles each time the package passes this many per shard. 0 is off.
 	DynamoAdaptiveDependents int
-	MinimumReleaseAge        time.Duration
-	OpenPRLimit              int
-	AllowAutomerge           bool
-	Workers                  int
-	WorkDir                  string
+	// DynamoCounterStripes spreads each package's dependents counter over this many items (1..MaxDynamoShards).
+	DynamoCounterStripes int
+	MinimumReleaseAge    time.Duration
+	OpenPRLimit          int
+	AllowAutomerge       bool
+	Workers              int
+	WorkDir              string
 	// MaxFiles and MaxDependencies cap one repo scan; a repo over either is skipped.
 	MaxFiles        int
 	MaxDependencies int
@@ -132,6 +135,7 @@ RIPPLE_DYNAMODB_JOB_SHARDS    default 8 (1-64): partitions holding pending jobs;
 RIPPLE_DYNAMODB_DEPENDENT_SHARDS  default 1 (1-64): partitions per package's dependents; each lookup costs this many queries
 RIPPLE_DYNAMODB_QUERY_CONCURRENCY default 4 (1-64): shard queries one read runs at once; 1 reads shards in turn
 RIPPLE_DYNAMODB_ADAPTIVE_DEPENDENTS default 0 (off): dependents one partition may hold before a package gets more shards
+RIPPLE_DYNAMODB_COUNTER_STRIPES default 1 (1-64): items each package's dependents counter is spread over; raise for a package imported by very many repos
 RIPPLE_MINIMUM_RELEASE_AGE    default 3d; a repo may only raise it
 RIPPLE_OPEN_PR_LIMIT          default 5; a repo may only lower it
 RIPPLE_ALLOW_AUTOMERGE        default true; false forbids automerge everywhere
@@ -240,6 +244,7 @@ func LoadServer(getenv func(string) string) (*Server, error) {
 		DynamoDependentShards:    shards("RIPPLE_DYNAMODB_DEPENDENT_SHARDS", DefaultDynamoDependentShards),
 		DynamoQueryConcurrency:   shards("RIPPLE_DYNAMODB_QUERY_CONCURRENCY", DefaultDynamoQueryConcurrency),
 		DynamoAdaptiveDependents: num("RIPPLE_DYNAMODB_ADAPTIVE_DEPENDENTS", 0, 0),
+		DynamoCounterStripes:     shards("RIPPLE_DYNAMODB_COUNTER_STRIPES", DefaultDynamoCounterStripes),
 		MinimumReleaseAge:        dur("RIPPLE_MINIMUM_RELEASE_AGE", "3d"),
 		OpenPRLimit:              num("RIPPLE_OPEN_PR_LIMIT", 5, 1),
 		AllowAutomerge:           true,

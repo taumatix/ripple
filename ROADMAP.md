@@ -179,27 +179,6 @@ Everything else:
     drops it until the repo's next run or scan. A person's edit to the dashboard body is not noticed until the
     jobs change (the stored hash is of what ripple last wrote). Turning the key off leaves the issue as it was
     instead of closing it. A repo with issues unavailable is retried hourly, in memory only.
-69. **DynamoDB per-repo open-job copies.** `ListOpenJobs` reads `REPO#<repo>` / `OPENJOB#<key>` items written on
-    `EnqueueJob` and `UpdateJob`. A job that was already pending before this version is absent from its repo's
-    dashboard until its next write, and a crash between the job write and the copy write leaves a stale copy
-    until the next one. Add a one-off backfill from the job index and reconcile on read. Postgres and DynamoDB
-    paths are covered only by CI.
-70. **Backfill and recount the adaptive dependent counters.** `RIPPLE_DYNAMODB_ADAPTIVE_DEPENDENTS` counts only the
-    dependents a scan adds or removes after it is turned on, so a package that already had many is under-counted
-    until they are rewritten, and the count drifts after a crash between the item writes and the counter ADD or
-    while the option is off. Add a one-off recount from the index (a Query per shard with `Select=COUNT`) that sets
-    `Deps` and raises `Shards`, and move items to their hashed shard instead of waiting for their next scan.
-71. **The adaptive counter is itself a hot item.** Every dependent change of a package ADDs to one
-    `PKGCOUNT#<ds>#<line>` item, which has the same 1000 writes/s limit the sharding exists to avoid. Count in
-    batches per scan (already one ADD per package per scan) and, if that still throttles, stripe the counter or
-    sample it.
-72. **Close the DynamoDB fake's gaps.** `internal/store/dynamofake` follows the documented Query, BatchWriteItem,
-    conditional write and UpdateItem rules but is strongly consistent (a GSI is never stale), never throttles
-    (`ProvisionedThroughputExceededException`, partial `UnprocessedItems` other than the test hook), has no
-    Scan, TransactWriteItems or BatchGetItem, does not reject reserved words, and approximates item and page
-    size. Add what the store starts to use as it does, a stale-GSI mode to test the eventual-consistency
-    paths, and a CI step that runs the whole suite against both and diffs the results, since DynamoDB Local
-    stays the source of truth.
 76. **Remove the `Ref` overload on `model.Event`.** `Ref` is still populated beside the typed fields and marked
     deprecated. Remove the fallback in the minor release after the one that introduced it, once no queue holds old
     rows (`ripple:deprecated event-ref-overload` in MIGRATION.md).
@@ -274,3 +253,29 @@ Everything else:
 108. **Sweep removal tombstones.** `removed|<repo>` cursor rows are ignored after 24 hours but never deleted.
 109. **Repo ids from install events.** `repos_added` events carry no repository id, so a repo added that way adopts it
     only on its first signed push; a push with a mismatched id is ignored, not resolved by a lookup on the host.
+110. **DynamoDB: failed jobs from before the open-job copies.** The backfill reads the sparse pending index, so a job
+    that failed before the copies existed is in no index and stays off its repo's dashboard until its next write.
+    Finding it takes a Scan of the table (`dynamofake` now has a base-table Scan). Run one as an explicit one-off,
+    not on every start.
+111. **DynamoDB: recount all packages, and a trigger for it.** `RecountDependents` repairs one package and runs lazily
+    only when a counter item is missing. Nothing recounts a counter that drifted (crash between the item writes and
+    the ADD, or while the option was off), and nothing calls it. Add a recount over every package (a Scan for
+    `PKGCOUNT#` items), a CLI command or maintenance hook, and a drift check that compares the counter to a
+    `Select=COUNT` Query and logs the gap.
+112. **DynamoDB: the fake's reserved-word list is a subset.** `dynamofake` rejects only the reserved words the store
+    could plausibly use as an unaliased name. Take the full list from the documentation, and add the same check for
+    key-condition and projection expressions if the real service applies it there. The parity check will say
+    where it matters.
+113. **DynamoDB: throttling and index lag against a real table.** `ThrottleNext` and `HoldIndex` model the errors and
+    the stale reads, not their timing or frequency, and DynamoDB Local throttles and lags neither. Run the sharded
+    and striped paths against a real on-demand table once (a throwaway account, a bounded run) and record the
+    retry counts, the index lag a recount or a `ListDependents` sees, and whether the SDK's three attempts are
+    enough for a burst.
+114. **DynamoDB: tune and measure counter striping.** `RIPPLE_DYNAMODB_COUNTER_STRIPES` defaults to 1 and the
+    estimate that avoids summing the stripes on every write is a heuristic. Measure write throttling on one hot
+    package with and without stripes, choose a default or document how to size `n` from the dependent count, and
+    consider batching the counter per scan (already one ADD per package per scan) before striping.
+115. **DynamoDB: adaptive counters while the option is off.** With `RIPPLE_DYNAMODB_ADAPTIVE_DEPENDENTS` unset, writes
+    do not touch the counters, so turning it on later starts from a stale count until the lazy recount or an
+    explicit one. Either keep counting with the option off (cheap, one ADD per package per scan) or document that
+    `RecountDependents` is the step to run after turning it on.

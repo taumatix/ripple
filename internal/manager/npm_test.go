@@ -35,6 +35,10 @@ const pkgJSON = `{
     "range": ">=1.0.0 <2",
     "pre": "^1.0.0-beta.1",
     "partial": "^1.2",
+    "xr": "2.x",
+    "xr2": "~3.4.x",
+    "tooLong": "1.2.3.x",
+    "midStar": "1.x.3",
     "git": "github:a/b#v1",
     "alias": "npm:other@^1.0.0",
     "ws": "workspace:*",
@@ -59,7 +63,7 @@ func TestNpmExtract(t *testing.T) {
 		}
 		got[d.Package] = d.Version
 	}
-	want := map[string]string{"left-pad": "^1.2.3", "@types/node": "~20.1.0", "exact": "4.0.1", "eq": "=2.0.0", "jest": "^29.0.0", "fsevents": "~2.3.2"}
+	want := map[string]string{"left-pad": "^1.2.3", "@types/node": "~20.1.0", "exact": "4.0.1", "eq": "=2.0.0", "jest": "^29.0.0", "fsevents": "~2.3.2", "partial": "^1.2", "xr": "2.x", "xr2": "~3.4.x"}
 	if len(got) != len(want) {
 		t.Errorf("got %v", got)
 	}
@@ -68,7 +72,7 @@ func TestNpmExtract(t *testing.T) {
 			t.Errorf("%s = %q, want %q", k, got[k], v)
 		}
 	}
-	if len(deps) != 6 {
+	if len(deps) != 9 {
 		t.Errorf("left-pad in two sections with one range is one dependency, got %d", len(deps))
 	}
 }
@@ -133,7 +137,7 @@ func TestNpmApplyEscapedKey(t *testing.T) {
 }
 
 func TestNpmRangeFloor(t *testing.T) {
-	for in, want := range map[string]string{"^1.2.3": "1.2.3", "~0.1.0": "0.1.0", "1.0.0": "1.0.0", "=1.0.0": "1.0.0", "^1.2": "", ">=1.0.0": "", "*": "", "^1.0.0-rc.1": "", "v1.0.0": ""} {
+	for in, want := range map[string]string{"^1.2.3": "1.2.3", "~0.1.0": "0.1.0", "1.0.0": "1.0.0", "=1.0.0": "1.0.0", "^1.2": "1.2.0", "1": "1.0.0", "1.x": "1.0.0", "1.2.*": "1.2.0", "1.x.x": "1.0.0", "1.2.3.x": "", "1.x.3": "", "x": "", "1.2.x.x": "", ">=1.0.0": "", "*": "", "^1.0.0-rc.1": "", "v1.0.0": ""} {
 		if got, _ := NpmRangeFloor(in); got != want {
 			t.Errorf("NpmRangeFloor(%q) = %q, want %q", in, got, want)
 		}
@@ -142,3 +146,25 @@ func TestNpmRangeFloor(t *testing.T) {
 
 func replaceAll(s, a, b string) string { return strings.ReplaceAll(s, a, b) }
 func contains(s, sub string) bool      { return strings.Contains(s, sub) }
+
+func TestNpmApplyKeepsPartialPrecision(t *testing.T) {
+	for _, tc := range []struct{ spec, to, want string }{
+		{"1", "2.3.4", "2"},
+		{"^1.2", "1.9.1", "^1.9"},
+		{"~1.2", "1.3.0", "~1.3"},
+		{"2.x", "3.0.1", "3.x"},
+		{"1.2.x", "1.4.0", "1.4.x"},
+		{"1.x.x", "2.0.0", "2.x.x"},
+		{"~3.4.*", "3.5.2", "~3.5.*"},
+		{"1.2.3", "1.4.0", "1.4.0"},
+	} {
+		in := `{"dependencies": {"foo": "` + tc.spec + `"}}`
+		out, err := Npm{Dir: "/"}.Apply([]byte(in), model.Dependency{File: "package.json", Package: "foo", Version: tc.spec}, "", tc.to)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.spec, err)
+		}
+		if want := `{"dependencies": {"foo": "` + tc.want + `"}}`; string(out) != want {
+			t.Errorf("%s -> %s: got %s, want %s", tc.spec, tc.to, out, want)
+		}
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/taumatix/ripple/internal/config"
@@ -18,12 +19,14 @@ import (
 // `~1.2.3` to `~1.2.9`, `1.2.3` to `1.5.0`. peerDependencies are not touched (a peer
 // range is a promise to users, not a pin).
 //
-// Only a range ripple can read with certainty is tracked: a full x.y.z version with
-// no operator, `=`, `^` or `~`. Wildcards, comparators, unions, hyphen ranges,
-// partial versions, prereleases, dist-tags, git/file/URL specs, `npm:` aliases and
-// `workspace:` specs are left alone. A range that is bumped is raised to the new
-// version even when it already allowed it, because without a lockfile refresh that is
-// the only change a PR can carry.
+// Only a range ripple can read with certainty is tracked: one to three numeric parts
+// with no operator, `=`, `^` or `~`, and for a partial one an x-range tail (`1.2`,
+// `^1.2`, `1.x`, `1.2.x`). A partial range keeps its precision when it moves (`1.2`
+// follows 1.5.3 to `1.5`). A bare `*`, comparators, unions, hyphen ranges,
+// prereleases, dist-tags, git/file/URL specs, `npm:` aliases and `workspace:` specs
+// are left alone. A full range that is bumped is raised to the new version even when
+// it already allowed it, because without a lockfile refresh that is the only change a
+// PR can carry; a partial one that already names the new version is not touched.
 //
 // The file is edited in place: only the string of the range changes, so indentation,
 // key order and everything else in the file stay byte for byte. Lockfiles are not
@@ -51,16 +54,65 @@ func (n Npm) Matches(p string) bool {
 
 var npmSections = map[string]bool{"dependencies": true, "devDependencies": true, "optionalDependencies": true}
 
-var npmRangeRE = regexp.MustCompile(`^([\^~=]?)(\d+\.\d+\.\d+)$`)
+var npmRangeRE = regexp.MustCompile(`^([\^~=]?)(\d+)((?:\.\d+){0,2})((?:\.[xX*]){0,2})$`)
 
-// NpmRangeFloor is the version a trackable range names, with ok false and "" when the
-// range is not one ripple moves.
-func NpmRangeFloor(spec string) (string, string) {
+// NpmRange is a single-comparator range ripple moves: an optional `^`, `~` or `=`, one
+// to three numeric parts, and for a partial one optionally the wildcard tail it was
+// written with ("1.2", "^1.2", "1.x", "1.2.x", "~1.*"). `*`, comparators, unions and
+// hyphen ranges are not NpmRanges.
+type NpmRange struct {
+	Op     string
+	Parts  []int  // the numbers, as written
+	Suffix string // the wildcard tail as written (".x", ".x.x", ".*"), or ""
+}
+
+// ParseNpmRange reads spec as an NpmRange; false when it is something else.
+func ParseNpmRange(spec string) (NpmRange, bool) {
 	m := npmRangeRE.FindStringSubmatch(spec)
 	if m == nil {
+		return NpmRange{}, false
+	}
+	r := NpmRange{Op: m[1], Suffix: m[4]}
+	nums := m[2] + m[3]
+	for _, p := range strings.Split(nums, ".") {
+		n, err := strconv.Atoi(p)
+		if err != nil {
+			return NpmRange{}, false
+		}
+		r.Parts = append(r.Parts, n)
+	}
+	// "1.2.3.x" has no wildcard room: the tail only fills missing parts.
+	if len(r.Parts)+strings.Count(r.Suffix, ".") > 3 || (r.Suffix != "" && len(r.Parts) == 3) {
+		return NpmRange{}, false
+	}
+	return r, true
+}
+
+// Floor is the lowest version the range allows, padded to x.y.z ("1.2" is "1.2.0").
+func (r NpmRange) Floor() string {
+	v := [3]int{}
+	copy(v[:], r.Parts)
+	return fmt.Sprintf("%d.%d.%d", v[0], v[1], v[2])
+}
+
+// Text is the range that follows version at the precision written: operator and
+// wildcard tail are kept ("1.2" and 1.5.3 give "1.5", "1.x" and 2.0.1 give "2.x").
+func (r NpmRange) Text(version string) string {
+	parts := strings.Split(version, ".")
+	if len(parts) > len(r.Parts) {
+		parts = parts[:len(r.Parts)]
+	}
+	return r.Op + strings.Join(parts, ".") + r.Suffix
+}
+
+// NpmRangeFloor is the version a trackable range names and its operator; both "" when
+// the range is not one ripple moves.
+func NpmRangeFloor(spec string) (string, string) {
+	r, ok := ParseNpmRange(spec)
+	if !ok {
 		return "", ""
 	}
-	return m[2], m[1]
+	return r.Floor(), r.Op
 }
 
 // npmEntry is one `"name": "range"` member of a dependency section.
@@ -154,7 +206,10 @@ func (n Npm) Apply(content []byte, dep model.Dependency, newPackage, newVersion 
 	if err != nil {
 		return nil, fmt.Errorf("parse %s: %w", dep.File, err)
 	}
-	_, op := NpmRangeFloor(dep.Version)
+	rng, ok := ParseNpmRange(dep.Version)
+	if !ok {
+		return nil, fmt.Errorf("%w: %q is not a range ripple moves", ErrUnsupported, dep.Version)
+	}
 	out := append([]byte(nil), content...)
 	changed := false
 	for i := len(entries) - 1; i >= 0; i-- { // back to front keeps earlier offsets valid
@@ -162,7 +217,7 @@ func (n Npm) Apply(content []byte, dep model.Dependency, newPackage, newVersion 
 		if e.name != dep.Package || e.spec != dep.Version {
 			continue
 		}
-		lit := `"` + op + newVersion + `"`
+		lit := `"` + rng.Text(newVersion) + `"`
 		out = append(out[:e.start], append([]byte(lit), out[e.end:]...)...)
 		changed = true
 	}

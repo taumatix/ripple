@@ -12,6 +12,7 @@ import (
 	"github.com/taumatix/ripple/internal/model"
 	"github.com/taumatix/ripple/internal/npmreg"
 	"github.com/taumatix/ripple/internal/rules"
+	"golang.org/x/mod/semver"
 )
 
 // npmPackagesCursor holds the npm packages some repo uses (newline separated). The
@@ -25,16 +26,40 @@ type NpmRegistry interface {
 }
 
 // applicableNpm judges a registry version for an npm dependency: the same package, a
-// range ripple can move, and a release newer than the range's floor.
+// range ripple can move, and a release newer than the range's floor. A partial range
+// that already names the version at its precision ("1.2" for 1.2.9) has nothing to
+// change and is not applicable.
 func applicableNpm(d model.Dependency, pkg, version string) (rules.UpdateType, bool) {
 	if d.Datasource != model.DatasourceNpm || d.Package != pkg {
 		return "", false
 	}
-	floor, _ := manager.NpmRangeFloor(d.Version)
-	if floor == "" {
+	rng, ok := manager.ParseNpmRange(d.Version)
+	if !ok {
 		return "", false
 	}
-	return rules.Classify("v"+floor, "v"+version)
+	typ, ok := rules.Classify("v"+rng.Floor(), "v"+version)
+	if !ok || (len(rng.Parts) < 3 && rng.Text(version) == d.Version) {
+		return "", false
+	}
+	return typ, true
+}
+
+// npmTargets lists, newest first, the newest release of each update type that is an
+// update of d, so a repo that ignores majors still gets the minor or patch behind one.
+func npmTargets(pv npmreg.Packument, d model.Dependency, pkg string) []cargoTarget {
+	newest := map[rules.UpdateType]string{}
+	for _, v := range pv.Releases() {
+		typ, ok := applicableNpm(d, pkg, v)
+		if ok && (newest[typ] == "" || semver.Compare("v"+v, "v"+newest[typ]) > 0) {
+			newest[typ] = v
+		}
+	}
+	var out []cargoTarget
+	for typ, v := range newest {
+		out = append(out, cargoTarget{v, typ})
+	}
+	sort.Slice(out, func(i, j int) bool { return semver.Compare("v"+out[i].version, "v"+out[j].version) > 0 })
+	return out
 }
 
 // NpmWatcher turns the registry's versions of the packages in use into jobs, like
@@ -81,26 +106,27 @@ func (w *NpmWatcher) Poll(ctx context.Context) (int, error) {
 			if floor == "" {
 				continue
 			}
-			target := pv.Newest(floor)
-			if target == "" {
-				continue
-			}
-			typ, ok := applicable(d, model.DatasourceNpm, pkg, target)
-			if !ok {
-				continue
-			}
-			rs, err := e.repoState(ctx, repos, d.Repo)
-			if err != nil {
-				return n, err
-			}
-			if !rs.found {
-				continue
-			}
-			// Abbreviated metadata has no publication dates: the cooldown runs from the
-			// first poll that saw the version, and EnqueueJob keeps the first ReleasedAt.
+			var target string
+			var rs *repoState
+			var dec rules.Decision
 			at := e.now()
-			dec, ok := e.decide(rs, d, typ, at)
-			if !ok || !dec.Enabled {
+			for _, c := range npmTargets(pv, d, pkg) {
+				if rs == nil {
+					if rs, err = e.repoState(ctx, repos, d.Repo); err != nil {
+						return n, err
+					}
+					if !rs.found {
+						break
+					}
+				}
+				// Abbreviated metadata has no publication dates: the cooldown runs from the
+				// first poll that saw the version, and EnqueueJob keeps the first ReleasedAt.
+				if x, ok := e.decide(rs, d, c.typ, at); ok && x.Enabled {
+					target, dec = c.version, x
+					break
+				}
+			}
+			if target == "" {
 				continue
 			}
 			inserted, err := e.Store.EnqueueJob(ctx, model.Job{

@@ -22,6 +22,11 @@ func TestApplicableNpm(t *testing.T) {
 		{"^1.2.3", "1.2.3", "", false},
 		{"^1.2.3", "1.0.0", "", false},
 		{"^1.2.3", "1.3.0-rc.1", "", false},
+		{"^1.2", "1.3.0", rules.Minor, true},
+		{"^1.2", "1.2.9", "", false}, // names 1.2.9 at its precision already
+		{"1", "1.9.0", "", false},
+		{"1", "2.0.0", rules.Major, true},
+		{"1.x", "2.0.0", rules.Major, true},
 		{"*", "1.3.0", "", false},
 		{">=1.0.0", "1.3.0", "", false},
 	} {

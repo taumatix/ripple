@@ -264,14 +264,11 @@ Everything else:
 146. **e2e: run the suite with `-count=2` in CI.** Entry 139 made `waitRepo` wait for the first scan; repeating the suite
     would show any test that still depends on a run order or leftover state. Do it once the container-runtimes job is not
     the long pole. The podman fake-runtime container failure that CI missed on PR #53 was not reproduced.
-147. **npm: ranges and sections beyond `x.y.z`.** Only a full version with no operator, `=`, `^` or `~` is moved. Partial
-    versions (`^1.2`), comparators (`>=1.2.3`), unions, hyphen ranges, a current prerelease, `peerDependencies`,
-    `overrides`/`resolutions`, `npm:` aliases and workspace specs are left alone. The target is the newest release only, so a
-    repo that disables major updates gets no minor update while a newer major exists; pick the newest target per update type.
 148. **npm: regenerate lockfiles offline.** ripple edits package.json and reports the lockfiles it could not refresh
     (`package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, `pnpm-lock.yaml`, bun). The abbreviated metadata carries
     `dist.integrity` and `dist.tarball` per version, so a package-lock v2/v3 entry for a leaf package whose own dependencies did
-    not change could be rewritten without running npm; start there, and say what is still left to the owner.
+    not change could be rewritten without running npm; start there, and say what is still left to the owner. `npmreg` parses
+    neither `dist` nor per-version `dependencies` yet (nor does the fake publish them): add both first.
 149. **npm: private registries, and verify against the real one.** A package whose `.npmrc` names another registry is skipped
     (guard against dependency confusion); supporting it needs credentials and a registry setting per scope. Nothing here has run
     against registry.npmjs.org: the client and fake come from the vendored excerpts (scoped-name encoding, 404 for private
@@ -325,3 +322,8 @@ Everything else:
     (docs/cargo.md). Still left alone: wildcards (`1.*`), comparators (`>=1.2`), multi-part requirements (`>=1, <2`),
     multi-line inline tables and dotted keys (`foo.version = "1"`); the manager is a line scanner, not a TOML parser, so a
     real parser is the way to widen it safely. The same newest-only target still applies to npm (see 147).
+164. **npm: comparators, unions, and other sections.** Partial ranges, x-ranges and the newest target per update type are
+    done (docs/npm.md). Still left alone: comparators (`>=1.2.3`), unions (`1.2 || 2`), hyphen ranges, a current
+    prerelease, `peerDependencies`, `overrides`/`resolutions`, `npm:` aliases and workspace specs. Also npm classifies by
+    number position, so `0.2.3` -> `0.3.0` is "minor" (Cargo has used the leftmost-nonzero rule since 154); do the same
+    here once a repo reports it.

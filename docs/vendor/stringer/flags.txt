@@ -1,0 +1,16 @@
+// Source: https://raw.githubusercontent.com/golang/tools/v0.20.0/cmd/stringer/stringer.go (flag declarations only), fetched 2026-11-23.
+34://	stringer -type=Pill
+47://	//go:generate stringer -type=Pill
+56:// The -type flag accepts a comma-separated list of types so a single run can
+89:	typeNames   = flag.String("type", "", "comma-separated list of type names; must be set")
+90:	output      = flag.String("output", "", "output file name; default srcdir/<type>_string.go")
+91:	trimprefix  = flag.String("trimprefix", "", "trim the `prefix` from the generated constant names")
+92:	linecomment = flag.Bool("linecomment", false, "use line comment text as printed text when present")
+93:	buildTags   = flag.String("tags", "", "comma-separated list of build tags to apply")
+96:// Usage is a replacement usage function for the flags package.
+97:func Usage() {
+98:	fmt.Fprintf(os.Stderr, "Usage of stringer:\n")
+99:	fmt.Fprintf(os.Stderr, "\tstringer [flags] -type T [directory]\n")
+100:	fmt.Fprintf(os.Stderr, "\tstringer [flags] -type T files... # Must be a single package\n")
+110:	flag.Usage = Usage
+113:		flag.Usage()

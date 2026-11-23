@@ -144,3 +144,38 @@ func TestMockgenIsLeftAloneWithoutExtended(t *testing.T) {
 	src := "package p\n\n//go:generate mockgen -destination=m.go github.com/a/b/v2/store Reader\n"
 	rewriteGoWant(t, src, src, 0, "p.go:3")
 }
+
+// -self_package is the import path of the generated package (mockgen README): it moves with
+// the path it names, in both the -f=v and -f v spellings, and is left when it names another.
+func TestExtendedMockgenSelfPackage(t *testing.T) {
+	src := "package p\n\n" +
+		"//go:generate mockgen -self_package=github.com/a/b/v2/store -destination=m.go github.com/a/b/v2/store Reader\n" +
+		"//go:generate mockgen -self_package github.com/a/b/v2 -package b -source=foo.go\n" +
+		"//go:generate mockgen -self_package=example.com/mine -destination=m.go github.com/a/b/v2/store Reader\n"
+	want := "package p\n\n" +
+		"//go:generate mockgen -self_package=github.com/a/b/v3/store -destination=m.go github.com/a/b/v3/store Reader\n" +
+		"//go:generate mockgen -self_package github.com/a/b/v3 -package b -source=foo.go\n" +
+		"//go:generate mockgen -self_package=example.com/mine -destination=m.go github.com/a/b/v3/store Reader\n"
+	rewriteExt(t, src, want, 4)
+}
+
+// github.com/golang/mock's mockgen takes the same grammar plus -prog_only, -exec_only and
+// -version (its README and mockgen.go flag set): a line using them is read, not given up on.
+func TestExtendedGolangMockFlags(t *testing.T) {
+	src := "package p\n\n" +
+		"//go:generate go run github.com/golang/mock/mockgen -prog_only github.com/a/b/v2/store Reader\n" +
+		"//go:generate mockgen -exec_only=/tmp/prog -destination=m.go github.com/a/b/v2/store Reader\n" +
+		"//go:generate mockgen -version\n"
+	want := strings.ReplaceAll(src, "b/v2/store", "b/v3/store")
+	rewriteExt(t, src, want, 2)
+}
+
+// stringer takes no import path (its flags are -type, -output, -trimprefix, -linecomment and
+// -tags, golang.org/x/tools/cmd/stringer): nothing to rewrite and nothing to report; only a
+// "go run pkg@version" pin of it moves, by the go run rule.
+func TestExtendedStringerHasNothingToRewrite(t *testing.T) {
+	src := "package p\n\n" +
+		"//go:generate stringer -type=Pill -trimprefix=Pill -linecomment -tags=a,b -output=pill_string.go\n" +
+		"//go:generate go run golang.org/x/tools/cmd/stringer -type=Pill\n"
+	rewriteExt(t, src, src, 0)
+}

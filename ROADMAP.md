@@ -188,10 +188,6 @@ Everything else:
     on the host sandbox only; a container sandbox ignores it, and `GOTOOLCHAIN` downloads through the module proxy
     stay off. Offer an image per minor, or a proxy-fed download with a checksum check, so a bump above the
     installed Go does not stay a draft there. Verified only with a fake `go` script.
-117. **Generators: stringer, `-self_package`, golang/mock.** `directives: extended` rewrites mockgen's documented
-    flags only. `stringer -type` takes no import path, `mockgen -self_package` and the older
-    `github.com/golang/mock` grammar are not read, and stay reported in the PR body. Add one at a time from the
-    tool's documented flags.
 118. **Workspace-only graphs against a real repo.** A requirement on a sibling at a version no proxy serves
     still opens a draft: with the workspace on, Go reads the sibling's `.mod` at the required version and gets a 404
     (reproduced against the fake proxy). `go work sync` is skipped for such workspaces and a member's own `vendor/`
@@ -340,3 +336,7 @@ Everything else:
     lookup was spot-checked against proxy.golang.org only for a stable module, an unknown one and a missing path;
     a prerelease-only or retracted real module has not been tried. Probe the proxy's own listing for higher majors
     instead of a fixed three, and try a real retraction.
+170. **Generators: run the rewritten lines.** The mockgen (`-self_package`, golang/mock flags) and stringer grammar
+    comes from the vendored READMEs and flag declarations, and is checked by rewriting text; no rewritten
+    `go:generate` line has been run with the real tool. Run `go generate` in a sandbox job over a repo using
+    each, and add `-write_command_comment` and the other flags newer mockgen releases add as they are documented.

@@ -98,12 +98,16 @@ func NewDynamo(db *dynamodb.Client, table string, opts ...DynamoOption) *Dynamo 
 	return d
 }
 
-// EnsureTable creates the table and its index when absent, then records the shard counts.
+// EnsureTable creates the table and its index when absent, records the shard counts, and
+// backfills the open-job copies of pending jobs written before they existed.
 func (d *Dynamo) EnsureTable(ctx context.Context) error {
 	if err := d.createTable(ctx); err != nil {
 		return err
 	}
-	return d.reconcileShards(ctx)
+	if err := d.reconcileShards(ctx); err != nil {
+		return err
+	}
+	return d.backfillOpenJobs(ctx)
 }
 
 // reconcileShards keeps a high-water mark of each shard count in the table
@@ -563,25 +567,6 @@ func (d *Dynamo) syncOpenJob(ctx context.Context, j model.Job) error {
 	_, err := d.db.DeleteItem(ctx, &dynamodb.DeleteItemInput{TableName: &d.table,
 		Key: map[string]types.AttributeValue{"PK": s("REPO#" + j.Repo), "SK": s("OPENJOB#" + j.Key)}})
 	return err
-}
-
-// ListOpenJobs is store.OpenJobLister: one Query on the repo's partition. A job
-// enqueued by a ripple older than this index has no copy until its next update.
-func (d *Dynamo) ListOpenJobs(ctx context.Context, repo string) ([]model.Job, error) {
-	var out []model.Job
-	err := d.query(ctx, &dynamodb.QueryInput{
-		ConsistentRead:            aws.Bool(true),
-		KeyConditionExpression:    aws.String("PK = :pk AND begins_with(SK, :p)"),
-		ExpressionAttributeValues: map[string]types.AttributeValue{":pk": s("REPO#" + repo), ":p": s("OPENJOB#")},
-	}, 0, func(it map[string]types.AttributeValue) error {
-		var a jobAttrs
-		if err := attributevalue.UnmarshalMap(it, &a); err != nil {
-			return err
-		}
-		out = append(out, fromJobItem(a))
-		return nil
-	})
-	return out, wrapD("list open jobs", err)
 }
 
 func fromJobItem(a jobAttrs) model.Job {

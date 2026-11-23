@@ -49,6 +49,7 @@ func (c *clock) Advance(d time.Duration) {
 type env struct {
 	t    *testing.T
 	gh   *testutil.GitHub
+	git  *testutil.GitHTTP // set by opts.gitHTTP
 	idx  *testutil.Index
 	st   store.Store
 	plat *testutil.CountingPlatform
@@ -119,6 +120,10 @@ type opts struct {
 	ghes *testutil.GHES
 	// tweak edits each App newApp builds, a restart included, before it runs.
 	tweak func(a *app.App)
+	// gitHTTP serves the repos over git smart-HTTP (env.git) instead of file://, so a
+	// test can count what a clone downloaded. Repos must be added before the env is built? No:
+	// the server reads the same bare repos, so adding them later is fine.
+	gitHTTP bool
 	// engine adjusts the engine before it runs (server-side go settings).
 	engine func(e *engine.Engine)
 }
@@ -141,6 +146,10 @@ func newEnvOpts(t *testing.T, st store.Store, lim rules.Limits, o opts) *env {
 	} else {
 		e.gh = testutil.NewGitHub(t)
 		apiBase, tokens = e.gh.APIURL, e.gh.Auth
+	}
+	if o.gitHTTP {
+		e.git = e.gh.ServeGit()
+		e.gh.GitBase = e.git.URL
 	}
 	gh := &github.Client{APIBase: apiBase, GitBase: e.gh.GitBase, Tokens: tokens, Versions: versions, WorkDir: t.TempDir(),
 		GoProxy: e.proxy.URL, GoSumDB: "off", GoCacheDir: goCache(t), Sandbox: o.sandbox, Now: e.clock.Now,

@@ -192,3 +192,91 @@ func TestToolchainJobWaitsOutTheCooldownFromFirstSight(t *testing.T) {
 }
 
 func newDL(t *testing.T) *testutil.GoDL { return testutil.NewGoDL(t) }
+
+// otherVersionFiles are the places a Go version hides besides go.mod, each with one
+// line a bump must move and, in the same file, lines it must not touch.
+func otherVersionFiles(old string) map[string]string {
+	return map[string]string{
+		".go-version":    old + "\n",
+		".tool-versions": "nodejs 20.1.0\ngolang " + old + " # keep\n",
+		".github/workflows/ci.yml": "jobs:\n  t:\n    steps:\n      - uses: actions/setup-go@v5\n        with:\n          go-version: " + old +
+			"\n      - uses: actions/setup-go@v5\n        with:\n          go-version: ${{ matrix.go }}\n          go-version-file: go.mod\n",
+		"Dockerfile": "FROM golang:" + old + "-alpine AS build\nFROM alpine:3.20\nRUN echo FROM golang:" + old + "\n",
+		"README.md":  "Needs go " + old + "\n",
+	}
+}
+
+func TestToolchainBumpMovesTheGoVersionInOtherFiles(t *testing.T) {
+	forEach(t, func(t *testing.T, st store.Store) {
+		n := localMinor(t)
+		dl := newDL(t)
+		e := newEnvOpts(t, st, defaultLimits(), opts{goDL: dl})
+		dl.Set(goVer(n, 9), goVer(n-1, 9))
+		old := fmt.Sprintf("1.%d.0", n)
+		files := withMode(tcRepo("1.22", "go"+old), "toolchain")
+		for p, c := range otherVersionFiles(old) {
+			files[p] = c
+		}
+		// The same files in a repo that did not opt in must stay as they are.
+		quiet := withMode(tcRepo("1.22", "go"+old), "")
+		for p, c := range otherVersionFiles(old) {
+			quiet[p] = c
+		}
+		e.gh.AddRepo("acme/app", files)
+		e.gh.AddRepo("acme/quiet", quiet)
+		start(t, e, "acme/app", "acme/quiet")
+		e.clock.Advance(time.Minute)
+		e.tick()
+
+		head, body := onePR(t, e, "acme/app", false)
+		nw := fmt.Sprintf("1.%d.9", n)
+		for p, want := range map[string]string{
+			".go-version":    nw + "\n",
+			".tool-versions": "nodejs 20.1.0\ngolang " + nw + " # keep\n",
+			".github/workflows/ci.yml": "jobs:\n  t:\n    steps:\n      - uses: actions/setup-go@v5\n        with:\n          go-version: " + nw +
+				"\n      - uses: actions/setup-go@v5\n        with:\n          go-version: ${{ matrix.go }}\n          go-version-file: go.mod\n",
+			"Dockerfile": "FROM golang:" + nw + "-alpine AS build\nFROM alpine:3.20\nRUN echo FROM golang:" + old + "\n",
+			"README.md":  "Needs go " + old + "\n",
+		} {
+			if got, _ := e.gh.FileAt("acme/app", head, p); got != want {
+				t.Errorf("%s:\n got %q\nwant %q", p, got, want)
+			}
+		}
+		for _, want := range []string{"Go version in other files", "`.go-version`", "`Dockerfile`", "`.tool-versions`", "`.github/workflows/ci.yml`"} {
+			if !strings.Contains(body, want) {
+				t.Errorf("body lacks %q:\n%s", want, body)
+			}
+		}
+		if strings.Contains(body, "`README.md`") {
+			t.Errorf("README is not a version file:\n%s", body)
+		}
+		if prs := e.gh.PRs("acme/quiet"); len(prs) != 0 {
+			t.Errorf("no go-toolchain key, no PR: %+v", prs)
+		}
+	})
+}
+
+func TestDirectiveBumpMovesTheGoVersionInOtherFiles(t *testing.T) {
+	forEach(t, func(t *testing.T, st store.Store) {
+		n := localMinor(t)
+		dl := newDL(t)
+		e := newEnvOpts(t, st, defaultLimits(), opts{goDL: dl})
+		dl.Set(goVer(n, 9), goVer(n-1, 9))
+		old := fmt.Sprintf("1.%d.3", n-2)
+		files := withMode(tcRepo(fmt.Sprintf("1.%d", n-2), "go"+old), "directive")
+		files[".go-version"] = old + "\n"
+		files["Dockerfile"] = fmt.Sprintf("FROM golang:1.%d\n", n-2) // floats on the minor: moves with the minor
+		e.gh.AddRepo("acme/old", files)
+		start(t, e, "acme/old")
+		e.clock.Advance(time.Minute)
+		e.tick()
+
+		head, _ := onePR(t, e, "acme/old", false)
+		if got, _ := e.gh.FileAt("acme/old", head, ".go-version"); got != fmt.Sprintf("1.%d.9\n", n-1) {
+			t.Errorf(".go-version %q", got)
+		}
+		if got, _ := e.gh.FileAt("acme/old", head, "Dockerfile"); got != fmt.Sprintf("FROM golang:1.%d\n", n-1) {
+			t.Errorf("Dockerfile %q", got)
+		}
+	})
+}

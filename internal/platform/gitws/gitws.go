@@ -92,7 +92,21 @@ type CredentialFunc func(ctx context.Context) (platform.Credential, error)
 // is set and on the remote's default branch otherwise. The clone talks to git with an
 // environment that cannot read host configuration, run hooks, or use any protocol
 // other than the one in o.GitBase.
+//
+// When ctx carries platform.WithScanOnly the clone has no working tree and no blobs
+// (see scan.go); if the host will not do that, the usual checkout is made instead.
 func Checkout(ctx context.Context, o Options, cloneURL, branch string, cred CredentialFunc) (platform.Workspace, error) {
+	if platform.ScanOnly(ctx) {
+		if ws, err := checkout(ctx, o, cloneURL, branch, cred, true); err == nil {
+			return ws, nil
+		} else if ctx.Err() != nil {
+			return nil, err
+		}
+	}
+	return checkout(ctx, o, cloneURL, branch, cred, false)
+}
+
+func checkout(ctx context.Context, o Options, cloneURL, branch string, cred CredentialFunc, light bool) (platform.Workspace, error) {
 	gb, err := url.Parse(o.GitBase)
 	if err != nil || gb.Scheme == "" {
 		return nil, fmt.Errorf("invalid git base URL")
@@ -108,7 +122,7 @@ func Checkout(ctx context.Context, o Options, cloneURL, branch string, cred Cred
 	if err != nil {
 		return nil, err
 	}
-	w := &workspace{dir: dir, o: o, base: base, cred: cred, branch: branch}
+	w := &workspace{dir: dir, o: o, base: base, cred: cred, branch: branch, light: light}
 	w.env = []string{
 		"PATH=" + os.Getenv("PATH"),
 		"HOME=" + dir,
@@ -120,6 +134,9 @@ func Checkout(ctx context.Context, o Options, cloneURL, branch string, cred Cred
 	}
 	repoDir := filepath.Join(dir, "repo")
 	args := []string{"clone", "--depth", "1", "--filter=blob:limit=1m", "--no-tags", "--single-branch", "--no-recurse-submodules"}
+	if light {
+		args = []string{"clone", "--depth", "1", "--filter=blob:none", "--no-checkout", "--no-tags", "--single-branch", "--no-recurse-submodules"}
+	}
 	if branch != "" {
 		args = append(args, "--branch", branch)
 	}
@@ -151,9 +168,13 @@ type workspace struct {
 	cred                 CredentialFunc
 	env                  []string // credential-free; network commands add a header per command
 	root                 *os.Root
+	light                bool // scan-only: see scan.go
 
 	mu      sync.Mutex
-	secrets []string // every credential this workspace has used, for redaction
+	treeMu  sync.Mutex
+	paths   []string             // scan-only: HEAD's regular files, walk order
+	entries map[string]treeEntry // scan-only: every blob in HEAD's tree
+	secrets []string             // every credential this workspace has used, for redaction
 }
 
 func (w *workspace) DefaultBranch() string { return w.branch }
@@ -185,6 +206,10 @@ func (w *workspace) git(ctx context.Context, dir string, args ...string) (string
 // for a credential at that moment and hands it to git only through that one
 // process's environment, never argv or the remote URL. An empty secret sends none.
 func (w *workspace) gitNet(ctx context.Context, dir string, args ...string) (string, error) {
+	return w.gitNetIO(ctx, dir, gitIO{}, args...)
+}
+
+func (w *workspace) gitNetIO(ctx context.Context, dir string, gio gitIO, args ...string) (string, error) {
 	env := w.env
 	if w.cred != nil {
 		c, err := w.cred(ctx)
@@ -207,6 +232,31 @@ func (w *workspace) gitNet(ctx context.Context, dir string, args ...string) (str
 }
 
 func (w *workspace) runGit(ctx context.Context, dir string, env []string, confined bool, args ...string) (string, error) {
+	return w.runGitIO(ctx, dir, env, confined, gitIO{}, args...)
+}
+
+// gitIO is the optional stdin and output bound of one git command.
+type gitIO struct {
+	stdin string
+	// maxOut, when positive, fails the command once it has written more than that.
+	maxOut int
+}
+
+type boundedBuffer struct {
+	bytes.Buffer
+	max int
+}
+
+var errTooLarge = errors.New("output too large")
+
+func (b *boundedBuffer) Write(p []byte) (int, error) {
+	if b.max > 0 && b.Len()+len(p) > b.max {
+		return 0, errTooLarge
+	}
+	return b.Buffer.Write(p)
+}
+
+func (w *workspace) runGitIO(ctx context.Context, dir string, env []string, confined bool, gio gitIO, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, gitTimeout)
 	defer cancel()
 	full := append([]string{"-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "protocol.version=2"}, args...)
@@ -221,8 +271,12 @@ func (w *workspace) runGit(ctx context.Context, dir string, env []string, confin
 	cmd.Dir = dir
 	cmd.Env = env
 	cmd.WaitDelay = 5 * time.Second
-	var out, errb bytes.Buffer
+	out := boundedBuffer{max: gio.maxOut}
+	var errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
+	if gio.stdin != "" {
+		cmd.Stdin = strings.NewReader(gio.stdin)
+	}
 	if err := cmd.Run(); err != nil {
 		w.reapIfCancelled(ctx, argv)
 		return "", fmt.Errorf("git %s: %w: %s", args[0], err, snippet([]byte(w.redact(errb.String()))))
@@ -247,6 +301,9 @@ func (w *workspace) ReadFile(p string) ([]byte, error) {
 	}
 	f, err := w.root.Open(p)
 	if errors.Is(err, fs.ErrNotExist) {
+		if w.light {
+			return w.readBlob(p)
+		}
 		return nil, platform.ErrNotExist
 	}
 	if err != nil {
@@ -264,6 +321,9 @@ func (w *workspace) ReadFile(p string) ([]byte, error) {
 }
 
 func (w *workspace) WriteFile(p string, data []byte) error {
+	if w.light {
+		return errScanOnly
+	}
 	p, err := cleanPath(p)
 	if err != nil {
 		return err
@@ -285,6 +345,9 @@ func (w *workspace) WriteFile(p string, data []byte) error {
 }
 
 func (w *workspace) Walk(fn func(string) error) error {
+	if w.light {
+		return w.walkTree(fn)
+	}
 	return fs.WalkDir(w.root.FS(), ".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -304,6 +367,9 @@ func (w *workspace) Walk(fn func(string) error) error {
 }
 
 func (w *workspace) CommitAndPush(ctx context.Context, branch, message string) (bool, error) {
+	if w.light {
+		return false, errScanOnly
+	}
 	if err := checkBranch(branch); err != nil {
 		return false, err
 	}
@@ -348,6 +414,9 @@ var goCommands = map[string]bool{"mod tidy": true, "mod vendor": true, "build ./
 const goTimeout = 10 * time.Minute
 
 func (w *workspace) RunGo(ctx context.Context, dir string, args ...string) (string, error) {
+	if w.light {
+		return "", errScanOnly
+	}
 	if !goCommands[strings.Join(args, " ")] {
 		return "", fmt.Errorf("go %s is not allowed", strings.Join(args, " "))
 	}
@@ -609,6 +678,9 @@ func (w *workspace) dirOutside(dir string) []string {
 }
 
 func (w *workspace) Reset(ctx context.Context) error {
+	if w.light {
+		return errScanOnly
+	}
 	if _, err := w.git(ctx, w.repoDir, "checkout", "--force", w.branch); err != nil {
 		return err
 	}

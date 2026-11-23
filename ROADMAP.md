@@ -16,9 +16,6 @@ Ordered by how much each entry limits real deployments. The top is next.
    off in the smoke test, import the fake module there, and assert the bumped `go.mod` and `go.sum`.
    Apple `container` has no `--network host`, so the smoke test runs against the image only in CI.
 
-6. **Scan without a full checkout.** The clone filter saves nothing while the scan checks out HEAD
-   ([docs/bounds.md](docs/bounds.md)): a huge-blob repo still downloads every blob at HEAD. Clone `--no-checkout`
-   (or sparse) and read only the paths the managers match, so a repo's size stops mattering to a scan.
 
 Platforms (code hosts). The goal is the whole list Renovate supports, each behind the one `Platform`
 interface, each with the same end-to-end test (a push or release event leads to exactly one PR in
@@ -115,8 +112,6 @@ Everything else:
 43. **Verify a Go bump with the Go it names.** Verification runs with the server's installed Go
     (`GOTOOLCHAIN=local`), so a directive above it opens a draft and a toolchain bump is checked
     against a different Go. Offer a toolchain image per supported minor; CI stays the real check until then.
-44. **Go version in other places.** The same bump leaves `.go-version`, `.tool-versions`, `go-version:`
-    in workflows and `FROM golang:` in Dockerfiles behind; propose them in the same PR, off the same list.
 45. **Stale PRs count toward the open-PR limit.** At the limit, a superseded PR holds the slot the newer PR
     needs, so the newer one is deferred and never supersedes it. Close (or recycle) the stale PR before the
     limit check when its replacement is the pending plan.
@@ -255,3 +250,11 @@ Everything else:
 88. **Replicas: configuration and metrics.** Expose `Replica` and `LeaseTTL` as `RIPPLE_REPLICA` and
     `RIPPLE_LEASE_TTL`, a replica-count and lease-takeover metric, and elect one replica for the feed poll
     (two polling is safe, since job enqueue is insert-if-absent, but wasteful).
+||||||| parent of 89b39d4 (Roadmap residuals for the partial scan and Go version files)
+89. **Partial scan on other hosts.** The scan without a checkout is verified against GitHub and the fake
+    only. GitLab, Bitbucket, Gitea, Azure and the rest may not serve `filter=blob:none` or by-id blob
+    fetches; they fall back to a full checkout, unmeasured. Check each and record which saves anything.
+90. **Partial scan relies on non-cone sparse checkout.** Git marks it deprecated. Move the batched blob
+    fetch to `git fetch --stdin` of object ids or `git backfill` once they work on a `--depth 1` clone.
+91. **Go version in more files.** `.mise.toml`, `.devcontainer/devcontainer.json`, `go.work`, `Makefile`
+    variables and workflows in a module subdirectory are not followed by a toolchain bump.

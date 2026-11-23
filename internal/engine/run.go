@@ -113,6 +113,8 @@ type runner struct {
 	touched map[string]bool
 	// migrations are the major bumps in this PR.
 	migrations []migration
+	// followed holds the files outside go.mod that took the Go version a toolchain bump moved to.
+	followed []string
 	// skipped holds Go files the import rewrite could not parse; the PR body lists them.
 	skipped []string
 	// ambiguous holds "file:line" of references to the old path in //go:generate lines
@@ -429,6 +431,7 @@ func (r *runner) openPR(p *prPlan) (*platform.PR, error) {
 	r.migrations = nil
 	r.skipped = nil
 	r.ambiguous = nil
+	r.followed = nil
 	var applied []item
 	for _, it := range p.items {
 		ok, err := r.apply(it)
@@ -450,6 +453,13 @@ func (r *runner) openPR(p *prPlan) (*platform.PR, error) {
 		return nil, err
 	}
 	var draft bool
+	if len(r.followed) > 0 {
+		sort.Strings(r.followed)
+		body += "\n## Go version in other files\n\nThese files named the old Go version on a line ripple recognises exactly, and were moved with it. Lines it does not recognise (matrix expressions, aliases such as `stable`, image digests) were left alone:\n\n"
+		for _, f := range r.followed {
+			body += "- `" + f + "`\n"
+		}
+	}
 	if len(r.skipped) > 0 {
 		sort.Strings(r.skipped)
 		body += "\n## Files not rewritten\n\nThese Go files do not parse, so their imports were left as they were. Fix them by hand if they import the old path:\n\n"
@@ -577,6 +587,11 @@ func (r *runner) apply(it item) (bool, error) {
 		if d.Manager == "gomod" {
 			r.touched[path.Dir(d.File)] = true
 		}
+		if d.Datasource == model.DatasourceGoToolchain {
+			if err := r.followGoVersion(d, it.job.Version); err != nil {
+				return false, err
+			}
+		}
 		touched = true
 	}
 	return touched, nil
@@ -673,4 +688,37 @@ func toolchainNotes(items []item) string {
 		b.WriteString("\nripple checked `go mod tidy`, `go build ./...` and `go vet ./...` with the Go installed on its server (toolchain downloads are off), which need not be the version named above; CI on this pull request is the check against that version.\n")
 	}
 	return b.String()
+}
+
+// followGoVersion moves the Go version named beside a go.mod whose toolchain line or
+// directive just moved from d.Version to target: the files in the module directory and
+// the repo root, and the root workflows. Only a repo that opted in with go-toolchain
+// reaches here, since only then is there a toolchain job at all.
+func (r *runner) followGoVersion(d model.Dependency, target string) error {
+	dirs := map[string]bool{".": true, path.Dir(d.File): true}
+	var files []string
+	err := r.ws.Walk(func(p string) error {
+		if manager.HoldsGoVersion(p) && (dirs[path.Dir(p)] || strings.HasPrefix(p, ".github/workflows/")) {
+			files = append(files, p)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	for _, p := range files {
+		content, err := r.ws.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		out, ok := manager.FollowGoVersion(p, content, d.Version, target)
+		if !ok {
+			continue
+		}
+		if err := r.ws.WriteFile(p, out); err != nil {
+			return err
+		}
+		r.followed = append(r.followed, p)
+	}
+	return nil
 }

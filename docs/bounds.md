@@ -16,10 +16,49 @@ update PRs, exactly like an invalid `.ripple.yaml`) and the engine logs a warnin
 is harder to reason about than none. The next push re-scans the repo, so it recovers as soon as it is
 under the cap. A repo file cannot raise a cap.
 
-## Clone filter: what it saves
+## Scan without a checkout
 
-Clones use `--depth 1 --filter=blob:limit=1m`. Measured with git 2.50.1 on a repo holding a 3 MB blob at
-HEAD (two commits, local `file://` server with `uploadpack.allowFilter`):
+A scan clones `--depth 1 --filter=blob:none --no-checkout` (a *scan-only* workspace, `platform.WithScanOnly`).
+`Walk` lists paths from `git ls-tree -r` (trees only, no blobs); the engine collects the paths a manager
+matches, and `Prefetch` loads exactly those in one request: a non-cone `git sparse-checkout set --stdin`
+followed by `git checkout HEAD`, which git documents as bulk-prefetching every missing blob in one batch
+(`checkout`, and any command using `unpack-trees`, in git's partial-clone design notes). Anything not on disk
+(the config file read before the walk, a path with glob characters) is read with `git cat-file blob <oid>`,
+one lazy fetch each. Every one of these network commands runs with the per-command credential, so a private
+repo works. An update (a PR) still takes a full checkout: `go mod tidy` needs the sources.
+
+What the host must offer: protocol v2 `filter` (git's `gitprotocol-v2`: advertised "when the filter feature is
+supported"; `uploadpack.allowFilter` on a stock git server) and fetching a blob by object id
+(`uploadpack.allowAnySHA1InWant` or reachable-sha1). GitHub serves partial clones (measured below); for the other hosts this
+is not verified here (a stock git server needs the two settings above). A host that does not support it ignores the filter, git warns, and the
+clone carries every object (no saving, same result). When the host cannot do the follow-up fetch, or a matched
+file is a symbolic link, the workspace returns `platform.ErrScanFallback` and the engine logs
+`partial scan unavailable; scanning a full checkout` and repeats on the usual checkout. The scan never fails
+for want of partial clone. Only GitHub was measured live; the others are from their documentation.
+
+Non-cone sparse patterns are marked deprecated by git (the replacement, cone mode, takes directories, not
+files). They are used because the files to fetch are arbitrary paths; if git removes them, `Prefetch` fails,
+the fallback applies and the scan costs what it did before, which a test (`TestScanOnlyDownloadsOnlyWhatIsRead`) would show.
+
+Measured over the public internet with git 2.50.1, `RIPPLE_LIVE_SCAN_REPO=<repo> go test -tags live ./internal/platform/gitws -run LiveScan -v`
+(Checkout, Walk, Prefetch of the default managers' matches, ReadFile; three runs each for `taumatix/ripple`, identical):
+
+| Repo | Files | Clone | Pack downloaded | Workspace on disk | Time |
+|---|---|---|---|---|---|
+| taumatix/ripple | 261 | `blob:limit=1m` + checkout (before) | 1318 KiB | 6532 KiB | 1.1-1.2 s |
+| taumatix/ripple | 261 | scan-only (after) | 17 KiB | 95 KiB | 1.3-1.4 s |
+| spf13/cobra | 66 | before / after | 218 / 3 KiB | 943 / 38 KiB | 0.9 / 1.3 s |
+| go-git/go-git | 791 | before / after | 1606 / 30 KiB | 7383 / 146 KiB | 1.4 / 1.3 s |
+
+The saving is in bytes (about 98%) and disk, not in time: the scan makes one more round trip (clone, then the
+batched blob fetch), which costs as much as the transfer on these small repos. It grows with the repo (the
+bytes avoided are every blob nothing reads: a repo with a 3 MB asset downloads 3 MB less, asserted in
+`TestScanDownloadsOnlyWhatManagersRead`); the time saving on a slow link or a very large repo is not measured.
+
+## Clone filter for updates: what it saves
+
+An update's clone is `--depth 1 --filter=blob:limit=1m` with a checkout. Measured with git 2.50.1 on a repo
+holding a 3 MB blob at HEAD (two commits, local `file://` server with `uploadpack.allowFilter`):
 
 | Clone | `.git` size |
 |---|---|
@@ -31,4 +70,4 @@ So **with a checkout the filter saves nothing today**: the checkout needs every 
 shallow clone has no other history to spare. It costs one extra on-demand fetch when HEAD holds a blob over
 1 MB. It is kept because it is harmless, bounds blobs that are not at HEAD if the clone ever deepens, and is
 the prerequisite for a sparse or `--no-checkout` scan (reading only the files managers match), which is
-where the saving would come from. That is not done here. Files over 1 MiB are not read by ripple regardless.
+where the saving would come from. That is done for scans, see above. Files over 1 MiB are not read by ripple regardless.

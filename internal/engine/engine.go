@@ -137,6 +137,10 @@ func RepoConfig(raw []byte) (*config.Repo, error) {
 // extracts every dependency and replaces the repo's rows in the reverse index. An
 // invalid file registers the repo with no dependencies, so nothing is updated until
 // the file is fixed.
+//
+// The scan reads a partial clone with no working tree when the host allows it, so
+// only the files a manager matches are downloaded; if the host cannot, it repeats on
+// a full checkout.
 func (e *Engine) Scan(ctx context.Context, repo model.Repo) error {
 	defer e.lockRepo(repo.FullName)()
 	hold, err := e.acquireRepo(ctx, repo.FullName, true)
@@ -146,6 +150,15 @@ func (e *Engine) Scan(ctx context.Context, repo model.Repo) error {
 	defer hold.Release()
 	ctx = hold.Ctx
 	defer func() { e.syncDashboard(ctx, repo.FullName) }()
+	err = e.scan(platform.WithScanOnly(ctx), repo)
+	if errors.Is(err, platform.ErrScanFallback) {
+		e.log().Info("partial scan unavailable; scanning a full checkout", "repo", repo.FullName, "reason", err)
+		err = e.scan(ctx, repo)
+	}
+	return err
+}
+
+func (e *Engine) scan(ctx context.Context, repo model.Repo) error {
 	ws, err := e.Platform.Checkout(ctx, repo)
 	if err != nil {
 		return fmt.Errorf("scan %s: %w", repo.FullName, err)
@@ -194,38 +207,75 @@ func (e *Engine) Scan(ctx context.Context, repo model.Repo) error {
 	if maxDeps <= 0 {
 		maxDeps = DefaultMaxDependencies
 	}
-	var deps []model.Dependency
-	seen := map[string]bool{}
+	// Walk first, read after: a workspace that fetches lazily gets every path in one request.
+	type hit struct {
+		path string
+		ms   []manager.Manager
+	}
+	var hits []hit
 	files := 0
 	err = ws.Walk(func(p string) error {
 		if files++; files > maxFiles {
 			return errScanCap
 		}
+		var matched []manager.Manager
 		for _, m := range ms {
-			if !m.Matches(p) || seen[p+"|"+m.Name()] {
+			if m.Matches(p) {
+				matched = append(matched, m)
+			}
+		}
+		if len(matched) > 0 {
+			hits = append(hits, hit{p, matched})
+		}
+		return nil
+	})
+	if err == nil {
+		if pf, ok := ws.(platform.Prefetcher); ok {
+			paths := make([]string, len(hits))
+			for i, h := range hits {
+				paths[i] = h.path
+			}
+			err = pf.Prefetch(ctx, paths)
+		}
+	}
+	var deps []model.Dependency
+	seen := map[string]bool{}
+	for _, h := range hits {
+		if err != nil {
+			break
+		}
+		for _, m := range h.ms {
+			if seen[h.path+"|"+m.Name()] {
 				continue
 			}
-			seen[p+"|"+m.Name()] = true
-			content, err := ws.ReadFile(p)
-			if err != nil {
-				e.log().Warn("skip unreadable file", "repo", repo.FullName, "file", p, "err", err)
+			seen[h.path+"|"+m.Name()] = true
+			content, rerr := ws.ReadFile(h.path)
+			if errors.Is(rerr, platform.ErrScanFallback) {
+				err = rerr
+				break
+			}
+			if rerr != nil {
+				e.log().Warn("skip unreadable file", "repo", repo.FullName, "file", h.path, "err", rerr)
 				continue
 			}
-			found, err := m.Extract(p, content)
-			if err != nil {
-				e.log().Warn("skip unparsable file", "repo", repo.FullName, "file", p, "err", err)
+			found, xerr := m.Extract(h.path, content)
+			if xerr != nil {
+				e.log().Warn("skip unparsable file", "repo", repo.FullName, "file", h.path, "err", xerr)
 				continue
 			}
 			for _, d := range found {
 				d.Repo = repo.FullName
 				deps = append(deps, d)
 				if len(deps) > maxDeps {
-					return errDepCap
+					err = errDepCap
+					break
 				}
 			}
+			if err != nil {
+				break
+			}
 		}
-		return nil
-	})
+	}
 	switch {
 	case errors.Is(err, errScanCap), errors.Is(err, errDepCap):
 		what, limit := "file", maxFiles

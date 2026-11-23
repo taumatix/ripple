@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/taumatix/ripple/internal/testutil"
 )
@@ -124,5 +125,15 @@ func TestChallengeRealmOffTheNetworkRulesIsRefused(t *testing.T) {
 	c := &Client{HTTP: srv.Client(), BaseURL: func(string) string { return srv.URL }, Insecure: true}
 	if _, err := c.Tags(context.Background(), "ghcr.io/x/y"); err == nil || !strings.Contains(err.Error(), "realm") {
 		t.Errorf("got %v", err)
+	}
+}
+
+func TestCreatedReadsTheConfigOfTheLinuxAmd64Manifest(t *testing.T) {
+	f := testutil.NewRegistry(t)
+	at := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
+	f.AddTagCreated("org/img", "1.2.3", at)
+	got, err := clientFor(f).Created(context.Background(), "ghcr.io/org/img", "1.2.3")
+	if err != nil || !got.Equal(at) {
+		t.Fatalf("created %v err %v want %v", got, err, at)
 	}
 }

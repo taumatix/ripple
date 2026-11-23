@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
+	"time"
 
 	"github.com/taumatix/ripple/internal/model"
 	"github.com/taumatix/ripple/internal/registry"
@@ -20,6 +22,14 @@ const dockerPackagesCursor = "docker:packages"
 type TagRegistry interface {
 	Tags(ctx context.Context, pkg string) ([]string, error)
 	Digest(ctx context.Context, pkg, tag string) (string, error)
+}
+
+// CreatedRegistry is the optional part of a TagRegistry that reads when an image was
+// built (its config's "created"); registry.Client implements it. Without it, or when
+// the image records no time or the read fails, a tag's release time is the first poll
+// that saw it.
+type CreatedRegistry interface {
+	Created(ctx context.Context, pkg, tag string) (time.Time, error)
 }
 
 // applicableImage judges a registry tag for a docker dependency: the same image, the
@@ -43,6 +53,40 @@ type DockerWatcher struct {
 	Engine *Engine
 
 	elect election // PollElected's claim
+
+	createdMu sync.Mutex
+	created   map[string]time.Time // "pkg:tag" -> image creation time, kept once read
+}
+
+// releasedAt is when tag of pkg was released: the image config's creation time when
+// the registry can say, else the moment of this poll (the cooldown then runs from first
+// sight, and EnqueueJob keeps the first ReleasedAt on a replay).
+func (w *DockerWatcher) releasedAt(ctx context.Context, pkg, tag string) time.Time {
+	cr, ok := w.Engine.Registry.(CreatedRegistry)
+	if !ok {
+		return w.Engine.now()
+	}
+	key := pkg + ":" + tag
+	w.createdMu.Lock()
+	t, hit := w.created[key]
+	w.createdMu.Unlock()
+	if hit {
+		return t
+	}
+	t, err := cr.Created(ctx, pkg, tag)
+	if err != nil || t.IsZero() || t.After(w.Engine.now()) {
+		if err != nil {
+			w.Engine.log().Warn("image creation time not read, using first sight", "package", pkg, "tag", tag, "err", err)
+		}
+		return w.Engine.now()
+	}
+	w.createdMu.Lock()
+	if w.created == nil {
+		w.created = map[string]time.Time{}
+	}
+	w.created[key] = t
+	w.createdMu.Unlock()
+	return t
 }
 
 // Poll returns how many jobs were new. It makes no request while no repo uses an
@@ -91,9 +135,9 @@ func (w *DockerWatcher) Poll(ctx context.Context) (int, error) {
 			if !rs.found {
 				continue
 			}
-			// A registry publishes no date with a tag: the cooldown runs from the first
-			// poll that saw it, and EnqueueJob keeps the first ReleasedAt on a replay.
-			at := e.now()
+			// A registry publishes no date with a tag: the image config's creation time
+			// stands in for it, else the cooldown runs from the first poll that saw it.
+			at := w.releasedAt(ctx, pkg, target)
 			dec, ok := e.decide(rs, d, typ, at)
 			if !ok || !dec.Enabled {
 				continue

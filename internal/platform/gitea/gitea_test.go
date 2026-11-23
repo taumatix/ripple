@@ -15,6 +15,7 @@ import (
 	"github.com/taumatix/ripple/internal/platform"
 	"github.com/taumatix/ripple/internal/platform/gitea"
 	"github.com/taumatix/ripple/internal/testutil"
+	"github.com/taumatix/ripple/internal/webhook"
 )
 
 // Literal wire values below are cited to docs/vendor/<flavour>/ sections.
@@ -235,5 +236,26 @@ func TestReceiverDedupesAndIgnores(t *testing.T) {
 	h.ServeHTTP(w, req)
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("GET: %d", w.Code)
+	}
+}
+
+func TestReceiverDedupesARewrittenDeliveryIDBySignature(t *testing.T) {
+	defer func(old bool) { webhook.DefaultDedupeBySignature = old }(webhook.DefaultDedupeBySignature)
+	secret := []byte("k")
+	sig := gitea.Sign(secret, []byte(pushBody))
+	run := func(on bool) int {
+		webhook.DefaultDedupeBySignature = on
+		s := &sink{}
+		h := &gitea.Receiver{Secret: secret, Sink: s, Log: slog.New(slog.DiscardHandler)}
+		for _, id := range []string{"d1", "d2"} {
+			deliver(h, map[string]string{"X-Gitea-Event": "push", "X-Gitea-Delivery": id, "X-Gitea-Signature": sig}, pushBody)
+		}
+		return len(s.evs)
+	}
+	if n := run(false); n != 2 {
+		t.Fatalf("off: %d events, want 2", n)
+	}
+	if n := run(true); n != 1 {
+		t.Fatalf("on: %d events, want 1", n)
 	}
 }

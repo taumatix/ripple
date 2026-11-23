@@ -130,9 +130,10 @@ func wireReplica(eng *engine.Engine, q *Queue, s *config.Server, log *slog.Logge
 	log.Info("replica", "replica", id, "lease_ttl", s.LeaseTTL.String(), "store", s.Store)
 }
 
-// configureWebhookSpool applies RIPPLE_WEBHOOK_SPOOL to every webhook receiver, which all
+// configureWebhookSpool applies RIPPLE_WEBHOOK_DEDUPE_SIGNATURE and RIPPLE_WEBHOOK_SPOOL to every webhook receiver, which all
 // read their signed bodies through a webhook.Guard that follows webhook.DefaultSpool.
 func configureWebhookSpool(s *config.Server) {
+	webhook.DefaultDedupeBySignature = s.WebhookDedupeSignature
 	webhook.DefaultSpool = webhook.SpoolDisk
 	if s.WebhookSpool == "memory" {
 		webhook.DefaultSpool = webhook.SpoolMemory

@@ -102,6 +102,9 @@ type Server struct {
 	// WebhookSpool is "disk" (default) or "memory": where a signed webhook body over 64 KiB
 	// waits for its signature check. See webhook.SpoolMode.
 	WebhookSpool string
+	// WebhookDedupeSignature (RIPPLE_WEBHOOK_DEDUPE_SIGNATURE, default false) also drops a
+	// webhook whose verified signature was already handled; see webhook.DefaultDedupeBySignature.
+	WebhookDedupeSignature bool
 	// Replica names this process among the replicas sharing the store (empty: a random id)
 	// and LeaseTTL is how long its claims on events and repos last without renewal.
 	Replica  string
@@ -175,6 +178,9 @@ RIPPLE_LEASE_TTL              how long a replica's claim on an event or repo las
                               work waits for another (Go duration, default 30s, minimum 10s)
 RIPPLE_WEBHOOK_SPOOL          disk (default) or memory: where a signed webhook body over 64 KiB waits for its signature check; memory never
                               writes a temp file but a forged body then costs up to 4 x 25 MB of memory instead of that much disk
+RIPPLE_WEBHOOK_DEDUPE_SIGNATURE  true to also drop a webhook whose verified signature was already handled in the last hour, so a captured
+                              body replayed under a new delivery id is dropped; a genuine redelivery of an identical body is dropped too
+                              (default false; in memory per process, every signed host)
 RIPPLE_EVENT_DEAD_RETENTION   how long an event that failed 3 times is kept for "ripple events" before it is purged (default 30d)
 `
 
@@ -345,6 +351,13 @@ func LoadServer(getenv func(string) string) (*Server, error) {
 				errs = append(errs, err)
 			}
 		}
+	}
+	if v := getenv("RIPPLE_WEBHOOK_DEDUPE_SIGNATURE"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			errs = append(errs, errors.New("RIPPLE_WEBHOOK_DEDUPE_SIGNATURE: want true or false"))
+		}
+		s.WebhookDedupeSignature = b
 	}
 	if v := getenv("RIPPLE_ALLOW_AUTOMERGE"); v != "" {
 		b, err := strconv.ParseBool(v)

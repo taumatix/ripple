@@ -41,6 +41,18 @@ func TestServerDropsAClientThatStalls(t *testing.T) {
 	}
 }
 
+func TestWebhookDedupeBySignatureFollowsTheConfiguration(t *testing.T) {
+	defer func(old bool) { webhook.DefaultDedupeBySignature = old }(webhook.DefaultDedupeBySignature)
+	configureWebhookSpool(&config.Server{WebhookDedupeSignature: true})
+	if !webhook.DefaultDedupeBySignature {
+		t.Fatal("on not applied")
+	}
+	configureWebhookSpool(&config.Server{})
+	if webhook.DefaultDedupeBySignature {
+		t.Fatal("off not applied")
+	}
+}
+
 func TestWebhookSpoolFollowsTheConfiguration(t *testing.T) {
 	defer func(old webhook.SpoolMode) { webhook.DefaultSpool = old }(webhook.DefaultSpool)
 	configureWebhookSpool(&config.Server{WebhookSpool: "memory"})

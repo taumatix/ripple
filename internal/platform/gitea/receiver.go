@@ -108,12 +108,13 @@ func (h *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ev.Delivery = delivery
-	if !h.dedupe.Claim(h.now(), delivery) {
+	keys := []string{delivery, webhook.SignatureKey(sig)}
+	if !h.dedupe.Claim(h.now(), keys...) {
 		w.WriteHeader(http.StatusAccepted)
 		return
 	}
 	if err := h.Sink.HandleEvent(r.Context(), ev); err != nil {
-		h.dedupe.Release(delivery)
+		h.dedupe.Release(keys...)
 		h.Log.Error("webhook sink", "event", ev.Kind, "err", err)
 		http.Error(w, "busy", http.StatusServiceUnavailable)
 		return

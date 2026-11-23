@@ -352,3 +352,13 @@ func goCache(t *testing.T) string {
 	}
 	return goCacheDir
 }
+
+// rerun puts a finished job back to pending, due now, as a re-delivered release would.
+func (e *env) rerun(repo, pkg, version string) {
+	e.t.Helper()
+	j := e.job(repo, pkg, version)
+	j.State, j.NotBefore, j.PRURL, j.Reason = model.JobPending, e.clock.Now(), "", ""
+	if err := e.st.UpdateJob(context.Background(), j); err != nil {
+		e.t.Fatal(err)
+	}
+}

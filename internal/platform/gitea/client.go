@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -98,6 +99,7 @@ var (
 	_ platform.AutoMerger  = (*Client)(nil)
 	_ platform.RateLimiter = (*Client)(nil)
 	_ platform.Lister      = (*Client)(nil)
+	_ platform.PRCloser    = (*Client)(nil)
 )
 
 func (c *Client) now() time.Time {
@@ -331,6 +333,114 @@ func (c *Client) RequestAutoMerge(ctx context.Context, repo model.Repo, pr platf
 	_, err = c.do(ctx, repo, http.MethodPost, c.api(fmt.Sprintf("/repos/%s/%s/pulls/%d/merge", o, n, pr.Number)),
 		map[string]any{key: "squash", "merge_when_checks_succeed": true}, nil)
 	return err
+}
+
+// ownTimeline are the timeline entry types ripple's own actions leave on a pull
+// request: labelling it (CreatePR) and scheduling or cancelling the auto-merge
+// (RequestAutoMerge, Gitea cancelling it when checks fail). The names are Gitea's
+// comment types from its source, not from its API documents
+// (docs/vendor/gitea/supersede-excerpts.md); any other type counts as touched.
+var ownTimeline = map[string]bool{"label": true, "pull_scheduled_merge": true, "pull_cancel_scheduled_merge": true}
+
+// CloseUntouchedPR closes pr and comments on it unless a person touched it. Touched
+// means: the head branch is not in this repository; the pull request has other than
+// exactly one commit, or that commit's author or committer is not ripple's identity;
+// it has a review, an issue comment, or a timeline entry other than ownTimeline (which
+// is how Gitea and Forgejo report a rename, "change_title", and a push to the branch
+// after it opened, "pull_push", force-pushes included); or, on Gitea, a non-zero
+// content_version, which an edited description raises (Forgejo reports no such field,
+// so a description edit goes unnoticed there). Every read must succeed and nothing is
+// closed on a failed one. The pull request is closed first and the comment is best
+// effort, so a failed close leaves nothing to repeat on the retry. Verified only
+// against the fake in internal/testutil.
+func (c *Client) CloseUntouchedPR(ctx context.Context, repo model.Repo, pr platform.PR, comment string) (bool, error) {
+	o, n, err := checkRepo(repo)
+	if err != nil {
+		return false, err
+	}
+	if pr.Number <= 0 {
+		return false, errors.New("pull request has no number")
+	}
+	pull := fmt.Sprintf("/repos/%s/%s/pulls/%d", o, n, pr.Number)
+	issue := fmt.Sprintf("/repos/%s/%s/issues/%d", o, n, pr.Number)
+	// swagger repoGetPullRequest: state, head.ref, head.repo.full_name, content_version.
+	var cur struct {
+		State string `json:"state"`
+		Head  struct {
+			Ref  string `json:"ref"`
+			Repo *struct {
+				FullName string `json:"full_name"`
+			} `json:"repo"`
+		} `json:"head"`
+		ContentVersion *int `json:"content_version"`
+	}
+	if _, err := c.do(ctx, repo, http.MethodGet, c.api(pull), nil, &cur); err != nil {
+		return false, err
+	}
+	if cur.State != "open" || cur.Head.Ref != pr.Head || cur.Head.Repo == nil || !strings.EqualFold(cur.Head.Repo.FullName, repo.FullName) {
+		return false, nil
+	}
+	if cur.ContentVersion != nil && *cur.ContentVersion != 0 {
+		return false, nil
+	}
+	// swagger repoGetPullRequestCommits: commit.author.email, commit.committer.email.
+	var commits []struct {
+		Commit struct {
+			Author    struct{ Email string } `json:"author"`
+			Committer struct{ Email string } `json:"committer"`
+		} `json:"commit"`
+	}
+	if _, err := c.do(ctx, repo, http.MethodGet, c.api(pull+"/commits?limit=2&verification=false&files=false"), nil, &commits); err != nil {
+		return false, err
+	}
+	ours := gitws.AuthorEmail(gitws.Options{AuthorEmail: c.AuthorEmail})
+	if len(commits) != 1 || commits[0].Commit.Author.Email != ours || commits[0].Commit.Committer.Email != ours {
+		return false, nil
+	}
+	touched := false
+	// swagger repoListPullReviews and issueGetComments: any entry is a person's.
+	for _, path := range []string{pull + "/reviews", issue + "/comments"} {
+		if err := c.paged(ctx, repo, path, func(raw json.RawMessage) (int, error) {
+			var items []json.RawMessage
+			if err := json.Unmarshal(raw, &items); err != nil {
+				return 0, err
+			}
+			touched = touched || len(items) > 0
+			return len(items), nil
+		}); err != nil {
+			return false, err
+		}
+		if touched {
+			return false, nil
+		}
+	}
+	// swagger issueGetCommentsAndTimeline: TimelineComment.type.
+	if err := c.paged(ctx, repo, issue+"/timeline", func(raw json.RawMessage) (int, error) {
+		var items []struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(raw, &items); err != nil {
+			return 0, err
+		}
+		for _, it := range items {
+			touched = touched || !ownTimeline[it.Type]
+		}
+		return len(items), nil
+	}); err != nil {
+		return false, err
+	}
+	if touched {
+		return false, nil
+	}
+	// swagger repoEditPullRequest: state closed.
+	if _, err := c.do(ctx, repo, http.MethodPatch, c.api(pull), map[string]string{"state": "closed"}, nil); err != nil {
+		return false, err
+	}
+	// swagger issueCreateComment: body.
+	if _, err := c.do(ctx, repo, http.MethodPost, c.api(issue+"/comments"), map[string]string{"body": comment}, nil); err != nil && c.Log != nil {
+		c.Log.Warn("commenting on the closed superseded pull request failed", "repo", repo.FullName, "pr", pr.Number, "err", err)
+	}
+	return true, nil
 }
 
 // ListRepos is every repository the token can push to: not archived, not empty.

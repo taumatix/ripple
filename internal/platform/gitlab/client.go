@@ -141,6 +141,7 @@ type Client struct {
 var (
 	_ platform.Platform    = (*Client)(nil)
 	_ platform.AutoMerger  = (*Client)(nil)
+	_ platform.PRCloser    = (*Client)(nil)
 	_ platform.RateLimiter = (*Client)(nil)
 	_ platform.Lister      = (*Client)(nil)
 )
@@ -341,6 +342,122 @@ func (c *Client) RequestAutoMerge(ctx context.Context, repo model.Repo, pr platf
 	body := map[string]any{"auto_merge": true, "merge_when_pipeline_succeeds": true, "squash": true}
 	_, err := c.doRepo(ctx, repo, http.MethodPut, c.projectURL(repo.FullName, rest), body, nil)
 	return err
+}
+
+// maxNotePages bounds the notes scan; a merge request with more notes than that is
+// busy enough that it is treated as touched.
+const maxNotePages = 5
+
+// ownSystemNotes are the system notes ripple's own actions leave on a merge request:
+// enabling auto-merge (RequestAutoMerge) and GitLab aborting it when checks fail.
+// Wording is from app/services/system_notes/merge_requests_service.rb in GitLab's source
+// (docs/vendor/gitlab/supersede-excerpts.md). Any other system note counts as touched.
+var ownSystemNotes = []string{"enabled an automatic merge", "aborted the automatic merge"}
+
+// CloseUntouchedPR closes pr and comments on it unless a person touched it. Touched
+// means: the source branch is not in this project; the merge request has other than
+// exactly one commit, or that commit's author or committer is not ripple's identity;
+// it has more than one diff version (a later push, force-push included); it has an
+// approval; or its notes hold a note a person wrote, or a system note other than
+// ownSystemNotes, which is how GitLab reports a changed title ("changed title from"),
+// an edited description ("changed the description"), and anything it has no API for.
+// Every read must succeed and nothing is closed on a failed one. Not detected: a
+// changed label, assignee or reviewer (those are resource events). The merge request
+// is closed first and the comment is best effort, so a failed close leaves nothing to
+// repeat on the retry. Verified only against the fake in internal/testutil.
+func (c *Client) CloseUntouchedPR(ctx context.Context, repo model.Repo, pr platform.PR, comment string) (bool, error) {
+	if pr.Number <= 0 {
+		return false, errors.New("merge request has no iid")
+	}
+	mr := c.projectURL(repo.FullName, "/merge_requests/"+strconv.Itoa(pr.Number))
+	get := func(rest string, out any) error {
+		_, err := c.doRepo(ctx, repo, http.MethodGet, mr+rest, nil, out)
+		return err
+	}
+	// api_merge_requests.md "Retrieve a merge request": state, source_branch,
+	// source_project_id, target_project_id.
+	var cur struct {
+		State           string `json:"state"`
+		SourceBranch    string `json:"source_branch"`
+		SourceProjectID int    `json:"source_project_id"`
+		TargetProjectID int    `json:"target_project_id"`
+	}
+	if err := get("", &cur); err != nil {
+		return false, err
+	}
+	if cur.State != "opened" || cur.SourceBranch != pr.Head || cur.SourceProjectID == 0 || cur.SourceProjectID != cur.TargetProjectID {
+		return false, nil
+	}
+	// api_merge_requests.md "Retrieve merge request commits": author_email, committer_email.
+	var commits []struct {
+		AuthorEmail    string `json:"author_email"`
+		CommitterEmail string `json:"committer_email"`
+	}
+	if err := get("/commits?per_page=2", &commits); err != nil {
+		return false, err
+	}
+	ours := gitws.AuthorEmail(gitws.Options{AuthorEmail: c.AuthorEmail})
+	if len(commits) != 1 || commits[0].AuthorEmail != ours || commits[0].CommitterEmail != ours {
+		return false, nil
+	}
+	// api_merge_requests.md "Retrieve merge request diff versions": a push to the source
+	// branch after the merge request opened, a force-push too, adds a version.
+	var versions []json.RawMessage
+	if err := get("/versions?per_page=2", &versions); err != nil {
+		return false, err
+	}
+	if len(versions) != 1 {
+		return false, nil
+	}
+	// merge_request_approvals.md "Retrieve approval state for a merge request": approved_by.
+	var approvals struct {
+		ApprovedBy []json.RawMessage `json:"approved_by"`
+	}
+	if err := get("/approvals", &approvals); err != nil {
+		return false, err
+	}
+	if len(approvals.ApprovedBy) > 0 {
+		return false, nil
+	}
+	// notes.md "List all merge request notes": body and system.
+	for page := 1; ; page++ {
+		if page > maxNotePages {
+			return false, nil
+		}
+		var notes []struct {
+			Body   string `json:"body"`
+			System bool   `json:"system"`
+		}
+		if err := get(fmt.Sprintf("/notes?per_page=%d&page=%d", perPage, page), &notes); err != nil {
+			return false, err
+		}
+		for _, n := range notes {
+			if !n.System || !ownSystemNote(n.Body) {
+				return false, nil
+			}
+		}
+		if len(notes) < perPage {
+			break
+		}
+	}
+	// api_merge_requests.md "Update a merge request": state_event close.
+	if _, err := c.doRepo(ctx, repo, http.MethodPut, mr, map[string]string{"state_event": "close"}, nil); err != nil {
+		return false, err
+	}
+	// notes.md "Create a merge request note": body.
+	if _, err := c.doRepo(ctx, repo, http.MethodPost, mr+"/notes", map[string]string{"body": comment}, nil); err != nil && c.Log != nil {
+		c.Log.Warn("commenting on the closed superseded merge request failed", "repo", repo.FullName, "mr", pr.Number, "err", err)
+	}
+	return true, nil
+}
+
+func ownSystemNote(body string) bool {
+	for _, p := range ownSystemNotes {
+		if strings.HasPrefix(body, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // ListRepos is every project each configured token is a member of, unarchived.

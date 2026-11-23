@@ -27,6 +27,26 @@ One host, `gitea`, serves both. Repositories of this host are stored as `gitea:o
 
 Sources are vendored in `docs/vendor/` (see its README).
 
+## Superseded pull requests
+
+When a newer release replaces ripple's own pull request for an older version of the same module, ripple closes the
+older one (`PATCH .../pulls/{index}` with `state: closed`) and leaves one comment naming the new version, unless
+`close-superseded-pull-requests: false`. The branch is kept. Ripple closes only a pull request nobody else has
+touched, and never on doubt: if any read fails it is left open and the error is logged. Touched means any of:
+
+- the head branch is not in this repository, or the pull request does not have exactly one commit, or that
+  commit's author or committer is not ripple's commit identity;
+- a review or an issue comment;
+- a timeline entry other than ripple's own (a label, a scheduled or cancelled auto-merge). That is how a rename
+  (`change_title`) and a push to the branch after it opened (`pull_push`, a force-push included) show up;
+- on Gitea, a `content_version` other than 0, which an edited description raises.
+
+Not detected: on Forgejo, an edited description (its pull request has no `content_version`); a label added by a person
+(the timeline's `label` entries are taken as ripple's own); an assignee or milestone change is read as a touch. The
+timeline's type names are from Gitea's source, not its API document, so a wrong name makes ripple close less, never
+more. All of this is verified only against the fake; the excerpts it relies on are in
+`docs/vendor/gitea/supersede-excerpts.md` and `docs/vendor/forgejo/supersede-excerpts.md`.
+
 ## Unverified
 
 No real Gitea or Forgejo instance has been tested; the fake in `internal/testutil/gitea.go` is written

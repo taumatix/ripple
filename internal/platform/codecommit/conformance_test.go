@@ -97,7 +97,7 @@ func (f *ccFixture) Push(t *testing.T, hook, path string, files map[string]strin
 func (f *ccFixture) PRs(path string) []platformtest.PR {
 	var out []platformtest.PR
 	for _, p := range f.cc.PRs(path) {
-		out = append(out, platformtest.PR{Head: p.Head, Base: p.Base, Draft: p.Draft})
+		out = append(out, platformtest.PR{Head: p.Head, Base: p.Base, Draft: p.Draft, Closed: p.Status == "CLOSED", Comments: p.Comments})
 	}
 	return out
 }

@@ -40,21 +40,31 @@ type fakeGerrit struct {
 	changes   []*fakeChange
 	rateLimit bool
 	requests  []fakeReq
+	// failAbandon makes the next abandon answer 500; failRead makes any GET whose
+	// path contains it answer 500.
+	failAbandon bool
+	failRead    string
 	// pageCap, when set, caps the page size the server returns, as Gerrit's internal limit does.
 	pageCap int
 }
 
 type fakeChange struct {
-	Number         int
-	Project        string
-	Branch         string
-	ChangeID       string
-	Topic          string
-	WIP            bool
-	Status         string
-	Revisions      []string // commit shas, patch set 1 first
-	Messages       []string
-	MessageTags    []string
+	Number      int
+	Project     string
+	Branch      string
+	ChangeID    string
+	Topic       string
+	WIP         bool
+	Status      string
+	Revisions   []string // commit shas, patch set 1 first
+	Messages    []string
+	MessageTags []string
+	// MessageAuthors parallels Messages: the account that wrote each, "" for the system.
+	MessageAuthors []string
+	Votes          []int
+	InlineComments []string
+	// AbandonMessage is the review message the abandon carried.
+	AbandonMessage string
 	Hashtags       []string
 	WIPPosts       int
 	HashtagsPosted int
@@ -328,11 +338,20 @@ func (f *fakeGerrit) serveAPI(w http.ResponseWriter, r *http.Request) {
 		text(w, 401, "Unauthorized")
 		return
 	}
+	f.mu.Lock()
+	failRead := f.failRead != "" && r.Method == http.MethodGet && strings.Contains(r.URL.Path, f.failRead)
+	f.mu.Unlock()
+	if failRead {
+		text(w, 500, "injected read failure")
+		return
+	}
 	switch {
 	case parts[0] == "changes" && len(parts) == 2 && parts[1] == "" && r.Method == http.MethodGet:
 		f.queryChanges(w, r)
 	case parts[0] == "changes" && len(parts) == 2 && r.Method == http.MethodGet:
-		f.getChange(w, parts[1])
+		f.getChange(w, r, parts[1])
+	case parts[0] == "changes" && len(parts) == 3 && parts[2] == "comments" && r.Method == http.MethodGet:
+		f.listComments(w, parts[1])
 	case parts[0] == "changes" && r.Method == http.MethodPost && len(parts) >= 3:
 		f.postChange(w, parts[1], strings.Join(parts[2:], "/"), body)
 	case parts[0] == "projects" && len(parts) == 2 && parts[1] == "" && r.Method == http.MethodGet:
@@ -448,7 +467,10 @@ func (f *fakeGerrit) page(w http.ResponseWriter, r *http.Request, all []map[stri
 	writeJSON(w, 200, out)
 }
 
-func (f *fakeGerrit) getChange(w http.ResponseWriter, handle string) {
+// getChange is "Get Change" with the o= options ripple asks for: ALL_REVISIONS with
+// ALL_COMMITS (revisions keyed by commit, each with its author and committer),
+// DETAILED_LABELS (every vote) and MESSAGES (rest-api-changes.md, "Query Changes").
+func (f *fakeGerrit) getChange(w http.ResponseWriter, r *http.Request, handle string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	c := f.lookupLocked(handle)
@@ -456,7 +478,67 @@ func (f *fakeGerrit) getChange(w http.ResponseWriter, handle string) {
 		text(w, 404, "Not found: "+handle)
 		return
 	}
-	writeJSON(w, 200, f.changeJSON(c))
+	m := f.changeJSON(c)
+	opts := map[string]bool{}
+	for _, o := range r.URL.Query()["o"] {
+		opts[o] = true
+	}
+	if opts["ALL_REVISIONS"] {
+		revs := map[string]any{}
+		for i, sha := range c.Revisions {
+			ri := map[string]any{"_number": i + 1}
+			if opts["ALL_COMMITS"] {
+				who := strings.Split(strings.TrimSpace(git(f.t, f.bare(c.Project), "log", "-1", "--format=%ae%n%ce%n%s", sha)), "\n")
+				ri["commit"] = map[string]any{"author": map[string]any{"email": who[0]}, "committer": map[string]any{"email": who[1]}, "subject": who[2]}
+			}
+			revs[sha] = ri
+		}
+		m["revisions"] = revs
+		m["current_revision"] = c.Revisions[len(c.Revisions)-1]
+	}
+	if opts["DETAILED_LABELS"] {
+		var all []map[string]any
+		for _, v := range c.Votes {
+			all = append(all, map[string]any{"_account_id": 1000096, "value": v})
+		}
+		m["labels"] = map[string]any{"Code-Review": map[string]any{"all": all}}
+	}
+	if opts["MESSAGES"] {
+		var msgs []map[string]any
+		for i, text := range c.Messages {
+			mi := map[string]any{"id": fmt.Sprintf("m%d", i), "message": text, "_revision_number": 1}
+			if c.MessageTags[i] != "" {
+				mi["tag"] = c.MessageTags[i]
+			}
+			if c.MessageAuthors[i] != "" {
+				mi["author"] = map[string]any{"_account_id": 1000097, "username": c.MessageAuthors[i]}
+			}
+			msgs = append(msgs, mi)
+		}
+		m["messages"] = msgs
+	}
+	writeJSON(w, 200, m)
+}
+
+// listComments is "List Change Comments": a map of file path to CommentInfo list.
+func (f *fakeGerrit) listComments(w http.ResponseWriter, handle string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	c := f.lookupLocked(handle)
+	if c == nil {
+		text(w, 404, "Not found: "+handle)
+		return
+	}
+	out := map[string]any{}
+	for i, msg := range c.InlineComments {
+		out["go.mod"] = append(asList(out["go.mod"]), map[string]any{"patch_set": 1, "id": fmt.Sprintf("c%d", i), "message": msg})
+	}
+	writeJSON(w, 200, out)
+}
+
+func asList(v any) []any {
+	l, _ := v.([]any)
+	return l
 }
 
 func (f *fakeGerrit) postChange(w http.ResponseWriter, handle, action string, body []byte) {
@@ -487,7 +569,35 @@ func (f *fakeGerrit) postChange(w http.ResponseWriter, handle, action string, bo
 		}
 		c.Messages = append(c.Messages, in.Message)
 		c.MessageTags = append(c.MessageTags, in.Tag)
+		c.MessageAuthors = append(c.MessageAuthors, f.User)
 		writeJSON(w, 200, map[string]any{})
+	case "abandon":
+		// rest-api-changes.md, "Abandon Change": 409 when the state does not allow it.
+		if f.failAbandon {
+			f.failAbandon = false
+			text(w, 500, "injected abandon failure")
+			return
+		}
+		if c.Status != "NEW" {
+			text(w, 409, "change is "+strings.ToLower(c.Status))
+			return
+		}
+		var in struct{ Message string }
+		if len(body) > 0 {
+			if err := json.Unmarshal(body, &in); err != nil {
+				text(w, 400, "bad AbandonInput")
+				return
+			}
+		}
+		c.Status = "ABANDONED"
+		c.AbandonMessage = in.Message
+		if in.Message != "" {
+			c.Messages = append(c.Messages, in.Message)
+			c.MessageTags = append(c.MessageTags, "")
+			c.MessageAuthors = append(c.MessageAuthors, f.User)
+		}
+		w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+		writeJSON(w, 200, f.changeJSON(c))
 	case "hashtags":
 		var in struct{ Add, Remove []string }
 		if err := json.Unmarshal(body, &in); err != nil {
@@ -602,4 +712,93 @@ func (f *fakeGerrit) commit(w http.ResponseWriter, project, sha string, files bo
 		res[path] = fi
 	}
 	writeJSON(w, 200, res)
+}
+
+// byTopic is the change of project with topic. Test helpers below act as a person
+// would: through the same state the REST reads report.
+func (f *fakeGerrit) byTopic(project, topic string) *fakeChange {
+	f.ingestLocked()
+	for _, c := range f.changes {
+		if c.Project == project && c.Topic == topic {
+			return c
+		}
+	}
+	f.t.Fatalf("no change with topic %q in %s", topic, project)
+	return nil
+}
+
+// HumanMessage is a review message a person posted.
+func (f *fakeGerrit) HumanMessage(project, topic, msg string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	c := f.byTopic(project, topic)
+	c.Messages = append(c.Messages, msg)
+	c.MessageTags = append(c.MessageTags, "")
+	c.MessageAuthors = append(c.MessageAuthors, "jane")
+}
+
+// SystemMessage is a message Gerrit wrote itself: no author, an autogenerated tag.
+func (f *fakeGerrit) SystemMessage(project, topic, msg string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	c := f.byTopic(project, topic)
+	c.Messages = append(c.Messages, msg)
+	c.MessageTags = append(c.MessageTags, "autogenerated:gerrit:newPatchSet")
+	c.MessageAuthors = append(c.MessageAuthors, "")
+}
+
+func (f *fakeGerrit) Vote(project, topic string, v int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	c := f.byTopic(project, topic)
+	c.Votes = append(c.Votes, v)
+}
+
+func (f *fakeGerrit) InlineComment(project, topic, msg string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	c := f.byTopic(project, topic)
+	c.InlineComments = append(c.InlineComments, msg)
+}
+
+// SetTopic renames the topic, as a person using "Set Topic" does.
+func (f *fakeGerrit) SetTopic(project, topic, to string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.byTopic(project, topic).Topic = to
+}
+
+// PatchSetBy adds a patch set whose commit is the current one's tree, authored and
+// committed by email: a person's edit, or (with ripple's own email) a rewrite that
+// keeps ripple's identity.
+func (f *fakeGerrit) PatchSetBy(project, topic, author, committer string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	c := f.byTopic(project, topic)
+	bare := f.bare(project)
+	last := c.Revisions[len(c.Revisions)-1]
+	cmd := exec.Command("git", "commit-tree", last+"^{tree}", "-p", last+"^", "-m", "edited\n\nChange-Id: "+c.ChangeID)
+	cmd.Dir = bare
+	cmd.Env = append(gitEnv(), "GIT_AUTHOR_NAME=x", "GIT_AUTHOR_EMAIL="+author, "GIT_COMMITTER_NAME=x", "GIT_COMMITTER_EMAIL="+committer)
+	out, err := cmd.Output()
+	if err != nil {
+		f.t.Fatalf("commit-tree: %v", err)
+	}
+	sha := strings.TrimSpace(string(out))
+	c.Revisions = append(c.Revisions, sha)
+	git(f.t, bare, "update-ref", fmt.Sprintf("refs/changes/%02d/%d/%d", c.Number%100, c.Number, len(c.Revisions)), sha)
+}
+
+// Abandon abandons the change out of band, as a person does.
+func (f *fakeGerrit) Abandon(project, topic string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.byTopic(project, topic).Status = "ABANDONED"
+}
+
+func (f *fakeGerrit) FailNextAbandon() { f.mu.Lock(); f.failAbandon = true; f.mu.Unlock() }
+func (f *fakeGerrit) FailReads(pathPart string) {
+	f.mu.Lock()
+	f.failRead = pathPart
+	f.mu.Unlock()
 }

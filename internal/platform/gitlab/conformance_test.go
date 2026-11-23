@@ -77,7 +77,7 @@ func (f *glFixture) Push(t *testing.T, hook, path string, files map[string]strin
 func (f *glFixture) PRs(path string) []platformtest.PR {
 	var out []platformtest.PR
 	for _, p := range f.gl.PRs(path) {
-		out = append(out, platformtest.PR{Head: p.Head, Base: p.Base, Draft: p.Draft, AutoMerge: p.AutoMerge})
+		out = append(out, platformtest.PR{Head: p.Head, Base: p.Base, Draft: p.Draft, AutoMerge: p.AutoMerge, Closed: p.Closed, Comments: p.Comments})
 	}
 	return out
 }

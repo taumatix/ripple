@@ -56,11 +56,15 @@ type BitbucketServer struct {
 	visible []string
 	// Merges records the raw merge request bodies, in order.
 	Merges []string
+	// failures make a request fail: "METHOD path-suffix" -> status (FailRequest).
+	failures map[string]int
 }
 
 type bbPR struct {
 	PR
 	version int
+	// actions is the pull request's activity log, oldest first (RestPullRequestActivity.action).
+	actions []string
 }
 
 var (
@@ -70,7 +74,7 @@ var (
 
 func NewBitbucketServer(t *testing.T) *BitbucketServer {
 	t.Helper()
-	b := &BitbucketServer{t: t, PageMax: 25, root: t.TempDir(), calls: map[string]int{}, lookups: map[string]int{}, prs: map[string][]*bbPR{}}
+	b := &BitbucketServer{t: t, PageMax: 25, root: t.TempDir(), calls: map[string]int{}, lookups: map[string]int{}, prs: map[string][]*bbPR{}, failures: map[string]int{}}
 	srv := httptest.NewServer(b)
 	t.Cleanup(srv.Close)
 	b.APIURL = srv.URL + BitbucketServerContext
@@ -99,6 +103,23 @@ func (b *BitbucketServer) AddRepo(repo string, files map[string]string) {
 func (b *BitbucketServer) Branch(repo, name string) {
 	b.t.Helper()
 	git(b.t, b.bare(repo), "branch", name, "main")
+}
+
+// BranchWithCommit creates branch from main with one empty commit whose author and
+// committer are name <email>: a pull request's branch as its opener left it.
+func (b *BitbucketServer) BranchWithCommit(repo, branch, name, email string) {
+	b.t.Helper()
+	work := b.t.TempDir()
+	git(b.t, work, "clone", "-q", b.bare(repo), "w")
+	w := filepath.Join(work, "w")
+	git(b.t, w, "checkout", "-q", "-b", branch)
+	cmd := exec.Command("git", "commit", "-q", "--allow-empty", "-m", "bump")
+	cmd.Dir = w
+	cmd.Env = append(gitEnv(), "GIT_AUTHOR_NAME="+name, "GIT_AUTHOR_EMAIL="+email, "GIT_COMMITTER_NAME="+name, "GIT_COMMITTER_EMAIL="+email)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		b.t.Fatalf("git commit: %v\n%s", err, out)
+	}
+	git(b.t, w, "push", "-q", "origin", branch)
 }
 
 // Show makes the repositories appear in GET /repos.
@@ -153,6 +174,9 @@ func (b *BitbucketServer) FileAt(repo, branch, path string) (string, bool) {
 	}
 	return string(out), true
 }
+
+// HasBranch reports whether the branch exists in the repository.
+func (b *BitbucketServer) HasBranch(repo, branch string) bool { return b.hasBranch(repo, branch) }
 
 func (b *BitbucketServer) hasBranch(repo, branch string) bool {
 	cmd := exec.Command("git", "rev-parse", "--verify", "--quiet", "refs/heads/"+branch)
@@ -285,7 +309,24 @@ func (b *BitbucketServer) handleRepo(w http.ResponseWriter, r *http.Request, par
 		b.fail(w, http.StatusTooManyRequests, "rate limited")
 		return
 	}
+	b.mu.Lock()
+	for k, status := range b.failures {
+		if m, suffix, _ := strings.Cut(k, " "); m == r.Method && strings.HasSuffix(r.URL.Path, suffix) {
+			b.mu.Unlock()
+			b.fail(w, status, "injected failure")
+			return
+		}
+	}
+	b.mu.Unlock()
 	switch {
+	case rest[0] == "pull-requests" && len(rest) == 3 && rest[2] == "decline" && r.Method == http.MethodPost:
+		b.decline(w, r, repo, rest[1])
+	case rest[0] == "pull-requests" && len(rest) == 3 && rest[2] == "comments" && r.Method == http.MethodPost:
+		b.comment(w, r, repo, rest[1])
+	case rest[0] == "pull-requests" && len(rest) == 3 && rest[2] == "activities" && r.Method == http.MethodGet:
+		b.activities(w, r, repo, rest[1])
+	case rest[0] == "pull-requests" && len(rest) == 3 && rest[2] == "commits" && r.Method == http.MethodGet:
+		b.commits(w, r, repo, rest[1])
 	case rest[0] == "pull-requests" && len(rest) == 1:
 		b.pulls(w, r, repo)
 	case rest[0] == "pull-requests" && len(rest) == 2 && r.Method == http.MethodGet:
@@ -301,6 +342,13 @@ func (b *BitbucketServer) handleRepo(w http.ResponseWriter, r *http.Request, par
 	}
 }
 
+func (p *bbPR) state() string {
+	if p.Closed {
+		return "DECLINED"
+	}
+	return "OPEN"
+}
+
 func (b *BitbucketServer) prURL(repo string, p *bbPR) string {
 	key, slug, _ := strings.Cut(repo, "/")
 	return fmt.Sprintf("https://bitbucket.example/projects/%s/repos/%s/pull-requests/%d", key, slug, p.Number)
@@ -312,8 +360,8 @@ func (b *BitbucketServer) prJSON(repo string, p *bbPR) map[string]any {
 		return map[string]any{"id": "refs/heads/" + branch, "displayId": branch, "repository": map[string]any{
 			"slug": slug, "project": map[string]any{"key": key}}}
 	}
-	return map[string]any{"id": p.Number, "version": p.version, "title": p.Title, "description": p.Body, "state": "OPEN", "open": true,
-		"closed": false, "draft": p.Draft, "fromRef": ref(p.Head), "toRef": ref(p.Base),
+	return map[string]any{"id": p.Number, "version": p.version, "title": p.Title, "description": p.Body, "state": p.state(), "open": !p.Closed,
+		"closed": p.Closed, "draft": p.Draft, "fromRef": ref(p.Head), "toRef": ref(p.Base),
 		"links": map[string]any{"self": []map[string]any{{"href": b.prURL(repo, p)}}}}
 }
 
@@ -324,7 +372,12 @@ func (b *BitbucketServer) pulls(w http.ResponseWriter, r *http.Request, repo str
 			b.t.Errorf("pull requests listed without state=OPEN: %s", r.URL.RawQuery)
 		}
 		b.mu.Lock()
-		all := append([]*bbPR(nil), b.prs[repo]...)
+		var all []*bbPR
+		for _, p := range b.prs[repo] {
+			if !p.Closed {
+				all = append(all, p)
+			}
+		}
 		lo, hi, env := b.page(r, len(all))
 		values := []map[string]any{}
 		for _, p := range all[lo:hi] {
@@ -390,13 +443,13 @@ func (b *BitbucketServer) create(w http.ResponseWriter, r *http.Request, repo st
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	for _, p := range b.prs[repo] {
-		if p.Head == heads["fromRef"] && p.Base == heads["toRef"] {
+		if !p.Closed && p.Head == heads["fromRef"] && p.Base == heads["toRef"] {
 			b.fail(w, http.StatusConflict, "A pull request between the two branches already exists")
 			return
 		}
 	}
 	p := &bbPR{PR: PR{Repo: repo, Head: heads["fromRef"], Base: heads["toRef"], Title: in.Title, Body: in.Description,
-		Number: len(b.prs[repo]) + 1, Draft: in.Draft != nil && *in.Draft}}
+		Number: len(b.prs[repo]) + 1, Draft: in.Draft != nil && *in.Draft}, actions: []string{"OPENED"}}
 	b.prs[repo] = append(b.prs[repo], p)
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(b.prJSON(repo, p))
@@ -483,4 +536,175 @@ func (b *BitbucketServer) changes(w http.ResponseWriter, r *http.Request, repo s
 	}
 	env["values"] = values
 	_ = json.NewEncoder(w).Encode(env)
+}
+
+// FailRequest makes every request "METHOD ...suffix" answer status.
+func (b *BitbucketServer) FailRequest(method, pathSuffix string, status int) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.failures[method+" "+pathSuffix] = status
+}
+
+// decline is "Decline pull request": the version query must be the current one and
+// the pull request OPEN, else 409 (docs: "not OPEN or has been updated since the
+// version specified"). The branch is kept.
+func (b *BitbucketServer) decline(w http.ResponseWriter, r *http.Request, repo, id string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	p := b.find(repo, id)
+	if p == nil {
+		b.fail(w, http.StatusNotFound, "no pull request %s", id)
+		return
+	}
+	v, err := strconv.Atoi(r.URL.Query().Get("version"))
+	if err != nil {
+		b.t.Errorf("decline without a version query: %s", r.URL.RawQuery)
+		b.fail(w, http.StatusBadRequest, "version is required")
+		return
+	}
+	if p.Closed || v != p.version {
+		b.fail(w, http.StatusConflict, "The pull request is not OPEN or the version is out of date")
+		return
+	}
+	p.Closed = true
+	p.version++
+	p.actions = append(p.actions, "DECLINED")
+	_ = json.NewEncoder(w).Encode(b.prJSON(repo, p))
+}
+
+// comment is "Add pull request comment" for a general comment: {"text": "..."}.
+func (b *BitbucketServer) comment(w http.ResponseWriter, r *http.Request, repo, id string) {
+	var in struct {
+		Text string `json:"text"`
+	}
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&in); err != nil || in.Text == "" {
+		b.t.Errorf("comment body must be {\"text\": ...}: %v", err)
+		b.fail(w, http.StatusBadRequest, "bad comment")
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	p := b.find(repo, id)
+	if p == nil {
+		b.fail(w, http.StatusNotFound, "no pull request %s", id)
+		return
+	}
+	p.Comments = append(p.Comments, in.Text)
+	p.actions = append(p.actions, "COMMENTED")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(map[string]any{"id": len(p.Comments), "text": in.Text})
+}
+
+func (b *BitbucketServer) activities(w http.ResponseWriter, r *http.Request, repo, id string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	p := b.find(repo, id)
+	if p == nil {
+		b.fail(w, http.StatusNotFound, "no pull request %s", id)
+		return
+	}
+	lo, hi, env := b.page(r, len(p.actions))
+	values := []map[string]any{}
+	for i, a := range p.actions[lo:hi] {
+		values = append(values, map[string]any{"id": lo + i + 1, "action": a, "createdDate": 1700000000000 + i,
+			"user": map[string]any{"name": "someone", "slug": "someone", "displayName": "Someone", "type": "NORMAL"}})
+	}
+	env["values"] = values
+	_ = json.NewEncoder(w).Encode(env)
+}
+
+// commits is "Get pull request commits": RestCommit with author and committer.
+func (b *BitbucketServer) commits(w http.ResponseWriter, r *http.Request, repo, id string) {
+	b.mu.Lock()
+	p := b.find(repo, id)
+	if p == nil {
+		b.mu.Unlock()
+		b.fail(w, http.StatusNotFound, "no pull request %s", id)
+		return
+	}
+	head, base := p.Head, p.Base
+	b.mu.Unlock()
+	cmd := exec.Command("git", "log", "--format=%H%x09%an%x09%ae%x09%cn%x09%ce", base+".."+head)
+	cmd.Dir = b.bare(repo)
+	cmd.Env = gitEnv()
+	out, _ := cmd.Output()
+	var all []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		f := strings.Split(line, "\t")
+		if len(f) != 5 {
+			continue
+		}
+		all = append(all, map[string]any{"id": f[0], "displayId": f[0][:11],
+			"author":    map[string]any{"name": f[1], "emailAddress": f[2]},
+			"committer": map[string]any{"name": f[3], "emailAddress": f[4]}})
+	}
+	lo, hi, env := b.page(r, len(all))
+	env["values"] = all[lo:hi]
+	_ = json.NewEncoder(w).Encode(env)
+}
+
+// The helpers below are a person touching a pull request, each as the activity log
+// would show it (RestPullRequestActivity.action).
+
+// HumanComment adds a general comment.
+func (b *BitbucketServer) HumanComment(repo string, n int, text string) {
+	b.touch(repo, n, "COMMENTED", func(p *bbPR) { p.Comments = append(p.Comments, text) })
+}
+
+// Approve records an approval.
+func (b *BitbucketServer) Approve(repo string, n int) {
+	b.touch(repo, n, "APPROVED", func(p *bbPR) { p.Reviews++ })
+}
+
+// Rename changes the title.
+func (b *BitbucketServer) Rename(repo string, n int, title string) {
+	b.touch(repo, n, "UPDATED", func(p *bbPR) { p.Title, p.Renamed, p.version = title, true, p.version+1 })
+}
+
+// EditDescription changes the description.
+func (b *BitbucketServer) EditDescription(repo string, n int, desc string) {
+	b.touch(repo, n, "UPDATED", func(p *bbPR) { p.Body, p.BodyEdited, p.version = desc, true, p.version+1 })
+}
+
+// PushCommit adds a commit by a person to the pull request's branch.
+func (b *BitbucketServer) PushCommit(repo string, n int) { b.push(repo, n, false) }
+
+// ForcePush rewrites the branch's commit, keeping its author and committer.
+func (b *BitbucketServer) ForcePush(repo string, n int) { b.push(repo, n, true) }
+
+func (b *BitbucketServer) push(repo string, n int, rewrite bool) {
+	b.t.Helper()
+	b.mu.Lock()
+	p := b.find(repo, strconv.Itoa(n))
+	head := p.Head
+	b.mu.Unlock()
+	work := b.t.TempDir()
+	git(b.t, work, "clone", "-q", "-b", head, b.bare(repo), "w")
+	w := filepath.Join(work, "w")
+	if rewrite {
+		git(b.t, w, "commit", "-q", "--amend", "--allow-empty", "-m", "rewritten")
+		git(b.t, w, "push", "-q", "--force", "origin", head)
+	} else {
+		cmd := exec.Command("git", "commit", "-q", "--allow-empty", "-m", "by a person")
+		cmd.Dir = w
+		cmd.Env = append(gitEnv(), "GIT_AUTHOR_NAME=Pat", "GIT_AUTHOR_EMAIL=pat@example.com", "GIT_COMMITTER_NAME=Pat", "GIT_COMMITTER_EMAIL=pat@example.com")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			b.t.Fatalf("git commit: %v\n%s", err, out)
+		}
+		git(b.t, w, "push", "-q", "origin", head)
+	}
+	b.touch(repo, n, "RESCOPED", func(p *bbPR) { p.ForcePushed, p.version = rewrite, p.version+1 })
+}
+
+func (b *BitbucketServer) touch(repo string, n int, action string, f func(*bbPR)) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	p := b.find(repo, strconv.Itoa(n))
+	if p == nil {
+		b.t.Fatalf("no pull request %s#%d", repo, n)
+	}
+	f(p)
+	p.actions = append(p.actions, action)
 }

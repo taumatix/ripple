@@ -45,3 +45,13 @@ Not confirmed against a real organisation: that a repository name is accepted wh
 that `autoCompleteSetBy.id` may be the pull request creator's id; the labels endpoint; the commit changes lookup (merge commits, paging); the service hook's
 delivery headers; page-size behaviour; and the fake in `internal/testutil/azuredevops.go` itself, which is
 written from the docs, not recorded. Entra ID bearer tokens are not supported (ROADMAP).
+
+## Superseded pull requests
+
+Not implemented: when a newer release's PR replaces ripple's earlier one on Azure DevOps, the old PR stays
+open. Abandoning it is possible (`PATCH .../pullrequests/{id}` with `status: abandoned`) and so are the reads
+for commits, threads (`commentType` separates people from `system`) and iterations (`forcePush`), but the
+API gives no way to tell that a person renamed the PR or edited its description: the pull request holds
+only the current title and description, with no edit history or original to compare against. Closing without
+that check could discard a person's edits, and ripple never closes on doubt. If a future API version exposes
+the edit history, this can be added; see `docs/vendor/azuredevops/pullrequests-supersede-excerpt.md`.

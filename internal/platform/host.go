@@ -63,11 +63,14 @@ var ErrNoClosePR = errors.New("host cannot close pull requests")
 // because what counts as a human touching it (commits, review comments, a rename)
 // is host-specific. A host that cannot answer that reliably does not implement it.
 type PRCloser interface {
-	// CloseUntouchedPR leaves comment on pr and closes it, but only when nobody but
+	// CloseUntouchedPR closes pr and leaves comment on it, but only when nobody but
 	// ripple has touched it: every commit on its branch is ripple's own, and it has
-	// no reviews, comments or rename. It returns false, nil, having changed nothing,
-	// when someone has. It never closes on doubt: any failed check is an error and
-	// leaves the PR open. It does not delete the branch.
+	// no reviews, comments, rename, edited description or rewritten branch that the
+	// host can report. It returns false, nil, having changed nothing, when someone
+	// has, or when pr is no longer open or its branch is no longer the one given. It
+	// never closes on doubt: any failed check is an error and leaves the PR open. It
+	// closes before it comments and a failed comment is only logged, so a retry
+	// after a failed close never repeats a comment. It does not delete the branch.
 	CloseUntouchedPR(ctx context.Context, repo model.Repo, pr PR, comment string) (bool, error)
 }
 

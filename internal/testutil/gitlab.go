@@ -24,6 +24,18 @@ type GitLabPR struct {
 	AutoMerge bool
 	// MergeBody is the body of the merge request, for tests that assert its fields.
 	MergeBody map[string]any
+	// Closed is set by a state_event=close update; Comments are the user notes on the
+	// merge request, ripple's own included.
+	Closed   bool
+	Comments []string
+	// Approvals counts people who approved; Renamed, BodyEdited and ForcePushed record
+	// what a person did, which GitLab reports only as system notes and diff versions.
+	Approvals                        int
+	Renamed, BodyEdited, ForcePushed bool
+	// Pushed counts diff versions beyond the first (a push after the merge request opened).
+	Pushed int
+	// SystemNotes are further system notes, worded as the test says.
+	SystemNotes []string
 }
 
 // GitLab is a fake GitLab: the REST API v4 pieces ripple uses over HTTP (merge
@@ -48,6 +60,12 @@ type GitLab struct {
 	requests []string
 	// Auths records the Authorization header of every API request.
 	auths []string
+
+	// FailClose makes closing a merge request (PUT with state_event) answer 500;
+	// FailNote does the same for creating a note; FailRead makes every GET whose path
+	// ends with it answer 500.
+	FailClose, FailNote bool
+	FailRead            string
 }
 
 func NewGitLab(t *testing.T) *GitLab {
@@ -129,6 +147,9 @@ func (g *GitLab) FileAt(path, branch, file string) (string, bool) {
 	}
 	return string(out), true
 }
+
+// HasBranch reports whether the bare repository of path has branch.
+func (g *GitLab) HasBranch(path, branch string) bool { return g.hasBranch(path, branch) }
 
 func (g *GitLab) hasBranch(path, branch string) bool {
 	cmd := exec.Command("git", "rev-parse", "--verify", "--quiet", "refs/heads/"+branch)
@@ -230,6 +251,8 @@ func (g *GitLab) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		g.mergeRequests(w, r, project)
 	case len(segs) == 7 && segs[4] == "merge_requests" && segs[6] == "merge" && r.Method == http.MethodPut:
 		g.merge(w, r, project, segs[5])
+	case len(segs) >= 6 && segs[4] == "merge_requests" && len(segs) <= 7:
+		g.mergeRequest(w, r, project, segs[5], strings.Join(segs[6:], "/"))
 	default:
 		g.fail(w, http.StatusNotFound, "404 Not Found")
 	}
@@ -266,8 +289,12 @@ func (g *GitLab) listProjects(w http.ResponseWriter, r *http.Request, scope stri
 }
 
 func (g *GitLab) mrJSON(project string, p *GitLabPR) map[string]any {
-	return map[string]any{"iid": p.IID, "id": 1000 + p.IID, "state": "opened", "title": p.Title,
-		"source_branch": p.Head, "target_branch": p.Base,
+	state := "opened"
+	if p.Closed {
+		state = "closed"
+	}
+	return map[string]any{"iid": p.IID, "id": 1000 + p.IID, "state": state, "title": p.Title,
+		"source_branch": p.Head, "target_branch": p.Base, "source_project_id": 7, "target_project_id": 7,
 		"web_url": "https://gitlab.example/" + project + "/-/merge_requests/" + strconv.Itoa(p.IID)}
 }
 
@@ -288,7 +315,13 @@ func (g *GitLab) mergeRequests(w http.ResponseWriter, r *http.Request, project s
 		}
 		g.mu.Lock()
 		out := []map[string]any{}
-		for i, p := range g.prs[project] {
+		var open []*GitLabPR
+		for _, p := range g.prs[project] {
+			if !p.Closed {
+				open = append(open, p)
+			}
+		}
+		for i, p := range open {
 			if i >= (page-1)*per && i < page*per {
 				out = append(out, g.mrJSON(project, p))
 			}
@@ -346,4 +379,192 @@ func (g *GitLab) merge(w http.ResponseWriter, r *http.Request, project, iid stri
 		}
 	}
 	g.fail(w, http.StatusNotFound, "404 Merge Request Not Found")
+}
+
+// note is a note as GitLab's notes API shapes it.
+func note(id int, body string, system bool) map[string]any {
+	return map[string]any{"id": id, "body": body, "system": system, "noteable_type": "MergeRequest"}
+}
+
+// notes is every note on p, oldest first: GitLab records what a person changed as
+// system notes, with the wording of app/services/system_notes in GitLab's source.
+func (p *GitLabPR) notes() []map[string]any {
+	var out []map[string]any
+	add := func(body string, system bool) { out = append(out, note(len(out)+1, body, system)) }
+	if p.AutoMerge {
+		add("enabled an automatic merge when all merge checks for abc123 pass", true)
+	}
+	if p.Renamed {
+		add("<p>changed title from <code class=\"idiff\">a</code> to <code class=\"idiff\">b</code></p>", true)
+	}
+	if p.BodyEdited {
+		add("changed the description", true)
+	}
+	for i := 0; i < p.Approvals; i++ {
+		add("approved this merge request", true)
+	}
+	for i := 0; i < p.Pushed; i++ {
+		add("added 1 commit", true)
+	}
+	for _, n := range p.SystemNotes {
+		add(n, true)
+	}
+	for _, c := range p.Comments {
+		add(c, false)
+	}
+	return out
+}
+
+func (g *GitLab) mergeRequest(w http.ResponseWriter, r *http.Request, project, iid, what string) {
+	n, err := strconv.Atoi(iid)
+	if err != nil {
+		g.fail(w, http.StatusBadRequest, "bad merge request iid")
+		return
+	}
+	if r.Method == http.MethodGet && g.FailRead != "" && strings.HasSuffix(r.URL.Path, g.FailRead) {
+		g.fail(w, http.StatusInternalServerError, "injected read failure")
+		return
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	var pr *GitLabPR
+	for _, p := range g.prs[project] {
+		if p.IID == n {
+			pr = p
+		}
+	}
+	if pr == nil {
+		g.fail(w, http.StatusNotFound, "404 Merge Request Not Found")
+		return
+	}
+	page := func(items []map[string]any) {
+		per, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
+		pg, _ := strconv.Atoi(r.URL.Query().Get("page"))
+		if per <= 0 || per > 100 {
+			per = 20
+		}
+		if pg <= 0 {
+			pg = 1
+		}
+		out := []map[string]any{}
+		for i := (pg - 1) * per; i < len(items) && i < pg*per; i++ {
+			out = append(out, items[i])
+		}
+		_ = json.NewEncoder(w).Encode(out)
+	}
+	switch {
+	case what == "" && r.Method == http.MethodGet:
+		_ = json.NewEncoder(w).Encode(g.mrJSON(project, pr))
+	case what == "" && r.Method == http.MethodPut:
+		var in map[string]any
+		if json.NewDecoder(r.Body).Decode(&in) != nil || in["state_event"] != "close" || len(in) != 1 {
+			g.fail(w, http.StatusBadRequest, "only state_event=close is supported")
+			return
+		}
+		if g.FailClose {
+			g.fail(w, http.StatusInternalServerError, "injected close failure")
+			return
+		}
+		pr.Closed = true
+		_ = json.NewEncoder(w).Encode(g.mrJSON(project, pr))
+	case what == "notes" && r.Method == http.MethodGet:
+		page(pr.notes())
+	case what == "notes" && r.Method == http.MethodPost:
+		var in struct{ Body string }
+		if json.NewDecoder(r.Body).Decode(&in) != nil || in.Body == "" {
+			g.fail(w, http.StatusBadRequest, "body is missing")
+			return
+		}
+		if g.FailNote {
+			g.fail(w, http.StatusInternalServerError, "injected note failure")
+			return
+		}
+		pr.Comments = append(pr.Comments, in.Body)
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(note(len(pr.Comments), in.Body, false))
+	case what == "commits" && r.Method == http.MethodGet:
+		var items []map[string]any
+		for _, c := range branchLog(g.bare(project), pr.Base, pr.Head) {
+			items = append(items, map[string]any{"author_name": c.AuthorName, "author_email": c.AuthorEmail,
+				"committer_name": c.CommitterName, "committer_email": c.CommitterEmail})
+		}
+		page(items)
+	case what == "versions" && r.Method == http.MethodGet:
+		items := make([]map[string]any, 1+pr.Pushed)
+		for i := range items {
+			items[i] = map[string]any{"id": 100 + i, "merge_request_id": pr.IID}
+		}
+		page(items)
+	case what == "approvals" && r.Method == http.MethodGet:
+		by := make([]map[string]any, pr.Approvals)
+		for i := range by {
+			by[i] = map[string]any{"user": map[string]any{"id": i + 1}}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"approved": pr.Approvals > 0, "approved_by": by})
+	default:
+		g.fail(w, http.StatusNotFound, "404 Not Found")
+	}
+}
+
+func (g *GitLab) mutate(path string, iid int, f func(*GitLabPR)) {
+	g.t.Helper()
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	for _, p := range g.prs[path] {
+		if p.IID == iid {
+			f(p)
+			return
+		}
+	}
+	g.t.Fatalf("no merge request !%d in %s", iid, path)
+}
+
+// HumanComment adds a note to a merge request, as a person would.
+func (g *GitLab) HumanComment(path string, iid int, body string) {
+	g.mutate(path, iid, func(p *GitLabPR) { p.Comments = append(p.Comments, body) })
+}
+
+// SystemNote adds a system note with body, for what GitLab would record that ripple
+// has no name for.
+func (g *GitLab) SystemNote(path string, iid int, body string) {
+	g.mutate(path, iid, func(p *GitLabPR) { p.SystemNotes = append(p.SystemNotes, body) })
+}
+
+// HumanApprove records an approval.
+func (g *GitLab) HumanApprove(path string, iid int) {
+	g.mutate(path, iid, func(p *GitLabPR) { p.Approvals++ })
+}
+
+// HumanRename changes the title; GitLab records it as a system note.
+func (g *GitLab) HumanRename(path string, iid int, title string) {
+	g.mutate(path, iid, func(p *GitLabPR) { p.Title, p.Renamed = title, true })
+}
+
+// HumanEditBody records a description edit.
+func (g *GitLab) HumanEditBody(path string, iid int) {
+	g.mutate(path, iid, func(p *GitLabPR) { p.BodyEdited = true })
+}
+
+// HumanCommitOnBranch pushes one more commit by a person onto the merge request's branch.
+func (g *GitLab) HumanCommitOnBranch(path string, iid int) {
+	g.t.Helper()
+	var branch string
+	g.mutate(path, iid, func(p *GitLabPR) { branch = p.Head; p.Pushed++ })
+	humanCommit(g.t, g.bare(path), branch)
+}
+
+// HumanForcePush rewrites the branch's commit keeping its author and committer, so
+// only the new diff version tells it from ripple's own push.
+func (g *GitLab) HumanForcePush(path string, iid int) {
+	g.t.Helper()
+	var branch string
+	g.mutate(path, iid, func(p *GitLabPR) { branch = p.Head; p.Pushed++; p.ForcePushed = true })
+	forcePushAmended(g.t, g.bare(path), branch)
+}
+
+// PushBranch creates branch off main with one commit by the given identity, as ripple's
+// engine would have, and opens nothing.
+func (g *GitLab) PushBranch(path, branch, authorEmail string) {
+	g.t.Helper()
+	pushBranchCommit(g.t, g.bare(path), branch, authorEmail)
 }

@@ -51,3 +51,23 @@ Written from vendored docs (`docs/vendor/bitbucket-cloud/`) against a fake; no r
 Unconfirmed: the 429 response headers, the 202 and Location of a queued merge, queue state names beyond
 those documented, whether `x-token-auth` works with API tokens for git, whether payload `commits` lists
 are always newest first, and the diffstat of merge commits.
+
+## Superseded pull requests
+
+When a newer release's PR replaces ripple's own earlier one, the old PR is declined
+(`POST .../pullrequests/{id}/decline`) and a comment naming the new version is added, the decline first
+so a retry never repeats the comment. The branch is not deleted. Setting `close-superseded-pull-requests: false`
+turns it off.
+
+It is declined only when nobody but ripple touched it. Touched means any of: the source branch is in
+another repository; the PR does not have exactly one commit whose `author.raw` is ripple's identity; any
+comment or task (`comment_count`, `task_count`, the comments list); any activity-log entry other than an
+`update` (a comment, an approval, a request for changes); or an `update` that records a title,
+description or source commit other than the current ones (a rename, an edited description, an extra or
+rewritten commit). A failed read is an error and declines nothing; more than 250 activity entries counts
+as touched.
+
+Not detected: a reviewer added without activity, a force push the activity log does not record, and the
+commit's committer (the API shows only the author). Everything here is verified only against the fake
+(`internal/platform/bitbucket/fake_test.go`); the assumptions are listed in
+`docs/vendor/bitbucket-cloud/pullrequests-supersede-excerpt.md`.

@@ -74,6 +74,32 @@ a quiet repository; a wrong setup is reported by the missing subscription confir
 - **Throttling** is `ThrottlingException` with HTTP 400 and no `Retry-After`, so ripple holds a
   region back for a fixed minute from the clock.
 
+## Superseded pull requests
+
+When a newer ripple pull request replaces a stale one, ripple closes the stale one and comments
+on it (`close-superseded-pull-requests`, default on), only when it knows nobody touched it. It
+calls `UpdatePullRequestStatus` to `CLOSED`, then `PostCommentForPullRequest`. The comment is best
+effort: if it fails the pull request stays closed and a warning is logged. The branch is not
+deleted.
+
+**Counted as touched** (the pull request is left open): a comment of any kind, deleted or not
+(`GetCommentsForPullRequest`); any pull request event other than created, source branch updated and
+merge state changed, so a status change, an approval, or an approval rule created, edited, deleted
+or overridden, and any event type ripple does not know (`DescribePullRequestEvents`); any commit
+from the source tip back to the merge base whose author or committer email is not ripple's, or
+that is a merge (`GetCommit`); a branch more than 50 commits long, or with none; and a pull
+request that is no longer open or whose source branch is not the one ripple recorded. A read
+that fails is an error and nothing is closed.
+
+**Not detected**: an edited title or description (no CodeCommit API reports either); a person
+who commits under ripple's own author and committer email; a person who only viewed it; and a change made between ripple's last read and the close,
+which `UpdatePullRequestStatus` does not guard against. Events are not filtered by actor, because
+the ARN ripple acts as is not known to it.
+
+All of this is verified only against the fake in `internal/testutil/codecommit.go`. Unconfirmed
+against AWS: that `PostCommentForPullRequest` is accepted on a closed pull request, and that the
+event types above are the only ones the service emits for system activity.
+
 ## Limitations
 
 One AWS account per ripple; a second account needs a second instance.

@@ -79,6 +79,7 @@ const (
 	dockerPollName    = "docker"
 	npmPollName       = "npm"
 	cargoPollName     = "cargo"
+	pipPollName       = "pip"
 )
 
 // PollElected is Poll for replicas sharing a store; see Watcher.PollElected.
@@ -135,3 +136,14 @@ func (w *CargoWatcher) Elected() bool { return w.elect.isHeld() }
 
 // StepDown gives the claim up; call it when stopping.
 func (w *CargoWatcher) StepDown(ctx context.Context) { w.elect.stepDown(ctx, w.Engine) }
+
+// PollElected is Poll for replicas sharing a store; see Watcher.PollElected.
+func (w *PipWatcher) PollElected(ctx context.Context, ttl time.Duration) (int, bool, error) {
+	return w.elect.poll(ctx, w.Engine, feedLease(pipPollName), ttl, w.Poll)
+}
+
+// Elected reports whether this replica held the claim at its last PollElected.
+func (w *PipWatcher) Elected() bool { return w.elect.isHeld() }
+
+// StepDown gives the claim up; call it when stopping.
+func (w *PipWatcher) StepDown(ctx context.Context) { w.elect.stepDown(ctx, w.Engine) }

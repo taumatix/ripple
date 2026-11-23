@@ -15,6 +15,7 @@ import (
 	"github.com/taumatix/ripple/internal/engine"
 	"github.com/taumatix/ripple/internal/model"
 	"github.com/taumatix/ripple/internal/npmreg"
+	"github.com/taumatix/ripple/internal/pypi"
 	"github.com/taumatix/ripple/internal/store"
 )
 
@@ -37,7 +38,7 @@ func (s *sourceStore) hits(k string) int {
 
 func (s *sourceStore) GetCursor(ctx context.Context, k string) (string, error) {
 	switch k {
-	case "npm:packages", "docker:packages", "github-tags:packages", "cargo:packages":
+	case "npm:packages", "docker:packages", "github-tags:packages", "cargo:packages", "pip:packages":
 		s.hit(k)
 	}
 	return s.Store.GetCursor(ctx, k)
@@ -75,25 +76,30 @@ func (noNpm) Packument(context.Context, string) (npmreg.Packument, error) {
 	return npmreg.Packument{}, npmreg.ErrNotFound
 }
 
+type noPyPI struct{}
+
+func (noPyPI) Project(context.Context, string) (pypi.Project, error) { return pypi.Project{}, nil }
+
 type noCrates struct{}
 
 func (noCrates) Crate(context.Context, string) (cratesindex.Crate, error) {
 	return cratesindex.Crate{}, nil
 }
 
-var allSources = []string{"npm:packages", "docker:packages", "github-tags:packages", "cargo:packages", model.DatasourceGoToolchain}
+var allSources = []string{"npm:packages", "docker:packages", "github-tags:packages", "cargo:packages", "pip:packages", model.DatasourceGoToolchain}
 
 func sourcesApp(base store.Store, id string) (*App, *sourceStore) {
 	st := &sourceStore{Store: base, rt: base.(store.ReplicaTable), n: map[string]int{}}
 	eng := &engine.Engine{Store: st, Replica: id, LeaseTTL: time.Second,
-		Registry: noImages{}, Npm: noNpm{}, Crates: noCrates{}}
+		Registry: noImages{}, Npm: noNpm{}, Crates: noCrates{}, PyPI: noPyPI{}}
 	return &App{Engine: eng, Log: slog.New(slog.DiscardHandler), PollEvery: 50 * time.Millisecond,
 		Watcher:   &engine.Watcher{Engine: eng, Feed: &fetchCounter{}},
 		Toolchain: &engine.ToolchainWatcher{Engine: eng, Source: noToolchain{}},
 		Actions:   &engine.ActionsWatcher{Engine: eng},
 		Docker:    &engine.DockerWatcher{Engine: eng},
 		Npm:       &engine.NpmWatcher{Engine: eng},
-		Cargo:     &engine.CargoWatcher{Engine: eng}}, st
+		Cargo:     &engine.CargoWatcher{Engine: eng},
+		Pip:       &engine.PipWatcher{Engine: eng}}, st
 }
 
 func (a *App) pollAllSources(ctx context.Context) {
@@ -102,6 +108,7 @@ func (a *App) pollAllSources(ctx context.Context) {
 	a.pollDocker(ctx)
 	a.pollNpm(ctx)
 	a.pollCargo(ctx)
+	a.pollPip(ctx)
 }
 
 func replicaJSON(t *testing.T, a *App) (out struct {
@@ -139,7 +146,7 @@ func TestOnlyOneReplicaPollsEachSourceAndTheNextTakesOver(t *testing.T) {
 	}
 	a.beat(ctx)
 	b.beat(ctx)
-	want := []string{"cargo", "docker", "feed", "github-actions", "go-toolchain", "npm"}
+	want := []string{"cargo", "docker", "feed", "github-actions", "go-toolchain", "npm", "pip"}
 	if got := replicaJSON(t, b); len(got.Pollers) != 0 || got.FeedPoller || got.Fleet != 1 {
 		t.Fatalf("b reports %+v, want no pollers and one in the fleet", got)
 	}
@@ -221,7 +228,7 @@ func TestRunElectsSourcePollersOverHTTP(t *testing.T) {
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		pa, pb := pollers(a), pollers(b)
-		if len(pa)+len(pb) == 6 && len(unionOf(pa, pb)) == 6 {
+		if len(pa)+len(pb) == 7 && len(unionOf(pa, pb)) == 7 {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -232,9 +239,9 @@ func TestRunElectsSourcePollersOverHTTP(t *testing.T) {
 	a.stop()
 	<-a.done
 	deadline = time.Now().Add(5 * time.Second)
-	for len(pollers(b)) != 6 {
+	for len(pollers(b)) != 7 {
 		if time.Now().After(deadline) {
-			t.Fatalf("b polls %v after a stopped, want all six", pollers(b))
+			t.Fatalf("b polls %v after a stopped, want all seven", pollers(b))
 		}
 		time.Sleep(20 * time.Millisecond)
 	}

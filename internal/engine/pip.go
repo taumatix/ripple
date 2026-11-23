@@ -65,6 +65,8 @@ func applicablePip(d model.Dependency, pkg, version string) (rules.UpdateType, b
 // (repo, project, target version).
 type PipWatcher struct {
 	Engine *Engine
+
+	elect election // PollElected's claim
 }
 
 // Poll returns how many jobs were new. It makes no request while no repo uses a

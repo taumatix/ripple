@@ -139,7 +139,7 @@ index.golang.org   ──► Watcher ──► reverse index lookup ──► jo
                                                      └──► workers ──► Platform: clone, edit, push, open PR
 ```
 
-Interfaces from day one: `Platform` (GitHub, [GitLab](docs/platform-gitlab.md), [Azure DevOps](docs/platform-azuredevops.md); Gitea and Forgejo, [docs/platform-gitea.md](docs/platform-gitea.md); Bitbucket Cloud, [docs/platform-bitbucket.md](docs/platform-bitbucket.md); AWS CodeCommit, [docs/platform-codecommit.md](docs/platform-codecommit.md); SCM-Manager, [docs/platform-scmmanager.md](docs/platform-scmmanager.md); adding a host: [docs/platform-authoring.md](docs/platform-authoring.md)), `Feed` (Go modules), `Manager` (gomod, regex),
+Interfaces from day one: `Platform` (GitHub, [GitLab](docs/platform-gitlab.md), [Azure DevOps](docs/platform-azuredevops.md); Gitea and Forgejo, [docs/platform-gitea.md](docs/platform-gitea.md); Bitbucket Cloud, [docs/platform-bitbucket.md](docs/platform-bitbucket.md); Bitbucket Server / Data Center, [docs/platform-bitbucketserver.md](docs/platform-bitbucketserver.md); AWS CodeCommit, [docs/platform-codecommit.md](docs/platform-codecommit.md); SCM-Manager, [docs/platform-scmmanager.md](docs/platform-scmmanager.md); adding a host: [docs/platform-authoring.md](docs/platform-authoring.md)), `Feed` (Go modules), `Manager` (gomod, regex),
 `Store` (Postgres, DynamoDB, in-memory). The DynamoDB access patterns are in
 [docs/store-dynamodb.md](docs/store-dynamodb.md).
 

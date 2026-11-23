@@ -1,0 +1,4389 @@
+{
+ "openapi": "3.0.1",
+ "info": {
+  "title": "Bitbucket Data Center",
+  "version": "10.0",
+  "source": "https://developer.atlassian.com/server/bitbucket/10.0.swagger.v3.json (fetched 2026-11-23); excerpt: the paths ripple calls and the schemas they reference"
+ },
+ "paths": {
+  "/api/latest/repos": {
+   "get": {
+    "deprecated": false,
+    "description": "Retrieve a page of repositories based on query parameters that control the search. See the documentation of the parameters for more details. \n\nThis resource is anonymously accessible, if anonymous access is enabled. \n\n<b>Note on permissions.</b> In absence of the <code>permission</code> query parameter the implicit 'read' permission is assumed. Please note that this permission is lower than the <tt>REPO_READ</tt> permission rather than being equal to it. The implicit 'read' permission for a given repository is assigned to any user that has any of the higher permissions, such as <tt>REPO_READ</tt>, as well as to anonymous users if the repository is marked as public. The important implication of the above is that an anonymous request to this resource with a permission level <tt>REPO_READ</tt> is guaranteed to receive an empty list of repositories as a result. For anonymous requests it is therefore recommended to not specify the <tt>permission</tt> parameter at all.",
+    "operationId": "getRepositories_1",
+    "parameters": [
+     {
+      "description": "(optional) if specified, this will limit the resulting repository list to ones whose are <tt>ACTIVE</tt>, <tt>ARCHIVED</tt> or <tt>ALL</tt> for both. The match performed is case-insensitive. This filter defaults to <tt>ACTIVE</tt> when not set. <em>Available since 8.0</em>",
+      "in": "query",
+      "name": "archived",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "description": "(optional) if specified, this will limit the resulting repository list to ones whose project's name matches this parameter's value. The match performed is case-insensitive and any leading and/or trailing whitespace characters on the <code>projectname</code> parameter will be stripped.",
+      "in": "query",
+      "name": "projectname",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "description": "(optional) if specified, this will limit the resulting repository list to ones whose project's key matches this parameter's value. The match performed is case-insensitive and any leading  and/or trailing whitespace characters on the <code>projectKey</code> parameter will be stripped. <em>Available since 8.0</em>",
+      "in": "query",
+      "name": "projectkey",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "description": "(optional) if specified, this will limit the resulting repository list based on the repositories visibility. Valid values are <em>public</em> or <em>private</em>.",
+      "in": "query",
+      "name": "visibility",
+      "schema": {
+       "type": "string",
+       "enum": [
+        "public",
+        "private"
+       ]
+      }
+     },
+     {
+      "description": "(optional) if specified, this will limit the resulting repository list to ones whose name matches this parameter's value. The match performed is case-insensitive and any leading and/or trailing whitespace characters on the <code>name</code> parameter will be stripped.",
+      "in": "query",
+      "name": "name",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "description": "(optional) if specified, it must be a valid repository permission level name and will limit the resulting repository list to ones that the requesting user has the specified permission level to. If not specified, the default implicit 'read' permission level will be assumed. The currently supported explicit permission values are <tt>REPO_READ</tt>, <tt>REPO_WRITE</tt> and <tt>REPO_ADMIN</tt>.",
+      "in": "query",
+      "name": "permission",
+      "schema": {
+       "type": "string",
+       "enum": [
+        "REPO_READ",
+        "REPO_WRITE",
+        "REPO_ADMIN"
+       ]
+      }
+     },
+     {
+      "description": "(optional) if specified, it must be a valid repository state name and will limit the resulting repository list to ones that are in the specified state. The currently supported explicit state values are <tt>AVAILABLE</tt>, <tt>INITIALISING</tt> and <tt>INITIALISATION_FAILED</tt>. Filtering by <tt>OFFLINE</tt> repositories is not supported.<br><em>Available since 5.13</em>",
+      "in": "query",
+      "name": "state",
+      "schema": {
+       "type": "string",
+       "enum": [
+        "AVAILABLE",
+        "INITIALISING",
+        "INITIALISATION_FAILED"
+       ]
+      }
+     },
+     {
+      "description": "Start number for the page (inclusive). If not passed, first page is assumed.",
+      "example": 0,
+      "in": "query",
+      "name": "start",
+      "required": false,
+      "schema": {
+       "type": "number",
+       "example": 0
+      }
+     },
+     {
+      "description": "Number of items to return. If not passed, a page size of 25 is used.",
+      "example": 25,
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "type": "number",
+       "example": 25
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json;charset=UTF-8": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "isLastPage": {
+           "type": "boolean"
+          },
+          "limit": {
+           "type": "number",
+           "example": 25
+          },
+          "nextPageStart": {
+           "type": "integer",
+           "format": "int32"
+          },
+          "size": {
+           "type": "number",
+           "example": 1
+          },
+          "start": {
+           "type": "integer",
+           "format": "int32"
+          },
+          "values": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/RestRepository"
+           }
+          }
+         }
+        }
+       }
+      },
+      "description": "A page of repositories."
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "errors": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/RestErrorMessage"
+           }
+          }
+         }
+        }
+       }
+      },
+      "description": "The <code>visibility</code> parameter contains an invalid value."
+     }
+    },
+    "summary": "Search for repositories",
+    "tags": [
+     "Repository"
+    ]
+   }
+  },
+  "/api/latest/projects/{projectKey}/repos/{repositorySlug}/pull-requests": {
+   "get": {
+    "deprecated": false,
+    "description": "Retrieve a page of pull requests to or from the specified repository. \n\nThe authenticated user must have <strong>REPO_READ</strong> permission for the specified repository to call this resource.  Optionally clients can specify PR participant filters. Each filter has a mandatory username.N parameter, and the optional role.N and approved.N parameters. \n\n- username.N - the \"root\" of a single participant filter, where \"N\" is a natural number   starting from 1. This allows clients to specify multiple participant filters, by providing consecutive   filters as username.1, username.2 etc. Note that the filters numbering has to start   with 1 and be continuous for all filters to be processed. The total allowed number of participant   filters is 10 and all filters exceeding that limit will be dropped.\n- role.N(optional) the role associated with username.N.   This must be one of AUTHOR, REVIEWER, or PARTICIPANT\n- approved.N (optional) the approved status associated with username.N.   That is whether username.N has approved the PR. Either true, or false\n",
+    "operationId": "getPage",
+    "parameters": [
+     {
+      "description": "(optional) defaults to true, whether to return additional pull request attributes",
+      "in": "query",
+      "name": "withAttributes",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "description": "The project key.",
+      "in": "path",
+      "name": "projectKey",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "description": "(optional) a <i>fully-qualified</i> branch ID to find pull requests to or from, such as refs/heads/master",
+      "in": "query",
+      "name": "at",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "description": "(optional) defaults to true, whether to return additional pull request properties",
+      "in": "query",
+      "name": "withProperties",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "description": "(optional) If specified, only pull requests matching the supplied draft status will be returned.",
+      "in": "query",
+      "name": "draft",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "description": "(optional) If specified, only pull requests where the title or description contains the supplied string will be returned.",
+      "in": "query",
+      "name": "filterText",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "description": "(optional, defaults to <strong>OPEN</strong>). Supply <strong>ALL</strong> to return pull request in any state. If a state is supplied only pull requests in the specified state will be returned. Either <strong>OPEN</strong>, <strong>DECLINED</strong> or <strong>MERGED</strong>.",
+      "in": "query",
+      "name": "state",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "description": "The repository slug.",
+      "in": "path",
+      "name": "repositorySlug",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "description": "(optional, defaults to <strong>NEWEST</strong>) the order to return pull requests in, either <strong>OLDEST</strong> (as in: \"oldest first\") or <strong>NEWEST</strong>.",
+      "in": "query",
+      "name": "order",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "description": "(optional, defaults to <strong>INCOMING</strong>) the direction relative to the specified repository. Either <strong>INCOMING</strong> or <strong>OUTGOING</strong>.",
+      "in": "query",
+      "name": "direction",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "description": "Start number for the page (inclusive). If not passed, first page is assumed.",
+      "example": 0,
+      "in": "query",
+      "name": "start",
+      "required": false,
+      "schema": {
+       "type": "number",
+       "example": 0
+      }
+     },
+     {
+      "description": "Number of items to return. If not passed, a page size of 25 is used.",
+      "example": 25,
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "type": "number",
+       "example": 25
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json;charset=UTF-8": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "isLastPage": {
+           "type": "boolean"
+          },
+          "limit": {
+           "type": "number",
+           "example": 25
+          },
+          "nextPageStart": {
+           "type": "integer",
+           "format": "int32"
+          },
+          "size": {
+           "type": "number",
+           "example": 1
+          },
+          "start": {
+           "type": "integer",
+           "format": "int32"
+          },
+          "values": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/RestPullRequest"
+           }
+          }
+         }
+        }
+       }
+      },
+      "description": "A page of pull requests that match the search criteria."
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "errors": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/RestErrorMessage"
+           }
+          }
+         }
+        }
+       }
+      },
+      "description": "The request was malformed."
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "errors": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/RestErrorMessage"
+           }
+          }
+         }
+        }
+       }
+      },
+      "description": "The currently authenticated user has insufficient permissions to view the specified pull request."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "errors": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/RestErrorMessage"
+           }
+          }
+         }
+        }
+       }
+      },
+      "description": "The specified repository or pull request does not exist."
+     }
+    },
+    "summary": "Get pull requests for repository",
+    "tags": [
+     "Pull Requests"
+    ]
+   },
+   "post": {
+    "deprecated": false,
+    "description": "Create a new pull request from a source branch or tag to a target branch. The source and target may be in the same repository, or different ones. (Note that different repositories must belong to the same <code>Repository#getHierarchyId()</code> hierarchy.) \n\nThe <code>fromRef</code> may be a branch or a tag. The <code>toRef</code> is required to be a branch. Tags are not allowed as targets because tags are intended to be immutable and should not be changed after they are created. \n\nThe authenticated user must have <strong>REPO_READ</strong> permission for the <code>fromRef</code> and <code>toRef</code> repositories to call this resource.",
+    "operationId": "create",
+    "parameters": [
+     {
+      "description": "The project key.",
+      "in": "path",
+      "name": "projectKey",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "description": "The repository slug.",
+      "in": "path",
+      "name": "repositorySlug",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/RestPullRequest"
+       }
+      }
+     },
+     "description": "The pull request data"
+    },
+    "responses": {
+     "201": {
+      "content": {
+       "application/json;charset=UTF-8": {
+        "schema": {
+         "$ref": "#/components/schemas/RestPullRequest"
+        }
+       }
+      },
+      "description": "The newly created pull request."
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "errors": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/RestErrorMessage"
+           }
+          }
+         }
+        }
+       }
+      },
+      "description": "The pull request entity supplied in the request was malformed."
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "errors": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/RestErrorMessage"
+           }
+          }
+         }
+        }
+       }
+      },
+      "description": "The currently authenticated user has insufficient permissions to create a pull request between the two specified repositories."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "errors": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/RestErrorMessage"
+           }
+          }
+         }
+        }
+       }
+      },
+      "description": "One of the specified repositories or branches does not exist."
+     },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "errors": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/RestErrorMessage"
+           }
+          }
+         }
+        }
+       }
+      },
+      "description": "One of the following error cases occurred (check the error message for more details): \n\n- There was a problem resolving one or more reviewers.\n- The specified branches were the same.\n- The <em>to</em> branch is already up-to-date with all the commits on the     <em>from</em> branch.\n- A pull request between the two branches already exists.\n- The <em>to</em> repository is archived.\n"
+     }
+    },
+    "summary": "Create pull request",
+    "tags": [
+     "Pull Requests"
+    ]
+   }
+  },
+  "/api/latest/projects/{projectKey}/repos/{repositorySlug}/pull-requests/{pullRequestId}": {
+   "delete": {
+    "deprecated": false,
+    "description": "Deletes a pull request. \n\nTo call this resource, users must be authenticated and have permission to view the pull request. Additionally, they must: \n\n- be the pull request author, if the system is configured to allow authors to delete their own   pull requests (this is the default) OR \n- have repository administrator permission for the repository the pull request is targeting\n\n\nA body containing the version of the pull request must be provided with this request. \n\n`{ \"version\": 1 }`",
+    "operationId": "delete_3",
+    "parameters": [
+     {
+      "description": "The project key.",
+      "in": "path",
+      "name": "projectKey",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "description": "The ID of the pull request within the repository",
+      "in": "path",
+      "name": "pullRequestId",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "description": "The repository slug.",
+      "in": "path",
+      "name": "repositorySlug",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/RestPullRequestDeleteRequest"
+       }
+      }
+     },
+     "description": "A body containing the version of the pull request"
+    },
+    "responses": {
+     "204": {
+      "description": "The pull request was deleted."
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "errors": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/RestErrorMessage"
+           }
+          }
+         }
+        }
+       }
+      },
+      "description": "The currently authenticated user has insufficient permissions to view the specified pull request."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "errors": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/RestErrorMessage"
+           }
+          }
+         }
+        }
+       }
+      },
+      "description": "The specified repository or pull request does not exist."
+     },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "errors": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/RestErrorMessage"
+           }
+          }
+         }
+        }
+       }
+      },
+      "description": "Deleting pull requests isn't supported on archived repositories."
+     }
+    },
+    "summary": "Delete pull request",
+    "tags": [
+     "Pull Requests"
+    ]
+   },
+   "get": {
+    "deprecated": false,
+    "description": "Retrieve a pull request. \n\nThe authenticated user must have <strong>REPO_READ</strong> permission for the repository that this pull request targets to call this resource.",
+    "operationId": "get_3",
+    "parameters": [
+     {
+      "description": "The project key.",
+      "in": "path",
+      "name": "projectKey",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "description": "The ID of the pull request within the repository",
+      "in": "path",
+      "name": "pullRequestId",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "description": "The repository slug.",
+      "in": "path",
+      "name": "repositorySlug",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json;charset=UTF-8": {
+        "schema": {
+         "$ref": "#/components/schemas/RestPullRequest"
+        }
+       }
+      },
+      "description": "The specified pull request."
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "errors": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/RestErrorMessage"
+           }
+          }
+         }
+        }
+       }
+      },
+      "description": "The currently authenticated user has insufficient permissions to view the specified pull request."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "errors": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/RestErrorMessage"
+           }
+          }
+         }
+        }
+       }
+      },
+      "description": "The specified repository or pull request does not exist."
+     }
+    },
+    "summary": "Get pull request",
+    "tags": [
+     "Pull Requests"
+    ]
+   },
+   "put": {
+    "deprecated": false,
+    "description": "Update the title, description, reviewers, destination branch or draft status of an existing pull request. \n\n**Note:** the <em>reviewers</em> list may be updated using this resource. However the <em>author</em> and <em>participants</em> list may not. \n\nThe authenticated user must either: \n\n- be the author of the pull request and have the <strong>REPO_READ</strong> permission for the repository that this pull request targets; or\n- have the <strong>REPO_WRITE</strong> permission for the repository that this pull request targets\n\n\nto call this resource.",
+    "operationId": "update",
+    "parameters": [
+     {
+      "description": "The project key.",
+      "in": "path",
+      "name": "projectKey",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "description": "The ID of the pull request within the repository",
+      "in": "path",
+      "name": "pullRequestId",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "description": "The repository slug.",
+      "in": "path",
+      "name": "repositorySlug",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/RestPullRequest"
+       }
+      }
+     },
+     "description": "The updated pull request"
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json;charset=UTF-8": {
+        "schema": {
+         "$ref": "#/components/schemas/RestPullRequest"
+        }
+       }
+      },
+      "description": "The updated pull request."
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "errors": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/RestErrorMessage"
+           }
+          }
+         }
+        }
+       }
+      },
+      "description": "One of the following error cases occurred (check the error message for more details): \n\n- The request tried to modify the <em>author</em> or <em>participants</em>.\n- The pull request's version attribute was not specified.\n- A reviewer's username was not specified.\n- The toRef ID value was incorrectly left blank\n"
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "errors": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/RestErrorMessage"
+           }
+          }
+         }
+        }
+       }
+      },
+      "description": "The currently authenticated user has insufficient permissions to update the specified pull request."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "errors": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/RestErrorMessage"
+           }
+          }
+         }
+        }
+       }
+      },
+      "description": "One of the specified repositories or branches does not exist."
+     },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "errors": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/RestErrorMessage"
+           }
+          }
+         }
+        }
+       }
+      },
+      "description": "One of the following error cases occurred (check the error message for more details): \n\n- The specified version is out of date.\n- One of the reviewers could not be added to the pull request.\n- If updating the destination branch:    - There is already an open pull request with an identical to branch\n   - The from and new to branch <i>are</i> the same\n   - The new destination branch up-to-date is up-to-date with all of                 changes from the from branch, resulting in a pull request with                 nothing to merge            \n- The <em>to</em> repository is archived.\n"
+     }
+    },
+    "summary": "Update pull request metadata",
+    "tags": [
+     "Pull Requests"
+    ]
+   }
+  },
+  "/api/latest/projects/{projectKey}/repos/{repositorySlug}/pull-requests/{pullRequestId}/merge": {
+   "get": {
+    "deprecated": false,
+    "description": "Test whether a pull request can be merged. \n\nA pull request may not be merged if: \n\n- there are conflicts that need to be manually resolved before merging; and/or\n- one or more merge checks have vetoed the merge.\n\n\nThe authenticated user must have <strong>REPO_READ</strong> permission for the repository that this pull request targets to call this resource.",
+    "operationId": "canMerge",
+    "parameters": [
+     {
+      "description": "The project key.",
+      "in": "path",
+      "name": "projectKey",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "description": "The ID of the pull request within the repository",
+      "in": "path",
+      "name": "pullRequestId",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "description": "The repository slug.",
+      "in": "path",
+      "name": "repositorySlug",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json;charset=UTF-8": {
+        "schema": {
+         "$ref": "#/components/schemas/RestPullRequestMergeability"
+        }
+       }
+      },
+      "description": "The mergeability status of the pull request."
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "errors": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/RestErrorMessage"
+           }
+          }
+         }
+        }
+       }
+      },
+      "description": "The currently authenticated user has insufficient permissions to view the specified pull request."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "errors": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/RestErrorMessage"
+           }
+          }
+         }
+        }
+       }
+      },
+      "description": "The specified repository or pull request does not exist."
+     },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "errors": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/RestErrorMessage"
+           }
+          }
+         }
+        }
+       }
+      },
+      "description": "The specified pull request is not open."
+     }
+    },
+    "summary": "Test if pull request can be merged",
+    "tags": [
+     "Pull Requests"
+    ]
+   },
+   "post": {
+    "deprecated": false,
+    "description": "Merge the specified pull request immediately or set the pull request to auto-merge when all the merge checks pass by setting <strong>autoMerge</strong> field in the request body.\n\nThe authenticated user must have <strong>REPO_WRITE</strong> permission for the repository that this pull request targets to call this resource.",
+    "operationId": "merge",
+    "parameters": [
+     {
+      "description": "The project key.",
+      "in": "path",
+      "name": "projectKey",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "description": "The ID of the pull request within the repository",
+      "in": "path",
+      "name": "pullRequestId",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "description": "The current version of the pull request. If the server's version isn't the same as the specified version the operation will fail. To determine the current version of the pull request it should be fetched from the server prior to this operation. Look for the 'version' attribute in the returned JSON structure.",
+      "in": "query",
+      "name": "version",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "description": "The repository slug.",
+      "in": "path",
+      "name": "repositorySlug",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/RestPullRequestMergeRequest"
+       }
+      }
+     },
+     "description": "The body holder"
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json;charset=UTF-8": {
+        "schema": {
+         "$ref": "#/components/schemas/RestPullRequest"
+        }
+       }
+      },
+      "description": "The merged pull request."
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "errors": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/RestErrorMessage"
+           }
+          }
+         }
+        }
+       }
+      },
+      "description": "The currently authenticated user has insufficient permissions to merge the specified pull request"
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "errors": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/RestErrorMessage"
+           }
+          }
+         }
+        }
+       }
+      },
+      "description": "The auto-merge setting is not enabled for the repository that this pull request targets."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "errors": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/RestErrorMessage"
+           }
+          }
+         }
+        }
+       }
+      },
+      "description": "The specified repository or pull request does not exist."
+     },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "errors": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/RestErrorMessage"
+           }
+          }
+         }
+        }
+       }
+      },
+      "description": "One of the following error cases occurred (check the error message for more details): \n\n- The pull request has conflicts.\n- A merge check vetoed the merge.\n- The specified version is out of date.\n- The specified pull request is not open.\n- The <em>to</em> repository is archived.\n"
+     }
+    },
+    "summary": "Merge pull request",
+    "tags": [
+     "Pull Requests"
+    ]
+   }
+  },
+  "/api/latest/projects/{projectKey}/repos/{repositorySlug}/pull-requests/{pullRequestId}/auto-merge": {
+   "delete": {
+    "deprecated": false,
+    "description": "Cancels a request to auto-merge the pull request, if the pull request was not merged yet.\n\nThe authenticated user must have <strong>REPO_WRITE</strong> permission for the repository that this pull request targets to call this resource.",
+    "operationId": "cancelAutoMerge",
+    "parameters": [
+     {
+      "description": "The project key.",
+      "in": "path",
+      "name": "projectKey",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "description": "The ID of the pull request within the repository",
+      "in": "path",
+      "name": "pullRequestId",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "description": "The repository slug.",
+      "in": "path",
+      "name": "repositorySlug",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "204": {
+      "description": "The auto-merge request was cancelled."
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "errors": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/RestErrorMessage"
+           }
+          }
+         }
+        }
+       }
+      },
+      "description": "The currently authenticated user has insufficient permissions to modify the pull request."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "errors": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/RestErrorMessage"
+           }
+          }
+         }
+        }
+       }
+      },
+      "description": "The specified repository or pull request does not exist."
+     },
+     "409": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "errors": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/RestErrorMessage"
+           }
+          }
+         }
+        }
+       }
+      },
+      "description": "The specified pull request is not open."
+     }
+    },
+    "summary": "Cancel auto-merge for pull request",
+    "tags": [
+     "Pull Requests"
+    ]
+   },
+   "get": {
+    "deprecated": false,
+    "description": "Returns an auto-merge request for the pull request, if requested.\n\nThe authenticated user must have <strong>REPO_READ</strong> permission for the repository that this pull request targets to call this resource.",
+    "operationId": "getAutoMergeRequest",
+    "parameters": [
+     {
+      "description": "The project key.",
+      "in": "path",
+      "name": "projectKey",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "description": "The ID of the pull request within the repository",
+      "in": "path",
+      "name": "pullRequestId",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "description": "The repository slug.",
+      "in": "path",
+      "name": "repositorySlug",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json;charset=UTF-8": {
+        "schema": {
+         "$ref": "#/components/schemas/RestAutoMergeRequest"
+        }
+       }
+      },
+      "description": "The auto-merge request."
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "errors": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/RestErrorMessage"
+           }
+          }
+         }
+        }
+       }
+      },
+      "description": "The currently authenticated user has insufficient permissions to view the specified pull request."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "errors": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/RestErrorMessage"
+           }
+          }
+         }
+        }
+       }
+      },
+      "description": "The specified repository or pull request does not exist."
+     }
+    },
+    "summary": "Get auto-merge request for pull request",
+    "tags": [
+     "Pull Requests"
+    ]
+   },
+   "post": {
+    "deprecated": false,
+    "description": "Requests the system to try merging the pull request if auto-merge was requested on it.\n\nThe authenticated user must have <strong>REPO_WRITE</strong> permission for the repository that this pull request targets to call this resource.",
+    "operationId": "tryAutoMerge",
+    "parameters": [
+     {
+      "description": "The project key.",
+      "in": "path",
+      "name": "projectKey",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "description": "The ID of the pull request within the repository",
+      "in": "path",
+      "name": "pullRequestId",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "description": "The repository slug.",
+      "in": "path",
+      "name": "repositorySlug",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json;charset=UTF-8": {
+        "schema": {
+         "$ref": "#/components/schemas/RestAutoMergeProcessingResult"
+        }
+       }
+      },
+      "description": "The result of trying to auto-merge the pull request."
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "errors": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/RestErrorMessage"
+           }
+          }
+         }
+        }
+       }
+      },
+      "description": "An auto-merge request was not submitted for this pull request."
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "errors": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/RestErrorMessage"
+           }
+          }
+         }
+        }
+       }
+      },
+      "description": "The currently authenticated user has insufficient permissions to modify the pull request."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "errors": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/RestErrorMessage"
+           }
+          }
+         }
+        }
+       }
+      },
+      "description": "The auto-merge setting is not enabled for the repository that this pull request targets."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "errors": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/RestErrorMessage"
+           }
+          }
+         }
+        }
+       }
+      },
+      "description": "The specified repository or pull request does not exist."
+     }
+    },
+    "summary": "Auto-merge pull request",
+    "tags": [
+     "Pull Requests"
+    ]
+   }
+  },
+  "/api/latest/projects/{projectKey}/repos/{repositorySlug}/settings/auto-merge": {
+   "delete": {
+    "deprecated": false,
+    "description": "Deletes pull request auto-merge settings for the supplied repository.\n\nThe authenticated user must have <strong>REPO_ADMIN</strong> permission for this repository to call the resource.",
+    "operationId": "delete_5",
+    "parameters": [
+     {
+      "description": "The project key",
+      "in": "path",
+      "name": "projectKey",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "description": "The repository slug",
+      "in": "path",
+      "name": "repositorySlug",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "204": {
+      "description": "The pull request auto-merge settings"
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "errors": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/RestErrorMessage"
+           }
+          }
+         }
+        }
+       }
+      },
+      "description": "The currently authenticated user has insufficient permissions to delete the pull request auto-merge settings."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "errors": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/RestErrorMessage"
+           }
+          }
+         }
+        }
+       }
+      },
+      "description": "The pull request auto-merge settings cannot be modified due to a restriction enforced by the supplied repository's project."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "errors": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/RestErrorMessage"
+           }
+          }
+         }
+        }
+       }
+      },
+      "description": "The specified repository does not exist."
+     }
+    },
+    "summary": "Delete pull request auto-merge settings",
+    "tags": [
+     "Repository"
+    ]
+   },
+   "get": {
+    "deprecated": false,
+    "description": "Retrieves the pull request auto-merge settings for the supplied repository. Project settings will be returned if no explicit settings have been set for the repository. In the case that there are no project settings, the default settings will be returned. If the repository's project has restricted its auto-merge settings, then the settings of the project will be returned.\n\nThe authenticated user must have <strong>REPO_READ</strong> permission for this repository to call the resource.",
+    "operationId": "get_5",
+    "parameters": [
+     {
+      "description": "The project key",
+      "in": "path",
+      "name": "projectKey",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "description": "The repository slug",
+      "in": "path",
+      "name": "repositorySlug",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json;charset=UTF-8": {
+        "schema": {
+         "$ref": "#/components/schemas/RestAutoMergeRestrictedSettings"
+        }
+       }
+      },
+      "description": "The pull request auto-merge settings"
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "errors": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/RestErrorMessage"
+           }
+          }
+         }
+        }
+       }
+      },
+      "description": "The currently authenticated user has insufficient permissions to retrieve the pull request auto-merge settings."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "errors": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/RestErrorMessage"
+           }
+          }
+         }
+        }
+       }
+      },
+      "description": "The specified repository does not exist."
+     }
+    },
+    "summary": "Get pull request auto-merge settings",
+    "tags": [
+     "Repository"
+    ]
+   },
+   "put": {
+    "deprecated": false,
+    "description": "Creates or updates the pull request auto-merge settings for the supplied repository.\n\nThe authenticated user must have <strong>REPO_ADMIN</strong> permission for this repository to call the resource.",
+    "operationId": "set_1",
+    "parameters": [
+     {
+      "description": "The project key",
+      "in": "path",
+      "name": "projectKey",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "description": "The repository slug",
+      "in": "path",
+      "name": "repositorySlug",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/RestAutoMergeSettingsRequest"
+       }
+      }
+     },
+     "description": "The settings to create or update"
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json;charset=UTF-8": {
+        "schema": {
+         "$ref": "#/components/schemas/RestAutoMergeRestrictedSettings"
+        }
+       }
+      },
+      "description": "The pull request auto-merge settings"
+     },
+     "400": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "errors": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/RestErrorMessage"
+           }
+          }
+         }
+        }
+       }
+      },
+      "description": "The 'enabled' field was not provided correctly."
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "errors": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/RestErrorMessage"
+           }
+          }
+         }
+        }
+       }
+      },
+      "description": "The currently authenticated user has insufficient permissions to create or update the pull request auto-merge settings."
+     },
+     "403": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "errors": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/RestErrorMessage"
+           }
+          }
+         }
+        }
+       }
+      },
+      "description": "The pull request auto-merge settings cannot be modified due to a restriction enforced by the supplied repository's project."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "errors": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/RestErrorMessage"
+           }
+          }
+         }
+        }
+       }
+      },
+      "description": "The specified repository does not exist."
+     }
+    },
+    "summary": "Create or update the pull request auto-merge settings",
+    "tags": [
+     "Repository"
+    ]
+   }
+  },
+  "/api/latest/projects/{projectKey}/repos/{repositorySlug}/default-branch": {
+   "get": {
+    "deprecated": false,
+    "description": "Retrieves the repository's <i>configured</i> default branch. \n\nEvery repository has a <i>configured</i> default branch, but that branch may not actually <i>exist</i> in the repository. For example, a newly-created repository will have a configured default branch even though no branches have been pushed yet. \n\nThe authenticated user must have <strong>REPO_READ</strong> permission for the specified repository to call this resource.",
+    "operationId": "getDefaultBranch_2",
+    "parameters": [
+     {
+      "description": "The project key.",
+      "in": "path",
+      "name": "projectKey",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "description": "The repository slug.",
+      "in": "path",
+      "name": "repositorySlug",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json;charset=UTF-8": {
+        "schema": {
+         "$ref": "#/components/schemas/RestMinimalRef"
+        }
+       }
+      },
+      "description": "The configured default branch for the repository."
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "errors": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/RestErrorMessage"
+           }
+          }
+         }
+        }
+       }
+      },
+      "description": "The currently authenticated user has insufficient permissions to read the repository."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "errors": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/RestErrorMessage"
+           }
+          }
+         }
+        }
+       }
+      },
+      "description": "The specified repository does not exist, or its configured default branch does not exist."
+     }
+    },
+    "summary": "Get repository default branch",
+    "tags": [
+     "Project"
+    ]
+   },
+   "put": {
+    "deprecated": false,
+    "description": "Update the default branch of a repository. \n\nThe authenticated user must have <strong>REPO_ADMIN</strong> permission for the specified repository to call this resource.",
+    "operationId": "setDefaultBranch_2",
+    "parameters": [
+     {
+      "description": "The project key.",
+      "in": "path",
+      "name": "projectKey",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "description": "The repository slug.",
+      "in": "path",
+      "name": "repositorySlug",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/RestBranch"
+       }
+      }
+     },
+     "description": "The branch to set as default"
+    },
+    "responses": {
+     "204": {
+      "description": "The default branch was updated."
+     },
+     "401": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "errors": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/RestErrorMessage"
+           }
+          }
+         }
+        }
+       }
+      },
+      "description": "The authenticated user does not have permission to modify the default branch."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "errors": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/RestErrorMessage"
+           }
+          }
+         }
+        }
+       }
+      },
+      "description": "The specified repository does not exist."
+     }
+    },
+    "summary": "Update default branch for repository",
+    "tags": [
+     "Project"
+    ]
+   }
+  },
+  "/api/latest/projects/{projectKey}/repos/{repositorySlug}/compare/changes": {
+   "get": {
+    "deprecated": false,
+    "description": "Gets the file changes available in the <code> from</code> commit but not in the <code> to</code> commit.\n\n\nIf either the <code> from</code> or <code> to</code> commit are not specified, they will be replaced by the default branch of their containing repository.",
+    "operationId": "streamChanges",
+    "parameters": [
+     {
+      "description": "The project key.",
+      "in": "path",
+      "name": "projectKey",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "description": "an optional parameter specifying the source repository containing the source commit if that commit is not present in the current repository; the repository can be specified by either its ID <em>fromRepo=42</em> or by its project key plus its repo slug separated by a slash: <em>fromRepo=projectKey/repoSlug</em>",
+      "in": "query",
+      "name": "fromRepo",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "description": "the source commit (can be a partial/full commit ID or qualified/unqualified ref name)",
+      "in": "query",
+      "name": "from",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "description": "the target commit (can be a partial/full commit ID or qualified/unqualified ref name)",
+      "in": "query",
+      "name": "to",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "description": "The repository slug.",
+      "in": "path",
+      "name": "repositorySlug",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "description": "Start number for the page (inclusive). If not passed, first page is assumed.",
+      "example": 0,
+      "in": "query",
+      "name": "start",
+      "required": false,
+      "schema": {
+       "type": "number",
+       "example": 0
+      }
+     },
+     {
+      "description": "Number of items to return. If not passed, a page size of 25 is used.",
+      "example": 25,
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "type": "number",
+       "example": 25
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json;charset=UTF-8": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "isLastPage": {
+           "type": "boolean"
+          },
+          "limit": {
+           "type": "number",
+           "example": 25
+          },
+          "nextPageStart": {
+           "type": "integer",
+           "format": "int32"
+          },
+          "size": {
+           "type": "number",
+           "example": 1
+          },
+          "start": {
+           "type": "integer",
+           "format": "int32"
+          },
+          "values": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/RestChange"
+           }
+          }
+         }
+        }
+       }
+      },
+      "description": "A page of changes."
+     },
+     "404": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "errors": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/RestErrorMessage"
+           }
+          }
+         }
+        }
+       }
+      },
+      "description": "The source repository,target repository, or commit does not exist."
+     }
+    },
+    "summary": "Compare commits",
+    "tags": [
+     "Repository"
+    ]
+   }
+  }
+ },
+ "components": {
+  "schemas": {
+   "RestPullRequestMergeability": {
+    "properties": {
+     "conflicted": {
+      "type": "boolean"
+     },
+     "outcome": {
+      "type": "string",
+      "enum": [
+       "CLEAN",
+       "CONFLICTED",
+       "UNKNOWN"
+      ]
+     },
+     "vetoes": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/RestRepositoryHookVeto"
+      }
+     }
+    }
+   },
+   "RestErrorMessage": {
+    "properties": {
+     "context": {
+      "type": "string"
+     },
+     "exceptionName": {
+      "type": "string"
+     },
+     "message": {
+      "type": "string"
+     }
+    }
+   },
+   "RestBranch": {
+    "properties": {
+     "default": {
+      "type": "boolean",
+      "readOnly": true
+     },
+     "displayId": {
+      "type": "string",
+      "readOnly": true
+     },
+     "id": {
+      "type": "string",
+      "example": "refs/heads/master"
+     },
+     "latestChangeset": {
+      "type": "string",
+      "example": "8d51122def5632836d1cb1026e879069e10a1e13",
+      "readOnly": true
+     },
+     "latestCommit": {
+      "type": "string",
+      "example": "8d51122def5632836d1cb1026e879069e10a1e13",
+      "readOnly": true
+     },
+     "type": {
+      "$ref": "#/components/schemas/RefType"
+     }
+    }
+   },
+   "RestAutoMergeRequest": {
+    "properties": {
+     "autoSubject": {
+      "type": "boolean",
+      "example": true
+     },
+     "createdDate": {
+      "type": "integer",
+      "format": "int64",
+      "example": 13590759200
+     },
+     "fromHash": {
+      "type": "string",
+      "example": "babecafebabecafebabecafebabecafebabecafe"
+     },
+     "message": {
+      "type": "string",
+      "example": "(Optional) A descriptive message for the merge commit"
+     },
+     "strategyId": {
+      "type": "string",
+      "example": "(Optional) squash"
+     },
+     "toRefId": {
+      "type": "string",
+      "example": "refs/heads/feature-ABC-123"
+     }
+    }
+   },
+   "RestMinimalRef": {
+    "properties": {
+     "displayId": {
+      "type": "string",
+      "example": "master"
+     },
+     "id": {
+      "type": "string",
+      "example": "refs/heads/master"
+     },
+     "type": {
+      "type": "string",
+      "enum": [
+       "BRANCH",
+       "TAG"
+      ]
+     }
+    }
+   },
+   "RestAutoMergeProcessingResult": {
+    "properties": {
+     "autoMergeProcessingStatus": {
+      "type": "string",
+      "enum": [
+       "CANCELLED",
+       "VETOED",
+       "STALE",
+       "MERGED",
+       "LOCK_FAILURE",
+       "UNKNOWN"
+      ],
+      "example": "CANCELLED"
+     },
+     "pullRequest": {
+      "type": "object",
+      "properties": {
+       "author": {
+        "type": "object",
+        "properties": {
+         "approved": {
+          "type": "boolean"
+         },
+         "lastReviewedCommit": {
+          "type": "string",
+          "example": "7549846524f8aed2bd1c0249993ae1bf9d3c9998"
+         },
+         "role": {
+          "type": "string",
+          "enum": [
+           "AUTHOR",
+           "REVIEWER",
+           "PARTICIPANT"
+          ]
+         },
+         "status": {
+          "type": "string",
+          "enum": [
+           "UNAPPROVED",
+           "NEEDS_WORK",
+           "APPROVED"
+          ]
+         },
+         "user": {
+          "type": "object",
+          "properties": {
+           "active": {
+            "type": "boolean"
+           },
+           "avatarUrl": {
+            "type": "string",
+            "writeOnly": true
+           },
+           "displayName": {
+            "type": "string",
+            "example": "Jane Citizen"
+           },
+           "emailAddress": {
+            "type": "string",
+            "example": "jane@example.com"
+           },
+           "id": {
+            "type": "integer",
+            "format": "int32",
+            "example": 101,
+            "readOnly": true
+           },
+           "links": {
+            "type": "object",
+            "properties": {},
+            "writeOnly": true
+           },
+           "name": {
+            "type": "string",
+            "example": "jcitizen"
+           },
+           "slug": {
+            "type": "string",
+            "example": "jcitizen"
+           },
+           "type": {
+            "type": "string",
+            "enum": [
+             "NORMAL",
+             "SERVICE"
+            ]
+           }
+          },
+          "required": [
+           "displayName",
+           "name",
+           "slug",
+           "type"
+          ]
+         }
+        },
+        "readOnly": true
+       },
+       "closed": {
+        "type": "boolean"
+       },
+       "closedDate": {
+        "type": "integer",
+        "format": "int64",
+        "example": 19990759200
+       },
+       "createdDate": {
+        "type": "integer",
+        "format": "int64",
+        "example": 13590759200
+       },
+       "description": {
+        "type": "string",
+        "example": "It is a kludge, but put the tuple from the database in the cache."
+       },
+       "descriptionAsHtml": {
+        "type": "string"
+       },
+       "draft": {
+        "type": "boolean"
+       },
+       "fromRef": {
+        "type": "object",
+        "properties": {
+         "displayId": {
+          "type": "string",
+          "example": "feature-ABC-1233"
+         },
+         "id": {
+          "type": "string",
+          "example": "refs/heads/feature-ABC-123"
+         },
+         "latestCommit": {
+          "type": "string",
+          "example": "babecafebabecafebabecafebabecafebabecafe"
+         },
+         "repository": {
+          "type": "object",
+          "properties": {
+           "archived": {
+            "type": "boolean",
+            "readOnly": true
+           },
+           "defaultBranch": {
+            "type": "string",
+            "example": "main",
+            "writeOnly": true
+           },
+           "description": {
+            "type": "string",
+            "example": "My repo description",
+            "readOnly": true
+           },
+           "forkable": {
+            "type": "boolean",
+            "readOnly": true
+           },
+           "hierarchyId": {
+            "type": "string",
+            "example": "e3c939f9ef4a7fae272e",
+            "readOnly": true
+           },
+           "id": {
+            "type": "integer",
+            "format": "int32",
+            "readOnly": true
+           },
+           "links": {
+            "type": "object",
+            "properties": {},
+            "writeOnly": true
+           },
+           "name": {
+            "type": "string",
+            "example": "My repo"
+           },
+           "origin": {
+            "type": "object",
+            "properties": {
+             "archived": {
+              "type": "boolean",
+              "readOnly": true
+             },
+             "defaultBranch": {
+              "type": "string",
+              "example": "main",
+              "writeOnly": true
+             },
+             "description": {
+              "type": "string",
+              "example": "My repo description",
+              "readOnly": true
+             },
+             "forkable": {
+              "type": "boolean",
+              "readOnly": true
+             },
+             "hierarchyId": {
+              "type": "string",
+              "example": "e3c939f9ef4a7fae272e",
+              "readOnly": true
+             },
+             "id": {
+              "type": "integer",
+              "format": "int32",
+              "readOnly": true
+             },
+             "links": {
+              "type": "object",
+              "properties": {},
+              "writeOnly": true
+             },
+             "name": {
+              "type": "string",
+              "example": "My repo"
+             },
+             "partition": {
+              "type": "integer",
+              "format": "int32",
+              "readOnly": true
+             },
+             "project": {
+              "type": "object",
+              "properties": {
+               "avatar": {
+                "type": "string"
+               },
+               "avatarUrl": {
+                "type": "string",
+                "writeOnly": true
+               },
+               "description": {
+                "type": "string",
+                "example": "The description for my cool project",
+                "readOnly": true
+               },
+               "id": {
+                "type": "integer",
+                "format": "int32",
+                "readOnly": true
+               },
+               "key": {
+                "type": "string",
+                "example": "PRJ"
+               },
+               "links": {
+                "type": "object",
+                "properties": {},
+                "writeOnly": true
+               },
+               "name": {
+                "type": "string",
+                "example": "My Cool Project",
+                "readOnly": true
+               },
+               "public": {
+                "type": "boolean",
+                "readOnly": true
+               },
+               "scope": {
+                "type": "string",
+                "example": "PROJECT",
+                "readOnly": true
+               },
+               "type": {
+                "type": "string",
+                "enum": [
+                 "NORMAL",
+                 "PERSONAL"
+                ],
+                "readOnly": true
+               }
+              },
+              "required": [
+               "key",
+               "name",
+               "type"
+              ]
+             },
+             "public": {
+              "type": "boolean",
+              "readOnly": true
+             },
+             "relatedLinks": {
+              "type": "object",
+              "properties": {},
+              "readOnly": true
+             },
+             "scmId": {
+              "type": "string",
+              "example": "git"
+             },
+             "scope": {
+              "type": "string",
+              "example": "REPOSITORY",
+              "readOnly": true
+             },
+             "slug": {
+              "type": "string",
+              "example": "my-repo"
+             },
+             "state": {
+              "type": "string",
+              "enum": [
+               "AVAILABLE",
+               "INITIALISATION_FAILED",
+               "INITIALISING",
+               "OFFLINE"
+              ],
+              "readOnly": true
+             },
+             "statusMessage": {
+              "type": "string",
+              "example": "Available",
+              "readOnly": true
+             }
+            },
+            "readOnly": true
+           },
+           "partition": {
+            "type": "integer",
+            "format": "int32",
+            "readOnly": true
+           },
+           "project": {
+            "type": "object",
+            "properties": {
+             "avatar": {
+              "type": "string"
+             },
+             "avatarUrl": {
+              "type": "string",
+              "writeOnly": true
+             },
+             "description": {
+              "type": "string",
+              "example": "The description for my cool project",
+              "readOnly": true
+             },
+             "id": {
+              "type": "integer",
+              "format": "int32",
+              "readOnly": true
+             },
+             "key": {
+              "type": "string",
+              "example": "PRJ"
+             },
+             "links": {
+              "type": "object",
+              "properties": {},
+              "writeOnly": true
+             },
+             "name": {
+              "type": "string",
+              "example": "My Cool Project",
+              "readOnly": true
+             },
+             "public": {
+              "type": "boolean",
+              "readOnly": true
+             },
+             "scope": {
+              "type": "string",
+              "example": "PROJECT",
+              "readOnly": true
+             },
+             "type": {
+              "type": "string",
+              "enum": [
+               "NORMAL",
+               "PERSONAL"
+              ],
+              "readOnly": true
+             }
+            },
+            "required": [
+             "key",
+             "name",
+             "type"
+            ]
+           },
+           "public": {
+            "type": "boolean",
+            "readOnly": true
+           },
+           "relatedLinks": {
+            "type": "object",
+            "properties": {},
+            "readOnly": true
+           },
+           "scmId": {
+            "type": "string",
+            "example": "git"
+           },
+           "scope": {
+            "type": "string",
+            "example": "REPOSITORY",
+            "readOnly": true
+           },
+           "slug": {
+            "type": "string",
+            "example": "my-repo"
+           },
+           "state": {
+            "type": "string",
+            "enum": [
+             "AVAILABLE",
+             "INITIALISATION_FAILED",
+             "INITIALISING",
+             "OFFLINE"
+            ],
+            "readOnly": true
+           },
+           "statusMessage": {
+            "type": "string",
+            "example": "Available",
+            "readOnly": true
+           }
+          }
+         },
+         "type": {
+          "type": "string",
+          "enum": [
+           "BRANCH",
+           "TAG"
+          ]
+         }
+        },
+        "required": [
+         "displayId",
+         "id",
+         "latestCommit"
+        ]
+       },
+       "htmlDescription": {
+        "type": "string",
+        "writeOnly": true
+       },
+       "id": {
+        "type": "integer",
+        "format": "int64",
+        "example": 1
+       },
+       "links": {
+        "type": "object",
+        "properties": {},
+        "writeOnly": true
+       },
+       "locked": {
+        "type": "boolean"
+       },
+       "open": {
+        "type": "boolean"
+       },
+       "participants": {
+        "type": "array",
+        "items": {
+         "$ref": "#/components/schemas/RestPullRequestParticipant"
+        }
+       },
+       "reviewers": {
+        "type": "array",
+        "items": {
+         "$ref": "#/components/schemas/RestPullRequestParticipant"
+        }
+       },
+       "state": {
+        "type": "string",
+        "enum": [
+         "DECLINED",
+         "MERGED",
+         "OPEN"
+        ]
+       },
+       "title": {
+        "type": "string",
+        "example": "Talking Nerdy"
+       },
+       "toRef": {
+        "type": "object",
+        "properties": {
+         "displayId": {
+          "type": "string",
+          "example": "feature-ABC-1233"
+         },
+         "id": {
+          "type": "string",
+          "example": "refs/heads/feature-ABC-123"
+         },
+         "latestCommit": {
+          "type": "string",
+          "example": "babecafebabecafebabecafebabecafebabecafe"
+         },
+         "repository": {
+          "type": "object",
+          "properties": {
+           "archived": {
+            "type": "boolean",
+            "readOnly": true
+           },
+           "defaultBranch": {
+            "type": "string",
+            "example": "main",
+            "writeOnly": true
+           },
+           "description": {
+            "type": "string",
+            "example": "My repo description",
+            "readOnly": true
+           },
+           "forkable": {
+            "type": "boolean",
+            "readOnly": true
+           },
+           "hierarchyId": {
+            "type": "string",
+            "example": "e3c939f9ef4a7fae272e",
+            "readOnly": true
+           },
+           "id": {
+            "type": "integer",
+            "format": "int32",
+            "readOnly": true
+           },
+           "links": {
+            "type": "object",
+            "properties": {},
+            "writeOnly": true
+           },
+           "name": {
+            "type": "string",
+            "example": "My repo"
+           },
+           "origin": {
+            "type": "object",
+            "properties": {
+             "archived": {
+              "type": "boolean",
+              "readOnly": true
+             },
+             "defaultBranch": {
+              "type": "string",
+              "example": "main",
+              "writeOnly": true
+             },
+             "description": {
+              "type": "string",
+              "example": "My repo description",
+              "readOnly": true
+             },
+             "forkable": {
+              "type": "boolean",
+              "readOnly": true
+             },
+             "hierarchyId": {
+              "type": "string",
+              "example": "e3c939f9ef4a7fae272e",
+              "readOnly": true
+             },
+             "id": {
+              "type": "integer",
+              "format": "int32",
+              "readOnly": true
+             },
+             "links": {
+              "type": "object",
+              "properties": {},
+              "writeOnly": true
+             },
+             "name": {
+              "type": "string",
+              "example": "My repo"
+             },
+             "partition": {
+              "type": "integer",
+              "format": "int32",
+              "readOnly": true
+             },
+             "project": {
+              "type": "object",
+              "properties": {
+               "avatar": {
+                "type": "string"
+               },
+               "avatarUrl": {
+                "type": "string",
+                "writeOnly": true
+               },
+               "description": {
+                "type": "string",
+                "example": "The description for my cool project",
+                "readOnly": true
+               },
+               "id": {
+                "type": "integer",
+                "format": "int32",
+                "readOnly": true
+               },
+               "key": {
+                "type": "string",
+                "example": "PRJ"
+               },
+               "links": {
+                "type": "object",
+                "properties": {},
+                "writeOnly": true
+               },
+               "name": {
+                "type": "string",
+                "example": "My Cool Project",
+                "readOnly": true
+               },
+               "public": {
+                "type": "boolean",
+                "readOnly": true
+               },
+               "scope": {
+                "type": "string",
+                "example": "PROJECT",
+                "readOnly": true
+               },
+               "type": {
+                "type": "string",
+                "enum": [
+                 "NORMAL",
+                 "PERSONAL"
+                ],
+                "readOnly": true
+               }
+              },
+              "required": [
+               "key",
+               "name",
+               "type"
+              ]
+             },
+             "public": {
+              "type": "boolean",
+              "readOnly": true
+             },
+             "relatedLinks": {
+              "type": "object",
+              "properties": {},
+              "readOnly": true
+             },
+             "scmId": {
+              "type": "string",
+              "example": "git"
+             },
+             "scope": {
+              "type": "string",
+              "example": "REPOSITORY",
+              "readOnly": true
+             },
+             "slug": {
+              "type": "string",
+              "example": "my-repo"
+             },
+             "state": {
+              "type": "string",
+              "enum": [
+               "AVAILABLE",
+               "INITIALISATION_FAILED",
+               "INITIALISING",
+               "OFFLINE"
+              ],
+              "readOnly": true
+             },
+             "statusMessage": {
+              "type": "string",
+              "example": "Available",
+              "readOnly": true
+             }
+            },
+            "readOnly": true
+           },
+           "partition": {
+            "type": "integer",
+            "format": "int32",
+            "readOnly": true
+           },
+           "project": {
+            "type": "object",
+            "properties": {
+             "avatar": {
+              "type": "string"
+             },
+             "avatarUrl": {
+              "type": "string",
+              "writeOnly": true
+             },
+             "description": {
+              "type": "string",
+              "example": "The description for my cool project",
+              "readOnly": true
+             },
+             "id": {
+              "type": "integer",
+              "format": "int32",
+              "readOnly": true
+             },
+             "key": {
+              "type": "string",
+              "example": "PRJ"
+             },
+             "links": {
+              "type": "object",
+              "properties": {},
+              "writeOnly": true
+             },
+             "name": {
+              "type": "string",
+              "example": "My Cool Project",
+              "readOnly": true
+             },
+             "public": {
+              "type": "boolean",
+              "readOnly": true
+             },
+             "scope": {
+              "type": "string",
+              "example": "PROJECT",
+              "readOnly": true
+             },
+             "type": {
+              "type": "string",
+              "enum": [
+               "NORMAL",
+               "PERSONAL"
+              ],
+              "readOnly": true
+             }
+            },
+            "required": [
+             "key",
+             "name",
+             "type"
+            ]
+           },
+           "public": {
+            "type": "boolean",
+            "readOnly": true
+           },
+           "relatedLinks": {
+            "type": "object",
+            "properties": {},
+            "readOnly": true
+           },
+           "scmId": {
+            "type": "string",
+            "example": "git"
+           },
+           "scope": {
+            "type": "string",
+            "example": "REPOSITORY",
+            "readOnly": true
+           },
+           "slug": {
+            "type": "string",
+            "example": "my-repo"
+           },
+           "state": {
+            "type": "string",
+            "enum": [
+             "AVAILABLE",
+             "INITIALISATION_FAILED",
+             "INITIALISING",
+             "OFFLINE"
+            ],
+            "readOnly": true
+           },
+           "statusMessage": {
+            "type": "string",
+            "example": "Available",
+            "readOnly": true
+           }
+          }
+         },
+         "type": {
+          "type": "string",
+          "enum": [
+           "BRANCH",
+           "TAG"
+          ]
+         }
+        },
+        "required": [
+         "displayId",
+         "id",
+         "latestCommit"
+        ]
+       },
+       "updatedDate": {
+        "type": "integer",
+        "format": "int64",
+        "example": 14490759200
+       },
+       "version": {
+        "type": "integer",
+        "format": "int32"
+       }
+      }
+     }
+    }
+   },
+   "RestAutoMergeRestrictedSettings": {
+    "properties": {
+     "enabled": {
+      "type": "boolean",
+      "example": false
+     },
+     "restrictionState": {
+      "type": "string",
+      "description": "The restriction state of this scope's project.",
+      "enum": [
+       "NONE",
+       "RESTRICTED_UNMODIFIABLE",
+       "RESTRICTED_MODIFIABLE"
+      ]
+     },
+     "scope": {
+      "type": "object",
+      "description": "The scope that these settings apply to.",
+      "properties": {
+       "resourceId": {
+        "type": "integer",
+        "format": "int32",
+        "example": 2
+       },
+       "type": {
+        "type": "string",
+        "enum": [
+         "GLOBAL",
+         "PROJECT",
+         "REPOSITORY"
+        ]
+       }
+      },
+      "required": [
+       "resourceId",
+       "type"
+      ]
+     }
+    }
+   },
+   "RestRepository": {
+    "properties": {
+     "archived": {
+      "type": "boolean",
+      "readOnly": true
+     },
+     "defaultBranch": {
+      "type": "string",
+      "example": "main",
+      "writeOnly": true
+     },
+     "description": {
+      "type": "string",
+      "example": "My repo description",
+      "readOnly": true
+     },
+     "forkable": {
+      "type": "boolean",
+      "readOnly": true
+     },
+     "hierarchyId": {
+      "type": "string",
+      "example": "e3c939f9ef4a7fae272e",
+      "readOnly": true
+     },
+     "id": {
+      "type": "integer",
+      "format": "int32",
+      "readOnly": true
+     },
+     "links": {
+      "type": "object",
+      "properties": {},
+      "writeOnly": true
+     },
+     "name": {
+      "type": "string",
+      "example": "My repo"
+     },
+     "origin": {
+      "type": "object",
+      "properties": {
+       "archived": {
+        "type": "boolean",
+        "readOnly": true
+       },
+       "defaultBranch": {
+        "type": "string",
+        "example": "main",
+        "writeOnly": true
+       },
+       "description": {
+        "type": "string",
+        "example": "My repo description",
+        "readOnly": true
+       },
+       "forkable": {
+        "type": "boolean",
+        "readOnly": true
+       },
+       "hierarchyId": {
+        "type": "string",
+        "example": "e3c939f9ef4a7fae272e",
+        "readOnly": true
+       },
+       "id": {
+        "type": "integer",
+        "format": "int32",
+        "readOnly": true
+       },
+       "links": {
+        "type": "object",
+        "properties": {},
+        "writeOnly": true
+       },
+       "name": {
+        "type": "string",
+        "example": "My repo"
+       },
+       "partition": {
+        "type": "integer",
+        "format": "int32",
+        "readOnly": true
+       },
+       "project": {
+        "type": "object",
+        "properties": {
+         "avatar": {
+          "type": "string"
+         },
+         "avatarUrl": {
+          "type": "string",
+          "writeOnly": true
+         },
+         "description": {
+          "type": "string",
+          "example": "The description for my cool project",
+          "readOnly": true
+         },
+         "id": {
+          "type": "integer",
+          "format": "int32",
+          "readOnly": true
+         },
+         "key": {
+          "type": "string",
+          "example": "PRJ"
+         },
+         "links": {
+          "type": "object",
+          "properties": {},
+          "writeOnly": true
+         },
+         "name": {
+          "type": "string",
+          "example": "My Cool Project",
+          "readOnly": true
+         },
+         "public": {
+          "type": "boolean",
+          "readOnly": true
+         },
+         "scope": {
+          "type": "string",
+          "example": "PROJECT",
+          "readOnly": true
+         },
+         "type": {
+          "type": "string",
+          "enum": [
+           "NORMAL",
+           "PERSONAL"
+          ],
+          "readOnly": true
+         }
+        },
+        "required": [
+         "key",
+         "name",
+         "type"
+        ]
+       },
+       "public": {
+        "type": "boolean",
+        "readOnly": true
+       },
+       "relatedLinks": {
+        "type": "object",
+        "properties": {},
+        "readOnly": true
+       },
+       "scmId": {
+        "type": "string",
+        "example": "git"
+       },
+       "scope": {
+        "type": "string",
+        "example": "REPOSITORY",
+        "readOnly": true
+       },
+       "slug": {
+        "type": "string",
+        "example": "my-repo"
+       },
+       "state": {
+        "type": "string",
+        "enum": [
+         "AVAILABLE",
+         "INITIALISATION_FAILED",
+         "INITIALISING",
+         "OFFLINE"
+        ],
+        "readOnly": true
+       },
+       "statusMessage": {
+        "type": "string",
+        "example": "Available",
+        "readOnly": true
+       }
+      },
+      "readOnly": true
+     },
+     "partition": {
+      "type": "integer",
+      "format": "int32",
+      "readOnly": true
+     },
+     "project": {
+      "type": "object",
+      "properties": {
+       "avatar": {
+        "type": "string"
+       },
+       "avatarUrl": {
+        "type": "string",
+        "writeOnly": true
+       },
+       "description": {
+        "type": "string",
+        "example": "The description for my cool project",
+        "readOnly": true
+       },
+       "id": {
+        "type": "integer",
+        "format": "int32",
+        "readOnly": true
+       },
+       "key": {
+        "type": "string",
+        "example": "PRJ"
+       },
+       "links": {
+        "type": "object",
+        "properties": {},
+        "writeOnly": true
+       },
+       "name": {
+        "type": "string",
+        "example": "My Cool Project",
+        "readOnly": true
+       },
+       "public": {
+        "type": "boolean",
+        "readOnly": true
+       },
+       "scope": {
+        "type": "string",
+        "example": "PROJECT",
+        "readOnly": true
+       },
+       "type": {
+        "type": "string",
+        "enum": [
+         "NORMAL",
+         "PERSONAL"
+        ],
+        "readOnly": true
+       }
+      },
+      "required": [
+       "key",
+       "name",
+       "type"
+      ]
+     },
+     "public": {
+      "type": "boolean",
+      "readOnly": true
+     },
+     "relatedLinks": {
+      "type": "object",
+      "properties": {},
+      "readOnly": true
+     },
+     "scmId": {
+      "type": "string",
+      "example": "git"
+     },
+     "scope": {
+      "type": "string",
+      "example": "REPOSITORY",
+      "readOnly": true
+     },
+     "slug": {
+      "type": "string",
+      "example": "my-repo"
+     },
+     "state": {
+      "type": "string",
+      "enum": [
+       "AVAILABLE",
+       "INITIALISATION_FAILED",
+       "INITIALISING",
+       "OFFLINE"
+      ],
+      "readOnly": true
+     },
+     "statusMessage": {
+      "type": "string",
+      "example": "Available",
+      "readOnly": true
+     }
+    }
+   },
+   "RestPullRequest": {
+    "properties": {
+     "author": {
+      "type": "object",
+      "properties": {
+       "approved": {
+        "type": "boolean"
+       },
+       "lastReviewedCommit": {
+        "type": "string",
+        "example": "7549846524f8aed2bd1c0249993ae1bf9d3c9998"
+       },
+       "role": {
+        "type": "string",
+        "enum": [
+         "AUTHOR",
+         "REVIEWER",
+         "PARTICIPANT"
+        ]
+       },
+       "status": {
+        "type": "string",
+        "enum": [
+         "UNAPPROVED",
+         "NEEDS_WORK",
+         "APPROVED"
+        ]
+       },
+       "user": {
+        "type": "object",
+        "properties": {
+         "active": {
+          "type": "boolean"
+         },
+         "avatarUrl": {
+          "type": "string",
+          "writeOnly": true
+         },
+         "displayName": {
+          "type": "string",
+          "example": "Jane Citizen"
+         },
+         "emailAddress": {
+          "type": "string",
+          "example": "jane@example.com"
+         },
+         "id": {
+          "type": "integer",
+          "format": "int32",
+          "example": 101,
+          "readOnly": true
+         },
+         "links": {
+          "type": "object",
+          "properties": {},
+          "writeOnly": true
+         },
+         "name": {
+          "type": "string",
+          "example": "jcitizen"
+         },
+         "slug": {
+          "type": "string",
+          "example": "jcitizen"
+         },
+         "type": {
+          "type": "string",
+          "enum": [
+           "NORMAL",
+           "SERVICE"
+          ]
+         }
+        },
+        "required": [
+         "displayName",
+         "name",
+         "slug",
+         "type"
+        ]
+       }
+      },
+      "readOnly": true
+     },
+     "closed": {
+      "type": "boolean"
+     },
+     "closedDate": {
+      "type": "integer",
+      "format": "int64",
+      "example": 19990759200
+     },
+     "createdDate": {
+      "type": "integer",
+      "format": "int64",
+      "example": 13590759200
+     },
+     "description": {
+      "type": "string",
+      "example": "It is a kludge, but put the tuple from the database in the cache."
+     },
+     "descriptionAsHtml": {
+      "type": "string"
+     },
+     "draft": {
+      "type": "boolean"
+     },
+     "fromRef": {
+      "type": "object",
+      "properties": {
+       "displayId": {
+        "type": "string",
+        "example": "feature-ABC-1233"
+       },
+       "id": {
+        "type": "string",
+        "example": "refs/heads/feature-ABC-123"
+       },
+       "latestCommit": {
+        "type": "string",
+        "example": "babecafebabecafebabecafebabecafebabecafe"
+       },
+       "repository": {
+        "type": "object",
+        "properties": {
+         "archived": {
+          "type": "boolean",
+          "readOnly": true
+         },
+         "defaultBranch": {
+          "type": "string",
+          "example": "main",
+          "writeOnly": true
+         },
+         "description": {
+          "type": "string",
+          "example": "My repo description",
+          "readOnly": true
+         },
+         "forkable": {
+          "type": "boolean",
+          "readOnly": true
+         },
+         "hierarchyId": {
+          "type": "string",
+          "example": "e3c939f9ef4a7fae272e",
+          "readOnly": true
+         },
+         "id": {
+          "type": "integer",
+          "format": "int32",
+          "readOnly": true
+         },
+         "links": {
+          "type": "object",
+          "properties": {},
+          "writeOnly": true
+         },
+         "name": {
+          "type": "string",
+          "example": "My repo"
+         },
+         "origin": {
+          "type": "object",
+          "properties": {
+           "archived": {
+            "type": "boolean",
+            "readOnly": true
+           },
+           "defaultBranch": {
+            "type": "string",
+            "example": "main",
+            "writeOnly": true
+           },
+           "description": {
+            "type": "string",
+            "example": "My repo description",
+            "readOnly": true
+           },
+           "forkable": {
+            "type": "boolean",
+            "readOnly": true
+           },
+           "hierarchyId": {
+            "type": "string",
+            "example": "e3c939f9ef4a7fae272e",
+            "readOnly": true
+           },
+           "id": {
+            "type": "integer",
+            "format": "int32",
+            "readOnly": true
+           },
+           "links": {
+            "type": "object",
+            "properties": {},
+            "writeOnly": true
+           },
+           "name": {
+            "type": "string",
+            "example": "My repo"
+           },
+           "partition": {
+            "type": "integer",
+            "format": "int32",
+            "readOnly": true
+           },
+           "project": {
+            "type": "object",
+            "properties": {
+             "avatar": {
+              "type": "string"
+             },
+             "avatarUrl": {
+              "type": "string",
+              "writeOnly": true
+             },
+             "description": {
+              "type": "string",
+              "example": "The description for my cool project",
+              "readOnly": true
+             },
+             "id": {
+              "type": "integer",
+              "format": "int32",
+              "readOnly": true
+             },
+             "key": {
+              "type": "string",
+              "example": "PRJ"
+             },
+             "links": {
+              "type": "object",
+              "properties": {},
+              "writeOnly": true
+             },
+             "name": {
+              "type": "string",
+              "example": "My Cool Project",
+              "readOnly": true
+             },
+             "public": {
+              "type": "boolean",
+              "readOnly": true
+             },
+             "scope": {
+              "type": "string",
+              "example": "PROJECT",
+              "readOnly": true
+             },
+             "type": {
+              "type": "string",
+              "enum": [
+               "NORMAL",
+               "PERSONAL"
+              ],
+              "readOnly": true
+             }
+            },
+            "required": [
+             "key",
+             "name",
+             "type"
+            ]
+           },
+           "public": {
+            "type": "boolean",
+            "readOnly": true
+           },
+           "relatedLinks": {
+            "type": "object",
+            "properties": {},
+            "readOnly": true
+           },
+           "scmId": {
+            "type": "string",
+            "example": "git"
+           },
+           "scope": {
+            "type": "string",
+            "example": "REPOSITORY",
+            "readOnly": true
+           },
+           "slug": {
+            "type": "string",
+            "example": "my-repo"
+           },
+           "state": {
+            "type": "string",
+            "enum": [
+             "AVAILABLE",
+             "INITIALISATION_FAILED",
+             "INITIALISING",
+             "OFFLINE"
+            ],
+            "readOnly": true
+           },
+           "statusMessage": {
+            "type": "string",
+            "example": "Available",
+            "readOnly": true
+           }
+          },
+          "readOnly": true
+         },
+         "partition": {
+          "type": "integer",
+          "format": "int32",
+          "readOnly": true
+         },
+         "project": {
+          "type": "object",
+          "properties": {
+           "avatar": {
+            "type": "string"
+           },
+           "avatarUrl": {
+            "type": "string",
+            "writeOnly": true
+           },
+           "description": {
+            "type": "string",
+            "example": "The description for my cool project",
+            "readOnly": true
+           },
+           "id": {
+            "type": "integer",
+            "format": "int32",
+            "readOnly": true
+           },
+           "key": {
+            "type": "string",
+            "example": "PRJ"
+           },
+           "links": {
+            "type": "object",
+            "properties": {},
+            "writeOnly": true
+           },
+           "name": {
+            "type": "string",
+            "example": "My Cool Project",
+            "readOnly": true
+           },
+           "public": {
+            "type": "boolean",
+            "readOnly": true
+           },
+           "scope": {
+            "type": "string",
+            "example": "PROJECT",
+            "readOnly": true
+           },
+           "type": {
+            "type": "string",
+            "enum": [
+             "NORMAL",
+             "PERSONAL"
+            ],
+            "readOnly": true
+           }
+          },
+          "required": [
+           "key",
+           "name",
+           "type"
+          ]
+         },
+         "public": {
+          "type": "boolean",
+          "readOnly": true
+         },
+         "relatedLinks": {
+          "type": "object",
+          "properties": {},
+          "readOnly": true
+         },
+         "scmId": {
+          "type": "string",
+          "example": "git"
+         },
+         "scope": {
+          "type": "string",
+          "example": "REPOSITORY",
+          "readOnly": true
+         },
+         "slug": {
+          "type": "string",
+          "example": "my-repo"
+         },
+         "state": {
+          "type": "string",
+          "enum": [
+           "AVAILABLE",
+           "INITIALISATION_FAILED",
+           "INITIALISING",
+           "OFFLINE"
+          ],
+          "readOnly": true
+         },
+         "statusMessage": {
+          "type": "string",
+          "example": "Available",
+          "readOnly": true
+         }
+        }
+       },
+       "type": {
+        "type": "string",
+        "enum": [
+         "BRANCH",
+         "TAG"
+        ]
+       }
+      },
+      "required": [
+       "displayId",
+       "id",
+       "latestCommit"
+      ]
+     },
+     "htmlDescription": {
+      "type": "string",
+      "writeOnly": true
+     },
+     "id": {
+      "type": "integer",
+      "format": "int64",
+      "example": 1
+     },
+     "links": {
+      "type": "object",
+      "properties": {},
+      "writeOnly": true
+     },
+     "locked": {
+      "type": "boolean"
+     },
+     "open": {
+      "type": "boolean"
+     },
+     "participants": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/RestPullRequestParticipant"
+      }
+     },
+     "reviewers": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/RestPullRequestParticipant"
+      }
+     },
+     "state": {
+      "type": "string",
+      "enum": [
+       "DECLINED",
+       "MERGED",
+       "OPEN"
+      ]
+     },
+     "title": {
+      "type": "string",
+      "example": "Talking Nerdy"
+     },
+     "toRef": {
+      "type": "object",
+      "properties": {
+       "displayId": {
+        "type": "string",
+        "example": "feature-ABC-1233"
+       },
+       "id": {
+        "type": "string",
+        "example": "refs/heads/feature-ABC-123"
+       },
+       "latestCommit": {
+        "type": "string",
+        "example": "babecafebabecafebabecafebabecafebabecafe"
+       },
+       "repository": {
+        "type": "object",
+        "properties": {
+         "archived": {
+          "type": "boolean",
+          "readOnly": true
+         },
+         "defaultBranch": {
+          "type": "string",
+          "example": "main",
+          "writeOnly": true
+         },
+         "description": {
+          "type": "string",
+          "example": "My repo description",
+          "readOnly": true
+         },
+         "forkable": {
+          "type": "boolean",
+          "readOnly": true
+         },
+         "hierarchyId": {
+          "type": "string",
+          "example": "e3c939f9ef4a7fae272e",
+          "readOnly": true
+         },
+         "id": {
+          "type": "integer",
+          "format": "int32",
+          "readOnly": true
+         },
+         "links": {
+          "type": "object",
+          "properties": {},
+          "writeOnly": true
+         },
+         "name": {
+          "type": "string",
+          "example": "My repo"
+         },
+         "origin": {
+          "type": "object",
+          "properties": {
+           "archived": {
+            "type": "boolean",
+            "readOnly": true
+           },
+           "defaultBranch": {
+            "type": "string",
+            "example": "main",
+            "writeOnly": true
+           },
+           "description": {
+            "type": "string",
+            "example": "My repo description",
+            "readOnly": true
+           },
+           "forkable": {
+            "type": "boolean",
+            "readOnly": true
+           },
+           "hierarchyId": {
+            "type": "string",
+            "example": "e3c939f9ef4a7fae272e",
+            "readOnly": true
+           },
+           "id": {
+            "type": "integer",
+            "format": "int32",
+            "readOnly": true
+           },
+           "links": {
+            "type": "object",
+            "properties": {},
+            "writeOnly": true
+           },
+           "name": {
+            "type": "string",
+            "example": "My repo"
+           },
+           "partition": {
+            "type": "integer",
+            "format": "int32",
+            "readOnly": true
+           },
+           "project": {
+            "type": "object",
+            "properties": {
+             "avatar": {
+              "type": "string"
+             },
+             "avatarUrl": {
+              "type": "string",
+              "writeOnly": true
+             },
+             "description": {
+              "type": "string",
+              "example": "The description for my cool project",
+              "readOnly": true
+             },
+             "id": {
+              "type": "integer",
+              "format": "int32",
+              "readOnly": true
+             },
+             "key": {
+              "type": "string",
+              "example": "PRJ"
+             },
+             "links": {
+              "type": "object",
+              "properties": {},
+              "writeOnly": true
+             },
+             "name": {
+              "type": "string",
+              "example": "My Cool Project",
+              "readOnly": true
+             },
+             "public": {
+              "type": "boolean",
+              "readOnly": true
+             },
+             "scope": {
+              "type": "string",
+              "example": "PROJECT",
+              "readOnly": true
+             },
+             "type": {
+              "type": "string",
+              "enum": [
+               "NORMAL",
+               "PERSONAL"
+              ],
+              "readOnly": true
+             }
+            },
+            "required": [
+             "key",
+             "name",
+             "type"
+            ]
+           },
+           "public": {
+            "type": "boolean",
+            "readOnly": true
+           },
+           "relatedLinks": {
+            "type": "object",
+            "properties": {},
+            "readOnly": true
+           },
+           "scmId": {
+            "type": "string",
+            "example": "git"
+           },
+           "scope": {
+            "type": "string",
+            "example": "REPOSITORY",
+            "readOnly": true
+           },
+           "slug": {
+            "type": "string",
+            "example": "my-repo"
+           },
+           "state": {
+            "type": "string",
+            "enum": [
+             "AVAILABLE",
+             "INITIALISATION_FAILED",
+             "INITIALISING",
+             "OFFLINE"
+            ],
+            "readOnly": true
+           },
+           "statusMessage": {
+            "type": "string",
+            "example": "Available",
+            "readOnly": true
+           }
+          },
+          "readOnly": true
+         },
+         "partition": {
+          "type": "integer",
+          "format": "int32",
+          "readOnly": true
+         },
+         "project": {
+          "type": "object",
+          "properties": {
+           "avatar": {
+            "type": "string"
+           },
+           "avatarUrl": {
+            "type": "string",
+            "writeOnly": true
+           },
+           "description": {
+            "type": "string",
+            "example": "The description for my cool project",
+            "readOnly": true
+           },
+           "id": {
+            "type": "integer",
+            "format": "int32",
+            "readOnly": true
+           },
+           "key": {
+            "type": "string",
+            "example": "PRJ"
+           },
+           "links": {
+            "type": "object",
+            "properties": {},
+            "writeOnly": true
+           },
+           "name": {
+            "type": "string",
+            "example": "My Cool Project",
+            "readOnly": true
+           },
+           "public": {
+            "type": "boolean",
+            "readOnly": true
+           },
+           "scope": {
+            "type": "string",
+            "example": "PROJECT",
+            "readOnly": true
+           },
+           "type": {
+            "type": "string",
+            "enum": [
+             "NORMAL",
+             "PERSONAL"
+            ],
+            "readOnly": true
+           }
+          },
+          "required": [
+           "key",
+           "name",
+           "type"
+          ]
+         },
+         "public": {
+          "type": "boolean",
+          "readOnly": true
+         },
+         "relatedLinks": {
+          "type": "object",
+          "properties": {},
+          "readOnly": true
+         },
+         "scmId": {
+          "type": "string",
+          "example": "git"
+         },
+         "scope": {
+          "type": "string",
+          "example": "REPOSITORY",
+          "readOnly": true
+         },
+         "slug": {
+          "type": "string",
+          "example": "my-repo"
+         },
+         "state": {
+          "type": "string",
+          "enum": [
+           "AVAILABLE",
+           "INITIALISATION_FAILED",
+           "INITIALISING",
+           "OFFLINE"
+          ],
+          "readOnly": true
+         },
+         "statusMessage": {
+          "type": "string",
+          "example": "Available",
+          "readOnly": true
+         }
+        }
+       },
+       "type": {
+        "type": "string",
+        "enum": [
+         "BRANCH",
+         "TAG"
+        ]
+       }
+      },
+      "required": [
+       "displayId",
+       "id",
+       "latestCommit"
+      ]
+     },
+     "updatedDate": {
+      "type": "integer",
+      "format": "int64",
+      "example": 14490759200
+     },
+     "version": {
+      "type": "integer",
+      "format": "int32"
+     }
+    }
+   },
+   "RestChange": {
+    "properties": {
+     "conflict": {
+      "type": "object",
+      "properties": {
+       "ourChange": {
+        "type": "object",
+        "properties": {
+         "path": {
+          "type": "object",
+          "properties": {
+           "components": {
+            "type": "array",
+            "example": [
+             "path",
+             "to",
+             "file.txt"
+            ],
+            "items": {
+             "type": "string"
+            }
+           },
+           "extension": {
+            "type": "string",
+            "example": "txt"
+           },
+           "name": {
+            "type": "string",
+            "example": "file.txt"
+           },
+           "parent": {
+            "type": "string",
+            "example": "path/to"
+           }
+          }
+         },
+         "srcPath": {
+          "type": "object",
+          "properties": {
+           "components": {
+            "type": "array",
+            "example": [
+             "path",
+             "to",
+             "file.txt"
+            ],
+            "items": {
+             "type": "string"
+            }
+           },
+           "extension": {
+            "type": "string",
+            "example": "txt"
+           },
+           "name": {
+            "type": "string",
+            "example": "file.txt"
+           },
+           "parent": {
+            "type": "string",
+            "example": "path/to"
+           }
+          }
+         },
+         "type": {
+          "type": "string",
+          "enum": [
+           "ADD",
+           "COPY",
+           "DELETE",
+           "MODIFY",
+           "MOVE",
+           "UNKNOWN"
+          ]
+         }
+        }
+       },
+       "theirChange": {
+        "type": "object",
+        "properties": {
+         "path": {
+          "type": "object",
+          "properties": {
+           "components": {
+            "type": "array",
+            "example": [
+             "path",
+             "to",
+             "file.txt"
+            ],
+            "items": {
+             "type": "string"
+            }
+           },
+           "extension": {
+            "type": "string",
+            "example": "txt"
+           },
+           "name": {
+            "type": "string",
+            "example": "file.txt"
+           },
+           "parent": {
+            "type": "string",
+            "example": "path/to"
+           }
+          }
+         },
+         "srcPath": {
+          "type": "object",
+          "properties": {
+           "components": {
+            "type": "array",
+            "example": [
+             "path",
+             "to",
+             "file.txt"
+            ],
+            "items": {
+             "type": "string"
+            }
+           },
+           "extension": {
+            "type": "string",
+            "example": "txt"
+           },
+           "name": {
+            "type": "string",
+            "example": "file.txt"
+           },
+           "parent": {
+            "type": "string",
+            "example": "path/to"
+           }
+          }
+         },
+         "type": {
+          "type": "string",
+          "enum": [
+           "ADD",
+           "COPY",
+           "DELETE",
+           "MODIFY",
+           "MOVE",
+           "UNKNOWN"
+          ]
+         }
+        }
+       }
+      }
+     },
+     "contentId": {
+      "type": "string",
+      "example": "abcdef0123abcdef4567abcdef8987abcdef6543"
+     },
+     "executable": {
+      "type": "boolean"
+     },
+     "fromContentId": {
+      "type": "string",
+      "example": "bcdef0123abcdef4567abcdef8987abcdef6543a"
+     },
+     "links": {
+      "type": "object",
+      "properties": {},
+      "writeOnly": true
+     },
+     "nodeType": {
+      "type": "string",
+      "enum": [
+       "DIRECTORY",
+       "FILE",
+       "SUBMODULE"
+      ]
+     },
+     "path": {
+      "type": "object",
+      "properties": {
+       "components": {
+        "type": "array",
+        "example": [
+         "path",
+         "to",
+         "file.txt"
+        ],
+        "items": {
+         "type": "string"
+        }
+       },
+       "extension": {
+        "type": "string",
+        "example": "txt"
+       },
+       "name": {
+        "type": "string",
+        "example": "file.txt"
+       },
+       "parent": {
+        "type": "string",
+        "example": "path/to"
+       }
+      }
+     },
+     "percentUnchanged": {
+      "type": "integer",
+      "format": "int32",
+      "example": 98
+     },
+     "srcExecutable": {
+      "type": "boolean"
+     },
+     "srcPath": {
+      "type": "object",
+      "properties": {
+       "components": {
+        "type": "array",
+        "example": [
+         "path",
+         "to",
+         "file.txt"
+        ],
+        "items": {
+         "type": "string"
+        }
+       },
+       "extension": {
+        "type": "string",
+        "example": "txt"
+       },
+       "name": {
+        "type": "string",
+        "example": "file.txt"
+       },
+       "parent": {
+        "type": "string",
+        "example": "path/to"
+       }
+      }
+     },
+     "type": {
+      "type": "string",
+      "enum": [
+       "ADD",
+       "COPY",
+       "DELETE",
+       "MODIFY",
+       "MOVE",
+       "UNKNOWN"
+      ]
+     }
+    }
+   },
+   "RestPullRequestMergeRequest": {
+    "type": "object",
+    "properties": {
+     "autoMerge": {
+      "type": "boolean",
+      "example": false
+     },
+     "autoSubject": {
+      "type": "string",
+      "example": "(Optional, 5.7+) true to prepend an auto-generated subject to the message (default), or false to use the message as-is"
+     },
+     "message": {
+      "type": "string",
+      "example": "(Optional) A descriptive message for the merge commit"
+     },
+     "strategyId": {
+      "type": "string",
+      "example": "(Optional) squash"
+     },
+     "version": {
+      "type": "integer",
+      "format": "int32"
+     }
+    }
+   },
+   "RestRepositoryHookVeto": {
+    "properties": {
+     "detailedMessage": {
+      "type": "string",
+      "example": "You have insufficient permissions to rebase 'refs/heads/feature-branch'."
+     },
+     "summaryMessage": {
+      "type": "string",
+      "example": "Insufficient branch permissions"
+     }
+    }
+   },
+   "RestPullRequestDeleteRequest": {
+    "type": "object",
+    "properties": {
+     "version": {
+      "type": "integer",
+      "format": "int32"
+     }
+    }
+   },
+   "RefType": {},
+   "RestPullRequestParticipant": {
+    "properties": {
+     "approved": {
+      "type": "boolean"
+     },
+     "lastReviewedCommit": {
+      "type": "string",
+      "example": "7549846524f8aed2bd1c0249993ae1bf9d3c9998"
+     },
+     "role": {
+      "type": "string",
+      "enum": [
+       "AUTHOR",
+       "REVIEWER",
+       "PARTICIPANT"
+      ]
+     },
+     "status": {
+      "type": "string",
+      "enum": [
+       "UNAPPROVED",
+       "NEEDS_WORK",
+       "APPROVED"
+      ]
+     },
+     "user": {
+      "type": "object",
+      "properties": {
+       "active": {
+        "type": "boolean"
+       },
+       "avatarUrl": {
+        "type": "string",
+        "writeOnly": true
+       },
+       "displayName": {
+        "type": "string",
+        "example": "Jane Citizen"
+       },
+       "emailAddress": {
+        "type": "string",
+        "example": "jane@example.com"
+       },
+       "id": {
+        "type": "integer",
+        "format": "int32",
+        "example": 101,
+        "readOnly": true
+       },
+       "links": {
+        "type": "object",
+        "properties": {},
+        "writeOnly": true
+       },
+       "name": {
+        "type": "string",
+        "example": "jcitizen"
+       },
+       "slug": {
+        "type": "string",
+        "example": "jcitizen"
+       },
+       "type": {
+        "type": "string",
+        "enum": [
+         "NORMAL",
+         "SERVICE"
+        ]
+       }
+      },
+      "required": [
+       "displayName",
+       "name",
+       "slug",
+       "type"
+      ]
+     }
+    }
+   },
+   "RestAutoMergeSettingsRequest": {
+    "type": "object",
+    "properties": {
+     "enabled": {
+      "type": "boolean",
+      "example": false
+     }
+    }
+   }
+  }
+ }
+}

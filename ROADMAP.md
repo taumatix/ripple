@@ -73,8 +73,12 @@ auth model, rate limits); the notes below are what I expect, **unverified** unti
     a repo on `git.repo.created` and forget it on `git.repo.deleted` / `git.repo.renamed` instead of waiting for
     the next listing; the commit-changes lookup (merge commits, paging past
     one page of changes) is unverified against a real organisation.
-15. **Bitbucket Server / Data Center.** A different REST API from Bitbucket Cloud; webhooks per
-    repo or project; HTTP access tokens.
+15. **Bitbucket Server / Data Center against a real instance.** The host shipped from vendored docs and a
+    fake only (docs/platform-bitbucketserver.md "Unverified"). Run the conformance flow against a real
+    Data Center (Atlassian's evaluation licence, no containers on the agent host), recording whether a 429
+    carries `Retry-After`, the `autoMerge` response and who performs the merge, `draft` support by release,
+    `path.toString` in `compare/changes`, and Basic versus Bearer for project tokens. Also: `repo:modified`
+    renames are left to periodic discovery, and a repository with no commits may list but not clone.
 16. **AWS CodeCommit: verify against real AWS.** Built from the vendored docs and a fake
     ([docs/platform-codecommit.md](docs/platform-codecommit.md)); no AWS account has run it. Needs a
     sandbox account: confirm SigV4 API calls and the git password are accepted, the title limit

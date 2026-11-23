@@ -68,6 +68,29 @@ func (e *Engine) notePackages(ctx context.Context, ds, cursor string, deps []mod
 	return e.Store.SetCursor(ctx, cursor, strings.Join(all, "\n"))
 }
 
+// dropActionPackage removes pkg from the polled set. It re-reads the cursor under the
+// lock and re-checks the dependents, so a repo that started using pkg since the poll
+// began keeps it; a lost update still only costs a re-add at the next scan.
+func (e *Engine) dropActionPackage(ctx context.Context, pkg string) error {
+	actionsPackagesMu.Lock()
+	defer actionsPackagesMu.Unlock()
+	deps, err := e.Store.ListDependents(ctx, model.DatasourceGitHubTags, pkg)
+	if err != nil || len(deps) > 0 {
+		return err
+	}
+	raw, err := e.Store.GetCursor(ctx, actionsPackagesCursor)
+	if err != nil {
+		return err
+	}
+	var keep []string
+	for _, p := range strings.Fields(raw) {
+		if p != pkg {
+			keep = append(keep, p)
+		}
+	}
+	return e.Store.SetCursor(ctx, actionsPackagesCursor, strings.Join(keep, "\n"))
+}
+
 var tagShapeRE = regexp.MustCompile(`^(v?)([0-9]+(?:\.[0-9]+){0,2})$`)
 
 // tagShape splits a tag into the semver ripple compares and its "shape": whether it
@@ -137,6 +160,9 @@ func (w *ActionsWatcher) Poll(ctx context.Context) (int, error) {
 			return n, fmt.Errorf("list dependents of %s: %w", pkg, err)
 		}
 		if len(deps) == 0 {
+			if err := e.dropActionPackage(ctx, pkg); err != nil {
+				e.log().Warn("unused package not pruned", "package", pkg, "err", err)
+			}
 			continue
 		}
 		via, found, err := e.Store.GetRepo(ctx, deps[0].Repo)

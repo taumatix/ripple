@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -145,6 +146,34 @@ func TestActionsLeftAloneAreNotReportedWithoutADashboard(t *testing.T) {
 		e.tick()
 		if is := e.gh.Issues("acme/app"); len(is) != 0 {
 			t.Errorf("issues without opting in: %+v", is)
+		}
+	})
+}
+
+// An action no repo uses any more leaves the polled set, so the watcher stops reading its tags.
+func TestActionsUnusedPackageIsPruned(t *testing.T) {
+	forEach(t, func(t *testing.T, st store.Store) {
+		e := newEnv(t, st, defaultLimits())
+		actionsUpstream(e, "up/action", "v4")
+		actionsUpstream(e, "up/other", "v1")
+		ci := "on: push\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: up/action@v4\n      - uses: up/other@v1\n"
+		e.gh.AddRepo("acme/app", map[string]string{".ripple.yaml": actionsConfig, ".github/workflows/ci.yml": ci})
+		start(t, e, "acme/app")
+		cursor := func() string {
+			c, err := e.st.GetCursor(context.Background(), "github-tags:packages")
+			if err != nil {
+				t.Fatal(err)
+			}
+			return c
+		}
+		if got := cursor(); got != "up/action\nup/other" {
+			t.Fatalf("polled set after the scan = %q", got)
+		}
+		e.push("acme/app", map[string]string{".github/workflows/ci.yml": "on: push\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: up/action@v4\n"})
+		e.waitQueueIdle()
+		e.tick()
+		if got := cursor(); got != "up/action" {
+			t.Errorf("polled set after up/other was dropped = %q, want only up/action", got)
 		}
 	})
 }

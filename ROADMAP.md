@@ -173,15 +173,19 @@ Everything else:
     on a closed PR, Gerrit abandon permission). Run each once on a real instance and record it.
 93. **Azure DevOps and SCM-Manager cannot close a superseded PR.** Azure exposes no edit history of a title or
     description; SCM-Manager's reject, comment and history endpoints are documented only in plugin source. Add
-    the closer when either API gives a reliable "a person touched it" read.
+    the closer when either API gives a reliable "a person touched it" read. Rechecked 2026-11-23 against the
+    vendored Azure REST pull-request update reference (docs/vendor/azuredevops) and the SCM-Manager source
+    notes: neither adds an edit history; nothing buildable offline.
 94. **Edits no host can report.** Not detected: a description edit on Forgejo, Bitbucket Cloud (beyond its
     activity log), CodeCommit and Gerrit; a changed label, assignee or reviewer on GitLab and Gerrit; a
     force-push under ripple's own commit identity on Gerrit, Bitbucket Cloud and CodeCommit. A person who does
     one of these loses nothing only if ripple stored what it opened: record the head SHA and body hash on the
-    job and compare, which would cover every host the same way.
-95. **Supersede re-reads touched PRs every run.** A stale PR a person touched is checked again (about six
-    reads) each time ripple works on the repo, because the retry cannot tell it from a failed close. Remember
-    "touched" on the job, cleared when the PR changes.
+    job and compare, which would cover every host the same way. It needs the head SHA on `platform.PR` and a
+    new job column (a Postgres migration and a DynamoDB attribute), so it waits for the store work in flight.
+124. **Supersede: a touched PR whose head moves.** A PR a person touched is now remembered by URL
+    (cursor `supersede-touched:<repo>`) until it leaves the open list. Touched is treated as permanent; a person
+    who undoes the touch (reverts a rename, deletes a comment) is not noticed until the PR closes. Fine for the
+    reads the hosts report today; revisit only if a host reports a revert.
 100. **Replicas: a store-assigned event sequence.** Event order across replicas now holds only as far as
     each replica's clock does: `Seq` is the receiving replica's `UnixNano`, so skewed clocks can order two events
     of a repo wrongly, and the claim-time `HasOlderEvent` check trusts that order. On DynamoDB the check reads the

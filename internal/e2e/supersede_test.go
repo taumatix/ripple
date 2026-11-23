@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -288,6 +289,41 @@ func TestAPRNoRippleJobOpenedIsNeverClosed(t *testing.T) {
 			if p.Head == "ripple/go/example.com-lib-v1.0.5" && (p.Closed || len(p.Comments) != 0) {
 				t.Errorf("closed a PR no ripple job opened: %+v", p)
 			}
+		}
+	})
+}
+
+// A stale PR a person touched is read once: the next runs of the repo remember it.
+func TestATouchedStalePRIsNotReReadOnEveryRun(t *testing.T) {
+	forEach(t, func(t *testing.T, st store.Store) {
+		e := supersedeEnv(t, st, "")
+		e.gh.HumanComment(repo, e.gh.PRs(repo)[0].Number, "we are testing this one")
+		e.tick() // opens v1.2.0 and finds v1.1.0 touched
+		// Any later read of the PR's reviews would fail now, and a failed check is logged.
+		e.gh.FailPath = "/reviews"
+		e.rerun(repo, "example.com/lib", "v1.2.0")
+		e.tick()
+		if n := e.logLines("stale pull request not closed"); n != 0 {
+			t.Errorf("the touched PR was checked again: %d failed checks logged", n)
+		}
+		if prs := e.gh.PRs(repo); len(prs) != 2 || prs[0].Closed {
+			t.Errorf("the touched PR must stay open: %+v", prs)
+		}
+	})
+}
+
+// The memory ends with the PR: when the person closes it, nothing stale is kept, and
+// a later PR on a reused branch is read afresh.
+func TestTheTouchedMemoryIsDroppedWhenThePRCloses(t *testing.T) {
+	forEach(t, func(t *testing.T, st store.Store) {
+		e := supersedeEnv(t, st, "")
+		e.gh.HumanComment(repo, e.gh.PRs(repo)[0].Number, "we are testing this one")
+		e.tick()
+		e.gh.HumanClosePR(repo, e.gh.PRs(repo)[0].Number)
+		e.rerun(repo, "example.com/lib", "v1.2.0")
+		e.tick()
+		if raw, err := e.st.GetCursor(context.Background(), "supersede-touched:"+repo); err != nil || raw != "" && raw != "[]" {
+			t.Errorf("memory %q (err %v) must be empty once the PR is closed", raw, err)
 		}
 	})
 }

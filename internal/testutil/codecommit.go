@@ -14,6 +14,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"io"
 	"math/big"
 	"net/http"
@@ -68,6 +69,7 @@ type CodeCommit struct {
 	requests  []string
 	apiHost   string
 	confirmed int
+	msgSeq    int
 	gitSeen   int
 	gitDenied int
 }
@@ -569,7 +571,12 @@ func (c *CodeCommit) certDER() ([]byte, error) {
 // "Notification" or "SubscriptionConfirmation"; version is the SignatureVersion ("1" or
 // "2"); message is the Message (an EventBridge event for a notification).
 func (c *CodeCommit) SNSMessage(typ, version, topic, message string) (http.Header, []byte) {
-	m := map[string]string{"Type": typ, "MessageId": "165545c9-2a5c-472c-8df2-7ff2be2b3b1b", "TopicArn": topic,
+	// Every SNS message has its own MessageId (a retry reuses it), and the receiver dedupes on it.
+	c.mu.Lock()
+	c.msgSeq++
+	id := fmt.Sprintf("165545c9-2a5c-472c-8df2-%012d", c.msgSeq)
+	c.mu.Unlock()
+	m := map[string]string{"Type": typ, "MessageId": id, "TopicArn": topic,
 		"Message": message, "Timestamp": "2026-11-23T10:00:00.751Z", "SignatureVersion": version, "SigningCertURL": c.CertURL}
 	var sts string
 	if typ == "SubscriptionConfirmation" {

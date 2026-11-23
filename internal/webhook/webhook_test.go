@@ -356,3 +356,74 @@ func TestParseRepositoryEvents(t *testing.T) {
 		})
 	}
 }
+
+func TestDedupeBySignatureCatchesARewrittenDeliveryID(t *testing.T) {
+	hr := newHarness()
+	hr.h.DedupeBySignature = true
+	hr.post("d1", pushBody)
+	if c := hr.post("d2-forged-header", pushBody); c != 202 || hr.count() != 1 {
+		t.Fatalf("captured body under a new id: code %d events %d", c, hr.count())
+	}
+	if c := hr.post("", pushBody); c != 202 || hr.count() != 1 {
+		t.Fatalf("captured body without an id: code %d events %d", c, hr.count())
+	}
+	hr.post("d3", `{"ref":"refs/heads/main","installation":{"id":7},"repository":{"full_name":"a/c","default_branch":"main"}}`)
+	if hr.count() != 2 {
+		t.Fatalf("a different body was dropped: %d", hr.count())
+	}
+}
+
+func TestFailedDeliveryCanBeRedeliveredBySignature(t *testing.T) {
+	hr := newHarness()
+	hr.h.DedupeBySignature = true
+	hr.sinkErr = context.Canceled
+	hr.post("d1", pushBody)
+	hr.sinkErr = nil
+	if c := hr.post("d9", pushBody); c != 202 || hr.count() != 2 {
+		t.Fatalf("redelivery after a failure: code %d events %d", c, hr.count())
+	}
+}
+
+// Through the real handler over a real socket: a signed-looking sender that trickles
+// loses its slot at ReadTimeout (408), and a genuine delivery then gets through.
+func TestHandlerSlowSenderTimesOutAndFreesItsSlot(t *testing.T) {
+	hr := newHarness()
+	hr.h.MaxInflight, hr.h.ReadTimeout = 1, 300*time.Millisecond
+	srv := httptest.NewServer(hr.h)
+	defer srv.Close()
+	pr, pw := io.Pipe()
+	defer pw.Close()
+	slow := make(chan int, 1)
+	go func() {
+		req, _ := http.NewRequest("POST", srv.URL, pr)
+		req.Header.Set("X-GitHub-Event", "push")
+		req.Header.Set("X-Hub-Signature-256", "sha256="+strings.Repeat("0", 64))
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			slow <- -1
+			return
+		}
+		resp.Body.Close()
+		slow <- resp.StatusCode
+	}()
+	pw.Write([]byte("{"))
+	select {
+	case code := <-slow:
+		if code != http.StatusRequestTimeout {
+			t.Fatalf("slow sender got %d, want 408", code)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("slow sender still holds its slot")
+	}
+	req, _ := http.NewRequest("POST", srv.URL, strings.NewReader(pushBody))
+	req.Header.Set("X-GitHub-Event", "push")
+	req.Header.Set("X-Hub-Signature-256", Sign(hr.secret, []byte(pushBody)))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 202 || hr.count() != 1 {
+		t.Fatalf("genuine delivery after the timeout: %d, events %d", resp.StatusCode, hr.count())
+	}
+}

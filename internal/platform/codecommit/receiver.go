@@ -24,16 +24,15 @@ import (
 
 	"github.com/taumatix/ripple/internal/model"
 	"github.com/taumatix/ripple/internal/platform"
+	"github.com/taumatix/ripple/internal/webhook"
 )
 
 const (
 	// maxBody bounds a delivery. SNS messages are at most 256 KB
 	// (docs/vendor/codecommit/sns-sns-message-and-json-formats.md); EventBridge adds an
 	// envelope, so a megabyte is far above anything real.
-	maxBody = 1 << 20
-	// maxInflight bounds how many request bodies are buffered at once.
-	maxInflight = 4
-	maxCerts    = 8
+	maxBody  = 1 << 20
+	maxCerts = 8
 )
 
 // snsHost is a host SNS signs and confirms from: sns.<region>.amazonaws.com, or its
@@ -67,8 +66,9 @@ type Receiver struct {
 	// them unknown. NewHost sets it to the client's ChangedFiles.
 	Files func(ctx context.Context, repo model.Repo, before, after string) ([]string, error)
 
-	sem   chan struct{} // set by NewHost
-	certs *certCache    // set by NewHost
+	certs  *certCache      // set by NewHost
+	guard  *webhook.Guard  // set by NewHost
+	dedupe *webhook.Dedupe // set by NewHost
 }
 
 // certCache holds a few signing certificates; it is a pointer so a Receiver can be copied.
@@ -268,18 +268,12 @@ func (h *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	select {
-	case h.sem <- struct{}{}:
-		defer func() { <-h.sem }()
-	default:
-		w.Header().Set("Retry-After", "5")
-		http.Error(w, "busy", http.StatusServiceUnavailable)
-		return
-	}
-	// SNS sends Content-Type text/plain, so the body is not decoded by type.
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBody))
-	if err != nil {
-		http.Error(w, "bad body", http.StatusRequestEntityTooLarge)
+	// SNS signs fields of the JSON (a SHA256withRSA over Message, MessageId, ... per
+	// sns-http-notification-json.md), so the signature cannot be checked until the whole
+	// message is parsed: the body is held in memory, bounded by maxBody (SNS caps a
+	// message at 256 KB) and by the guard's slots and read deadline.
+	body, res := h.guard.ReadBody(w, r, maxBody)
+	if res != webhook.ReadOK {
 		return
 	}
 	var m message
@@ -357,6 +351,12 @@ func (h *Receiver) notify(w http.ResponseWriter, r *http.Request, m message) {
 		http.Error(w, "bad repository", http.StatusBadRequest)
 		return
 	}
+	// MessageId is signed, and a retried notification keeps the original's
+	// (sns-http-notification-json.md), so a repeat is dropped.
+	if !h.dedupe.Claim(time.Now(), m.MessageID) {
+		w.WriteHeader(http.StatusAccepted)
+		return
+	}
 	ev := platform.Event{Kind: platform.Push, Delivery: m.MessageID, Repos: []string{path}, Ref: d.ReferenceFull}
 	if h.Files != nil && d.Event == "referenceUpdated" && d.OldCommitID != "" && d.CommitID != "" {
 		files, err := h.Files(r.Context(), model.Repo{FullName: path}, d.OldCommitID, d.CommitID)
@@ -366,6 +366,7 @@ func (h *Receiver) notify(w http.ResponseWriter, r *http.Request, m message) {
 		ev.Files = files
 	}
 	if err := h.Sink.HandleEvent(r.Context(), ev); err != nil {
+		h.dedupe.Release(m.MessageID)
 		h.log().Error("codecommit webhook: sink", "repo", path, "err", err)
 		http.Error(w, fmt.Sprintf("try again: %v", err), http.StatusServiceUnavailable)
 		return

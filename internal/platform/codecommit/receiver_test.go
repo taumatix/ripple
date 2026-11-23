@@ -75,7 +75,7 @@ func TestNotificationBecomesAPushForBothSignatureVersions(t *testing.T) {
 			t.Fatalf("version %s: status %d", v, code)
 		}
 		// ug-monitoring-events.md: referenceFullName is the ref; the lookup gets both commits.
-		want := platform.Event{Kind: platform.Push, Delivery: "165545c9-2a5c-472c-8df2-7ff2be2b3b1b",
+		want := platform.Event{Kind: platform.Push, Delivery: "165545c9-2a5c-472c-8df2-000000000001",
 			Repos: []string{region + "/app"}, Ref: "refs/heads/main", Files: []string{"go.mod"}}
 		if len(r.s.got) != 1 || !eventEq(r.s.got[0], want) || r.got[0] != region+"/app aaa..bbb" {
 			t.Errorf("version %s: %+v lookups %v", v, r.s.got, r.got)
@@ -213,5 +213,42 @@ func TestAWSURL(t *testing.T) {
 		if got := codecommit.AWSURL(u); got != ok {
 			t.Errorf("AWSURL(%s) = %v", raw, got)
 		}
+	}
+}
+
+// SNS redelivers a notification under the same MessageId when it did not see a 2xx;
+// a repeat that was handled must not become a second event.
+func TestRepeatedMessageIDIsHandledOnce(t *testing.T) {
+	r := newRx(t, okFiles())
+	hdr, body := r.cc.SNSMessage("Notification", "2", topic, refUpdated(region+"/app", "main", "a", "b"))
+	for i := range 2 {
+		if code := r.post(hdr, body); code != http.StatusAccepted && code != http.StatusOK {
+			t.Fatalf("delivery %d: status %d", i, code)
+		}
+	}
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	if len(r.s.got) != 1 {
+		t.Fatalf("%d events for one MessageId delivered twice", len(r.s.got))
+	}
+}
+
+func TestFailedMessageCanBeRedelivered(t *testing.T) {
+	r := newRx(t, okFiles())
+	r.s.err = errors.New("db down")
+	hdr, body := r.cc.SNSMessage("Notification", "2", topic, refUpdated(region+"/app", "main", "a", "b"))
+	if code := r.post(hdr, body); code != http.StatusServiceUnavailable {
+		t.Fatalf("status %d", code)
+	}
+	r.s.mu.Lock()
+	r.s.err = nil
+	r.s.mu.Unlock()
+	if code := r.post(hdr, body); code >= 300 {
+		t.Fatalf("redelivery refused: %d", code)
+	}
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	if len(r.s.got) != 2 { // the failed attempt was recorded too
+		t.Fatalf("%d events", len(r.s.got))
 	}
 }

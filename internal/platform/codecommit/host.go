@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/taumatix/ripple/internal/platform"
+	"github.com/taumatix/ripple/internal/webhook"
 )
 
 // HostName is CodeCommit's name in the host registry. Its repos are stored as
@@ -19,7 +20,8 @@ func NewHost(c *Client, r Receiver, log *slog.Logger) *platform.Host {
 		Platform: c,
 		Receiver: func(sink platform.Sink) http.Handler {
 			r := r
-			r.Sink, r.Log, r.sem, r.certs = sink, log, make(chan struct{}, maxInflight), &certCache{}
+			r.Sink, r.Log, r.certs = sink, log, &certCache{}
+			r.guard, r.dedupe = &webhook.Guard{}, &webhook.Dedupe{}
 			if r.Files == nil {
 				r.Files = c.ChangedFiles
 			}

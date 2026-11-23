@@ -199,3 +199,34 @@ func TestPushPayloadHandling(t *testing.T) {
 		t.Errorf("GET: %d", w.Code)
 	}
 }
+
+func TestSignedDeliveryIsDedupedOnWebhookIDAndForgeryIs401(t *testing.T) {
+	key, _ := gitlab.ParseSigningToken(vecToken)
+	now := time.Unix(1700000000, 0)
+	sink := &sinkRec{}
+	h := gitlab.NewHost(&gitlab.Client{}, gitlab.Receiver{SigningKey: key, Now: func() time.Time { return now }}, nil).Receiver(sink)
+	body := strings.Replace(pushBody, "mike/sub/diaspora", "g/app", 1)
+	post := func(sig, b string) int {
+		req := httptest.NewRequest(http.MethodPost, "/webhook/gitlab", strings.NewReader(b))
+		req.Header.Set("X-Gitlab-Event", "Push Hook")
+		req.Header.Set("webhook-id", vecID)
+		req.Header.Set("webhook-timestamp", vecTS)
+		req.Header.Set("webhook-signature", sig)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		return w.Code
+	}
+	good := gitlab.Signature(key, vecID, vecTS, []byte(body))
+	// A forged body under a genuine id is refused and does not use the id up.
+	if c := post(good, body+" "); c != http.StatusUnauthorized {
+		t.Fatalf("forged body: %d", c)
+	}
+	for i := range 2 {
+		if c := post(good, body); c != http.StatusAccepted {
+			t.Fatalf("delivery %d: %d", i, c)
+		}
+	}
+	if n := len(sink.events()); n != 1 {
+		t.Fatalf("%d events for one webhook-id delivered twice", n)
+	}
+}

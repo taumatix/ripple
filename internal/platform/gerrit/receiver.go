@@ -140,7 +140,10 @@ func (h *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					files = nil
 				}
 			}
-			out = append(out, platform.Event{Kind: platform.Push, Repos: []string{u.Project}, Ref: u.RefName, Files: files})
+			// The transition is the push's identity: Gerrit sends no delivery id, and a
+			// retry repeats these four values while any other push changes oldRev or newRev.
+			delivery := u.Project + "@" + u.RefName + ":" + u.OldRev + ".." + u.NewRev
+			out = append(out, platform.Event{Kind: platform.Push, Delivery: delivery, Repos: []string{u.Project}, Ref: u.RefName, Files: files})
 		}
 	}
 	for _, e := range out {

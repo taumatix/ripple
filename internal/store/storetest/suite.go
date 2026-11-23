@@ -1208,6 +1208,25 @@ func Run(t *testing.T, mk func(t *testing.T) store.Store) {
 		}
 	})
 
+	t.Run("cursor purge by group", func(t *testing.T) {
+		s := mk(t)
+		c := s.(store.CursorPurger)
+		for k, v := range map[string]string{"removed#a/x": "100|0", "removed#a/y": "900|0", "removed#a/cleared": "", "other#a/z": "100|0", "removed|a/legacy": "100|0"} {
+			if err := s.SetCursor(ctx, k, v); err != nil {
+				t.Fatal(err)
+			}
+		}
+		n, err := c.PurgeCursors(ctx, "removed#", func(v string) bool { return v == "" || v == "100|0" })
+		if err != nil || n != 2 {
+			t.Fatalf("purged %d, %v; want 2", n, err)
+		}
+		for k, want := range map[string]string{"removed#a/x": "", "removed#a/cleared": "", "removed#a/y": "900|0", "other#a/z": "100|0", "removed|a/legacy": "100|0"} {
+			if got, _ := s.GetCursor(ctx, k); got != want {
+				t.Fatalf("cursor %q = %q, want %q", k, got, want)
+			}
+		}
+	})
+
 	t.Run("cursor purge", func(t *testing.T) {
 		s := mk(t)
 		c, ok := s.(store.CursorPurger)

@@ -28,13 +28,24 @@ const pauseDefer = time.Hour
 // a hint: it is trusted only while the record it names still carries that id.
 const repoIDCursor = "repoid|"
 
-// removedCursor is the tombstone a removal leaves ("removed|<name>" -> "<unix>|<id>", id 0
+// removedCursor is the tombstone a removal leaves ("removed#<name>" -> "<unix>|<id>", id 0
 // when it was not known). The rule it serves: for removedTTL after a removal, a signed
 // push for that name does not register it again unless it carries a different repository
 // id than the removed one (a new repository that took the name). An explicit re-add
 // (repos_added, unarchive of an unknown repo) clears it. Expired tombstones are never
 // read again and are deleted by SweepTombstones.
-const removedCursor = "removed|"
+//
+// The name is a cursor group ("<group>#<key>", store.CursorGroupSep), which DynamoDB
+// indexes, so the sweep is a Query of the group and not a Scan of the table. Tombstones
+// written before that were named legacyRemovedCursor; they are still read, cleared and
+// swept (see sweepLegacyTombstones) and no longer written.
+const removedCursor = "removed" + store.CursorGroupSep
+
+const legacyRemovedCursor = "removed|"
+
+// legacySweepCursor records the legacy sweep: the unix time of its first run, then "done"
+// once a whole removedTTL has passed since, when no legacy tombstone can still be live.
+const legacySweepCursor = "tombstones-legacy"
 
 // removedTTL is how long a removal is remembered. A delivery the host retries arrives
 // within hours; a day covers it without keeping a removed repo out for long.
@@ -48,12 +59,55 @@ func (e *Engine) SweepTombstones(ctx context.Context) (int, error) {
 	if !ok {
 		return 0, nil
 	}
+	n, err := e.purgeTombstones(ctx, p, removedCursor)
+	if err != nil {
+		return n, err
+	}
+	m, err := e.sweepLegacyTombstones(ctx, p)
+	return n + m, err
+}
+
+func (e *Engine) purgeTombstones(ctx context.Context, p store.CursorPurger, prefix string) (int, error) {
 	now := e.now()
-	return p.PurgeCursors(ctx, removedCursor, func(v string) bool {
+	return p.PurgeCursors(ctx, prefix, func(v string) bool {
 		at, _, _ := strings.Cut(v, "|")
 		secs, err := strconv.ParseInt(at, 10, 64)
 		return v == "" || err != nil || now.Sub(time.Unix(secs, 0)) > removedTTL
 	})
+}
+
+// sweepLegacyTombstones sweeps the "removed|" names, a Scan on DynamoDB, until a whole
+// removedTTL has passed since the first sweep after the rename: nothing writes that name
+// any more, so every one is expired by then and the last sweep leaves the Scan retired.
+func (e *Engine) sweepLegacyTombstones(ctx context.Context, p store.CursorPurger) (int, error) {
+	state, err := e.Store.GetCursor(ctx, legacySweepCursor)
+	if err != nil || state == "done" {
+		return 0, err
+	}
+	now := e.now()
+	first, perr := strconv.ParseInt(state, 10, 64)
+	if state == "" || perr != nil {
+		first = now.Unix()
+		if err := e.Store.SetCursor(ctx, legacySweepCursor, strconv.FormatInt(first, 10)); err != nil {
+			return 0, err
+		}
+	}
+	n, err := e.purgeTombstones(ctx, p, legacyRemovedCursor)
+	if err != nil {
+		return n, err
+	}
+	if now.Sub(time.Unix(first, 0)) > removedTTL {
+		err = e.Store.SetCursor(ctx, legacySweepCursor, "done")
+	}
+	return n, err
+}
+
+// removedTombstone reads name's tombstone, current name first and then the legacy one.
+func (e *Engine) removedTombstone(ctx context.Context, name string) (string, error) {
+	if v, err := e.Store.GetCursor(ctx, removedCursor+name); err != nil || v != "" {
+		return v, err
+	}
+	return e.Store.GetCursor(ctx, legacyRemovedCursor+name)
 }
 
 // maxRenameHops bounds following a chain of renames (a -> b -> c).
@@ -150,9 +204,11 @@ func (e *Engine) Rename(ctx context.Context, old, now string, scope int64) error
 // ForgetRename drops the alias for name. It is called when name is registered
 // (again): a new repository that took a freed name must not inherit the old one's jobs.
 func (e *Engine) ForgetRename(ctx context.Context, name string) error {
-	if v, err := e.Store.GetCursor(ctx, removedCursor+name); err == nil && v != "" {
-		if err := e.Store.SetCursor(ctx, removedCursor+name, ""); err != nil {
-			return err
+	for _, c := range []string{removedCursor, legacyRemovedCursor} {
+		if v, err := e.Store.GetCursor(ctx, c+name); err == nil && v != "" {
+			if err := e.Store.SetCursor(ctx, c+name, ""); err != nil {
+				return err
+			}
 		}
 	}
 	if v, err := e.Store.GetCursor(ctx, renamedCursor+name); err != nil || v == "" {
@@ -237,7 +293,7 @@ func (e *Engine) releaseRepoID(ctx context.Context, hold *repoLease, id int64, n
 // RemovedRecently applies the tombstone rule (see removedCursor) to a signed push for
 // name carrying repository id: true means the push is a late delivery for a removed repo.
 func (e *Engine) RemovedRecently(ctx context.Context, name string, id int64) bool {
-	v, err := e.Store.GetCursor(ctx, removedCursor+name)
+	v, err := e.removedTombstone(ctx, name)
 	if err != nil || v == "" {
 		return false
 	}

@@ -72,7 +72,7 @@ func TestReceiverRefUpdatedBecomesPushWithResolvedFiles(t *testing.T) {
 	if w.Code != http.StatusAccepted {
 		t.Fatalf("status %d", w.Code)
 	}
-	want := []platform.Event{{Kind: platform.Push, Repos: []string{"acme/app"}, Ref: "refs/heads/main", Files: []string{"go.mod"}}}
+	want := []platform.Event{{Kind: platform.Push, Delivery: "acme/app@refs/heads/main:" + oldRev + ".." + newRev, Repos: []string{"acme/app"}, Ref: "refs/heads/main", Files: []string{"go.mod"}}}
 	if !reflect.DeepEqual(sink.got, want) {
 		t.Errorf("events %+v, want %+v", sink.got, want)
 	}
@@ -236,5 +236,25 @@ func TestReceiverOversizedBodyRefused(t *testing.T) {
 	h.ServeHTTP(w, req)
 	if w.Code != http.StatusRequestEntityTooLarge {
 		t.Errorf("status %d, want 413", w.Code)
+	}
+}
+
+// A ref update is identified by the transition it records, so the same update delivered
+// twice carries the same Delivery and a different update does not.
+func TestRefUpdatedCarriesTheTransitionAsItsDeliveryID(t *testing.T) {
+	sink := &sinkRec{}
+	h := &gerrit.Receiver{Secret: []byte("s3cret"), Sink: sink}
+	serve(h, "/webhook/gerrit?token=s3cret", refUpdated("refs/heads/main", oldRev, newRev), nil)
+	serve(h, "/webhook/gerrit?token=s3cret", refUpdated("refs/heads/main", oldRev, newRev), nil)
+	serve(h, "/webhook/gerrit?token=s3cret", refUpdated("refs/heads/main", newRev, oldRev), nil)
+	serve(h, "/webhook/gerrit?token=s3cret", refUpdated("refs/heads/dev", oldRev, newRev), nil)
+	if len(sink.got) != 4 || sink.got[0].Delivery == "" {
+		t.Fatalf("events %+v", sink.got)
+	}
+	if sink.got[0].Delivery != sink.got[1].Delivery {
+		t.Errorf("the same update got two ids: %q, %q", sink.got[0].Delivery, sink.got[1].Delivery)
+	}
+	if sink.got[2].Delivery == sink.got[0].Delivery || sink.got[3].Delivery == sink.got[0].Delivery {
+		t.Errorf("distinct updates share an id: %+v", sink.got)
 	}
 }

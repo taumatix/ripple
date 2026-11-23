@@ -135,7 +135,7 @@ func TestExpiredRemovalTombstonesAreSwept(t *testing.T) {
 		e.eventually("id adopted", func() bool { return e.storedRepoID("acme/uses-lib") == 11 })
 		e.removeRepos("acme/uses-lib")
 		tomb := func() string {
-			v, err := e.st.GetCursor(context.Background(), "removed|acme/uses-lib")
+			v, err := e.st.GetCursor(context.Background(), "removed#acme/uses-lib")
 			if err != nil {
 				t.Fatal(err)
 			}

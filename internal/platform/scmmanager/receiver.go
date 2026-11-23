@@ -160,6 +160,10 @@ func (h *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		ev := platform.Event{Kind: platform.Push, Repos: []string{repo}, Ref: "refs/heads/" + branch, Files: files}
+		if len(ids[branch]) > 0 {
+			// No delivery id is sent; the changesets a push carries identify it, and a retry repeats them.
+			ev.Delivery = repo + "@" + branch + ":" + strings.Join(ids[branch], ",")
+		}
 		if err := h.Sink.HandleEvent(r.Context(), ev); err != nil {
 			h.Log.Error("scm-manager webhook sink", "repo", repo, "err", err)
 			http.Error(w, "busy", http.StatusServiceUnavailable)

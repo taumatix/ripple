@@ -89,37 +89,21 @@ func (d *Dynamo) PurgeDeliveries(ctx context.Context, before time.Time) (int, er
 	return n, nil
 }
 
-// PurgeCursors is store.CursorPurger. DynamoDB cannot list items by partition-key prefix,
-// so this is a filtered Scan of the whole table: callers run it rarely (the engine, once a
-// day). Each delete is conditional on the value read.
+// PurgeCursors is store.CursorPurger. A prefix with a group ("removed#") lists the group's
+// gsi1 partition with a Query, which is how the removal tombstones are swept; any other
+// prefix is a filtered Scan of the whole table, because DynamoDB cannot list items by
+// partition-key prefix, so callers run it rarely. Each delete is conditional on the value
+// read, and a cursor gsi1 has not caught up with yet is simply swept on the next run.
 func (d *Dynamo) PurgeCursors(ctx context.Context, prefix string, drop func(string) bool) (int, error) {
 	type cur struct{ pk, value string }
 	var drops []cur
-	var start map[string]types.AttributeValue
-	for {
-		out, err := d.db.Scan(ctx, &dynamodb.ScanInput{
-			TableName:                 &d.table,
-			FilterExpression:          aws.String("begins_with(PK, :p)"),
-			ExpressionAttributeValues: map[string]types.AttributeValue{":p": s("CURSOR#" + prefix)},
-			ExclusiveStartKey:         start,
-		})
-		if err != nil {
-			return 0, wrapD("purge cursors", err)
-		}
-		for _, it := range out.Items {
-			var a struct {
-				PK    string
-				Value string
-			}
-			if err := attributevalue.UnmarshalMap(it, &a); err != nil {
-				return 0, wrapD("purge cursors", err)
-			}
-			if drop(a.Value) {
-				drops = append(drops, cur{a.PK, a.Value})
-			}
-		}
-		if start = out.LastEvaluatedKey; len(start) == 0 {
-			break
+	listed, err := d.ListCursors(ctx, prefix)
+	if err != nil {
+		return 0, err
+	}
+	for _, c := range listed {
+		if drop(c.Value) {
+			drops = append(drops, cur{"CURSOR#" + c.Name, c.Value})
 		}
 	}
 	n := 0

@@ -69,7 +69,7 @@ func TestPushBecomesAnEventWithItsFiles(t *testing.T) {
 	if w := do(h, hook, "s3cret", onePush); w.Code != http.StatusAccepted {
 		t.Fatalf("status %d", w.Code)
 	}
-	want := platform.Event{Kind: platform.Push, Repos: []string{"acme/app"}, Ref: "refs/heads/main", Files: []string{"go.mod"}}
+	want := platform.Event{Kind: platform.Push, Delivery: "acme/app@main:4fa9832c50e0ac57183023a30195d0f11a9dc0ef", Repos: []string{"acme/app"}, Ref: "refs/heads/main", Files: []string{"go.mod"}}
 	if len(sink.got) != 1 || !reflect.DeepEqual(sink.got[0], want) {
 		t.Fatalf("events %+v, want %+v", sink.got, want)
 	}
@@ -230,4 +230,20 @@ func TestBusyReceiverAnswers503WithRetryAfter(t *testing.T) {
 	}
 	pw.release()
 	<-done
+}
+
+// A push is identified by the changesets it carries, so a redelivery has the same
+// Delivery and a push of other changesets does not.
+func TestPushCarriesItsChangesetsAsItsDeliveryID(t *testing.T) {
+	h, sink := newReceiver(&filesRec{})
+	other := strings.Replace(onePush, "4fa9832c", "5fa9832c", 1)
+	do(h, hook, "s3cret", onePush)
+	do(h, hook, "s3cret", onePush)
+	do(h, hook, "s3cret", other)
+	if len(sink.got) != 3 || sink.got[0].Delivery == "" {
+		t.Fatalf("events %+v", sink.got)
+	}
+	if sink.got[0].Delivery != sink.got[1].Delivery || sink.got[2].Delivery == sink.got[0].Delivery {
+		t.Errorf("ids %q %q %q", sink.got[0].Delivery, sink.got[1].Delivery, sink.got[2].Delivery)
+	}
 }

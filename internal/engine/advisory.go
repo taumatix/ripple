@@ -284,6 +284,7 @@ func (w *AdvisoryWatcher) Poll(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	w.retryBusy(ctx)
 	entries, truncated, err := w.Source.Modified(ctx, pos)
 	if err != nil {
 		return 0, fmt.Errorf("osv modified list: %w", err)

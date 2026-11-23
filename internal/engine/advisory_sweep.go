@@ -17,8 +17,7 @@ import (
 // cleared. The position is the cursor osv-sweep, so a restart resumes it; a second gap
 // during a sweep starts it over, which covers a superset.
 //
-// It needs a store that lists repos (store.RepoLister: memory and Postgres, not
-// DynamoDB) and the history querier; without them a truncated read only logs.
+// It needs a store that lists repos (store.RepoLister: every store here) and the history querier; without them a truncated read only logs.
 const (
 	advisorySweepCursor = "osv-sweep"
 	// DefaultSweepBatch is the repos one poll sweeps.
@@ -27,7 +26,14 @@ const (
 
 type sweepState struct {
 	After string `json:"after"` // the last repo swept; "" is the start
+	// Cleared is the repo whose history memo was already cleared and which a poll left
+	// part-checked (a repo with more pairs than one round reads), so the next poll
+	// continues it instead of starting it over.
+	Cleared string `json:"cleared,omitempty"`
 }
+
+// sweepRounds bounds the history rounds one poll spends on one repo.
+const sweepRounds = 10
 
 // beginSweep marks that the repos need re-checking, unless a sweep is already running
 // and has not yet got past the start (restarting a sweep that is mid-way is also right,
@@ -70,9 +76,13 @@ func (w *AdvisoryWatcher) sweepStep(ctx context.Context) error {
 		return fmt.Errorf("osv sweep: list repos: %w", err)
 	}
 	for _, name := range names {
-		done, err := e.sweepRepo(ctx, name)
+		done, partial, err := e.sweepRepo(ctx, name, st.Cleared != name)
 		if err != nil {
 			return fmt.Errorf("osv sweep of %s: %w", name, err)
+		}
+		if partial {
+			b, _ := json.Marshal(sweepState{After: st.After, Cleared: name})
+			return e.Store.SetCursor(ctx, advisorySweepCursor, string(b))
 		}
 		if !done {
 			return nil // busy: the next poll resumes at this repo
@@ -89,28 +99,42 @@ func (w *AdvisoryWatcher) sweepStep(ctx context.Context) error {
 	return nil
 }
 
-// sweepRepo forgets what the history check remembered for repo and runs it again. It
-// reports false when the repo is busy.
-func (e *Engine) sweepRepo(ctx context.Context, name string) (bool, error) {
+// sweepRepo forgets what the history check remembered for repo (when clear) and runs it
+// again, round after round while the repo has pairs a round could not read, up to
+// sweepRounds. It reports done=false when the repo is busy and partial when rounds
+// remain, so that the caller keeps the position.
+func (e *Engine) sweepRepo(ctx context.Context, name string, clear bool) (done, partial bool, err error) {
 	release := e.tryRepo(ctx, name)
 	if release == nil {
-		return false, nil
+		return false, false, nil
 	}
 	defer release()
 	repo, found, err := e.Store.GetRepo(ctx, name)
 	if err != nil || !found {
-		return true, err
+		return true, false, err
 	}
 	cfg, err := RepoConfig(repo.Config)
 	if err != nil {
-		return true, nil // an invalid config is reported by the scan, not here
+		return true, false, nil // an invalid config is reported by the scan, not here
 	}
 	deps, err := e.Store.ListRepoDependencies(ctx, name)
 	if err != nil {
-		return true, err
+		return true, false, err
 	}
-	if err := e.Store.SetCursor(ctx, advisoryCheckedPrefix+name, ""); err != nil {
-		return true, err
+	if clear {
+		if err := e.Store.SetCursor(ctx, advisoryCheckedPrefix+name, ""); err != nil {
+			return true, false, err
+		}
 	}
-	return true, e.checkAdvisoryHistory(ctx, name, cfg, deps)
+	for i := 0; i < sweepRounds; i++ {
+		more, err := e.checkAdvisoryHistoryMore(ctx, name, cfg, deps)
+		if err != nil {
+			return true, false, err
+		}
+		if !more {
+			return true, false, nil
+		}
+	}
+	e.log().Info("osv: sweep continues this repo on the next poll", "repo", name)
+	return true, true, nil
 }

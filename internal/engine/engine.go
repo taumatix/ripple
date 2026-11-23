@@ -61,6 +61,10 @@ type Engine struct {
 	// AdvisoryHistory, when set, lets a scan ask OSV about the advisories that already
 	// cover what a repo uses (see checkAdvisoryHistory). Nil leaves the poller the only source.
 	AdvisoryHistory AdvisoryQuerier
+	// HistoryQueries and HistoryFetch bound one round of that check: the (dependency,
+	// version) pairs sent to OSV and the records fetched. Zero means 500 and 100. A scan
+	// runs one round; the sweep runs rounds until a repo is done.
+	HistoryQueries, HistoryFetch int
 	// MaxBackfill bounds the jobs one scan creates for dependencies new to the repo; zero
 	// means DefaultMaxBackfill.
 	MaxBackfill int

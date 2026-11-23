@@ -37,11 +37,16 @@ If the release feed already queued the same bump behind its cooldown, the adviso
   it), ripple finishes the job that was waiting for it as skipped, closes the PR it opened for it with a comment saying
   why, and drops its dashboard entry. A PR a person touched stays open, and so does every PR when
   `close-superseded-pull-requests: false`. A dependency that already reached the fix is not "corrected": that work was
-  done. Jobs made before this release are not found, and a PR body is not rewritten. A record whose fix was raised is
+  done. Jobs made before the per-advisory indexes are not found, and a PR body is not rewritten. A repo that another run holds
+for more than two seconds keeps its job and PR for now: the record is remembered (cursor `osv-reconcile-retry`) and applied
+again, fetched fresh, at the start of the next polls until the repo is free. A record whose fix was raised is
   handled by the superseded-PR flow, which replaces the old PR when the new one opens.
 - **Toolchain precedence.** A security `toolchain` job and a `go` directive job both rewrite the toolchain line of one
   go.mod. The security job goes first (the higher fixed version first); the other waits, with a reason naming the PR,
-  until it is merged or closed. A PR already open is not closed for this: whoever merges second resolves the conflict.
+  until it is merged or closed. A directive or toolchain PR of ripple's that is already open and does not fix an advisory is closed, untouched and with a
+comment, once the security PR has opened; its job goes back to waiting for that PR and is judged afresh when it is merged
+or closed. A PR a person touched, a host that cannot close PRs, and `close-superseded-pull-requests: false` leave both
+open, and then whoever merges second resolves the conflict.
 - **No fix at all, or none ripple can propose.** With `dependency-dashboard: true` the dashboard gains a section
   "Advisories without a fix ripple can propose", linking the advisory. Entries disappear when a fix is proposed, the
   record is withdrawn, or the repo stops using that version. At most 100 per repo are kept. Without the dashboard
@@ -61,10 +66,11 @@ checked`) and never fails the scan. This also covers an advisory missed during a
 newly seen in a repo, and by the sweep below.
 
 When the poll reads the whole line cap (`truncated`, 20000 lines) an outage may have outrun it, so ripple sweeps: it
-lists repos in pages (`RepoLister`: memory and Postgres; DynamoDB has no cheap listing and is not swept), and each poll
-re-checks 10 repos (a fixed batch, not configurable yet) with a fresh history check, the position kept in the
-`osv-sweep` cursor until every repo was visited. A repo busy with a run is retried next poll. A huge repo is still bound
-by the per-scan query and fetch caps above.
+lists repos in pages (`RepoLister`: memory, Postgres and DynamoDB, which keeps one index item per repo), and each poll
+re-checks `RIPPLE_OSV_SWEEP_BATCH` repos (default 10) with a fresh history check, the position kept in the
+`osv-sweep` cursor until every repo was visited. A repo busy with a run is retried next poll. A repo with more pairs than
+one round reads (500 queries, 100 records) gets up to 10 rounds in a poll and, if that is not enough, continues on the
+next poll where it stopped (the cursor remembers that its memo was cleared). A scan still runs a single round.
 
 ## Failure behaviour
 
@@ -75,7 +81,7 @@ in a row is skipped so it cannot hold up the ones behind it. A record OSV answer
 ## Limits
 
 Every request is bounded: a 20s timeout, a 1 MiB cap on a record, a 4 MiB and 20000-line cap on the list (the Go list was about 10000 lines on 2026-11-23). At most one
-list request and `RIPPLE_OSV_MAX_FETCH` record requests per interval.
+list request and `RIPPLE_OSV_MAX_FETCH` record requests per interval; `RIPPLE_OSV_SWEEP_BATCH` sets the repos a sweep re-checks per poll.
 
 What this has not been verified against, and the pinned contract, are in [UPSTREAM.md](../UPSTREAM.md); OSV's own
 documentation and recorded answers are in [vendor/osv](vendor/osv/).

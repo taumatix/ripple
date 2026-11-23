@@ -330,6 +330,9 @@ func (d *Dynamo) query(ctx context.Context, in *dynamodb.QueryInput, limit int, 
 func (d *Dynamo) UpsertRepo(ctx context.Context, r model.Repo) error {
 	err := d.put(ctx, repoAttrs{item: item{PK: "REPO#" + r.FullName, SK: "META"}, FullName: r.FullName,
 		InstallationID: r.InstallationID, DefaultBranch: r.DefaultBranch, Config: r.Config, RepoID: r.RepoID}, nil)
+	if err == nil {
+		err = d.putRepoIndex(ctx, r.FullName) // the listing (dynamo_repolist.go)
+	}
 	return wrapD("upsert repo", err)
 }
 
@@ -365,6 +368,9 @@ func (d *Dynamo) DeleteRepo(ctx context.Context, n string) error {
 		if sk := k["SK"].(*types.AttributeValueMemberS).Value; strings.HasPrefix(sk, "DEP#") {
 			delta[depBaseOf(sk)]--
 		}
+	}
+	if err := d.deleteRepoIndex(ctx, n); err != nil {
+		return wrapD("delete repo", err)
 	}
 	return wrapD("delete repo", d.adjustCounts(ctx, delta))
 }

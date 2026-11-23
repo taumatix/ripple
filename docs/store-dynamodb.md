@@ -15,6 +15,8 @@ Billing is on-demand. `Store.EnsureTable` creates both.
 | event | `EVENT#<id>` | `META` | `EVENTS` | `<seq, 20 digits>\x1f<id>` |
 | dead event | `EVENT#<id>` | `META` | `EVENTS#dead` | `<dead_at, fixed width>\x1f<id>` |
 | lease | `LEASE#<name>` | `META` | | |
+| repo listing | `REPOS` | `<repo>` | | |
+| repo listing built | `REPOSMETA` | `BUILT` | | |
 
 ## Queries
 
@@ -24,6 +26,7 @@ Billing is on-demand. `Store.EnsureTable` creates both.
 | What does `repo` depend on? | Query base table, `PK = REPO#<repo>`, `SK begins_with DEP#` |
 | Replace a repo's dependencies | The query above, then a diffed BatchWrite (puts for new, deletes for gone) |
 | Which jobs are due? | One Query per job shard on `gsi1`, `GSI1PK = JOBS#pending[#<n>]`, `GSI1SK <= <now>`, each limited to the caller's limit; the results are merged in `(not_before, key)` order |
+| Registered repos in name order (`store.RepoLister`, the OSV sweep) | Query base table, `PK = REPOS`, `SK > <after>`, limited. One index item per repo is written beside its `META` item and deleted with it. A table from before the index has none: the first listing runs one Scan for `META` items, writes the missing index items and then a marker (`REPOSMETA`/`BUILT`), so the Scan happens once and only when something asks to list |
 | Job by key / cursor / repo | GetItem, strongly consistent |
 | Queued webhook events, oldest first (at start, then every 30s to find requeued ones) | Query `gsi1`, `GSI1PK = EVENTS` |
 | Dead events, earliest first (`ripple events list`) | Query `gsi1`, `GSI1PK = EVENTS#dead` |

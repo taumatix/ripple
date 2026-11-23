@@ -81,6 +81,12 @@ func renderDashboardWith(jobs []model.Job, advisories []openAdvisory, now time.T
 
 // renderDashboardFull also lists the actions left alone for want of a tag of their shape.
 func renderDashboardFull(jobs []model.Job, advisories []openAdvisory, skips []shapeSkip, now time.Time) string {
+	return renderDashboardNotice(jobs, advisories, skips, "", now)
+}
+
+// renderDashboardNotice also says the repo's config does not parse (cfgErr, untrusted and
+// cleaned), which is why every job of the repo is skipped until the file is fixed.
+func renderDashboardNotice(jobs []model.Job, advisories []openAdvisory, skips []shapeSkip, cfgErr string, now time.Time) string {
 	var deferred, due, failed []model.Job
 	for _, j := range jobs {
 		switch {
@@ -98,6 +104,9 @@ func renderDashboardFull(jobs []model.Job, advisories []openAdvisory, skips []sh
 	var b strings.Builder
 	b.WriteString(DashboardMarker + "\n# Dependency dashboard\n\n")
 	b.WriteString("ripple keeps this issue up to date. It is a report: edits to it are undone, and it is rewritten when the lists below change.\n")
+	if cfgErr != "" {
+		fmt.Fprintf(&b, "\n## Configuration invalid\n\nThis repository's ripple config does not parse, so ripple opens no pull requests for it and skips its jobs: no updates until it is fixed. `%s`\n", clean(cfgErr))
+	}
 	omitted := 0
 	section := func(title, hint string, js []model.Job, detail func(model.Job) string) {
 		if len(js) == 0 {
@@ -155,7 +164,7 @@ func renderDashboardFull(jobs []model.Job, advisories []openAdvisory, skips []sh
 			b.WriteString(line)
 		}
 	}
-	if len(jobs) == 0 && len(advisories) == 0 && len(skips) == 0 {
+	if len(jobs) == 0 && len(advisories) == 0 && len(skips) == 0 && cfgErr == "" {
 		b.WriteString("\nNothing is pending, deferred or failed.\n")
 	}
 	if omitted > 0 {
@@ -303,13 +312,25 @@ func (e *Engine) syncDashboard(ctx context.Context, name string) {
 	}
 	cfg, err := RepoConfig(repo.Config)
 	if err != nil {
+		// The opt-in cannot be read, so only a dashboard that already exists is kept
+		// truthful: it says why nothing moves.
+		cur, cerr := e.Store.GetCursor(ctx, dashboardCursor(name))
+		if n, _, _ := parseDashboardCursor(cur); cerr != nil || n == 0 {
+			return
+		}
+		e.finishDashboard(ctx, name, e.updateDashboard(ctx, repo, lister, err.Error()))
 		return
 	}
 	if cfg.DependencyDashboard {
-		err = e.updateDashboard(ctx, repo, lister)
+		err = e.updateDashboard(ctx, repo, lister, "")
 	} else {
 		err = e.closeDashboard(ctx, repo)
 	}
+	e.finishDashboard(ctx, name, err)
+}
+
+// finishDashboard logs a failed sync, and backs off a repo whose issues cannot be written.
+func (e *Engine) finishDashboard(ctx context.Context, name string, err error) {
 	if err != nil {
 		switch {
 		case errors.Is(err, platform.ErrNoIssues):
@@ -353,7 +374,7 @@ func (e *Engine) closeDashboard(ctx context.Context, repo model.Repo) error {
 	return e.setDashboardCursor(ctx, repo.FullName, "")
 }
 
-func (e *Engine) updateDashboard(ctx context.Context, repo model.Repo, lister store.OpenJobLister) error {
+func (e *Engine) updateDashboard(ctx context.Context, repo model.Repo, lister store.OpenJobLister, cfgErr string) error {
 	jobs, err := lister.ListOpenJobs(ctx, repo.FullName)
 	if err != nil {
 		return err
@@ -366,7 +387,7 @@ func (e *Engine) updateDashboard(ctx context.Context, repo model.Repo, lister st
 	if err != nil {
 		return err
 	}
-	body := renderDashboardFull(jobs, advisories, skips, e.now())
+	body := renderDashboardNotice(jobs, advisories, skips, cfgErr, e.now())
 	hash := bodyHash(body)
 	cur, err := e.Store.GetCursor(ctx, dashboardCursor(repo.FullName))
 	if err != nil {
@@ -402,7 +423,7 @@ func (e *Engine) updateDashboard(ctx context.Context, repo model.Repo, lister st
 			return err
 		}
 		if !found {
-			if len(jobs) == 0 && len(advisories) == 0 && len(skips) == 0 {
+			if len(jobs) == 0 && len(advisories) == 0 && len(skips) == 0 && cfgErr == "" {
 				return nil // nothing to report and nothing reported yet
 			}
 			return e.createDashboard(ctx, repo, body, save)
@@ -425,7 +446,7 @@ func (e *Engine) updateDashboard(ctx context.Context, repo model.Repo, lister st
 			}
 			return err
 		}
-		if len(jobs) == 0 && len(advisories) == 0 && len(skips) == 0 {
+		if len(jobs) == 0 && len(advisories) == 0 && len(skips) == 0 && cfgErr == "" {
 			return e.setDashboardCursor(ctx, repo.FullName, "")
 		}
 		return e.createDashboard(ctx, repo, body, save)

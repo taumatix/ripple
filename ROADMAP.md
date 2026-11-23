@@ -134,8 +134,10 @@ Everything else:
     `dependency-dashboard`) is a read-only report. A checkbox that releases a deferred job early needs the
     `issues` webhook, a check of the editor's repository permission (never the issue's text) and an audit
     line; do that or leave it out for good. Only GitHub has an issue tracker implementation: GitLab, Gitea and
-    Forgejo issues, and Azure Boards, are the same `platform.IssueTracker` interface. Also list ripple's open PRs
-    and the jobs skipped for an invalid config, so the issue answers "what is ripple waiting on" completely.
+    Forgejo issues, and Azure Boards, are the same `platform.IssueTracker` interface (each needs its issues API
+    read from the vendored docs and verified against a real instance, see 61). Also list ripple's open PRs, so
+    the issue answers "what is ripple waiting on" completely: that needs a platform listing on every sync and a
+    refresh when a PR closes. (Shipped: an invalid config is now said on an existing dashboard.)
 76. **Remove the `Ref` overload on `model.Event`.** `Ref` is still populated beside the typed fields and marked
     deprecated. Remove the fallback in the minor release after the one that introduced it, once no queue holds old
     rows (`ripple:deprecated event-ref-overload` in MIGRATION.md).

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -458,4 +459,44 @@ func TestNewerEventWaitsForAnOlderOneOnAnotherReplica(t *testing.T) {
 	}
 	bHold.Release()
 	eventually(t, "newer event runs once the older is gone", func() bool { return g.has("new") })
+}
+
+// A replica that stalled past its event lease finishes its work and then writes the outcome
+// (delete, retry, dead letter). The new holder owns the event, so the store refuses the write
+// and the event is left as it was.
+func TestStaleReplicaCannotFinishAnEvent(t *testing.T) {
+	for name, outcome := range map[string]error{"handled": nil, "failed": errors.New("boom")} {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			st := store.NewMemory()
+			if err := (&Queue{Store: st}).Add(ctx, ev(1, "1", "acme/a")); err != nil {
+				t.Fatal(err)
+			}
+			var usurped atomic.Bool
+			process := func(_ context.Context, e model.Event) error {
+				// Stalled: the lease is taken over before this replica reports back.
+				l, ok, err := st.AcquireLease(ctx, eventLease(e.ID), "a", time.Minute)
+				if err != nil || !ok {
+					t.Errorf("own lease: %v %v", ok, err)
+				}
+				_ = st.ReleaseLease(ctx, l)
+				if _, ok, err := st.AcquireLease(ctx, eventLease(e.ID), "usurper", time.Minute); err != nil || !ok {
+					t.Errorf("usurp: %v %v", ok, err)
+				}
+				usurped.Store(true)
+				return outcome
+			}
+			q := &Queue{Store: st, Process: process, Workers: 1, PerInstallation: 1, Owner: "a", LeaseTTL: 600 * time.Millisecond}
+			startQueue(t, q)
+			eventually(t, "event processed", usurped.Load)
+			time.Sleep(150 * time.Millisecond)
+			got, ok, err := st.GetEvent(ctx, "1")
+			if err != nil || !ok {
+				t.Fatalf("the event is gone after a stale finish: ok=%v err=%v", ok, err)
+			}
+			if got.Attempts != 0 || got.LastError != "" {
+				t.Fatalf("a stale retry was written: %+v", got)
+			}
+		})
+	}
 }

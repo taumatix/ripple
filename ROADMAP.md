@@ -175,18 +175,15 @@ Everything else:
     each replica's clock does: `Seq` is the receiving replica's `UnixNano`, so skewed clocks can order two events
     of a repo wrongly, and the claim-time `HasOlderEvent` check trusts that order. On DynamoDB the check reads the
     eventually consistent `gsi1`, so an older event written a moment ago can be missed; Postgres and the memory
-    store have no such window. Assign `Seq` in the store (a Postgres sequence, a DynamoDB counter item) and make
-    the DynamoDB check consistent.
+    store have no such window. Assign `Seq` in the store (a Postgres sequence in a new migration, a DynamoDB counter
+    item bumped by a transaction with the event put; `Queue.Add` stops using its clock) and keep the `Seq` that
+    existing rows carry sorting before new ones. Looked at in the replicas pass and not started: a global index
+    cannot be read consistently (DynamoDB refuses `ConsistentRead` on a GSI), so the DynamoDB check needs a base-table
+    key per repo (`REPOEVENTS#<repo>` items written with the event) to be consistent, a data-model change that needs
+    DynamoDB Local to verify.
 101. **Replicas: soak against real databases.** The shared suite races goroutines on one store handle and the
     e2e runs two replicas; neither is a real multi-node Postgres or DynamoDB under load, or with a skewed clock.
     Run three replicas against both with a clock offset and check one PR per job and ordered events.
-102. **Replicas: the remaining unfenced writes.** The job rows the runner writes are fenced on the repo lease;
-    the advisory pass's `UpdateJob` (`advisory.go`), event `UpdateEvent`/`DeleteEvent` by a replica whose event
-    lease lapsed, and the cursor writes of pause, remove and rename run under a lease but are not fenced by the
-    store. Extend fencing to them, or show each is idempotent.
-103. **Replicas: metrics and one feed poller.** Expose a replica-count and lease-takeover metric (today only the
-    `replica` start-up and `lease taken over` log lines exist) and elect one replica for the release-feed poll
-    (two polling is safe, since job enqueue is insert-if-absent, but wasteful).
 107. **Archive events on other hosts.** GitLab (`project_update`), Gitea/Forgejo, Bitbucket and Azure DevOps report no
     archive event in the docs checked (see each `docs/platform-*.md`). Poll the archived flag per host on a refresh,
     or map an event once a host documents one; Forgejo and Bitbucket Data Center were not checked.
@@ -301,3 +298,10 @@ Everything else:
     would remove each other's, and a killed server's job containers keep the network alive until they exit (the next
     start then fails to recreate it). Name it per `RIPPLE_REPLICA` and remove the labelled job containers of that
     replica at start, then test the kill-and-restart case live.
+143. **Replicas: count replicas.** `GET /replica` reports one replica's takeovers and whether it polls the feed, but
+    no replica can list the live leases (the `Leases` interface has no listing), so a replica count and a takeover
+    count across replicas are not available. Add an optional lease listing (Postgres query, DynamoDB query on a lease
+    index) and report the number of distinct live owners.
+144. **Replicas: elect the other pollers.** Only the Go module feed poll is elected; the toolchain, Actions and Docker
+    pollers still run on every replica (safe, wasteful). Give each its own `feed:<name>` lease the way `PollElected`
+    does.

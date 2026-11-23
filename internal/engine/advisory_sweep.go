@@ -104,7 +104,7 @@ func (w *AdvisoryWatcher) sweepStep(ctx context.Context) error {
 // sweepRounds. It reports done=false when the repo is busy and partial when rounds
 // remain, so that the caller keeps the position.
 func (e *Engine) sweepRepo(ctx context.Context, name string, clear bool) (done, partial bool, err error) {
-	release := e.tryRepo(ctx, name)
+	_, release := e.tryRepo(ctx, name)
 	if release == nil {
 		return false, false, nil
 	}

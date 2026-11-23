@@ -40,6 +40,14 @@ type Store interface {
 	// otherwise changes nothing and returns ErrLeaseLost. A replica that lapsed and was
 	// replaced cannot overwrite the job row the new holder owns.
 	UpdateJobFenced(ctx context.Context, j model.Job, l Lease) error
+	// SetCursorFenced is SetCursor that applies only while l is still the live lease
+	// (same owner and token), and otherwise changes nothing and returns ErrLeaseLost.
+	SetCursorFenced(ctx context.Context, name, value string, l Lease) error
+	// UpdateEventFenced is UpdateEvent under the same rule as UpdateJobFenced. An event
+	// that no longer exists is a no-op, as in UpdateEvent.
+	UpdateEventFenced(ctx context.Context, e model.Event, l Lease) error
+	// DeleteEventFenced is DeleteEvent under the same rule. A missing event is not an error.
+	DeleteEventFenced(ctx context.Context, id string, l Lease) error
 	// ListDueJobs returns pending jobs with NotBefore <= now, oldest first.
 	ListDueJobs(ctx context.Context, now time.Time, limit int) ([]model.Job, error)
 	// ListDueJobsExcluding is ListDueJobs without the jobs of the named repos, applied

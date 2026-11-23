@@ -44,6 +44,12 @@ func (e *Engine) replicaID() string {
 	return e.id
 }
 
+// ReplicaID is this engine's replica id (see replicaID), for status output.
+func (e *Engine) ReplicaID() string { return e.replicaID() }
+
+// LeaseDuration is the lease ttl in effect, for status output.
+func (e *Engine) LeaseDuration() time.Duration { return e.leaseTTL() }
+
 func (e *Engine) leaseTTL() time.Duration {
 	if e.LeaseTTL > 0 {
 		return e.LeaseTTL
@@ -81,6 +87,15 @@ func (e *Engine) updateJob(ctx context.Context, hold *repoLease, j model.Job) er
 		return e.Store.UpdateJob(ctx, j)
 	}
 	return e.Store.UpdateJobFenced(ctx, j, hold.Lease())
+}
+
+// setCursor is SetCursor under the repo lease: while hold is this replica's live claim the
+// write is fenced on its token, as updateJob is. A nil hold writes plainly.
+func (e *Engine) setCursor(ctx context.Context, hold *repoLease, name, value string) error {
+	if hold == nil {
+		return e.Store.SetCursor(ctx, name, value)
+	}
+	return e.Store.SetCursorFenced(ctx, name, value, hold.Lease())
 }
 
 // leaseRepo takes the in-process lock of the repo and then its lease, waiting for both, for a

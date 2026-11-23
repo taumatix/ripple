@@ -191,7 +191,7 @@ func (a *App) enqueue(ctx context.Context, host string, ev platform.Event) (retE
 	return a.Queue.Add(ctx, evs...)
 }
 
-// Handler serves POST /webhook, POST /webhook/<host> and GET /healthz.
+// Handler serves POST /webhook, POST /webhook/<host>, GET /healthz and GET /replica.
 func (a *App) Handler() http.Handler {
 	mux := http.NewServeMux()
 	if a.Hosts == nil {
@@ -208,6 +208,7 @@ func (a *App) Handler() http.Handler {
 		}
 	}
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	mux.HandleFunc("/replica", a.replicaStatus)
 	return mux
 }
 
@@ -284,6 +285,24 @@ func (a *App) Tick(ctx context.Context) {
 	}
 }
 
+// pollFeed polls the release feed if this replica is the elected poller (see
+// engine.Watcher.PollElected) and returns the jobs it enqueued. The claim outlives a few
+// poll periods, so a replica that dies is replaced within about two of them.
+func (a *App) pollFeed(ctx context.Context) int {
+	n, polled, err := a.Watcher.PollElected(ctx, 2*a.PollEvery)
+	switch {
+	case err != nil:
+		if ctx.Err() == nil {
+			a.Log.Error("feed poll", "err", err)
+		}
+	case polled && n > 0:
+		a.Log.Info("feed poll enqueued jobs", "jobs", n)
+	}
+	return n
+}
+
+func (a *App) stepDownFeed(ctx context.Context) { a.Watcher.StepDown(ctx) }
+
 // pollAdvisories runs one OSV poll when enabled. A failure is logged and nothing else:
 // normal updates never wait on OSV.
 func (a *App) pollAdvisories(ctx context.Context) {
@@ -318,14 +337,10 @@ func (a *App) advisoryLoop(ctx context.Context) {
 func (a *App) pollLoop(ctx context.Context) {
 	t := time.NewTicker(a.PollEvery)
 	defer t.Stop()
+	defer a.stepDownFeed(context.WithoutCancel(ctx)) // hand the feed to another replica at once
 	for {
 		a.Discover(ctx)
-		if n, err := a.Watcher.Poll(ctx); err != nil {
-			if ctx.Err() == nil {
-				a.Log.Error("feed poll", "err", err)
-			}
-		} else if n > 0 {
-			a.Log.Info("feed poll enqueued jobs", "jobs", n)
+		if a.pollFeed(ctx) > 0 {
 			a.jobs.Wake()
 		}
 		if a.pollToolchain(ctx) > 0 {

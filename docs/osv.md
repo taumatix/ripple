@@ -19,6 +19,10 @@ Off by default. `RIPPLE_OSV=true` turns it on; it never changes what happens whe
    groups, automerge and the open-PR limit still apply. The PR is titled `[security] Update ...`, labelled `security`,
    and its body links the advisory and shows its summary and severity when OSV gives one. Only the fixed version is
    urgent: a newer release of the same module still waits for its cooldown.
+   An update entry can opt in to skipping more: `security-bypass: [open-pull-requests-limit]` opens the security PR even
+   when the repo is at its cap (it is planned before ordinary updates, which still wait for a free slot, and one advisory
+   that affects many modules can open that many PRs), and `security-bypass: [schedule]` opens it outside the schedule
+   window. The default, no list, is the behaviour above.
 
 If the release feed already queued the same bump behind its cooldown, the advisory makes that job due.
 

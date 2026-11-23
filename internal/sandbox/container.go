@@ -137,6 +137,9 @@ func (c container) Wrap(p Policy, argv []string) ([]string, error) {
 		out = append(out, "--network", c.o.Network)
 	}
 	out = append(out, "--read-only", "--tmpfs", "/tmp", "--cap-drop", "ALL", "--user", c.uid)
+	if c.fl == FlavourPodman {
+		out = append(out, "--userns", "keep-id") // rootless: else --user maps outside the bind mounts' owner
+	}
 	if c.fl == FlavourApple {
 		out = append(out, "-c", c.o.CPUs, "-m", c.o.Memory)
 	} else {

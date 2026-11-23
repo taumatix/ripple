@@ -58,3 +58,24 @@ jobs:
       # one new release must end in exactly one pull request.
       - name: smoke test the image
         run: RIPPLE_SMOKE_IMAGE=ripple:ci go test -count=1 -v ./internal/smoke/
+  # The container runners against a real daemon: the same live test the Apple runner has, plus the
+  # confined network (internal network and a proxy sidecar). It needs a registry and proxy.golang.org.
+  container-runtimes:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: [docker, podman]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: runtime version
+        run: ${{ matrix.runtime }} version
+      - name: live container tests
+        env:
+          RIPPLE_TEST_CONTAINER_FLAVOUR: ${{ matrix.runtime }}
+        run: go test -tags containerlive -count=1 -v -timeout 20m -run 'TestContainerRuntimeLive|TestContainerConfinedNetworkLive' ./internal/sandbox/ | tee live.log
+      - name: no skipped test
+        run: "! grep -E -- '--- SKIP' live.log"

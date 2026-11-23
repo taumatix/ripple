@@ -139,3 +139,14 @@ func TestDetectContainerNeedsBinaryAndImage(t *testing.T) {
 		t.Error("container backend does not own its network")
 	}
 }
+
+// Rootless Podman maps the caller to root in the container, so --user uid:gid could not write the
+// bind mounts: keep-id keeps the caller's own ids. Docker has no such option.
+func TestContainerPodmanKeepsTheCallersIDs(t *testing.T) {
+	if got := wrapContainer(t, FlavourPodman, ContainerOptions{}, jobPolicy, "go", "build"); !has(got, "--userns", "keep-id") {
+		t.Errorf("podman argv lacks --userns keep-id: %v", got)
+	}
+	if got := wrapContainer(t, FlavourDocker, ContainerOptions{}, jobPolicy, "go", "build"); has(got, "--userns", "keep-id") {
+		t.Errorf("docker argv has --userns keep-id: %v", got)
+	}
+}

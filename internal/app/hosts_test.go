@@ -175,3 +175,65 @@ func TestEnqueueKeepsTheDeprecatedRefBesideTypedFields(t *testing.T) {
 		}
 	}
 }
+
+// archivingHost is a listingHost that also lists its archived repos.
+type archivingHost struct {
+	listingHost
+	archived []string
+}
+
+func (l *archivingHost) setArchived(names ...string) { l.mu.Lock(); l.archived = names; l.mu.Unlock() }
+
+func (l *archivingHost) ListArchivedRepos(context.Context) ([]model.Repo, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	var out []model.Repo
+	for _, n := range l.archived {
+		out = append(out, model.Repo{FullName: n})
+	}
+	return out, nil
+}
+
+// An archive seen in a listing is an archive, not a removal: the repo keeps its index
+// and jobs (RepoArchived), and unarchiving resumes it (RepoUnarchived) rather than
+// registering it afresh. A repo first seen archived is not registered at all.
+func TestDiscoverTurnsAnArchiveIntoAPauseNotARemoval(t *testing.T) {
+	st := store.NewMemory()
+	lh := &archivingHost{}
+	a := &App{Hosts: []*platform.Host{{Name: "gitlab", Platform: lh}}, Queue: &Queue{Store: st, Process: newGate().process}}
+	ctx := context.Background()
+	step := func(want string) {
+		t.Helper()
+		a.Discover(ctx)
+		if got := fmt.Sprint(queued(t, st)); got != want {
+			t.Fatalf("queued %s, want %s", got, want)
+		}
+		drain(t, st)
+	}
+
+	lh.set("a", "b")
+	lh.setArchived("old")
+	step("[repos_added gitlab:a repos_added gitlab:b]") // "old" is not registered
+
+	lh.set("b")
+	lh.setArchived("old", "a")
+	step("[repo_archived gitlab:a]")
+
+	step("[]") // unchanged
+
+	lh.set("a", "b")
+	lh.setArchived("old")
+	step("[repo_unarchived gitlab:a]")
+
+	lh.set("a", "b", "old")
+	lh.setArchived()
+	step("[repo_unarchived gitlab:old]") // known to be archived before: resume registers it if unknown
+
+	lh.set("a", "old")
+	lh.setArchived("b")
+	step("[repo_archived gitlab:b]")
+
+	lh.set("a", "old")
+	lh.setArchived() // an archived repo that vanished: deleted
+	step("[repos_removed gitlab:b]")
+}

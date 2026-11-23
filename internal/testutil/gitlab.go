@@ -50,12 +50,13 @@ type GitLab struct {
 	t    *testing.T
 	root string
 
-	mu      sync.Mutex
-	tokens  map[string]string // token -> scope ("" reaches every project)
-	members map[string]bool
-	calls   map[string]int
-	prs     map[string][]*GitLabPR
-	limit   map[string]bool // token -> answer its next merge request creation with 429
+	mu       sync.Mutex
+	tokens   map[string]string // token -> scope ("" reaches every project)
+	members  map[string]bool
+	archived map[string]bool
+	calls    map[string]int
+	prs      map[string][]*GitLabPR
+	limit    map[string]bool // token -> answer its next merge request creation with 429
 	// Requests records "METHOD escaped-path" of every API request, in order.
 	requests []string
 	// Auths records the Authorization header of every API request.
@@ -70,7 +71,7 @@ type GitLab struct {
 
 func NewGitLab(t *testing.T) *GitLab {
 	t.Helper()
-	g := &GitLab{t: t, root: t.TempDir(), tokens: map[string]string{}, members: map[string]bool{},
+	g := &GitLab{t: t, root: t.TempDir(), tokens: map[string]string{}, members: map[string]bool{}, archived: map[string]bool{},
 		calls: map[string]int{}, prs: map[string][]*GitLabPR{}, limit: map[string]bool{}}
 	srv := httptest.NewServer(g)
 	t.Cleanup(srv.Close)
@@ -92,6 +93,15 @@ func (g *GitLab) Member(path string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.members[path] = true
+}
+
+// SetArchived archives or unarchives a project. The membership listing honours its `archived`
+// filter (docs/vendor/gitlab/api_projects.md: absent lists both) and, like `simple=true`, does
+// not say on each project whether it is archived.
+func (g *GitLab) SetArchived(path string, archived bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.archived[path] = archived
 }
 
 // RateLimitToken answers the next merge request creation made with token with 429.
@@ -275,7 +285,10 @@ func (g *GitLab) listProjects(w http.ResponseWriter, r *http.Request, scope stri
 	g.mu.Lock()
 	var all []string
 	for p := range g.members {
-		if inScope(scope, p) {
+		if !inScope(scope, p) {
+			continue
+		}
+		if want := q.Get("archived"); want == "" || want == strconv.FormatBool(g.archived[p]) {
 			all = append(all, p)
 		}
 	}

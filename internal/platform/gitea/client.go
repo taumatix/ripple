@@ -445,6 +445,17 @@ func (c *Client) CloseUntouchedPR(ctx context.Context, repo model.Repo, pr platf
 
 // ListRepos is every repository the token can push to: not archived, not empty.
 func (c *Client) ListRepos(ctx context.Context) ([]model.Repo, error) {
+	return c.listRepos(ctx, false)
+}
+
+// ListArchivedRepos is the archived ones among them. Gitea and Forgejo send no archive
+// event (docs/vendor/gitea/webhooks.md, docs/vendor/forgejo/webhooks.md), but each
+// repository object carries `archived` (swagger), so a listing tells an archive from a deletion.
+func (c *Client) ListArchivedRepos(ctx context.Context) ([]model.Repo, error) {
+	return c.listRepos(ctx, true)
+}
+
+func (c *Client) listRepos(ctx context.Context, archived bool) ([]model.Repo, error) {
 	var out []model.Repo
 	err := c.paged(ctx, model.Repo{}, "/user/repos", func(raw json.RawMessage) (int, error) {
 		var rs []struct {
@@ -460,7 +471,7 @@ func (c *Client) ListRepos(ctx context.Context) ([]model.Repo, error) {
 			return 0, err
 		}
 		for _, r := range rs {
-			if r.Archived || r.Empty || (r.Permissions != nil && !r.Permissions.Push) {
+			if r.Archived != archived || r.Empty || (r.Permissions != nil && !r.Permissions.Push) {
 				continue
 			}
 			out = append(out, model.Repo{FullName: r.FullName, DefaultBranch: r.DefaultBranch})

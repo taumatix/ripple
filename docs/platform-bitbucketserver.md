@@ -44,7 +44,7 @@ with no commits in listings; the `permission` filter on `/repos`.
 
 ## Archive
 
-Only GitHub reports archive and unarchive today (ripple pauses the repo on `archived`, resumes on `unarchived`). Bitbucket Data Center: an archive event is not documented to ripple's knowledge and was not verified (2026-11-23). ripple maps none and nothing pauses on archive.
+ripple pauses a repo on archive and resumes it on unarchive (no scan, pending jobs kept). Data Center documents no archive event in the vendored payload reference, but `GET /repos` takes `archived=ACTIVE|ARCHIVED|ALL` and each repository carries `archived` (available since 8.0, `docs/vendor/bitbucket-server/openapi-excerpt.json`). ripple lists `archived=ARCHIVED` on every discovery and reads a repo that moves between the listings as archived or unarchived. A server before 8.0 ignores the filter and sends no `archived` field, so ripple lists no archived repo there and an archive is not seen. Not verified against a real Data Center; only the fake has run.
 
 ## Superseded pull requests
 

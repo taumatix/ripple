@@ -85,3 +85,8 @@ func (f *fixture) FileAt(path, branch, file string) (string, bool) {
 }
 func (f *fixture) Calls(path string) int { return f.g.Calls(path) }
 func (f *fixture) RateLimitNextPR() bool { f.g.RateLimitOnce = true; return true }
+
+// SetArchived: neither Gitea nor Forgejo sends an archive event; the listing's `archived` flag changes.
+func (f *fixture) SetArchived(_ *testing.T, _, path string, archived bool) {
+	f.g.SetArchived(path, archived)
+}

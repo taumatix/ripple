@@ -180,6 +180,17 @@ type Lister interface {
 	ListRepos(ctx context.Context) ([]model.Repo, error)
 }
 
+// ArchivedLister is the optional second half of a Lister: the repos the host lists
+// as archived, which ListRepos leaves out. With it, the app reads a repo that moves
+// between the two listings as RepoArchived or RepoUnarchived instead of removed or
+// added, so an archive keeps the repo's index and pending jobs. An error leaves the
+// previous listings in place, so a failing archived listing is never read as an
+// unarchive. Only names matter; a repo ripple would not watch (empty, no push
+// permission) must be left out here as in ListRepos.
+type ArchivedLister interface {
+	ListArchivedRepos(ctx context.Context) ([]model.Repo, error)
+}
+
 // Host is everything one code host contributes, as registered with the app.
 type Host struct {
 	// Name is lower-case letters, digits and dashes. It prefixes the host's repo

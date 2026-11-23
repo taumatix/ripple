@@ -464,6 +464,17 @@ func ownSystemNote(body string) bool {
 // A project or group access token's bot is a member of its project or group, so it
 // lists exactly what it was issued for. An error leaves the previous listing in place.
 func (c *Client) ListRepos(ctx context.Context) ([]model.Repo, error) {
+	return c.listProjects(ctx, false)
+}
+
+// ListArchivedRepos is the member projects that are archived (`archived=true`, a
+// documented filter of GET /projects), so an archive is told apart from a deletion:
+// GitLab sends no event for it.
+func (c *Client) ListArchivedRepos(ctx context.Context) ([]model.Repo, error) {
+	return c.listProjects(ctx, true)
+}
+
+func (c *Client) listProjects(ctx context.Context, archived bool) ([]model.Repo, error) {
 	seen := map[string]bool{}
 	var out []model.Repo
 	for key, secret := range c.Tokens.all() {
@@ -471,7 +482,7 @@ func (c *Client) ListRepos(ctx context.Context) ([]model.Repo, error) {
 			var ps []struct {
 				Path string `json:"path_with_namespace"`
 			}
-			u := fmt.Sprintf("%s/projects?membership=true&archived=false&simple=true&per_page=%d&page=%d", c.api(), perPage, page)
+			u := fmt.Sprintf("%s/projects?membership=true&archived=%t&simple=true&per_page=%d&page=%d", c.api(), archived, perPage, page)
 			if _, err := c.do(ctx, key, secret, http.MethodGet, u, nil, &ps); err != nil {
 				return nil, err
 			}

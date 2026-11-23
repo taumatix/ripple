@@ -29,7 +29,7 @@ Sources are vendored in `docs/vendor/` (see its README).
 
 ## Archive
 
-Only GitHub reports archive and unarchive today (ripple pauses the repo on `archived`, resumes on `unarchived`). Gitea's webhook documentation lists `create`, `delete`, `fork`, `push`, `wiki`, `repository`, `release`, `package` and `status`, and no archive or unarchive event (checked 2026-11-23 against docs.gitea.com/usage/webhooks). Forgejo is a fork and its list was not checked. ripple does not pause on archive here; the `repository` event's actions are mapped only as far as `created` and `deleted`.
+ripple pauses a repo on archive and resumes it on unarchive (no scan, pending jobs kept). Gitea's and Forgejo's webhook documentation list no archive event (checked 2026-11-23 against docs/vendor/gitea/webhooks.md and docs/vendor/forgejo/webhooks.md, both vendored), so ripple reads the `archived` flag of each repository in `GET /user/repos` on every discovery: a repo whose flag flips is paused or resumed, not removed or added. It is seen within one discovery interval. Not verified against a real Gitea or Forgejo; only the fake has run.
 
 ## Superseded pull requests
 

@@ -420,11 +420,11 @@ func (q *Queue) start(ctx context.Context, e *entry) {
 			q.standDown(e, ev, q.Now().Add(q.LeaseTTL/3), false)
 			return
 		}
-		defer held.Release()
 		err := q.Process(held.Ctx, ev)
 		if errors.Is(context.Cause(held.Ctx), store.ErrLeaseLost) && ctx.Err() == nil {
 			// Another replica owns the event now; its outcome is the event's.
 			q.Log.Warn("event lease lost; leaving the event to its new holder", "event", ev.ID, "repo", ev.Repo)
+			held.Release()
 			q.standDown(e, ev, q.Now().Add(q.LeaseTTL/3), false)
 			return
 		}
@@ -531,6 +531,7 @@ func (q *Queue) finish(ctx context.Context, e *entry, held *store.Held, err erro
 			if uerr := q.updateEvent(ctx, held, ev); uerr != nil {
 				q.Log.Error("persist dead event", "event", ev.ID, "err", uerr)
 			}
+			held.Release()
 			q.mu.Lock()
 			defer q.mu.Unlock()
 			e.running = false
@@ -554,6 +555,10 @@ func (q *Queue) finish(ctx context.Context, e *entry, held *store.Held, err erro
 			q.Log.Error("delete handled event", "event", ev.ID, "err", derr)
 		}
 	}
+	// Give the lease up before the event can be started again: a retry re-takes the same
+	// owner's lease with the same token, so a release landing after that would delete the
+	// retry's lease and have its outcome refused as lost.
+	held.Release()
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	e.running = false

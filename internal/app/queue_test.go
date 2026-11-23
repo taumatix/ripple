@@ -500,3 +500,40 @@ func TestStaleReplicaCannotFinishAnEvent(t *testing.T) {
 		})
 	}
 }
+
+// slowRelease is a store whose lease release takes a while, as a loaded database's does.
+type slowRelease struct {
+	store.Store
+	delay time.Duration
+}
+
+func (s slowRelease) ReleaseLease(ctx context.Context, l store.Lease) error {
+	time.Sleep(s.delay)
+	return s.Store.ReleaseLease(ctx, l)
+}
+
+// A failed event is due again as soon as its backoff passes, which can be before the lease of
+// the attempt that failed is released. The retry takes the same owner's lease and must not
+// have it deleted by that release: its outcome would be refused as a lost lease, the attempt
+// not counted, and the event rescanned more often than MaxAttempts.
+func TestRetryDoesNotLoseItsLeaseToThePreviousAttemptsRelease(t *testing.T) {
+	st, g := slowRelease{Store: store.NewMemory(), delay: 20 * time.Millisecond}, newGate()
+	g.fail["broken"] = 100
+	// A scan that outlasts the previous attempt's release: the release lands mid-attempt.
+	process := func(ctx context.Context, e model.Event) error {
+		time.Sleep(60 * time.Millisecond)
+		return g.process(ctx, e)
+	}
+	q := &Queue{Store: st, Process: process, MaxAttempts: 3, Backoff: func(int) time.Duration { return time.Millisecond }}
+	startQueue(t, q)
+	_ = q.Add(context.Background(), ev(1, "broken", "acme/a"))
+	eventually(t, "broken dead-lettered", func() bool { return len(dead(t, st)) == 1 })
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if n := 100 - g.fail["broken"]; n != 3 {
+		t.Fatalf("attempted %d times, want 3", n)
+	}
+	if d := dead(t, st)[0]; d.Attempts != 3 {
+		t.Fatalf("dead event counts %d attempts, want 3", d.Attempts)
+	}
+}

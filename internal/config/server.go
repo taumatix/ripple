@@ -58,6 +58,9 @@ type Server struct {
 	// reach only the go commands that run no repository code, and need RIPPLE_GOPROXY set to a private proxy. GoCC is the C compiler cgo
 	// verification uses; empty is cc.
 	GoProxyUser, GoProxyToken, GoCC string
+	// RegistryAuthFile is a Docker config.json holding logins for private container
+	// registries (ecosystem: docker); empty means every registry is read anonymously.
+	RegistryAuthFile string
 	// GoToolchainDir holds Go releases (go1.25.3/bin/go) that verification uses when a go.mod names one.
 	GoToolchainDir string
 	Sandbox        string // none, auto, bwrap, seatbelt, container, docker, podman
@@ -150,6 +153,7 @@ RIPPLE_OSV_SWEEP_BATCH        repos re-checked per poll while a sweep runs (defa
 RIPPLE_GOPROXY                module proxy used to verify major bumps (default https://proxy.golang.org)
 RIPPLE_GOPROXY_USER           user for RIPPLE_GOPROXY (HTTP basic auth); with RIPPLE_GOPROXY_TOKEN, sent only to repos listing private-modules
 RIPPLE_GOPROXY_TOKEN          password or token for RIPPLE_GOPROXY; needs an https proxy
+RIPPLE_REGISTRY_AUTH_FILE     Docker config.json with logins for private container registries (ecosystem: docker); read once at start
 RIPPLE_GO_TOOLCHAIN_DIR       directory of Go releases (go1.25.3/bin/go) verification runs with when a go.mod names one; never downloaded
 RIPPLE_GO_CC                  C compiler for repos with cgo: true (default: go's own, gcc or clang)
 RIPPLE_STORE                  memory (default), postgres or dynamodb
@@ -290,6 +294,7 @@ func LoadServer(getenv func(string) string) (*Server, error) {
 		GoProxyUser:              getenv("RIPPLE_GOPROXY_USER"),
 		GoProxyToken:             getenv("RIPPLE_GOPROXY_TOKEN"),
 		GoCC:                     getenv("RIPPLE_GO_CC"),
+		RegistryAuthFile:         getenv("RIPPLE_REGISTRY_AUTH_FILE"),
 		GoToolchainDir:           getenv("RIPPLE_GO_TOOLCHAIN_DIR"),
 		Sandbox:                  str("RIPPLE_SANDBOX", "none"),
 		ContainerImage:           getenv("RIPPLE_CONTAINER_IMAGE"),

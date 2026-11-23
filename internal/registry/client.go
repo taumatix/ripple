@@ -30,8 +30,10 @@ const (
 	tagsPageSize = 1000
 )
 
-// Client reads from registries anonymously: it never sends a credential, so a private
-// image is ErrDenied rather than fetched (credentials are not supported).
+// Client reads from registries. Without Auth it is anonymous and a private image is
+// ErrDenied; with Auth, a registry that has a login there gets it (a Basic challenge is
+// answered with it directly, a Bearer challenge by presenting it to the token endpoint
+// the challenge names), and every other registry stays anonymous.
 type Client struct {
 	// HTTP is the transport. Nil means a client that refuses to connect to a
 	// loopback, private, link-local or otherwise non-public address, because the
@@ -44,6 +46,8 @@ type Client struct {
 	Insecure bool
 	// UserAgent is sent with every request when set.
 	UserAgent string
+	// Auth holds per-registry logins; nil means anonymous everywhere.
+	Auth *Credentials
 }
 
 var safeHTTP = &http.Client{
@@ -107,7 +111,7 @@ func (c *Client) Tags(ctx context.Context, pkg string) ([]string, error) {
 		if page >= maxPages {
 			return nil, fmt.Errorf("registry: %s has more than %d tag pages", pkg, maxPages)
 		}
-		resp, err := c.do(ctx, http.MethodGet, next, ref.Repo, "application/json")
+		resp, err := c.do(ctx, http.MethodGet, next, ref, "application/json")
 		if err != nil {
 			return nil, err
 		}
@@ -162,7 +166,7 @@ func (c *Client) Digest(ctx context.Context, pkg, tag string) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("registry: %q is not a registry/repository name", pkg)
 	}
-	resp, err := c.do(ctx, http.MethodHead, c.base(ref.Registry)+"/v2/"+ref.Repo+"/manifests/"+url.PathEscape(tag), ref.Repo,
+	resp, err := c.do(ctx, http.MethodHead, c.base(ref.Registry)+"/v2/"+ref.Repo+"/manifests/"+url.PathEscape(tag), ref,
 		"application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json")
 	if err != nil {
 		return "", err
@@ -189,9 +193,9 @@ type manifestDoc struct {
 	} `json:"config"`
 }
 
-func (c *Client) manifest(ctx context.Context, base, repo, ref string) (manifestDoc, error) {
+func (c *Client) manifest(ctx context.Context, base string, repo Ref, ref string) (manifestDoc, error) {
 	var m manifestDoc
-	resp, err := c.do(ctx, http.MethodGet, base+"/v2/"+repo+"/manifests/"+url.PathEscape(ref), repo, manifestAccept)
+	resp, err := c.do(ctx, http.MethodGet, base+"/v2/"+repo.Repo+"/manifests/"+url.PathEscape(ref), repo, manifestAccept)
 	if err != nil {
 		return m, err
 	}
@@ -211,7 +215,7 @@ func (c *Client) Created(ctx context.Context, pkg, tag string) (time.Time, error
 		return time.Time{}, fmt.Errorf("registry: %q is not a registry/repository name", pkg)
 	}
 	base := c.base(ref.Registry)
-	m, err := c.manifest(ctx, base, ref.Repo, tag)
+	m, err := c.manifest(ctx, base, ref, tag)
 	if err != nil {
 		return time.Time{}, err
 	}
@@ -228,14 +232,14 @@ func (c *Client) Created(ctx context.Context, pkg, tag string) (time.Time, error
 		if pick == "" {
 			return time.Time{}, nil
 		}
-		if m, err = c.manifest(ctx, base, ref.Repo, pick); err != nil {
+		if m, err = c.manifest(ctx, base, ref, pick); err != nil {
 			return time.Time{}, err
 		}
 	}
 	if !digestRE.MatchString(m.Config.Digest) {
 		return time.Time{}, nil
 	}
-	resp, err := c.do(ctx, http.MethodGet, base+"/v2/"+ref.Repo+"/blobs/"+m.Config.Digest, ref.Repo, "application/json")
+	resp, err := c.do(ctx, http.MethodGet, base+"/v2/"+ref.Repo+"/blobs/"+m.Config.Digest, ref, "application/json")
 	if err != nil {
 		return time.Time{}, err
 	}
@@ -249,12 +253,14 @@ func (c *Client) Created(ctx context.Context, pkg, tag string) (time.Time, error
 	return cfg.Created, nil
 }
 
-// do issues a request, answering one anonymous Bearer challenge. The caller closes the body.
-func (c *Client) do(ctx context.Context, method, target, repo, accept string) (*http.Response, error) {
+// do issues a request, answering one Basic or Bearer challenge (with the registry's login when there is one). The caller closes the body.
+func (c *Client) do(ctx context.Context, method, target string, ref Ref, accept string) (*http.Response, error) {
 	if !c.Insecure && !strings.HasPrefix(target, "https://") {
 		return nil, fmt.Errorf("registry: %s is not https", target)
 	}
-	token := ""
+	repo := ref.Repo
+	user, pass, haveLogin := c.Auth.For(ref.Registry)
+	token, basic := "", false
 	for attempt := 0; ; attempt++ {
 		req, err := http.NewRequestWithContext(ctx, method, target, nil)
 		if err != nil {
@@ -266,6 +272,8 @@ func (c *Client) do(ctx context.Context, method, target, repo, accept string) (*
 		}
 		if token != "" {
 			req.Header.Set("Authorization", "Bearer "+token)
+		} else if basic {
+			req.SetBasicAuth(user, pass)
 		}
 		resp, err := c.http().Do(req)
 		if err != nil {
@@ -277,7 +285,14 @@ func (c *Client) do(ctx context.Context, method, target, repo, accept string) (*
 		case resp.StatusCode == http.StatusUnauthorized && attempt == 0:
 			challenge := resp.Header.Get("WWW-Authenticate")
 			resp.Body.Close()
-			if token, err = c.token(ctx, challenge, repo); err != nil {
+			if scheme, _, _ := strings.Cut(strings.TrimSpace(challenge), " "); strings.EqualFold(scheme, "basic") {
+				if !haveLogin {
+					return nil, fmt.Errorf("%w: %s asks for a login and none is configured for %s", ErrDenied, target, ref.Registry)
+				}
+				basic = true
+				continue
+			}
+			if token, err = c.token(ctx, challenge, repo, user, pass, haveLogin); err != nil {
 				return nil, err
 			}
 			continue
@@ -298,7 +313,7 @@ func (c *Client) do(ctx context.Context, method, target, repo, accept string) (*
 var paramRE = regexp.MustCompile(`(\w+)="([^"]*)"`)
 
 // token answers a `Bearer realm=...,service=...,scope=...` challenge without credentials.
-func (c *Client) token(ctx context.Context, challenge, repo string) (string, error) {
+func (c *Client) token(ctx context.Context, challenge, repo, user, pass string, haveLogin bool) (string, error) {
 	scheme, params, _ := strings.Cut(strings.TrimSpace(challenge), " ")
 	if !strings.EqualFold(scheme, "bearer") {
 		return "", fmt.Errorf("%w: the registry asks for %q authentication", ErrDenied, scheme)
@@ -328,12 +343,18 @@ func (c *Client) token(ctx context.Context, challenge, repo string) (string, err
 	if c.UserAgent != "" {
 		req.Header.Set("User-Agent", c.UserAgent)
 	}
+	if haveLogin {
+		req.SetBasicAuth(user, pass)
+	}
 	resp, err := c.http().Do(req)
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		if haveLogin {
+			return "", fmt.Errorf("%w: token for %s (the configured login was refused)", ErrDenied, repo)
+		}
 		return "", fmt.Errorf("%w: token for %s", ErrDenied, repo)
 	}
 	if resp.StatusCode != http.StatusOK {

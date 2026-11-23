@@ -1,3 +1,5 @@
+//go:build live
+
 package gitws_test
 
 import (
@@ -19,7 +21,7 @@ import (
 // reports the size of the workspace directory, which is what the clone and the
 // checkout wrote (the packed objects git downloaded plus the working tree).
 //
-//	RIPPLE_LIVE_SCAN_REPO=taumatix/ripple go test ./internal/platform/gitws -run LiveScan -v
+//	RIPPLE_LIVE_SCAN_REPO=taumatix/ripple go test -tags live ./internal/platform/gitws -run LiveScan -v
 func TestLiveScanCost(t *testing.T) {
 	repo := os.Getenv("RIPPLE_LIVE_SCAN_REPO")
 	if repo == "" {

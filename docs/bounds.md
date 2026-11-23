@@ -40,7 +40,7 @@ Non-cone sparse patterns are marked deprecated by git (the replacement, cone mod
 files). They are used because the files to fetch are arbitrary paths; if git removes them, `Prefetch` fails,
 the fallback applies and the scan costs what it did before, which a test (`TestScanOnlyDownloadsOnlyWhatIsRead`) would show.
 
-Measured over the public internet with git 2.50.1, `RIPPLE_LIVE_SCAN_REPO=<repo> go test ./internal/platform/gitws -run LiveScan -v`
+Measured over the public internet with git 2.50.1, `RIPPLE_LIVE_SCAN_REPO=<repo> go test -tags live ./internal/platform/gitws -run LiveScan -v`
 (Checkout, Walk, Prefetch of the default managers' matches, ReadFile; three runs each for `taumatix/ripple`, identical):
 
 | Repo | Files | Clone | Pack downloaded | Workspace on disk | Time |

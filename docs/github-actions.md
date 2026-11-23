@@ -24,7 +24,9 @@ Only the `directory` key applies. Without the entry ripple does not read workflo
 | `./local`, `docker://image` | ignored |
 
 Same shape means the same `v` prefix and component count: `v4` follows `v5`, never `v5.0.1`, so a floating tag
-stays floating. If upstream has no tag of that shape newer than the current one, the dependency is left alone.
+stays floating. If upstream has no tag of that shape newer than the current one, the dependency is left alone;
+with `dependency-dashboard: true` the dashboard lists it under "Actions left alone" with the newest tag it
+saw, until upstream publishes the shape or the dependency moves.
 
 Edits are exact-line: indentation, quoting and comments are kept. The result is re-parsed as YAML before it is
 committed, and the PR links the upstream release (when it has a published one) under "Release notes". A sha pin
@@ -45,4 +47,6 @@ need it.
 - The denial is recognised by git's message containing "workflow" and "permission". The exact wording GitHub
   returns is not verified against the real service (the tests use a fake written from its documented text).
 - Tags are read from github.com. With GitHub Enterprise Server the upstream action must be on the same host.
-- No superseding: a newer tag opens its own PR next to an open older one.
+- Superseding follows the Go modules' rules (`close-superseded-pull-requests`, on by default): a PR for a newer
+  tag closes the open older ripple PR of the same action and the same tag shape, unless a person touched it.
+  PRs of different shapes (`v5` and `v5.1.0`) are separate dependencies and never close each other.

@@ -411,7 +411,7 @@ func (r *runner) execute(plans []*prPlan, deps []model.Dependency) {
 		if count >= limit && p.group == "" && len(p.items) > 0 {
 			// A stale PR of the module this plan updates holds the slot its replacement needs.
 			j := p.items[0].job
-			closed := r.closeStale(supersededBy{pkg: j.Package, version: j.Version}, p.branch, open)
+			closed := r.closeStale(supersededBy{ds: j.Datasource, pkg: j.Package, version: j.Version}, p.branch, open)
 			open, count = without(open, closed), count-len(closed)
 		}
 		if count >= limit {

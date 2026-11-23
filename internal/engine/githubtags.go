@@ -154,18 +154,25 @@ func (w *ActionsWatcher) Poll(ctx context.Context) (int, error) {
 		released := map[string]platform.TagRelease{}
 		for _, d := range deps {
 			target := actionTarget(d.Version, tags)
-			if target == "" {
-				continue
-			}
-			typ, ok := applicable(d, model.DatasourceGitHubTags, pkg, target)
-			if !ok {
-				continue
-			}
 			rs, err := e.repoState(ctx, repos, d.Repo)
 			if err != nil {
 				return n, err
 			}
 			if !rs.found {
+				continue
+			}
+			other := ""
+			if target == "" {
+				other = newestOtherShape(d.Version, tags)
+			}
+			if err := e.noteShapeSkip(ctx, rs, d, other); err != nil {
+				return n, err
+			}
+			if target == "" {
+				continue
+			}
+			typ, ok := applicable(d, model.DatasourceGitHubTags, pkg, target)
+			if !ok {
 				continue
 			}
 			rel, seen := released[target]

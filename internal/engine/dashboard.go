@@ -76,6 +76,11 @@ func renderDashboard(jobs []model.Job, now time.Time) string {
 // renderDashboardWith also lists advisories ripple cannot propose a fix for. Their ids,
 // packages and versions come from OSV and the repo's go.mod: all untrusted, all cleaned.
 func renderDashboardWith(jobs []model.Job, advisories []openAdvisory, now time.Time) string {
+	return renderDashboardFull(jobs, advisories, nil, now)
+}
+
+// renderDashboardFull also lists the actions left alone for want of a tag of their shape.
+func renderDashboardFull(jobs []model.Job, advisories []openAdvisory, skips []shapeSkip, now time.Time) string {
 	var deferred, due, failed []model.Job
 	for _, j := range jobs {
 		switch {
@@ -139,7 +144,18 @@ func renderDashboardWith(jobs []model.Job, advisories []openAdvisory, now time.T
 			b.WriteString(line)
 		}
 	}
-	if len(jobs) == 0 && len(advisories) == 0 {
+	if len(skips) > 0 {
+		fmt.Fprintf(&b, "\n## Actions left alone (%d)\n\nGitHub Actions with a newer tag upstream, none of which has the shape they are pinned to (`v4` follows `v5`, not `v5.0.0`), so ripple does not move them. Pin a shape upstream publishes, or update by hand. No pull request is opened for them.\n\n", len(skips))
+		for _, sk := range skips {
+			line := fmt.Sprintf("- `%s` `%s`: newest tag `%s`\n", clean(sk.Package), clean(sk.Version), clean(sk.Newest))
+			if b.Len()+len(line) > dashboardBudget {
+				omitted++
+				continue
+			}
+			b.WriteString(line)
+		}
+	}
+	if len(jobs) == 0 && len(advisories) == 0 && len(skips) == 0 {
 		b.WriteString("\nNothing is pending, deferred or failed.\n")
 	}
 	if omitted > 0 {
@@ -346,7 +362,11 @@ func (e *Engine) updateDashboard(ctx context.Context, repo model.Repo, lister st
 	if err != nil {
 		return err
 	}
-	body := renderDashboardWith(jobs, advisories, e.now())
+	skips, err := e.currentShapeSkips(ctx, repo.FullName)
+	if err != nil {
+		return err
+	}
+	body := renderDashboardFull(jobs, advisories, skips, e.now())
 	hash := bodyHash(body)
 	cur, err := e.Store.GetCursor(ctx, dashboardCursor(repo.FullName))
 	if err != nil {
@@ -382,7 +402,7 @@ func (e *Engine) updateDashboard(ctx context.Context, repo model.Repo, lister st
 			return err
 		}
 		if !found {
-			if len(jobs) == 0 && len(advisories) == 0 {
+			if len(jobs) == 0 && len(advisories) == 0 && len(skips) == 0 {
 				return nil // nothing to report and nothing reported yet
 			}
 			return e.createDashboard(ctx, repo, body, save)
@@ -405,7 +425,7 @@ func (e *Engine) updateDashboard(ctx context.Context, repo model.Repo, lister st
 			}
 			return err
 		}
-		if len(jobs) == 0 && len(advisories) == 0 {
+		if len(jobs) == 0 && len(advisories) == 0 && len(skips) == 0 {
 			return e.setDashboardCursor(ctx, repo.FullName, "")
 		}
 		return e.createDashboard(ctx, repo, body, save)

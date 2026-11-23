@@ -15,6 +15,7 @@ import (
 	"github.com/taumatix/ripple/internal/config"
 	"github.com/taumatix/ripple/internal/engine"
 	"github.com/taumatix/ripple/internal/feed"
+	"github.com/taumatix/ripple/internal/npmreg"
 	"github.com/taumatix/ripple/internal/platform"
 	"github.com/taumatix/ripple/internal/platform/github"
 	"github.com/taumatix/ripple/internal/platform/gitws"
@@ -86,6 +87,7 @@ func New(ctx context.Context, s *config.Server, log *slog.Logger) (a *App, st st
 	eng.Lookup = &feed.GoProxyLookup{BaseURL: s.GoProxy, User: s.GoProxyUser, Token: s.GoProxyToken,
 		UserAgent: "ripple (+https://github.com/taumatix/ripple)"}
 	eng.Registry = &registry.Client{UserAgent: "ripple (+https://github.com/taumatix/ripple)"}
+	eng.Npm = &npmreg.Client{UserAgent: "ripple (+https://github.com/taumatix/ripple)"}
 	a = &App{
 		Engine: eng, Log: log, Secret: []byte(s.WebhookSecret), PollEvery: s.FeedInterval,
 		Hosts: hosts, DefaultHost: github.HostName,
@@ -94,6 +96,7 @@ func New(ctx context.Context, s *config.Server, log *slog.Logger) (a *App, st st
 		Toolchain: &engine.ToolchainWatcher{Engine: eng, Source: &feed.GoDL{BaseURL: s.GoReleasesURL, UserAgent: "ripple (+https://github.com/taumatix/ripple)"}},
 		Actions:   &engine.ActionsWatcher{Engine: eng},
 		Docker:    &engine.DockerWatcher{Engine: eng},
+		Npm:       &engine.NpmWatcher{Engine: eng},
 		Watcher:   &engine.Watcher{Engine: eng, Feed: &feed.GoIndex{BaseURL: s.FeedURL, UserAgent: "ripple (+https://github.com/taumatix/ripple)"}},
 	}
 	a.closers = append(a.closers, closeSandbox)

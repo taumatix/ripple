@@ -22,6 +22,9 @@ func applicable(d model.Dependency, ds, pkg, version string) (rules.UpdateType, 
 	if ds == model.DatasourceDocker {
 		return applicableImage(d, pkg, version)
 	}
+	if ds == model.DatasourceNpm {
+		return applicableNpm(d, pkg, version)
+	}
 	if ds == model.DatasourceGitHubTags {
 		return applicableTag(d, pkg, version)
 	}

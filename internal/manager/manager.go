@@ -30,6 +30,8 @@ func Build(cfg *config.Repo) ([]Manager, error) {
 			out = append(out, GitHubActions{Dir: u.Directory})
 		case "docker":
 			out = append(out, Docker{Dir: u.Directory})
+		case "npm":
+			out = append(out, Npm{Dir: u.Directory})
 		case "regex":
 			r, err := NewRegex(cfg.ManagerName(i), u)
 			if err != nil {

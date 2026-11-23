@@ -22,6 +22,7 @@ import (
 	"github.com/taumatix/ripple/internal/engine"
 	"github.com/taumatix/ripple/internal/feed"
 	"github.com/taumatix/ripple/internal/model"
+	"github.com/taumatix/ripple/internal/npmreg"
 	"github.com/taumatix/ripple/internal/platform/github"
 	"github.com/taumatix/ripple/internal/registry"
 	"github.com/taumatix/ripple/internal/rules"
@@ -127,6 +128,8 @@ type opts struct {
 	gitHTTP bool
 	// registry, when set, is the fake container registry every image host resolves to.
 	registry *testutil.Registry
+	// npm, when set, is the fake npm registry the engine reads package versions from.
+	npm *testutil.NpmRegistry
 	// engine adjusts the engine before it runs (server-side go settings).
 	engine func(e *engine.Engine)
 }
@@ -163,6 +166,9 @@ func newEnvOpts(t *testing.T, st store.Store, lim rules.Limits, o opts) *env {
 	if o.engine != nil {
 		o.engine(eng)
 	}
+	if o.npm != nil {
+		eng.Npm = &npmreg.Client{BaseURL: o.npm.URL}
+	}
 	if o.registry != nil {
 		eng.Registry = &registry.Client{HTTP: http.DefaultClient, Insecure: true, BaseURL: func(string) string { return o.registry.URL }}
 	}
@@ -170,7 +176,7 @@ func newEnvOpts(t *testing.T, st store.Store, lim rules.Limits, o opts) *env {
 		a := &app.App{Engine: eng, Secret: []byte(secret), Log: slog.New(slog.NewTextHandler(io.MultiWriter(testWriter{t}, e.logs), nil)),
 			PollEvery: o.pollEvery, Queue: &app.Queue{},
 			Watcher: &engine.Watcher{Engine: eng, Feed: &feed.GoIndex{BaseURL: e.idx.URL}},
-			Actions: &engine.ActionsWatcher{Engine: eng}, Docker: &engine.DockerWatcher{Engine: eng}}
+			Actions: &engine.ActionsWatcher{Engine: eng}, Docker: &engine.DockerWatcher{Engine: eng}, Npm: &engine.NpmWatcher{Engine: eng}}
 		if o.goDL != nil {
 			a.Toolchain = &engine.ToolchainWatcher{Engine: eng, Source: &feed.GoDL{BaseURL: o.goDL.URL}}
 		}

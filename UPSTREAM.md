@@ -29,6 +29,14 @@ upstream:
     verified-against: "docs/vendor/registry excerpts read 2026-11-23; tests use internal/testutil/registry.go, a fake written from them"
     unverified: "any real registry: Docker Hub host and library/ prefix, GHCR anonymous pulls, the Accept types for the index digest, rate-limit statuses (see docs/vendor/registry/README.md)"
     checked: 2026-11-23
+  - name: npm-registry-api
+    kind: http-api
+    reference: https://github.com/npm/registry/blob/main/docs/responses/package-metadata.md
+    docs: https://github.com/npm/registry/blob/main/docs/REGISTRY-API.md
+    format: "GET /<package> with Accept application/vnd.npm.install-v1+json (abbreviated metadata: name, modified, dist-tags, versions with deprecated), anonymous; scoped names as @scope%2Fname"
+    verified-against: "docs/vendor/npm excerpts read 2026-11-23; tests use internal/testutil/npm.go, a fake written from them"
+    unverified: "any real registry: the %2F encoding of scoped names, 404 or 401/403 for private packages, the exact shape of deprecated, a latest tag that exists, rate limits, abbreviated documents for very large packages (see docs/vendor/npm/README.md); .npmrc and node-semver grammar are read only as far as docs/npm.md says"
+    checked: 2026-11-23
   - name: github-enterprise-server
     kind: http-api
     reference: https://docs.github.com/en/enterprise-server@latest/rest

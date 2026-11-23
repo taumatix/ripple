@@ -10,9 +10,12 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/taumatix/ripple/internal/model"
+	"github.com/taumatix/ripple/internal/platform"
+	"github.com/taumatix/ripple/internal/platform/gerrit"
 	"github.com/taumatix/ripple/internal/store"
 )
 
@@ -118,4 +121,29 @@ func TestDeliveryWhileQueueStartsDoesNotRace(t *testing.T) {
 	}
 	cancel()
 	<-done
+}
+
+// Hosts whose payloads carry no delivery header (Gerrit, SCM-Manager) derive an id from
+// what they record, so the store's table drops a redelivery after a restart too.
+func TestRedeliveryOfAGerritUpdateIsDroppedAcrossReplicas(t *testing.T) {
+	st := store.NewMemory()
+	body := `{"type":"ref-updated","refUpdate":{"oldRev":"1111111111111111111111111111111111111111","newRev":"2222222222222222222222222222222222222222","refName":"refs/heads/main","project":"acme/app"}}`
+	post := func() {
+		a := replica(st, 0)
+		a.Hosts = []*platform.Host{{Name: "gerrit", Receiver: func(s platform.Sink) http.Handler {
+			return &gerrit.Receiver{Secret: []byte("s"), Sink: s, Log: slog.New(slog.DiscardHandler)}
+		}}}
+		r := httptest.NewRequest(http.MethodPost, "/webhook/gerrit?token=s", strings.NewReader(body))
+		w := httptest.NewRecorder()
+		a.Handler().ServeHTTP(w, r)
+		if w.Code != http.StatusAccepted {
+			t.Fatalf("status %d", w.Code)
+		}
+	}
+	post()
+	drain(t, st)
+	post()
+	if got := queued(t, st); len(got) != 0 {
+		t.Fatalf("a redelivery after a restart was handled again: %v", got)
+	}
 }

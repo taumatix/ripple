@@ -81,12 +81,12 @@ Everything else:
 - **Listing state outside a single cursor.** `App.Discover` keeps a host's previous listing as one JSON
   store cursor, which DynamoDB caps at 400 KB (roughly 10k repo names). Store it per repo before a host
   with larger installations ships.
-29. **More datasources and feeds, as many ecosystems as Renovate has.** ~~npm registry~~ (shipped with 30c, polled per package; the replicate feed is not used), PyPI, ~~crates.io
+29. **More datasources and feeds, as many ecosystems as Renovate has.** ~~npm registry~~ (shipped with 30c, polled per package; the replicate feed is not used), ~~PyPI~~ (shipped with 30e, polled per project), ~~crates.io
    sparse index~~ (shipped with 30d, polled per crate), Maven, NuGet, RubyGems, Packagist, ~~Docker/OCI tags~~ (shipped with 30b, polled per image), GitHub releases/tags, Helm, Terraform
    registry. Where a registry has a changes feed, use it; where it has none (OCI registries), fall back to polling
    only the packages the reverse index says someone imports, never every repo. Each datasource says which of the two it is.
 30. **More managers, toward Renovate parity.** ~~GitHub Actions~~ shipped ([docs/github-actions.md](docs/github-actions.md)).
-   ~~30b Dockerfile~~ shipped ([docs/docker.md](docs/docker.md)). ~~30c npm~~ shipped ([docs/npm.md](docs/npm.md)). ~~30d Cargo~~ shipped ([docs/cargo.md](docs/cargo.md)). Remaining, by value, each its own entry: 30e pip, 30f Helm, and the long tail.
+   ~~30b Dockerfile~~ shipped ([docs/docker.md](docs/docker.md)). ~~30c npm~~ shipped ([docs/npm.md](docs/npm.md)). ~~30d Cargo~~ shipped ([docs/cargo.md](docs/cargo.md)). ~~30e pip~~ shipped ([docs/pip.md](docs/pip.md)). Remaining, by value, each its own entry: 30f Helm, and the long tail.
 33. **Plugin mechanism** for out-of-tree managers, datasources and platforms.
 34. **Presets, org-level defaults and packageRules-like matching.** Later and strictly opt-in: a repo
     file must opt into a preset by name, and none of these may ever change the meaning of a plain
@@ -314,3 +314,15 @@ Everything else:
     Actions prune), and measuring the per-poll listing (one index Query on DynamoDB, paginated, but it returns every package) on a
     large install. Cursors named `<group>#<key>` written before this release carry no index attributes on DynamoDB and are not
     listed by group; none existed.
+160. **pip: Poetry and other manifests, wider specifiers.** Poetry's `[tool.poetry.dependencies]` (caret and tilde
+    ranges), `Pipfile`, `setup.cfg`, `setup.py`, `[build-system] requires`, `.in` files and constraints files are not read;
+    nor are `>=1,<2` style ranges, `==1.*` and `!=`. The manager is a scanner for PEP 508 requirements and a line scanner
+    for TOML, not a parser, so a real TOML parser is the way to widen it safely.
+161. **pip: refresh lock files, Requires-Python, and other indexes.** `poetry.lock`, `uv.lock`, `pdm.lock` and a
+    pip-compile output are reported, not regenerated (docs/pip.md). `Requires-Python` is ignored, so a bump may need a
+    newer interpreter. A dependency on a private index is skipped, not read from its own index (needs per-index
+    credentials and a PEP 503/691 client); the guard also skips a file that names `https://pypi.org/simple` explicitly.
+162. **pip: verify against the real index.** Nothing here ran against pypi.org: the client and fake come from the
+    vendored excerpts (redirects for non-normalized names, 404 for a missing project, `releases` being documented as
+    deprecated in favour of the PEP 691 index, large projects). PEP 440 ordering is implemented from the summary; compare
+    it with the `packaging` library on a corpus. `pip:packages` is one read-modify-write cursor (see 151).

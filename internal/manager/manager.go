@@ -34,6 +34,8 @@ func Build(cfg *config.Repo) ([]Manager, error) {
 			out = append(out, Npm{Dir: u.Directory})
 		case "cargo":
 			out = append(out, Cargo{Dir: u.Directory})
+		case "pip":
+			out = append(out, Pip{Dir: u.Directory})
 		case "regex":
 			r, err := NewRegex(cfg.ManagerName(i), u)
 			if err != nil {

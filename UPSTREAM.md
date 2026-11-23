@@ -45,6 +45,14 @@ upstream:
     verified-against: "docs/vendor/cargo excerpts read 2026-11-23; tests use internal/testutil/cratesindex.go, a fake written from them"
     unverified: "any real index: index.crates.io's path rules for mixed-case names, 404 for a missing crate, response size for large crates, conditional requests, rate limits (see docs/vendor/cargo/README.md); TOML is read by a line scanner as far as docs/cargo.md says, not parsed"
     checked: 2026-11-23
+  - name: pypi-json-api
+    kind: http-api
+    reference: https://docs.pypi.org/api/json/
+    docs: https://peps.python.org/pep-0440/
+    format: "GET {index}/pypi/{PEP 503 normalized name}/json, anonymous; releases maps a version to its files, each with yanked"
+    verified-against: "docs/vendor/pip excerpts read 2026-11-23; tests use internal/testutil/pypi.go, a fake written from them"
+    unverified: "any real index: pypi.org's handling of non-normalized names, 404 for a missing project, response size for large projects, whether `releases` (documented as deprecated) is kept, rate limits (see docs/vendor/pip/README.md); PEP 440 is implemented from the summary, not checked against the packaging library; requirements files and TOML are read by a scanner as far as docs/pip.md says, not parsed"
+    checked: 2026-11-23
   - name: github-enterprise-server
     kind: http-api
     reference: https://docs.github.com/en/enterprise-server@latest/rest

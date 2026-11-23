@@ -80,6 +80,9 @@ type Engine struct {
 	// Crates reads crate versions from the Cargo sparse index for ecosystem: cargo. Nil
 	// leaves Cargo dependencies without updates (see CargoWatcher).
 	Crates CratesIndex
+	// PyPI reads project versions from the PyPI JSON API for ecosystem: pip. Nil leaves
+	// pip dependencies without updates (see PipWatcher).
+	PyPI PyPIIndex
 	// Replica names this process among the replicas sharing the Store; empty picks a random
 	// id, which is right unless logs should carry a stable name. LeaseTTL is how long a
 	// repo claim survives without renewal (zero means DefaultLeaseTTL). See docs/replicas.md.
@@ -347,6 +350,9 @@ func (e *Engine) scan(ctx context.Context, repo model.Repo) error {
 		return err
 	}
 	if err := e.notePackages(ctx, model.DatasourceCargo, cargoPackagesCursor, deps); err != nil {
+		return err
+	}
+	if err := e.notePackages(ctx, model.DatasourcePip, pipPackagesCursor, deps); err != nil {
 		return err
 	}
 	if err := e.Store.ReplaceDependencies(ctx, repo.FullName, deps); err != nil {

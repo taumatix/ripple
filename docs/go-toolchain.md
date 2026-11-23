@@ -24,18 +24,25 @@ directive is not touched. If a directive PR would lift the same file's toolchain
 
 A toolchain or directive PR also moves the Go version named next to go.mod, so CI and
 local tooling do not stay on the old release. Only these exact line shapes are rewritten,
-in the repo root, the module's directory, and `.github/workflows/` at the root:
+in the repo root, the module's directory, `.github/workflows/` and `.devcontainer/` at the root:
 
 - `.go-version`: a file holding just a version.
 - `.tool-versions`: a `golang <version>` line (a trailing comment is kept).
 - workflows: `go-version: 1.24.1`, quoted or not, alone or as a list item.
 - Dockerfiles (`Dockerfile`, `Dockerfile.*`, `*.Dockerfile`): `FROM golang:<version>[-suffix] [AS name]`.
+- `.mise.toml` / `mise.toml`: `go = "1.24.1"` under `[tools]` only.
+- `.devcontainer/devcontainer.json` (also one directory deeper) and `.devcontainer.json`: the `image` line when it is
+  `mcr.microsoft.com/devcontainers/go:<version>[-suffix]` or `golang:<version>[-suffix]`. A `1-1.24-bookworm` tag
+  floats on the minor and is left alone, as is a Go feature's `version`.
+- `go.work`: the `go 1.24.1` and `toolchain go1.24.1` lines, in the repo root or the module's directory.
+- `Makefile`, `GNUmakefile` and `*.mk`: a `GO_VERSION` or `GOLANG_VERSION` assignment (`=`, `:=`, `::=`, `?=`,
+  optionally `export`ed) whose value is a literal version.
 
 A file moves only if it names the same minor go.mod had and an older release than the
 target. A version written without a patch (`1.24`) keeps that spelling and moves only when
 the minor does. Matrix expressions, `stable`, `go-version-file`, image digests, version
 lists, `ARG`-driven tags and comments are left alone. The PR body lists the files moved.
-Other tools reading other files (`.mise.toml`, `devcontainer.json`) are not touched.
+A workflow under a module's own `.github/workflows/` is not followed: GitHub only runs the root's. Other tools reading other files are not touched.
 
 ## Choices, and why
 

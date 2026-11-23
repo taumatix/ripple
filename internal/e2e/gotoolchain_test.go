@@ -201,8 +201,12 @@ func otherVersionFiles(old string) map[string]string {
 		".tool-versions": "nodejs 20.1.0\ngolang " + old + " # keep\n",
 		".github/workflows/ci.yml": "jobs:\n  t:\n    steps:\n      - uses: actions/setup-go@v5\n        with:\n          go-version: " + old +
 			"\n      - uses: actions/setup-go@v5\n        with:\n          go-version: ${{ matrix.go }}\n          go-version-file: go.mod\n",
-		"Dockerfile": "FROM golang:" + old + "-alpine AS build\nFROM alpine:3.20\nRUN echo FROM golang:" + old + "\n",
-		"README.md":  "Needs go " + old + "\n",
+		"Dockerfile":                      "FROM golang:" + old + "-alpine AS build\nFROM alpine:3.20\nRUN echo FROM golang:" + old + "\n",
+		"README.md":                       "Needs go " + old + "\n",
+		".mise.toml":                      "[tools]\ngo = \"" + old + "\"\nnode = \"20\"\n",
+		".devcontainer/devcontainer.json": "{\n  \"image\": \"mcr.microsoft.com/devcontainers/go:" + old + "-bookworm\"\n}\n",
+		"go.work":                         "go 1.22\n\ntoolchain go" + old + "\n\nuse .\n",
+		"Makefile":                        "GO_VERSION ?= " + old + "\nbuild:\n\tgo build ./...\n",
 	}
 }
 
@@ -235,14 +239,18 @@ func TestToolchainBumpMovesTheGoVersionInOtherFiles(t *testing.T) {
 			".tool-versions": "nodejs 20.1.0\ngolang " + nw + " # keep\n",
 			".github/workflows/ci.yml": "jobs:\n  t:\n    steps:\n      - uses: actions/setup-go@v5\n        with:\n          go-version: " + nw +
 				"\n      - uses: actions/setup-go@v5\n        with:\n          go-version: ${{ matrix.go }}\n          go-version-file: go.mod\n",
-			"Dockerfile": "FROM golang:" + nw + "-alpine AS build\nFROM alpine:3.20\nRUN echo FROM golang:" + old + "\n",
-			"README.md":  "Needs go " + old + "\n",
+			"Dockerfile":                      "FROM golang:" + nw + "-alpine AS build\nFROM alpine:3.20\nRUN echo FROM golang:" + old + "\n",
+			"README.md":                       "Needs go " + old + "\n",
+			".mise.toml":                      "[tools]\ngo = \"" + nw + "\"\nnode = \"20\"\n",
+			".devcontainer/devcontainer.json": "{\n  \"image\": \"mcr.microsoft.com/devcontainers/go:" + nw + "-bookworm\"\n}\n",
+			"go.work":                         "go 1.22\n\ntoolchain go" + nw + "\n\nuse .\n",
+			"Makefile":                        "GO_VERSION ?= " + nw + "\nbuild:\n\tgo build ./...\n",
 		} {
 			if got, _ := e.gh.FileAt("acme/app", head, p); got != want {
 				t.Errorf("%s:\n got %q\nwant %q", p, got, want)
 			}
 		}
-		for _, want := range []string{"Go version in other files", "`.go-version`", "`Dockerfile`", "`.tool-versions`", "`.github/workflows/ci.yml`"} {
+		for _, want := range []string{"Go version in other files", "`.go-version`", "`Dockerfile`", "`.tool-versions`", "`.github/workflows/ci.yml`", "`.mise.toml`", "`.devcontainer/devcontainer.json`", "`go.work`", "`Makefile`"} {
 			if !strings.Contains(body, want) {
 				t.Errorf("body lacks %q:\n%s", want, body)
 			}

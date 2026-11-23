@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"golang.org/x/mod/module"
+	"golang.org/x/mod/semver"
 	"golang.org/x/mod/zip"
 )
 
@@ -90,6 +91,10 @@ func (p *GoProxy) serve(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
+	if esc, ok := strings.CutSuffix(strings.TrimPrefix(r.URL.Path, "/"), "/@latest"); ok {
+		p.serveLatest(w, r, esc)
+		return
+	}
 	escPath, rest, ok := strings.Cut(strings.TrimPrefix(r.URL.Path, "/"), "/@v/")
 	if !ok {
 		http.NotFound(w, r)
@@ -145,6 +150,29 @@ func (p *GoProxy) serve(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+// serveLatest answers /<module>/@latest with the highest release (prereleases only when
+// there is nothing else), as the real proxy does.
+func (p *GoProxy) serveLatest(w http.ResponseWriter, r *http.Request, esc string) {
+	mpath, err := module.UnescapePath(esc)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	p.mu.Lock()
+	best := ""
+	for v := range p.mod[mpath] {
+		if best == "" || semver.Compare(v, best) > 0 {
+			best = v
+		}
+	}
+	p.mu.Unlock()
+	if best == "" {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	_, _ = fmt.Fprintf(w, `{"Version":%q,"Time":%q}`, best, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC).Format(time.RFC3339))
 }
 
 type memFile struct{ name, content string }

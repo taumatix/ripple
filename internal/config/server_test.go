@@ -31,6 +31,22 @@ func TestServerDefaults(t *testing.T) {
 	}
 }
 
+func TestServerMaxBackfill(t *testing.T) {
+	s, err := LoadServer(env(base))
+	if err != nil || s.MaxBackfill != 0 {
+		t.Fatalf("default must be zero (the engine's own default): %+v, %v", s, err)
+	}
+	s, err = LoadServer(env(with("RIPPLE_MAX_BACKFILL", "25")))
+	if err != nil || s.MaxBackfill != 25 {
+		t.Fatalf("set: %+v, %v", s, err)
+	}
+	for _, v := range []string{"0", "-1", "lots"} {
+		if _, err := LoadServer(env(with("RIPPLE_MAX_BACKFILL", v))); err == nil {
+			t.Errorf("RIPPLE_MAX_BACKFILL=%s accepted", v)
+		}
+	}
+}
+
 func TestServerScanCaps(t *testing.T) {
 	s, err := LoadServer(env(base))
 	if err != nil || s.MaxFiles != DefaultMaxFiles || s.MaxDependencies != DefaultMaxDependencies {

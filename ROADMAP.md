@@ -131,13 +131,6 @@ Everything else:
     requests (2026-11-23): stdlib and toolchain 1.21.0 gave disjoint id sets and no next_page_token. Still open: a
     ripple run pointed at real OSV end to end, a querybatch result large enough to paginate, rate limits, CSV
     ordering, and the 404 delay.
-53. **Backfill residuals.** A new dependency beyond `DefaultMaxBackfill` (10 per scan) is never backfilled, and
-    only a release of the exact module path is found: a newer major path on the same line is not. Make the
-    bound a server setting (`RIPPLE_MAX_BACKFILL`), carry the unserved remainder to the next scan instead of
-    dropping it, look across the line for a newer major, and cover releases the feed never recorded (a module
-    nobody else imports has none stored) with a bounded index lookup. Also ListDependents is still an
-    eventually consistent GSI read on DynamoDB, so a release fanned out in that window can still miss a repo
-    that registered a moment before.
 58. **Prove the credentialed container path live.** `RIPPLE_GOPROXY_TOKEN` under a container backend (GOPROXY
     userinfo over https) is covered by argv and refusal tests only, not run against a real container and an
     https proxy. Also offer an image with a C toolchain and headers, and a preflight that checks it for `cgo: true`.
@@ -174,10 +167,6 @@ Everything else:
 89. **Partial scan on other hosts.** The scan without a checkout is verified against GitHub and the fake
     only. GitLab, Bitbucket, Gitea, Azure and the rest may not serve `filter=blob:none` or by-id blob
     fetches; they fall back to a full checkout, unmeasured. Check each and record which saves anything.
-90. **Partial scan relies on non-cone sparse checkout.** Git marks it deprecated. Move the batched blob
-    fetch to `git fetch --stdin` of object ids or `git backfill` once they work on a `--depth 1` clone.
-91. **Go version in more files.** `.mise.toml`, `.devcontainer/devcontainer.json`, `go.work`, `Makefile`
-    variables and workflows in a module subdirectory are not followed by a toolchain bump.
 92. **Supersede against real hosts.** GitHub, GitLab, Gitea/Forgejo, Bitbucket Cloud and Data Center, Gerrit and
     CodeCommit close or abandon a stale PR, written from vendored docs and checked only against fakes. Several
     reads rest on source or assumptions (GitLab and Gitea system-note and timeline wording, CodeCommit commenting
@@ -269,11 +258,18 @@ Everything else:
 119. **`tidy: minimal` evidence.** It stays opt-in: no real PR diffs exist to show the default would lose less
     than it risks (a kept requirement with missing go.sum lines opens a draft; the default `go mod tidy` result is
     what a maintainer reproduces by hand). Collect the diffs of repos that opted in and revisit.
-120. **Webhook bodies: stream the parse.** A signed body is still held whole, on disk (default) or in memory
+120. **Backfill reads the GSI consistently.** `ListDependents` is still an eventually consistent GSI read on
+    DynamoDB, so a release fanned out in that window can miss a repo that registered a moment before. The carried
+    backfill closes it only for dependencies new to the repo, not for the window itself.
+121. **Backfill lookup residuals.** The proxy lookup asks `@latest` only, so a prerelease-only or retracted-latest
+    module is missed; it is not cached across repos (every repo with the same new module asks again, up to 20 per
+    scan); a module that skipped more than three majors is found only by the feed; and it was verified against a
+    fake proxy, not the real one.
+122. **Webhook bodies: stream the parse.** A signed body is still held whole, on disk (default) or in memory
     (`RIPPLE_WEBHOOK_SPOOL=memory`), because an HMAC cannot be checked before its last byte and each receiver
     unmarshals the whole payload. Extracting only the fields ripple acts on while the stream is hashed, and
     discarding the result of a forgery, would hold neither; it means a token-level parse per host's payload.
-121. **Dashboard: reopen and share the sets.** Turning the key back on after ripple closed the issue creates a
+123. **Dashboard: reopen and share the sets.** Turning the key back on after ripple closed the issue creates a
     new one rather than reopening the old, and a person's own close is still never reopened. The refresh set
     (`dashboard-dirty`) and the repo list that drives the hourly read-back (`dashboard-watch`) are
     read-modify-write cursors, so two replicas marking at once can lose an entry; the loss heals at the repo's

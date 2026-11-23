@@ -8,6 +8,7 @@ One repo must not be able to cost the server unbounded memory or time.
 |---|---|---|
 | `RIPPLE_MAX_FILES` | 100000 | regular files walked in one scan (`.git`, `vendor` and `node_modules` are not walked) |
 | `RIPPLE_MAX_DEPENDENCIES` | 5000 | dependencies extracted from one repo; a repo at exactly the cap is fine |
+| `RIPPLE_MAX_BACKFILL` | 10 | jobs one scan creates for dependencies new to a repo; the unserved rest carries to the repo's next scan (not a skip: nothing is lost). Each scan also asks the module proxy at most 20 times for a module with no stored release |
 
 A repo over either cap is **skipped, not truncated**: it is registered with no dependencies (so no
 update PRs, exactly like an invalid `.ripple.yaml`) and the engine logs a warning
@@ -20,11 +21,11 @@ under the cap. A repo file cannot raise a cap.
 
 A scan clones `--depth 1 --filter=blob:none --no-checkout` (a *scan-only* workspace, `platform.WithScanOnly`).
 `Walk` lists paths from `git ls-tree -r` (trees only, no blobs); the engine collects the paths a manager
-matches, and `Prefetch` loads exactly those in one request: a non-cone `git sparse-checkout set --stdin`
-followed by `git checkout HEAD`, which git documents as bulk-prefetching every missing blob in one batch
-(`checkout`, and any command using `unpack-trees`, in git's partial-clone design notes). Anything not on disk
-(the config file read before the walk, a path with glob characters) is read with `git cat-file blob <oid>`,
-one lazy fetch each. Every one of these network commands runs with the per-command credential, so a private
+matches, and `Prefetch` loads exactly those in one request: `git fetch origin --stdin` of the files' object ids
+(the command git runs itself for a lazy fetch, with `--filter=blob:none` and `fetch.negotiationAlgorithm=noop`; it
+needs git 2.35 or later for `--stdin`). No sparse checkout and no working tree are involved, so any path spelling
+works and `ReadFile` reads the blobs from the object database. Anything not prefetched
+(the config file read before the walk) is read with `git cat-file blob <oid>`, one lazy fetch each. Every one of these network commands runs with the per-command credential, so a private
 repo works. An update (a PR) still takes a full checkout: `go mod tidy` needs the sources.
 
 What the host must offer: protocol v2 `filter` (git's `gitprotocol-v2`: advertised "when the filter feature is
@@ -36,9 +37,21 @@ file is a symbolic link, the workspace returns `platform.ErrScanFallback` and th
 `partial scan unavailable; scanning a full checkout` and repeats on the usual checkout. The scan never fails
 for want of partial clone. Only GitHub was measured live; the others are from their documentation.
 
-Non-cone sparse patterns are marked deprecated by git (the replacement, cone mode, takes directories, not
-files). They are used because the files to fetch are arbitrary paths; if git removes them, `Prefetch` fails,
-the fallback applies and the scan costs what it did before, which a test (`TestScanOnlyDownloadsOnlyWhatIsRead`) would show.
+### Why not sparse checkout
+
+The first version fetched through `git sparse-checkout set --no-cone --stdin` and `git checkout HEAD`. Git marks
+non-cone patterns deprecated, and on a `--no-checkout` clone it was also not doing the job: the helper that ran git
+dropped the command's stdin, so the pattern list was empty and nothing was prefetched. Every blob was read by its own
+lazy fetch, which the byte-budget test could not tell apart. `TestScanOnlyPrefetchIsOneFetchByObjectID` now counts
+`git-upload-pack` requests: one for the batch, none for the reads after it.
+
+Checked with git 2.50.1 on a `--depth 1 --filter=blob:none --no-checkout` clone: `git fetch origin --stdin` of blob ids
+fetches them all in one request over `file://`, `git://` and smart HTTP (the test server). Plain `git fetch` of object
+ids without `fetch.negotiationAlgorithm=noop` fails ("bad revision") because it tries to negotiate from a blob.
+`git backfill` was not used: it needs a checkout's sparse patterns to name paths and fetches by path batches, which
+is the sparse mechanism again. Not verified: github.com and the other hosts with this command (the earlier GitHub
+measurements below are of the sparse version; the hosts must serve a blob by id either way, which the lazy fetch
+needs too, so a host that served the old path serves this one).
 
 Measured over the public internet with git 2.50.1, `RIPPLE_LIVE_SCAN_REPO=<repo> go test -tags live ./internal/platform/gitws -run LiveScan -v`
 (Checkout, Walk, Prefetch of the default managers' matches, ReadFile; three runs each for `taumatix/ripple`, identical):

@@ -19,12 +19,20 @@ var (
 	goVersionFileRE = regexp.MustCompile(`^(\s*)(` + versionToken + `)(\s*)$`)
 	toolVersionsRE  = regexp.MustCompile(`^(\s*golang\s+)(` + versionToken + `)(\s*(?:#.*)?)$`)
 	workflowRE      = regexp.MustCompile(`^(\s*(?:-\s+)?go-version:\s*["']?)(` + versionToken + `)(["']?\s*(?:#.*)?)$`)
+	miseGoRE        = regexp.MustCompile(`^(\s*go\s*=\s*["'])(` + versionToken + `)(["']\s*(?:#.*)?)$`)
+	tomlSectionRE   = regexp.MustCompile(`^\s*\[+\s*([^\]\s]+)\s*\]+`)
+	devcontainerRE  = regexp.MustCompile(`^(\s*"image"\s*:\s*"(?:mcr\.microsoft\.com/devcontainers/go|golang):)(` + versionToken + `)((?:-[A-Za-z0-9._]+)?"\s*,?\s*)$`)
+	goWorkGoRE      = regexp.MustCompile(`^(go\s+)(` + versionToken + `)(\s*(?://.*)?)$`)
+	goWorkToolRE    = regexp.MustCompile(`^(toolchain\s+go)(` + versionToken + `)(\s*(?://.*)?)$`)
+	makeVarRE       = regexp.MustCompile(`^(\s*(?:export\s+)?(?:GO|GOLANG)_VERSION\s*(?:\?=|:=|::=|=)\s*)(` + versionToken + `)(\s*(?:#.*)?)$`)
 	dockerFromRE    = regexp.MustCompile(`(?i)^(\s*FROM\s+(?:--platform=\S+\s+)?golang:)(` + versionToken + `)((?:-[A-Za-z0-9._]+)?(?:\s+AS\s+\S+)?\s*)$`)
 )
 
 // FollowGoVersion rewrites the Go version in a file that names one next to go.mod:
 // `.go-version`, the golang line of `.tool-versions`, `go-version:` in
-// .github/workflows/*.yml, and `FROM golang:` in Dockerfiles. old is the semver the
+// .github/workflows/*.yml, `FROM golang:` in Dockerfiles, `go` under `[tools]` in
+// `.mise.toml`, the image of a devcontainer.json, the `go` and `toolchain` lines of
+// go.work, and a `GO_VERSION` / `GOLANG_VERSION` variable in a Makefile. old is the semver the
 // module's toolchain line or go directive had before the bump and target the release
 // it moves to. A file moves only when it names the same minor as old and an older
 // release than target; a version written without a patch keeps that spelling and
@@ -33,8 +41,8 @@ func FollowGoVersion(p string, content []byte, old, target string) ([]byte, bool
 	if !semver.IsValid(old) || !semver.IsValid(target) || semver.Compare(target, old) <= 0 {
 		return content, false
 	}
-	var re *regexp.Regexp
-	whole := false
+	var re, re2 *regexp.Regexp
+	whole, mise := false, false
 	switch base := path.Base(p); {
 	case base == ".go-version":
 		re, whole = goVersionFileRE, true
@@ -44,6 +52,14 @@ func FollowGoVersion(p string, content []byte, old, target string) ([]byte, bool
 		re = workflowRE
 	case isDockerfile(base):
 		re = dockerFromRE
+	case base == ".mise.toml" || base == "mise.toml":
+		re, mise = miseGoRE, true
+	case isDevcontainer(p):
+		re = devcontainerRE
+	case base == "go.work":
+		re, re2 = goWorkGoRE, goWorkToolRE
+	case isMakefile(base):
+		re = makeVarRE
 	default:
 		return content, false
 	}
@@ -61,10 +77,23 @@ func FollowGoVersion(p string, content []byte, old, target string) ([]byte, bool
 		}
 	}
 	changed := false
+	section := ""
 	for i, l := range lines {
 		cr := strings.HasSuffix(l, "\r")
 		l = strings.TrimSuffix(l, "\r")
+		if mise {
+			if sm := tomlSectionRE.FindStringSubmatch(l); sm != nil {
+				section = sm[1]
+				continue
+			}
+			if section != "tools" {
+				continue
+			}
+		}
 		m := re.FindStringSubmatch(l)
+		if m == nil && re2 != nil {
+			m = re2.FindStringSubmatch(l)
+		}
 		if m == nil {
 			continue
 		}
@@ -89,7 +118,28 @@ func FollowGoVersion(p string, content []byte, old, target string) ([]byte, bool
 // caller reads only those.
 func HoldsGoVersion(p string) bool {
 	base := path.Base(p)
-	return base == ".go-version" || base == ".tool-versions" || isWorkflow(p) || isDockerfile(base)
+	return base == ".go-version" || base == ".tool-versions" || isWorkflow(p) || isDockerfile(base) ||
+		base == ".mise.toml" || base == "mise.toml" || base == "go.work" || isDevcontainer(p) || isMakefile(base)
+}
+
+// HoldsGoVersionRepoWide reports whether the file at p is one a toolchain bump reads
+// wherever it sits in the repo, not only beside the module: workflows and devcontainer
+// configs belong to the repo, not to one module.
+func HoldsGoVersionRepoWide(p string) bool {
+	return isWorkflow(p) || isDevcontainer(p)
+}
+
+func isMakefile(base string) bool {
+	return base == "Makefile" || base == "GNUmakefile" || base == "makefile" || strings.HasSuffix(base, ".mk")
+}
+
+// isDevcontainer matches .devcontainer.json and any devcontainer.json under a root
+// .devcontainer directory (the spec allows one level of subdirectories).
+func isDevcontainer(p string) bool {
+	if p == ".devcontainer.json" {
+		return true
+	}
+	return path.Base(p) == "devcontainer.json" && strings.HasPrefix(p, ".devcontainer/")
 }
 
 func isDockerfile(base string) bool {

@@ -245,6 +245,10 @@ func (a *App) Run(ctx context.Context, ln net.Listener) error {
 			a.Log.Error("event queue", "err", err)
 		}
 	}()
+	if _, ok := a.replicaTable(); ok {
+		wg.Add(1)
+		go func() { defer wg.Done(); a.heartbeatLoop(ctx) }()
+	}
 	if a.PollEvery > 0 {
 		wg.Add(2)
 		go func() { defer wg.Done(); a.pollLoop(ctx) }()

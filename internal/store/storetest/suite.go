@@ -941,6 +941,41 @@ func Run(t *testing.T, mk func(t *testing.T) store.Store) {
 		}
 	})
 
+	t.Run("live replicas", func(t *testing.T) {
+		r, ok := mk(t).(store.ReplicaTable)
+		if !ok {
+			t.Fatal("store has no ReplicaTable")
+		}
+		if got, err := r.LiveReplicas(ctx); err != nil || len(got) != 0 {
+			t.Fatalf("empty table = %v, %v", got, err)
+		}
+		for _, in := range []store.ReplicaInfo{{ID: "b", Takeovers: 2, FeedPoller: true}, {ID: "a"}} {
+			if err := r.Heartbeat(ctx, in, time.Minute); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := r.Heartbeat(ctx, store.ReplicaInfo{ID: "b", Takeovers: 3}, time.Minute); err != nil { // a later beat replaces the earlier one
+			t.Fatal(err)
+		}
+		if err := r.Heartbeat(ctx, store.ReplicaInfo{ID: "gone"}, 50*time.Millisecond); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(1200 * time.Millisecond) // past the short ttl; Postgres judges it by its own clock
+		got, err := r.LiveReplicas(ctx)
+		if err != nil || len(got) != 2 || got[0].ID != "a" || got[1].ID != "b" || got[1].Takeovers != 3 || got[1].FeedPoller || got[1].Seen.IsZero() {
+			t.Fatalf("live = %+v, %v; want a and b (b at 3 takeovers, not polling), not the lapsed one", got, err)
+		}
+		if err := r.RetireReplica(ctx, "a"); err != nil {
+			t.Fatal(err)
+		}
+		if err := r.RetireReplica(ctx, "never-beat"); err != nil {
+			t.Fatalf("retiring an absent replica: %v", err)
+		}
+		if got, _ := r.LiveReplicas(ctx); len(got) != 1 || got[0].ID != "b" {
+			t.Fatalf("after retire = %+v", got)
+		}
+	})
+
 	t.Run("delivery table", func(t *testing.T) {
 		d, ok := mk(t).(store.DeliveryTable)
 		if !ok {

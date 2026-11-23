@@ -111,14 +111,6 @@ Everything else:
     Kubernetes Jobs backend, and publish an updater image per ecosystem so a repo's build never runs next to the
     App key. Later, behind the plugin mechanism (entry 33): a dependency collector as an isolated container with the
     same limits.
-38. **Verify the Docker and Podman runners for real, in CI.** Their argv is unverified against a daemon (fake CLI
-    only). Add a CI job on a hosted Linux runner (Docker is installed) that runs the container end-to-end test with
-    `RIPPLE_SANDBOX=docker`, a Go image and a proxy reachable from the container (the fake proxy bound to the docker
-    bridge address), and a Podman variant if a runner offers it; fix whatever the real CLI rejects.
-39. **Confine the container's network to the module proxy.** `go` runs on the runtime's default network, so a
-    repository's build can reach anything that network can. Ship a recipe, then a built-in option, that creates an
-    internal network holding only a proxy sidecar; also run `git` and `go` together in one image with a
-    documented, pinned Go version so `GOTOOLCHAIN=local` always satisfies the repo's `go` line.
 51. **OSV: should a security PR bypass the open-PR limit and the schedule?** Today only the cooldown is skipped.
     Needs a decision from real use. Trade-offs: bypassing the limit makes a security fix arrive even when a repo
     is at its cap of open PRs (the case where it matters most) but lets one advisory affecting many modules open
@@ -291,3 +283,18 @@ Everything else:
 134. **Delivery dedupe: hosts without a delivery id, and the DynamoDB cursor Scan.** The persistent claim covers events
     whose host sets `Delivery`; others rely on the in-memory table. `Dynamo.PurgeCursors` is a filtered Scan of the
     table (run at most daily) and is unmeasured on a large table; move tombstones to an indexed prefix if it hurts.
+135. **Wire the confined network into the server.** `sandbox.ConfineNetwork` (internal network plus an nginx proxy
+    sidecar, docker and podman) is verified in CI but nothing starts it: add an opt-in `RIPPLE_CONTAINER_CONFINE`
+    that creates it at start and removes it at stop, sets `ContainerOptions.Network`, and gives the container its own
+    `GOPROXY` (the sidecar) apart from the server's `RIPPLE_GOPROXY`, which the server itself keeps using. A proxy
+    credential in `GOPROXY` userinfo reaches the sidecar and is forwarded by nginx unchanged: test that against a
+    credentialed fake before relying on it. Clean up leftovers (label `ripple.job=1`) from a server killed outright.
+136. **The container client's environment.** The engine runs the container CLI with the job's environment
+    (`cmd.Env = env`, so `HOME` is the job directory) because `-e KEY` takes values from the client. Rootless Podman keeps
+    its image storage under `$HOME`, so it would pull the image into the job directory, where the repository's code can
+    read it. The CI live test works around it (`clientEnv`) and so does not exercise this path. Fix in `Wrap` or the
+    engine (pass non-secret values explicitly, or give the client its own `HOME`) and test it live in the
+    `container-runtimes` job.
+137. **One image with git and a pinned Go.** The second half of the old entry 39: the runners are verified with a
+    `go`-only image. Document and publish an image carrying both `git` and a pinned Go so `GOTOOLCHAIN=local` always
+    satisfies a repo's `go` line, and run the git steps through the live job.

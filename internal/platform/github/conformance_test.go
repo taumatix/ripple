@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -94,3 +95,15 @@ func (f *ghFixture) FileAt(path, branch, file string) (string, bool) {
 }
 func (f *ghFixture) Calls(path string) int { return f.gh.Calls(path) }
 func (f *ghFixture) RateLimitNextPR() bool { f.gh.RateLimitOnce = true; return true }
+
+// RenameRepo is platformtest.ReportsRenames: GitHub's repository.renamed event.
+func (f *ghFixture) RenameRepo(t *testing.T, hook, from, to string) {
+	f.gh.RenameRepo(from, to)
+	_, oldName, _ := strings.Cut(from, "/")
+	owner, newName, _ := strings.Cut(to, "/")
+	f.deliver(t, hook, "repository", map[string]any{
+		"action": "renamed", "installation": map[string]any{"id": installation},
+		"repository": map[string]any{"name": newName, "full_name": to, "default_branch": "main", "owner": map[string]any{"login": owner}},
+		"changes":    map[string]any{"repository": map[string]any{"name": map[string]any{"from": oldName}}},
+	})
+}

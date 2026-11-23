@@ -52,7 +52,7 @@ func Verify(secret, body []byte, header string) bool {
 
 // Event is the subset of a delivery ripple acts on.
 type Event struct {
-	Kind           string // "repos_added", "repos_removed", "push"
+	Kind           string // "repos_added", "repos_removed", "push", "repo_renamed", "default_branch_changed"
 	InstallationID int64
 	// Delivery is the X-GitHub-Delivery header, empty when absent. It is unsigned.
 	Delivery string
@@ -61,6 +61,8 @@ type Event struct {
 	Ref           string
 	DefaultBranch string
 	Files         []string
+	// repo_renamed only: Repos holds the old full name, NewRepo the new one.
+	NewRepo string
 }
 
 // Sink consumes events. Returning an error makes the receiver answer 503, but
@@ -301,6 +303,78 @@ func Parse(name string, body []byte) (Event, error) {
 		}
 		return Event{Kind: "push", InstallationID: p.Installation.ID, Repos: []string{p.Repository.FullName},
 			Ref: p.Ref, DefaultBranch: p.Repository.DefaultBranch, Files: files}, nil
+	case "repository":
+		return parseRepository(body)
 	}
 	return Event{}, errIgnored
+}
+
+type login struct {
+	Login string `json:"login"`
+}
+
+// parseRepository maps the repository event (docs/vendor/github). Archiving and
+// deleting forget the repo, unarchiving registers it again, a rename or transfer
+// moves the stored identity, and a changed default branch re-scans against it.
+func parseRepository(body []byte) (Event, error) {
+	var p struct {
+		Action       string             `json:"action"`
+		Installation struct{ ID int64 } `json:"installation"`
+		Repository   struct {
+			Name          string `json:"name"`
+			FullName      string `json:"full_name"`
+			DefaultBranch string `json:"default_branch"`
+		} `json:"repository"`
+		Changes struct {
+			Repository struct {
+				Name struct{ From string } `json:"name"`
+			} `json:"repository"`
+			Owner struct {
+				From struct {
+					User         login `json:"user"`
+					Organization login `json:"organization"`
+				} `json:"from"`
+			} `json:"owner"`
+			DefaultBranch *struct{ From string } `json:"default_branch"`
+		} `json:"changes"`
+	}
+	if err := json.Unmarshal(body, &p); err != nil {
+		return Event{}, fmt.Errorf("bad repository payload: %w", err)
+	}
+	if p.Repository.FullName == "" {
+		return Event{}, errors.New("repository payload without full_name")
+	}
+	ev := Event{InstallationID: p.Installation.ID, Repos: []string{p.Repository.FullName}, DefaultBranch: p.Repository.DefaultBranch}
+	owner, _, _ := strings.Cut(p.Repository.FullName, "/")
+	switch p.Action {
+	case "archived", "deleted":
+		ev.Kind = "repos_removed"
+	case "unarchived":
+		ev.Kind = "repos_added"
+	case "renamed":
+		from := p.Changes.Repository.Name.From
+		if from == "" {
+			return Event{}, errors.New("renamed payload without changes.repository.name.from")
+		}
+		ev.Kind, ev.Repos, ev.NewRepo = "repo_renamed", []string{owner + "/" + from}, p.Repository.FullName
+	case "transferred":
+		from := p.Changes.Owner.From.User.Login
+		if from == "" {
+			from = p.Changes.Owner.From.Organization.Login
+		}
+		if from == "" || p.Repository.Name == "" {
+			// The old name is unknown: watch the new one and let the old fall away.
+			ev.Kind = "repos_added"
+			break
+		}
+		ev.Kind, ev.Repos, ev.NewRepo = "repo_renamed", []string{from + "/" + p.Repository.Name}, p.Repository.FullName
+	case "edited":
+		if p.Changes.DefaultBranch == nil || p.Repository.DefaultBranch == "" {
+			return Event{}, errIgnored
+		}
+		ev.Kind = "default_branch_changed"
+	default:
+		return Event{}, errIgnored
+	}
+	return ev, nil
 }

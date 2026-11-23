@@ -81,9 +81,11 @@ type Event struct {
 	// Seq orders events: lower is older. It is assigned at receipt.
 	Seq            int64
 	InstallationID int64
-	Kind           string // "repos_added", "repos_removed", "push"
+	Kind           string // "repos_added", "repos_removed", "push", "repo_renamed", "default_branch_changed"
 	Repo           string
-	// push only
+	// Ref is a push's ref. The two repo-state kinds reuse it, so the persisted event
+	// schema stays as it is: repo_renamed carries the new stored repo name, and
+	// default_branch_changed the new default branch as refs/heads/<name>.
 	Ref   string
 	Files []string
 	// Attempts counts failed handling attempts; NotBefore delays the next one.

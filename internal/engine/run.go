@@ -164,6 +164,10 @@ func (e *Engine) runRepo(ctx context.Context, name string, jobs []model.Job) int
 		return 0
 	}
 	if !found {
+		if target, ok := e.followRename(ctx, name, jobs); ok {
+			e.log().Info("jobs followed a renamed repository", "from", name, "to", target, "jobs", len(jobs))
+			return 0
+		}
 		for _, j := range jobs {
 			r.finish(j, model.JobSkipped, "repository no longer registered", "")
 		}

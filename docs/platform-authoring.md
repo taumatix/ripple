@@ -90,6 +90,13 @@ credential scope the event belongs to (0 if there is one credential); the queue 
 between scopes. `model.Repo.InstallationID` carries that scope back to your client.
 `internal/webhook` is GitHub's receiver and a reference for the hardening (signature first, inflight cap, dedupe).
 
+Two more kinds are optional, for a host that reports them: `RepoRenamed` (`Repos` holds the old path,
+`NewRepo` the new one; the stored repo, its dependencies and its pending jobs follow, no scan) and
+`DefaultBranchChanged` (`DefaultBranch` is the new branch; one re-scan, future PRs target it, open PRs are
+untouched). A host that cannot report them sends neither and behaves as before. Archive and delete map to
+`ReposRemoved`, unarchive to `ReposAdded`. A fixture that can deliver a rename implements the suite's
+`ReportsRenames` marker and is then held to it; others skip it.
+
 The receiver is served at `POST /webhook/<host>`.
 
 ## Done means the conformance suite passes

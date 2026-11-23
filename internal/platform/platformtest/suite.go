@@ -80,6 +80,15 @@ type FilelessPushes interface{ FilelessPushes() }
 // whole repo set, jobs pending, and no duplicate after the retry".
 type PushCreatesProposals interface{ PushCreatesProposals() }
 
+// ReportsRenames is implemented by a Fixture whose host tells ripple that a repository
+// was renamed or moved (platform.RepoRenamed). RenameRepo renames the repository in the
+// fake, from and to being host-native paths, and delivers the host's event to webhook.
+// A host that cannot report it leaves this out and the rename test is skipped; ripple
+// then learns of the new name from a listing or an install event, as before.
+type ReportsRenames interface {
+	RenameRepo(t *testing.T, webhook, from, to string)
+}
+
 // Run runs every conformance test against f.
 func Run(t *testing.T, f Fixture) {
 	t.Run("ReleaseOpensOnePRInExactlyTheImportingRepos", func(t *testing.T) { releaseFanOut(t, f) })
@@ -89,6 +98,7 @@ func Run(t *testing.T, f Fixture) {
 	t.Run("AutoMergeRequestedOnlyWhereTheHostCan", func(t *testing.T) { autoMerge(t, f) })
 	t.Run("StalePRClosedOnlyWhereTheHostCan", func(t *testing.T) { supersede(t, f) })
 	t.Run("RateLimitHoldsBackTheHostThenRetries", func(t *testing.T) { rateLimit(t, f) })
+	t.Run("RenameKeepsTheIndexWithoutAScan", func(t *testing.T) { renamed(t, f) })
 }
 
 // 2026-11-23 is a Monday.

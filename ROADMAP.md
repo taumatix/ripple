@@ -108,8 +108,6 @@ Everything else:
 23. **Verify with cgo and private modules.** The sandbox builds with `CGO_ENABLED=0` (cgo files are
    rewritten but not compiled) and only from `RIPPLE_GOPROXY`; support a toolchain image with C
    headers and credentials for private proxies, without exposing the App token to the build.
-26. **Default-branch rename handling.** Handle the `repository` rename and default-branch change
-   events; today a stale `DefaultBranch` is corrected only on the next push.
 27. **Dependency dashboard issue.** One issue per repo listing pending, deferred and failed jobs.
 29. **More datasources and feeds, as many ecosystems as Renovate has.** npm replicate, PyPI, crates.io
    sparse index, Maven, NuGet, RubyGems, Packagist, Docker/OCI tags, GitHub releases/tags, Helm, Terraform
@@ -180,3 +178,12 @@ Everything else:
     nobody else imports has none stored) with a bounded index lookup. Also ListDependents is still an
     eventually consistent GSI read on DynamoDB, so a release fanned out in that window can still miss a repo
     that registered a moment before.
+54. **Self-heal the default branch from pushes.** A push payload carries `default_branch`; use it to correct a
+    stored branch when an `edited` delivery was missed (the receiver parses it, `enqueue` drops it for pushes).
+55. **Pushes for a renamed repo that beat the rename event.** A push under the new name arrives for an unknown
+    repo and is ignored; register unknown repos from a push, or replay after the rename is processed.
+56. **Typed rename and branch fields on `model.Event`.** `Ref` carries the new stored name for `repo_renamed` and
+    `refs/heads/<name>` for `default_branch_changed`; give them real fields when the store schemas are next changed.
+57. **Pause rather than skip on archive.** Archive drops the repo's index and skips its pending jobs; unarchive
+    rescans, but jobs skipped meanwhile are not restored. Also: a repo name reused after a rename drops the old
+    repo's pending jobs.

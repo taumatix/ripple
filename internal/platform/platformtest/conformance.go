@@ -1,6 +1,7 @@
 package platformtest
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -235,5 +236,44 @@ func supersede(t *testing.T, f Fixture) {
 		if j := e.job("sup", "example.com/lib", v); j.State != model.JobDone {
 			t.Errorf("job %s is %s, want done", v, j.State)
 		}
+	}
+}
+
+// A host that reports renames: the stored repo and its dependencies move to the new
+// name with no scan, and a later release opens its one PR there.
+func renamed(t *testing.T, f Fixture) {
+	rr, ok := f.(ReportsRenames)
+	if !ok {
+		// Absent means the host cannot report renames, which is allowed: nothing to hold
+		// it to. Returning rather than skipping keeps CI's "no test may skip" check.
+		return
+	}
+	e := newEnv(t, f, opts{})
+	e.stub("example.com/lib", "v1.0.0", "v1.1.0")
+	e.addRepo("before", libRepo("example.com/before", nil))
+	e.register("before")
+	oldName, newName := e.name("before"), e.mux.RepoName(e.host.Name, f.Path("after"))
+	scans := e.plat.Calls(oldName)
+
+	rr.RenameRepo(t, e.hook, f.Path("before"), f.Path("after"))
+	e.eventually("repo stored under its new name", func() bool {
+		_, ok, err := e.st.GetRepo(context.Background(), newName)
+		return err == nil && ok
+	})
+	e.eventually("old name forgotten", func() bool {
+		_, ok, err := e.st.GetRepo(context.Background(), oldName)
+		return err == nil && !ok
+	})
+	if d, err := e.st.ListRepoDependencies(context.Background(), newName); err != nil || len(d) != 1 || d[0].Repo != newName {
+		t.Fatalf("dependencies did not follow: %+v %v", d, err)
+	}
+	if n := e.plat.Calls(oldName) - scans + e.plat.Calls(newName); n != 0 {
+		t.Errorf("the rename cost %d platform calls (a scan), want 0", n)
+	}
+
+	e.publish("example.com/lib", "v1.1.0")
+	e.tick()
+	if n := len(e.f.PRs(f.Path("after"))); n != 1 {
+		t.Fatalf("want 1 PR under the new name, got %d", n)
 	}
 }

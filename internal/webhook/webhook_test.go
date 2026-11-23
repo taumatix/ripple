@@ -3,6 +3,7 @@ package webhook
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -306,4 +307,52 @@ func (b *blockingBody) Read(p []byte) (int, error) {
 	b.once.Do(func() { b.started <- struct{}{} })
 	<-b.release
 	return 0, io.EOF
+}
+
+func TestParseRepositoryEvents(t *testing.T) {
+	repo := func(extra string) string {
+		return `"installation":{"id":7},"repository":{"name":"new","full_name":"acme/new","default_branch":"trunk","owner":{"login":"acme"}}` + extra
+	}
+	tests := []struct {
+		name, body string
+		want       *Event // nil: ignored
+		wantErr    bool
+	}{
+		{"renamed", `{"action":"renamed",` + repo(`,"changes":{"repository":{"name":{"from":"old"}}}`) + `}`,
+			&Event{Kind: "repo_renamed", InstallationID: 7, DefaultBranch: "trunk", Repos: []string{"acme/old"}, NewRepo: "acme/new"}, false},
+		{"transferred from a user", `{"action":"transferred",` + repo(`,"changes":{"owner":{"from":{"user":{"login":"bob"}}}}`) + `}`,
+			&Event{Kind: "repo_renamed", InstallationID: 7, DefaultBranch: "trunk", Repos: []string{"bob/new"}, NewRepo: "acme/new"}, false},
+		{"transferred from an organization", `{"action":"transferred",` + repo(`,"changes":{"owner":{"from":{"organization":{"login":"oldco"}}}}`) + `}`,
+			&Event{Kind: "repo_renamed", InstallationID: 7, DefaultBranch: "trunk", Repos: []string{"oldco/new"}, NewRepo: "acme/new"}, false},
+		{"transferred without the old owner", `{"action":"transferred",` + repo("") + `}`,
+			&Event{Kind: "repos_added", InstallationID: 7, DefaultBranch: "trunk", Repos: []string{"acme/new"}}, false},
+		{"default branch edited", `{"action":"edited",` + repo(`,"changes":{"default_branch":{"from":"main"}}`) + `}`,
+			&Event{Kind: "default_branch_changed", InstallationID: 7, Repos: []string{"acme/new"}, DefaultBranch: "trunk"}, false},
+		{"other edit", `{"action":"edited",` + repo(`,"changes":{"description":{"from":"x"}}`) + `}`, nil, false},
+		{"archived", `{"action":"archived",` + repo("") + `}`, &Event{Kind: "repos_removed", InstallationID: 7, DefaultBranch: "trunk", Repos: []string{"acme/new"}}, false},
+		{"deleted", `{"action":"deleted",` + repo("") + `}`, &Event{Kind: "repos_removed", InstallationID: 7, DefaultBranch: "trunk", Repos: []string{"acme/new"}}, false},
+		{"unarchived", `{"action":"unarchived",` + repo("") + `}`, &Event{Kind: "repos_added", InstallationID: 7, DefaultBranch: "trunk", Repos: []string{"acme/new"}}, false},
+		{"created is ignored", `{"action":"created",` + repo("") + `}`, nil, false},
+		{"no repository", `{"action":"renamed"}`, nil, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := Parse("repository", []byte(tc.body))
+			if tc.wantErr {
+				if err == nil || errors.Is(err, errIgnored) {
+					t.Fatalf("want a real error, got %v", err)
+				}
+				return
+			}
+			if tc.want == nil {
+				if !errors.Is(err, errIgnored) {
+					t.Fatalf("want ignored, got %+v, %v", got, err)
+				}
+				return
+			}
+			if err != nil || !reflect.DeepEqual(got, *tc.want) {
+				t.Fatalf("got %+v, %v\nwant %+v", got, err, *tc.want)
+			}
+		})
+	}
 }

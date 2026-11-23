@@ -337,3 +337,28 @@ func TestServerGoToolchainDir(t *testing.T) {
 		}
 	}
 }
+
+func TestServerContainerConfine(t *testing.T) {
+	ok := with("RIPPLE_SANDBOX", "podman", "RIPPLE_CONTAINER_IMAGE", "img", "RIPPLE_CONTAINER_CONFINE", "true")
+	s, err := LoadServer(env(ok))
+	if err != nil || !s.ContainerConfine {
+		t.Fatalf("%+v, %v", s, err)
+	}
+	if s, err = LoadServer(env(base)); err != nil || s.ContainerConfine {
+		t.Fatalf("default must be off: %+v, %v", s, err)
+	}
+	bad := map[string]map[string]string{
+		"not a bool":      with("RIPPLE_SANDBOX", "docker", "RIPPLE_CONTAINER_IMAGE", "i", "RIPPLE_CONTAINER_CONFINE", "yes please"),
+		"no sandbox":      with("RIPPLE_CONTAINER_CONFINE", "true"),
+		"apple container": with("RIPPLE_SANDBOX", "container", "RIPPLE_CONTAINER_IMAGE", "i", "RIPPLE_CONTAINER_CONFINE", "true"),
+		"bwrap":           with("RIPPLE_SANDBOX", "bwrap", "RIPPLE_CONTAINER_CONFINE", "true"),
+		"own network":     with("RIPPLE_SANDBOX", "docker", "RIPPLE_CONTAINER_IMAGE", "i", "RIPPLE_CONTAINER_CONFINE", "true", "RIPPLE_CONTAINER_NETWORK", "n"),
+		"proxy path":      with("RIPPLE_SANDBOX", "docker", "RIPPLE_CONTAINER_IMAGE", "i", "RIPPLE_CONTAINER_CONFINE", "true", "RIPPLE_GOPROXY", "https://p.example/go"),
+		"credential":      with("RIPPLE_SANDBOX", "docker", "RIPPLE_CONTAINER_IMAGE", "i", "RIPPLE_CONTAINER_CONFINE", "true", "RIPPLE_GOPROXY", "https://p.example", "RIPPLE_GOPROXY_TOKEN", "t"),
+	}
+	for name, m := range bad {
+		if _, err := LoadServer(env(m)); err == nil || !strings.Contains(err.Error(), "RIPPLE_CONTAINER_CONFINE") {
+			t.Errorf("%s: err = %v", name, err)
+		}
+	}
+}

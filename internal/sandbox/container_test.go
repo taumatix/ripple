@@ -42,7 +42,7 @@ func TestContainerAppleArgv(t *testing.T) {
 		{"run", "--rm", "--name"}, {"--progress", "none"}, {"--network", "none"}, {"--read-only"},
 		{"--tmpfs", "/tmp"}, {"--cap-drop", "ALL"}, {"--user", uid}, {"-c", "2", "-m", "2G"},
 		{"-v", "/w/job:/w/job"}, {"-v", "/w/cache:/w/cache"}, {"-w", "/w/job/repo"},
-		{"-e", "HOME"}, {"-e", "GOPROXY"}, {"img:1", "go", "build", "./..."},
+		{"-e", "HOME=/w/job"}, {"-e", "GOPROXY"}, {"img:1", "go", "build", "./..."},
 	} {
 		if !has(got, want...) {
 			t.Errorf("argv lacks %v: %v", want, got)
@@ -148,5 +148,68 @@ func TestContainerPodmanKeepsTheCallersIDs(t *testing.T) {
 	}
 	if got := wrapContainer(t, FlavourDocker, ContainerOptions{}, jobPolicy, "go", "build"); has(got, "--userns", "keep-id") {
 		t.Errorf("docker argv has --userns keep-id: %v", got)
+	}
+}
+
+// The job's HOME and TMPDIR are paths in the container, not the client's: they travel as
+// explicit values (not secret), so the client can keep its own HOME and rootless Podman
+// does not put its image storage in the job directory.
+func TestContainerPassesHomeAndTmpdirExplicitly(t *testing.T) {
+	p := jobPolicy
+	p.Env = append([]string{"TMPDIR=/w/job/tmp"}, p.Env...)
+	got := wrapContainer(t, FlavourPodman, ContainerOptions{}, p, "go", "build")
+	for _, want := range [][]string{{"-e", "HOME=/w/job"}, {"-e", "TMPDIR=/w/job/tmp"}, {"-e", "GOPROXY"}} {
+		if !has(got, want...) {
+			t.Errorf("argv lacks %v: %v", want, got)
+		}
+	}
+	if has(got, "-e", "HOME") || has(got, "-e", "TMPDIR") {
+		t.Errorf("HOME or TMPDIR taken from the client's environment: %v", got)
+	}
+}
+
+func clientEnvOf(t *testing.T, o ContainerOptions, job []string) map[string]string {
+	t.Helper()
+	o.Image = "img:1"
+	b, err := Container(FlavourPodman, "/usr/bin/rt", o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := map[string]string{}
+	for _, kv := range b.(ClientEnver).ClientEnv(job) {
+		k, v, _ := strings.Cut(kv, "=")
+		env[k] = v
+	}
+	return env
+}
+
+func TestContainerClientEnvKeepsTheClientsOwnHome(t *testing.T) {
+	t.Setenv("HOME", "/home/server")
+	t.Setenv("XDG_RUNTIME_DIR", "/run/user/1000")
+	t.Setenv("DOCKER_HOST", "unix:///run/user/1000/docker.sock")
+	t.Setenv("RIPPLE_GITHUB_KEY_FILE", "/secrets/app.pem")
+	t.Setenv("GOPROXY", "http://host-env")
+	env := clientEnvOf(t, ContainerOptions{}, []string{"PATH=/host/bin", "HOME=/w/job", "TMPDIR=/w/job", "GOPROXY=http://p", "GOFLAGS=-mod=mod"})
+	if env["HOME"] != "/home/server" {
+		t.Errorf("client HOME = %q, want the server's own", env["HOME"])
+	}
+	if env["TMPDIR"] == "/w/job" {
+		t.Errorf("client TMPDIR is the job directory")
+	}
+	if env["XDG_RUNTIME_DIR"] != "/run/user/1000" || env["DOCKER_HOST"] == "" {
+		t.Errorf("the client lost its runtime location: %v", env)
+	}
+	if env["GOPROXY"] != "http://p" || env["GOFLAGS"] != "-mod=mod" {
+		t.Errorf("job variables missing: %v", env)
+	}
+	if _, ok := env["RIPPLE_GITHUB_KEY_FILE"]; ok {
+		t.Errorf("an unrelated server variable reached the client: %v", env)
+	}
+}
+
+func TestContainerClientEnvPointsGoproxyAtTheSidecar(t *testing.T) {
+	env := clientEnvOf(t, ContainerOptions{ProxyURL: "http://side:3128"}, []string{"HOME=/w/job", "GOPROXY=https://user:tok@proxy.example"})
+	if env["GOPROXY"] != "http://side:3128" {
+		t.Errorf("GOPROXY = %q, want the sidecar and never the job's credentialed URL", env["GOPROXY"])
 	}
 }

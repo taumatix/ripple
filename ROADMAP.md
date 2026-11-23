@@ -283,21 +283,6 @@ Everything else:
 134. **Delivery dedupe: hosts without a delivery id, and the DynamoDB cursor Scan.** The persistent claim covers events
     whose host sets `Delivery`; others rely on the in-memory table. `Dynamo.PurgeCursors` is a filtered Scan of the
     table (run at most daily) and is unmeasured on a large table; move tombstones to an indexed prefix if it hurts.
-135. **Wire the confined network into the server.** `sandbox.ConfineNetwork` (internal network plus an nginx proxy
-    sidecar, docker and podman) is verified in CI but nothing starts it: add an opt-in `RIPPLE_CONTAINER_CONFINE`
-    that creates it at start and removes it at stop, sets `ContainerOptions.Network`, and gives the container its own
-    `GOPROXY` (the sidecar) apart from the server's `RIPPLE_GOPROXY`, which the server itself keeps using. A proxy
-    credential in `GOPROXY` userinfo reaches the sidecar and is forwarded by nginx unchanged: test that against a
-    credentialed fake before relying on it. Clean up leftovers (label `ripple.job=1`) from a server killed outright.
-136. **The container client's environment.** The engine runs the container CLI with the job's environment
-    (`cmd.Env = env`, so `HOME` is the job directory) because `-e KEY` takes values from the client. Rootless Podman keeps
-    its image storage under `$HOME`, so it would pull the image into the job directory, where the repository's code can
-    read it. The CI live test works around it (`clientEnv`) and so does not exercise this path. Fix in `Wrap` or the
-    engine (pass non-secret values explicitly, or give the client its own `HOME`) and test it live in the
-    `container-runtimes` job.
-137. **One image with git and a pinned Go.** The second half of the old entry 39: the runners are verified with a
-    `go`-only image. Document and publish an image carrying both `git` and a pinned Go so `GOTOOLCHAIN=local` always
-    satisfies a repo's `go` line, and run the git steps through the live job.
 139. **Direct `waitRepo` callers in `internal/e2e` can still act before the first scan ends.** Entry 138 found that
     `env.install` returned once the repo row existed, while its scan and dependency backfill were still running, so tests
     polling right after saw no dependents (fixed: `install` now waits for the event queue to drain). About fifteen tests
@@ -305,3 +290,14 @@ Everything else:
     each has the same window. Audit them (wait for the scan log line or `e.deps`), and make the e2e suite run with
     `-count=2` in CI once the container-runtimes job is not the long pole. The earlier podman fake-runtime container
     failure that CI missed on PR #53 was not reproduced; with `pipefail` the `container-runtimes` jobs are green.
+140. **Credentialed private proxy under a confined container network.** `RIPPLE_CONTAINER_CONFINE` is refused with
+    `RIPPLE_GOPROXY_TOKEN`: go sends GOPROXY userinfo only over https and the sidecar speaks http. Give the sidecar
+    TLS (a per-start certificate the image trusts) or have it add the Authorization header for the steps that may carry
+    it, without sending the credential to build and vet. Entry 58 needs this to be proven live.
+141. **Publish the runner image.** `docker/runner/Dockerfile` is built in the `container-runtimes` CI job and documented, but
+    no image is published: build and push it to GHCR on the release train (public, since it holds only upstream
+    images; check the package visibility, there is no API for it) and name the tag in docs/sandbox.md.
+142. **Confinement leftovers and sharing.** The confined network has fixed names, so two servers on one container runtime
+    would remove each other's, and a killed server's job containers keep the network alive until they exit (the next
+    start then fails to recreate it). Name it per `RIPPLE_REPLICA` and remove the labelled job containers of that
+    replica at start, then test the kill-and-restart case live.

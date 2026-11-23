@@ -20,7 +20,6 @@ import (
 	"github.com/taumatix/ripple/internal/platform/gitws"
 	"github.com/taumatix/ripple/internal/registry"
 	"github.com/taumatix/ripple/internal/rules"
-	"github.com/taumatix/ripple/internal/sandbox"
 	"github.com/taumatix/ripple/internal/store"
 	"github.com/taumatix/ripple/internal/webhook"
 )
@@ -52,14 +51,21 @@ func OpenStore(ctx context.Context, s *config.Server) (store.Store, error) {
 
 // New wires the production components from the server configuration: every
 // registered host that is configured (see RegisterHost), behind one platform.Mux.
-func New(ctx context.Context, s *config.Server, log *slog.Logger) (*App, store.Store, error) {
+//
+// With RIPPLE_CONTAINER_CONFINE it also starts the confined container network; the caller
+// must call App.Close when it is done with the server (also when it never runs it).
+func New(ctx context.Context, s *config.Server, log *slog.Logger) (a *App, st store.Store, err error) {
 	configureWebhookSpool(s)
 	httpc := &http.Client{Timeout: 30 * time.Second}
-	sb, err := sandbox.DetectWith(s.Sandbox, nil, sandbox.ContainerOptions{Image: s.ContainerImage,
-		CPUs: s.ContainerCPUs, Memory: s.ContainerMemory, Pull: s.ContainerPull, Network: s.ContainerNetwork})
+	sb, closeSandbox, err := newSandbox(ctx, s, log, nil)
 	if err != nil {
 		return nil, nil, err
 	}
+	defer func() {
+		if err != nil {
+			closeSandbox()
+		}
+	}()
 	hosts, err := BuildHosts(ctx, HostDeps{Server: s, Getenv: os.Getenv, HTTP: httpc, Log: log,
 		Git: gitws.Options{WorkDir: s.WorkDir, GoProxy: s.GoProxy, Sandbox: sb}})
 	if err != nil {
@@ -69,7 +75,7 @@ func New(ctx context.Context, s *config.Server, log *slog.Logger) (*App, store.S
 	if err != nil {
 		return nil, nil, err
 	}
-	st, err := OpenStore(ctx, s)
+	st, err = OpenStore(ctx, s)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -80,7 +86,7 @@ func New(ctx context.Context, s *config.Server, log *slog.Logger) (*App, store.S
 	eng.Lookup = &feed.GoProxyLookup{BaseURL: s.GoProxy, User: s.GoProxyUser, Token: s.GoProxyToken,
 		UserAgent: "ripple (+https://github.com/taumatix/ripple)"}
 	eng.Registry = &registry.Client{UserAgent: "ripple (+https://github.com/taumatix/ripple)"}
-	a := &App{
+	a = &App{
 		Engine: eng, Log: log, Secret: []byte(s.WebhookSecret), PollEvery: s.FeedInterval,
 		Hosts: hosts, DefaultHost: github.HostName,
 		Queue: &Queue{Workers: s.EventWorkers, PerInstallation: s.EventWorkersPerInstallation,
@@ -90,6 +96,7 @@ func New(ctx context.Context, s *config.Server, log *slog.Logger) (*App, store.S
 		Docker:    &engine.DockerWatcher{Engine: eng},
 		Watcher:   &engine.Watcher{Engine: eng, Feed: &feed.GoIndex{BaseURL: s.FeedURL, UserAgent: "ripple (+https://github.com/taumatix/ripple)"}},
 	}
+	a.closers = append(a.closers, closeSandbox)
 	wireReplica(eng, a.Queue, s, log)
 	if s.OSV {
 		eng.Advisories = true

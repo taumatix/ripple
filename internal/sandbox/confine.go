@@ -96,12 +96,7 @@ func confine(ctx context.Context, fl Flavour, o ConfineOptions, run runFn) (*Con
 		"      proxy_ssl_server_name on;\n      proxy_http_version 1.1;\n    }\n  }\n}\n",
 		proxyPort, u.Scheme, u.Host, u.Host)
 
-	remove := func() {
-		c, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		_, _ = run(c, "rm", "-f", side)
-		_, _ = run(c, "network", "rm", name)
-	}
+	remove := func() { removeConfinement(context.Background(), name, run) }
 	if _, err := run(ctx, "network", "create", "--internal", "--label", "ripple.job=1", name); err != nil {
 		return nil, err
 	}
@@ -135,6 +130,30 @@ func confine(ctx context.Context, fl Flavour, o ConfineOptions, run runFn) (*Con
 		time.Sleep(500 * time.Millisecond)
 	}
 	return &Confinement{Network: name, ProxyURL: fmt.Sprintf("http://%s:%d", side, proxyPort), remove: remove}, nil
+}
+
+func removeConfinement(ctx context.Context, name string, run runFn) {
+	c, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	_, _ = run(c, "rm", "-f", name+"-proxy")
+	_, _ = run(c, "network", "rm", name)
+}
+
+// RemoveConfinement removes the sidecar and the network of a confinement named name that
+// an earlier process left behind (a server killed outright never ran Close). Missing
+// pieces are not an error. A network that job containers still use stays until they exit.
+func RemoveConfinement(ctx context.Context, fl Flavour, bin, name string) error {
+	if fl != FlavourDocker && fl != FlavourPodman {
+		return fmt.Errorf("sandbox %s: no internal networks; confinement needs docker or podman", fl)
+	}
+	if !safeName.MatchString(name) {
+		return fmt.Errorf("sandbox: confinement network name %q is not a plain name", name)
+	}
+	removeConfinement(ctx, name, func(ctx context.Context, args ...string) (string, error) {
+		out, err := exec.CommandContext(ctx, bin, args...).CombinedOutput()
+		return string(out), err
+	})
+	return nil
 }
 
 // Close removes the sidecar and the network. Safe to call more than once.

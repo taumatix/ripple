@@ -269,7 +269,7 @@ func (w *workspace) runGitIO(ctx context.Context, dir string, env []string, conf
 	}
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = dir
-	cmd.Env = env
+	cmd.Env = w.clientEnv(env)
 	cmd.WaitDelay = 5 * time.Second
 	out := boundedBuffer{max: gio.maxOut}
 	var errb bytes.Buffer
@@ -590,7 +590,7 @@ func (w *workspace) RunGo(ctx context.Context, dir string, args ...string) (stri
 	}
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = abs
-	cmd.Env = env
+	cmd.Env = w.clientEnv(env)
 	cmd.WaitDelay = 5 * time.Second
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
@@ -666,6 +666,16 @@ func (w *workspace) reapIfCancelled(ctx context.Context, argv []string) {
 	if r, ok := w.o.Sandbox.(sandbox.Reaper); ok {
 		r.Reap(argv)
 	}
+}
+
+// clientEnv is the environment the (possibly confined) command's process starts with. For
+// a container backend that is the container CLI's own, which keeps its HOME apart from the
+// job's; for every other backend the command inherits env itself.
+func (w *workspace) clientEnv(env []string) []string {
+	if ce, ok := w.o.Sandbox.(sandbox.ClientEnver); ok {
+		return ce.ClientEnv(env)
+	}
+	return env
 }
 
 // confine wraps argv in the configured sandbox; with none configured it is unchanged.

@@ -40,6 +40,10 @@ type ContainerOptions struct {
 	// Network names the runtime network a command that needs the module proxy joins; empty
 	// is the runtime's default network. Commands that need no network always get none.
 	Network string
+	// ProxyURL, when set, is the module proxy every command's GOPROXY is pointed at (see
+	// ClientEnv), whatever the policy's environment says: the confined network's sidecar,
+	// so a job never learns the real upstream or sends a credential to the sidecar.
+	ProxyURL string
 	// PIDs caps processes per container (Docker and Podman; Apple has no option). Default 512.
 	PIDs int
 }
@@ -150,13 +154,18 @@ func (c container) Wrap(p Policy, argv []string) ([]string, error) {
 	}
 	out = append(out, "-w", p.Workdir)
 	// Only the keys are on the command line; the values come from the client's own
-	// environment (-e KEY), so nothing sensitive shows in a process listing.
+	// environment (-e KEY), so nothing sensitive shows in a process listing. HOME and
+	// TMPDIR are the job's paths, not secrets, and the client keeps its own (ClientEnv),
+	// so they are given as values.
 	for _, kv := range p.Env {
 		k, _, ok := strings.Cut(kv, "=")
-		if !ok || k == "" || k == "PATH" { // the host's PATH means nothing in the image
-			continue
+		switch {
+		case !ok || k == "" || k == "PATH": // the host's PATH means nothing in the image
+		case clientOwned[k]:
+			out = append(out, "-e", kv)
+		default:
+			out = append(out, "-e", k)
 		}
-		out = append(out, "-e", k)
 	}
 	cmd := append([]string(nil), argv...)
 	if filepath.IsAbs(cmd[0]) {
@@ -203,6 +212,46 @@ func mountSet(paths []string) []string {
 			out = append(out, p)
 			seen[p] = true
 		}
+	}
+	return out
+}
+
+// clientOwned are the variables the container client keeps for itself: the command's
+// values travel as -e KEY=value instead.
+var clientOwned = map[string]bool{"HOME": true, "TMPDIR": true}
+
+// clientHostVars are the server's own variables the container CLI needs to find its
+// runtime and its state (the rest of the server's environment, which holds its
+// credentials' locations, never reaches the client); a name ending in _ is a prefix.
+var clientHostVars = []string{"HOME", "USER", "LOGNAME", "PATH", "TMPDIR", "XDG_RUNTIME_DIR", "XDG_CONFIG_HOME",
+	"XDG_DATA_HOME", "DBUS_SESSION_BUS_ADDRESS", "DOCKER_HOST", "DOCKER_CONFIG", "DOCKER_CONTEXT",
+	"DOCKER_CERT_PATH", "DOCKER_TLS_VERIFY", "CONTAINER_HOST", "CONTAINER_CONNECTION", "CONTAINERS_"}
+
+// ClientEnv is the environment the container CLI runs with: the server's own variables
+// that locate the runtime and its storage (HOME among them, so rootless Podman does not
+// pull the image into the job directory, where the repository's code could read it),
+// then the policy's, which supply the values `-e KEY` takes, except those the client
+// keeps (HOME, TMPDIR) and PATH. With ContainerOptions.ProxyURL set, GOPROXY is that.
+func (c container) ClientEnv(job []string) []string {
+	var out []string
+	for _, kv := range os.Environ() {
+		k, _, _ := strings.Cut(kv, "=")
+		for _, v := range clientHostVars {
+			if k == v || (strings.HasSuffix(v, "_") && strings.HasPrefix(k, v)) {
+				out = append(out, kv)
+				break
+			}
+		}
+	}
+	for _, kv := range job {
+		k, _, ok := strings.Cut(kv, "=")
+		if !ok || k == "" || k == "PATH" || clientOwned[k] {
+			continue
+		}
+		if k == "GOPROXY" && c.o.ProxyURL != "" {
+			kv = "GOPROXY=" + c.o.ProxyURL
+		}
+		out = append(out, kv)
 	}
 	return out
 }

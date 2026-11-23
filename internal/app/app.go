@@ -26,6 +26,7 @@ import (
 )
 
 type App struct {
+	closers []func() // run by Close, in reverse order
 	Engine  *engine.Engine
 	Watcher *engine.Watcher
 	// Toolchain polls the Go release list for repos that opted into go-toolchain
@@ -215,6 +216,15 @@ func (a *App) Handler() http.Handler {
 // deadline, which needs a ResponseWriter that supports deadlines) and the response write.
 func newServer(h http.Handler) *http.Server {
 	return &http.Server{Handler: h, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: time.Minute, WriteTimeout: time.Minute, IdleTimeout: 2 * time.Minute}
+}
+
+// Close releases what New started outside the process (the confined container network of
+// RIPPLE_CONTAINER_CONFINE). It is safe to call more than once and after Run returns.
+func (a *App) Close() {
+	for i := len(a.closers) - 1; i >= 0; i-- {
+		a.closers[i]()
+	}
+	a.closers = nil
 }
 
 // Run serves HTTP on ln and runs the background loops until ctx ends.

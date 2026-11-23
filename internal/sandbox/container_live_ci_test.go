@@ -79,3 +79,47 @@ func TestContainerConfinedNetworkLive(t *testing.T) {
 		t.Errorf("sidecar health: %v %q", err, out)
 	}
 }
+
+// The runner image carries git next to go (docker/runner/Dockerfile): the local git steps the engine
+// runs in a container (checkout, clean, commit) work, with no network, as the caller's uid.
+// The CI job runs it only against that image; the default go-only image has no git.
+func TestContainerGitLive(t *testing.T) {
+	fl, bin, o := ciRuntime(t)
+	b, err := Container(fl, bin, o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	work, _ := filepath.EvalSymlinks(t.TempDir())
+	repo := filepath.Join(work, "repo")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(repo, "go.mod"), []byte("module x\n\ngo 1.21\n"), 0o644)
+	p := Policy{Workdir: repo, Writable: []string{work}, Env: []string{"HOME=" + work, "TMPDIR=" + work, "GOTOOLCHAIN=local",
+		"GIT_AUTHOR_NAME=ripple", "GIT_AUTHOR_EMAIL=r@example.com", "GIT_COMMITTER_NAME=ripple", "GIT_COMMITTER_EMAIL=r@example.com"}}
+	const long = 5 * time.Minute // first run may pull the image
+	for _, argv := range [][]string{
+		{"git", "init", "-q", "-b", "main"},
+		{"git", "add", "."},
+		{"git", "-c", "core.hooksPath=/dev/null", "commit", "-q", "-m", "first"},
+		{"git", "checkout", "--force", "main"},
+		{"git", "clean", "-fdxq"},
+	} {
+		if out, err := runLive(t, b, p, long, argv...); err != nil {
+			t.Fatalf("%v in the container: %v\n%s", argv, err, out)
+		}
+	}
+	if out, err := runLive(t, b, p, time.Minute, "git", "log", "--format=%s"); err != nil || strings.TrimSpace(out) != "first" {
+		t.Errorf("git log: %v %q", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(repo, ".git", "HEAD")); err != nil {
+		t.Errorf("the repository written in the container is not on the host: %v", err)
+	}
+	// the pinned Go is the image's own and satisfies GOTOOLCHAIN=local
+	if out, err := runLive(t, b, p, time.Minute, "go", "version"); err != nil || !strings.Contains(out, "go version go1.") {
+		t.Errorf("go version: %v %q", err, out)
+	}
+	if out, err := runLive(t, b, p, time.Minute, "sh", "-c", "wget -q -T 3 -O /dev/null http://1.1.1.1/"); err == nil {
+		t.Errorf("local git ran with a network: %s", out)
+	}
+}

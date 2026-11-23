@@ -15,7 +15,12 @@ server's uid. `RIPPLE_SANDBOX` confines those commands. The default is `none`, s
 ## Container runners (`container`, `docker`, `podman`)
 
 Each confined command runs in a fresh container of `RIPPLE_CONTAINER_IMAGE`, which must carry `go` and
-`git` (for example `golang:1.27`; the `-alpine` variants have no `git`, so local git commands would fail).
+`git`. Build the image ripple's own checks use from `docker/runner/Dockerfile` (`golang:<GO_VERSION>-alpine` plus
+`git`, `GOTOOLCHAIN=local`; `GO_VERSION` is a build argument, default the Go ripple is built with):
+`docker build -t ripple-runner -f docker/runner/Dockerfile docker/runner`. A bare `golang:1.27-alpine` has no `git`,
+so local git commands would fail there; the Debian `golang:1.27` has both. Because the image's Go decides what
+`GOTOOLCHAIN=local` can satisfy, build the runner with a Go at least as new as the highest `go` line of the repositories you
+update. Publishing a prebuilt image is not done yet (ROADMAP).
 `argv[0]` is run by its base name from the image's `PATH`, and the image's Go version must satisfy the
 repositories' `go` lines because `GOTOOLCHAIN=local`. The `go` and `git` binaries on the host are not used.
 
@@ -26,11 +31,16 @@ repositories' `go` lines because `GOTOOLCHAIN=local`. The `go` and `git` binarie
 | `RIPPLE_CONTAINER_MEMORY` | `2G` | memory per container |
 | `RIPPLE_CONTAINER_PULL` | `missing` | `missing`, `always` or `never` (docker, podman); Apple's CLI has no pull option, so only `missing` |
 | `RIPPLE_CONTAINER_NETWORK` | runtime default | network joined by commands that need the module proxy |
+| `RIPPLE_CONTAINER_CONFINE` | `false` | `true` makes the server create the confined network below at start (docker, podman); excludes `RIPPLE_CONTAINER_NETWORK` |
 
 What each container gets: a read-only root with a tmpfs `/tmp`; every capability dropped; the server's uid and
 gid; only the job workspace (and a shared build cache outside it) mounted read-write, at the same paths so
 `HOME`, `GOPATH` and `GOCACHE` hold; the policy's environment passed by key only (`-e KEY`, so values never appear
-on a command line) without the host's `PATH`; a unique name and `--rm`. Docker and Podman also get
+on a command line) without the host's `PATH`; a unique name and `--rm`. `HOME` and `TMPDIR` are the exception to key-only: they are the job directory, not secret,
+and go as `-e HOME=<dir>` so that the container *client* can keep its own `HOME` (it is started with the server's
+variables that locate the runtime and its state: `HOME`, `XDG_*`, `DOCKER_*`, `CONTAINER*`, `DBUS_SESSION_BUS_ADDRESS`,
+not the rest of the server's environment). Otherwise rootless Podman would keep its image storage under the job directory,
+where the repository's code can read it; the live CI job checks the client wrote nothing there. Docker and Podman also get
 `--pids-limit 512`, `--security-opt no-new-privileges` and `--pull`. Nothing else of the host is visible: not the
 home directory, the App key or other jobs.
 
@@ -52,17 +62,28 @@ running). When a command's context ends, ripple runs `<cli> kill <name>` and, fo
 nginx sidecar (`nginx:1.27-alpine`) that forwards everything to the upstream, joins it to the internal network and waits
 for it to answer. Pass the result's `Network` as `ContainerOptions.Network` and its `ProxyURL` (`http://<name>-proxy:3128`)
 as the command's `GOPROXY` and `Policy.Proxy`; `Close` removes both. A command on that network reaches the sidecar and
-nothing else: no other address, no DNS for other names. The server does not start it yet (ROADMAP), so today this is a
-library function and a recipe; `RIPPLE_CONTAINER_NETWORK` can name a network you created yourself the same way.
+nothing else: no other address, no DNS for other names.
+
+`RIPPLE_CONTAINER_CONFINE=true` (with `RIPPLE_SANDBOX=docker` or `podman`) makes the server do this: at start it removes a
+confinement an earlier server left behind (the network `ripple-confine` and the container `ripple-confine-proxy`, fixed
+names, so **one server per container runtime**), creates a fresh one forwarding to `RIPPLE_GOPROXY`, and every command
+that needs the proxy joins that network with `GOPROXY` pointed at the sidecar, whatever `RIPPLE_GOPROXY` is for the
+server itself, which keeps using it directly (the feed, version checks). It is removed on a normal stop (SIGINT, SIGTERM). A start
+fails if the runtime cannot make the network. `RIPPLE_GOPROXY` must be `scheme://host[:port]` with no path or
+credentials, and `RIPPLE_GOPROXY_TOKEN` is refused with it (go sends a credential only over https and the sidecar speaks
+http; a credentialed private proxy is a ROADMAP entry). Job containers left by a server killed outright keep the network
+alive until they exit; the next start then fails to recreate it and says so. `RIPPLE_CONTAINER_NETWORK` can still name a
+network you created yourself.
 
 **Verification status.** The `container-runtimes` CI job runs `internal/sandbox/container_live_shared_test.go` (build,
 `go mod tidy`, a read-only-root write, writable mounts, a networkless fetch, a host file outside the mounts, a timeout
 reap) against real Docker and real Podman on a hosted Linux runner, and the confined network (`go mod download` through the
 sidecar to the real module proxy; `1.1.1.1`, `proxy.golang.org` and `example.com` unreachable from the container). The
-Apple runner runs the same checks on a developer's Mac (`container_live_darwin_test.go`), which CI cannot. Not
-verified anywhere: `git` inside an image (the live image has `go` only), the server driving a container end to end,
-Podman as a non-rootless install, SELinux hosts, Docker Desktop, and Podman's image storage under the engine's
-environment (ROADMAP). The unit tests still use the fake CLI (`internal/testutil/fakecontainer.go`) and the
+Apple runner runs the same checks on a developer's Mac (`container_live_darwin_test.go`), which CI cannot. The same job builds `docker/runner/Dockerfile`, runs the local git steps (init, add, commit, checkout, clean) and `go version` in
+it, and starts the server's wiring (`newSandbox` with `RIPPLE_CONTAINER_CONFINE`) to fetch a module through the sidecar,
+replace a leftover confinement and clean up. Not verified anywhere: the server process itself running a whole job in a
+container end to end with a real runtime (the engine's end-to-end test uses the fake CLI), Podman as a non-rootless install,
+SELinux hosts, Docker Desktop, and a server killed outright with job containers still running. The unit tests still use the fake CLI (`internal/testutil/fakecontainer.go`) and the
 cross-flavour engine test (`internal/e2e/container_test.go`). Only `go` and local `git` run in a container; clone,
 fetch, push and the server stay on the host.
 

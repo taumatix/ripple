@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -35,7 +34,7 @@ func runLive(t *testing.T, b Backend, p Policy, timeout time.Duration, argv ...s
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, w[0], w[1:]...)
-	cmd.Env = append(os.Environ(), clientEnv(p.Env)...)
+	cmd.Env = b.(ClientEnver).ClientEnv(p.Env) // the environment the engine starts the client with
 	cmd.WaitDelay = 5 * time.Second
 	out, err := cmd.CombinedOutput()
 	if ctx.Err() != nil {
@@ -74,6 +73,14 @@ func checkContainerBackend(t *testing.T, b Backend, bin string, fl Flavour) {
 	}
 	if _, err := runLive(t, b, p, long, "go", "mod", "tidy"); err != nil {
 		t.Fatalf("go mod tidy: %v", err)
+	}
+	// The job's HOME is the work directory; the client must not have used it for its own state
+	// (rootless Podman's image storage lives under the client's HOME), where the repository's
+	// code could read it.
+	for _, dir := range []string{".local", ".docker", ".container"} {
+		if _, err := os.Stat(filepath.Join(work, dir)); err == nil {
+			t.Errorf("the container client wrote %s under the job directory", dir)
+		}
 	}
 	fi, err := os.Stat(filepath.Join(repo, "go.mod"))
 	if err != nil || fi.Sys() == nil {
@@ -134,21 +141,4 @@ func slicesIndex(s []string, v string) int {
 		}
 	}
 	return -1
-}
-
-// clientEnv is the environment the container client runs with. The runner's own HOME stays: the
-// engine's policy sets HOME to the job directory, and rootless Podman keeps its image storage
-// under $HOME, so it would pull the image into (and then fail to remove) the job directory.
-// That the engine itself runs the client with HOME set to the job directory is a ROADMAP residual.
-func clientEnv(env []string) []string {
-	if runtime.GOOS != "linux" {
-		return env
-	}
-	var out []string
-	for _, e := range env {
-		if !strings.HasPrefix(e, "HOME=") && !strings.HasPrefix(e, "TMPDIR=") {
-			out = append(out, e)
-		}
-	}
-	return out
 }

@@ -207,7 +207,7 @@ func (w *workspace) runGit(ctx context.Context, dir string, env []string, confin
 	argv := append([]string{gitBinary()}, full...)
 	if confined {
 		var err error
-		if argv, err = w.confine(sandbox.Policy{Workdir: dir, Writable: w.dirOutside(dir)}, argv); err != nil {
+		if argv, err = w.confine(sandbox.Policy{Workdir: dir, Writable: w.dirOutside(dir), Env: env}, argv); err != nil {
 			return "", fmt.Errorf("git %s: %w", args[0], err)
 		}
 	}
@@ -218,6 +218,7 @@ func (w *workspace) runGit(ctx context.Context, dir string, env []string, confin
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	if err := cmd.Run(); err != nil {
+		w.reapIfCancelled(ctx, argv)
 		return "", fmt.Errorf("git %s: %w: %s", args[0], err, snippet([]byte(w.redact(errb.String()))))
 	}
 	return out.String(), nil
@@ -405,14 +406,17 @@ func (w *workspace) RunGo(ctx context.Context, dir string, args ...string) (stri
 	}
 	ctx, cancel := context.WithTimeout(ctx, goTimeout)
 	defer cancel()
-	pol := sandbox.Policy{Workdir: abs, Writable: w.dirOutside(abs)}
+	pol := sandbox.Policy{Workdir: abs, Writable: w.dirOutside(abs), Env: env}
 	if cache != "" && !strings.HasPrefix(cache, w.dir+string(filepath.Separator)) {
 		pol.Writable = append(pol.Writable, cache)
 	}
 	if real, err := filepath.EvalSymlinks(gobin); err == nil {
 		pol.ReadOnly = append(pol.ReadOnly, filepath.Dir(filepath.Dir(real)))
 	}
-	if w.sandboxed() {
+	if no, ok := w.o.Sandbox.(sandbox.NetworkOwner); ok && no.OwnsNetwork() {
+		// A container cannot reach a loopback gate: the backend decides the network.
+		pol.Proxy = proxy
+	} else if w.sandboxed() {
 		gate, err := sandbox.NewGate(proxy)
 		if err != nil {
 			return "", err
@@ -436,6 +440,9 @@ func (w *workspace) RunGo(ctx context.Context, dir string, args ...string) (stri
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
 	runErr := cmd.Run()
+	if runErr != nil {
+		w.reapIfCancelled(ctx, argv)
+	}
 	text := w.redact(out.String())
 	if len(text) > 16<<10 {
 		text = "...\n" + text[len(text)-16<<10:]
@@ -472,6 +479,17 @@ func isExecutable(p string) bool {
 // sandboxed reports whether commands run under a real confinement backend.
 func (w *workspace) sandboxed() bool {
 	return w.o.Sandbox != nil && w.o.Sandbox.Name() != "none"
+}
+
+// reapIfCancelled stops a confined command that outlives its killed client (a
+// container) after the context ended it; other backends have nothing to reap.
+func (w *workspace) reapIfCancelled(ctx context.Context, argv []string) {
+	if ctx.Err() == nil {
+		return
+	}
+	if r, ok := w.o.Sandbox.(sandbox.Reaper); ok {
+		r.Reap(argv)
+	}
 }
 
 // confine wraps argv in the configured sandbox; with none configured it is unchanged.

@@ -6,18 +6,6 @@ Ordered by how much each entry limits real deployments. The top is next.
    module proxy, so `go` refuses to run under it, and bwrap has never run on a Linux host. Give it a
    network namespace with a forwarded socket to the gate (or run `go` with a prefilled module cache),
    and add a Linux CI job that runs the sandbox end-to-end tests. See [docs/sandbox.md](docs/sandbox.md).
-2. **Run jobs in a container runner, with updaters as OCI images.** Entry 1 contains the build; this entry
-   moves the whole job (clone, edit, verify, push) out of the server process. Define a `Runner` interface
-   (start a job from an image with a workspace, an env allowlist, a network policy and CPU, memory and time limits;
-   stream logs; report the exit status) and ship backends for Docker, Apple `container`, Podman and Kubernetes
-   Jobs, plus the current in-process runner as the default so nothing changes for existing installs. Each
-   ecosystem's updater is a published image (the Go one carries the toolchain), so a repo's build never runs
-   next to the App key. The token reaches the job as a short-lived, per-job secret. Cross-backend end-to-end
-   test: the same job over a fake platform on every backend that is available, skipped (and said so) where its
-   runtime is absent. CLI flags and socket paths for each runtime are **unverified** until the entry fetches
-   that runtime's documentation. Later, behind the plugin mechanism (entry 33): a dependency collector that
-   runs as an isolated container for discoveries too complex or too risky to run in-process, with the same
-   `Runner` and the same limits.
 3. **Exercise the release workflow for real, and finish the smoke test.** `release.yml` has never run on a tag:
    the tag trigger, the GHCR push, the release upload and the `verify` job (which installs the published
    binary and image and runs `ripple version`) are **unverified** until the first release train tags, and
@@ -146,3 +134,18 @@ Everything else:
 36. **Remove the `.github/ripple.yml` alias.** Deprecated in the release after v0.1.0 in favour of the
     root `.ripple.yaml`; remove it no earlier than v0.3.0 (the minor release after next), with a
     `MIGRATION.md` and a last warning release, per the deprecate-then-remove rule.
+37. **Whole job in a container, with a per-job token and Kubernetes Jobs.** The container runner
+    ([docs/sandbox.md](docs/sandbox.md)) confines only `go` and local `git`; clone, edit and push still run in the
+    server. Move the whole job into the image behind a `Runner` interface (workspace, env allowlist, network policy,
+    limits, streamed logs, exit status) with the installation token passed as a short-lived per-job secret, add a
+    Kubernetes Jobs backend, and publish an updater image per ecosystem so a repo's build never runs next to the
+    App key. Later, behind the plugin mechanism (entry 33): a dependency collector as an isolated container with the
+    same limits.
+38. **Verify the Docker and Podman runners for real, in CI.** Their argv is unverified against a daemon (fake CLI
+    only). Add a CI job on a hosted Linux runner (Docker is installed) that runs the container end-to-end test with
+    `RIPPLE_SANDBOX=docker`, a Go image and a proxy reachable from the container (the fake proxy bound to the docker
+    bridge address), and a Podman variant if a runner offers it; fix whatever the real CLI rejects.
+39. **Confine the container's network to the module proxy.** `go` runs on the runtime's default network, so a
+    repository's build can reach anything that network can. Ship a recipe, then a built-in option, that creates an
+    internal network holding only a proxy sidecar; also run `git` and `go` together in one image with a
+    documented, pinned Go version so `GOTOOLCHAIN=local` always satisfies the repo's `go` line.

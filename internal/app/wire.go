@@ -49,7 +49,8 @@ func OpenStore(ctx context.Context, s *config.Server) (store.Store, error) {
 // registered host that is configured (see RegisterHost), behind one platform.Mux.
 func New(ctx context.Context, s *config.Server, log *slog.Logger) (*App, store.Store, error) {
 	httpc := &http.Client{Timeout: 30 * time.Second}
-	sb, err := sandbox.Detect(s.Sandbox, nil)
+	sb, err := sandbox.DetectWith(s.Sandbox, nil, sandbox.ContainerOptions{Image: s.ContainerImage,
+		CPUs: s.ContainerCPUs, Memory: s.ContainerMemory, Pull: s.ContainerPull, Network: s.ContainerNetwork})
 	if err != nil {
 		return nil, nil, err
 	}

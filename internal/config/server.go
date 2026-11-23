@@ -14,25 +14,27 @@ import (
 // can tighten the limits here, never widen them. Every URL comes from here and
 // never from a repo file, so a repo cannot point ripple at an internal host.
 type Server struct {
-	Listen            string
-	WebhookSecret     string
-	GitHubAppID       string
-	GitHubKeyFile     string
-	GitHubAPIURL      string
-	GitHubGitURL      string
-	FeedURL           string
-	FeedInterval      time.Duration
-	GoProxy           string
-	Sandbox           string // none, auto, bwrap, seatbelt
-	Store             string // memory, postgres, dynamodb
-	PostgresDSN       string
-	DynamoTable       string
-	DynamoEndpoint    string
-	MinimumReleaseAge time.Duration
-	OpenPRLimit       int
-	AllowAutomerge    bool
-	Workers           int
-	WorkDir           string
+	Listen        string
+	WebhookSecret string
+	GitHubAppID   string
+	GitHubKeyFile string
+	GitHubAPIURL  string
+	GitHubGitURL  string
+	FeedURL       string
+	FeedInterval  time.Duration
+	GoProxy       string
+	Sandbox       string // none, auto, bwrap, seatbelt, container, docker, podman
+	// Container* configure the container, docker and podman sandboxes (docs/sandbox.md).
+	ContainerImage, ContainerCPUs, ContainerMemory, ContainerPull, ContainerNetwork string
+	Store                                                                           string // memory, postgres, dynamodb
+	PostgresDSN                                                                     string
+	DynamoTable                                                                     string
+	DynamoEndpoint                                                                  string
+	MinimumReleaseAge                                                               time.Duration
+	OpenPRLimit                                                                     int
+	AllowAutomerge                                                                  bool
+	Workers                                                                         int
+	WorkDir                                                                         string
 	// MaxFiles and MaxDependencies cap one repo scan; a repo over either is skipped.
 	MaxFiles        int
 	MaxDependencies int
@@ -132,6 +134,11 @@ func LoadServer(getenv func(string) string) (*Server, error) {
 		FeedInterval:      dur("RIPPLE_FEED_INTERVAL", "1m"),
 		GoProxy:           strings.TrimRight(str("RIPPLE_GOPROXY", "https://proxy.golang.org"), "/"),
 		Sandbox:           str("RIPPLE_SANDBOX", "none"),
+		ContainerImage:    getenv("RIPPLE_CONTAINER_IMAGE"),
+		ContainerCPUs:     getenv("RIPPLE_CONTAINER_CPUS"),
+		ContainerMemory:   getenv("RIPPLE_CONTAINER_MEMORY"),
+		ContainerPull:     getenv("RIPPLE_CONTAINER_PULL"),
+		ContainerNetwork:  getenv("RIPPLE_CONTAINER_NETWORK"),
 		Store:             str("RIPPLE_STORE", "memory"),
 		PostgresDSN:       getenv("RIPPLE_POSTGRES_DSN"),
 		DynamoTable:       str("RIPPLE_DYNAMODB_TABLE", "ripple"),

@@ -110,3 +110,12 @@ func TestServerSandbox(t *testing.T) {
 		t.Fatalf("set: %+v, %v", s, err)
 	}
 }
+
+func TestServerContainerSettings(t *testing.T) {
+	s, err := LoadServer(env(with("RIPPLE_SANDBOX", "docker", "RIPPLE_CONTAINER_IMAGE", "golang:1.27", "RIPPLE_CONTAINER_CPUS", "1",
+		"RIPPLE_CONTAINER_MEMORY", "1G", "RIPPLE_CONTAINER_PULL", "always", "RIPPLE_CONTAINER_NETWORK", "ripple-net")))
+	if err != nil || s.ContainerImage != "golang:1.27" || s.ContainerCPUs != "1" || s.ContainerMemory != "1G" ||
+		s.ContainerPull != "always" || s.ContainerNetwork != "ripple-net" {
+		t.Fatalf("%+v, %v", s, err)
+	}
+}

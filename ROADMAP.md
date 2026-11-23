@@ -66,8 +66,14 @@ auth model, rate limits); the notes below are what I expect, **unverified** unti
     with an API token, and merge-commit diffstats. Also: auto-merge exists only through merge queues, so a
     merge-check poll is the open design question if queues stay a paid feature; webhooks are created by hand,
     so per-workspace webhook registration is a follow-up.
-14. **Azure DevOps.** Service hooks (code pushed, PR events), PAT or Entra token, auto-complete on PRs,
-    organisation/project/repo hierarchy instead of owner/repo.
+14. **Azure DevOps follow-ups** (the host itself shipped, see [docs/platform-azuredevops.md](docs/platform-azuredevops.md)):
+    verify it against a real organisation (every wire shape is from the docs and a fake: repo name accepted as
+    `repositoryId`, `autoCompleteSetBy` taken from `createdBy.id`, the exact service-hook headers); Entra ID
+    bearer tokens, which need a `gitws` scheme for sending `Authorization: Bearer` to git as `http.extraHeader`;
+    names with spaces (projects and repos often have them: escape path segments in REST and clone URLs); register
+    a repo on `git.repo.created` and forget it on `git.repo.deleted` / `git.repo.renamed` instead of waiting for
+    the next listing; re-scan on a changed `.ripple.yaml` without a full re-scan once a push lists files (it
+    does not today, so every push to a default branch costs a scan).
 15. **Bitbucket Server / Data Center.** A different REST API from Bitbucket Cloud; webhooks per
     repo or project; HTTP access tokens.
 16. **AWS CodeCommit.** No webhooks: repository events arrive through EventBridge or SNS, so this needs an

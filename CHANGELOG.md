@@ -37,6 +37,9 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
   (drafts as `Draft:`, labels), merge when the pipeline succeeds, push webhooks authenticated by secret token or
   signing token at `/webhook/gitlab`, projects found by membership listing, subgroups of any depth. Written from
   the vendored docs and **not yet run against a real GitLab**: see [docs/platform-gitlab.md](docs/platform-gitlab.md).
+- Azure DevOps Services host (`RIPPLE_AZUREDEVOPS_*`): repos as `org/project/repo`, found by listing, pushes
+  from `git.push` service hooks (HTTP Basic, no HMAC exists), PATs, auto-complete. Written from the vendored
+  docs and a fake, not yet run against a real organisation. See [docs/platform-azuredevops.md](docs/platform-azuredevops.md).
 - A major bump now also rewrites `//go:generate go run <package>` lines and canonical `// import "..."`
   comments, and lists directives that still mention the old path in the PR body. `manager.RewriteGo` returns
   that report; `RewriteGoImports` keeps its signature.

@@ -1,0 +1,96 @@
+package azuredevops_test
+
+import (
+	"bytes"
+	"encoding/json"
+	"log/slog"
+	"net/http"
+	"testing"
+	"time"
+
+	"github.com/taumatix/ripple/internal/platform"
+	"github.com/taumatix/ripple/internal/platform/azuredevops"
+	"github.com/taumatix/ripple/internal/platform/gitws"
+	"github.com/taumatix/ripple/internal/platform/platformtest"
+	"github.com/taumatix/ripple/internal/testutil"
+)
+
+const (
+	org        = "acme"
+	project    = "Platform"
+	hookUser   = "ripple"
+	hookSecret = "conformance-hook-password"
+)
+
+func TestConformance(t *testing.T) {
+	platformtest.Run(t, &adoFixture{})
+}
+
+// adoFixture drives the fake Azure DevOps: repositories are found by listing (the
+// service has no install event) and pushes arrive as git.push service hooks.
+type adoFixture struct{ az *testutil.AzureDevOps }
+
+func (f *adoFixture) Host(t *testing.T, g gitws.Options, now func() time.Time) *platform.Host {
+	f.az = testutil.NewAzureDevOps(t, org)
+	c := &azuredevops.Client{APIBase: f.az.URL, GitBase: f.az.URL, Org: org, Now: now,
+		Credentials: platform.StaticCredential{Secret: testutil.AzurePAT},
+		WorkDir:     g.WorkDir, GoProxy: g.GoProxy, GoSumDB: g.GoSumDB, GoCacheDir: g.GoCacheDir, Sandbox: g.Sandbox}
+	return azuredevops.NewHost(c, azuredevops.BasicAuth{Username: hookUser, Password: hookSecret}, slog.New(slog.DiscardHandler))
+}
+
+func (f *adoFixture) Path(short string) string { return org + "/" + project + "/" + short }
+
+func (f *adoFixture) AddRepo(_ *testing.T, path string, files map[string]string) {
+	f.az.AddRepo(path, files)
+}
+
+// Register delivers nothing: discovery lists the repositories.
+func (f *adoFixture) Register(*testing.T, string, ...string) {}
+
+func (f *adoFixture) Push(t *testing.T, hook, path string, files map[string]string) {
+	t.Helper()
+	f.az.Commit(path, files)
+	body, _ := json.Marshal(pushPayload(project, path[len(org)+len(project)+2:], "refs/heads/main", "refs/heads/main"))
+	req, _ := http.NewRequest(http.MethodPost, hook, bytes.NewReader(body))
+	req.SetBasicAuth(hookUser, hookSecret)
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("git.push webhook: %d", resp.StatusCode)
+	}
+}
+
+func (f *adoFixture) PRs(path string) []platformtest.PR {
+	var out []platformtest.PR
+	for _, p := range f.az.PRs(path) {
+		out = append(out, platformtest.PR{Head: p.Head, Base: p.Base, Draft: p.IsDraft, AutoMerge: p.AutoCompleteSetBy != ""})
+	}
+	return out
+}
+
+func (f *adoFixture) FileAt(path, branch, file string) (string, bool) {
+	return f.az.FileAt(path, branch, file)
+}
+func (f *adoFixture) Calls(path string) int { return f.az.Calls(path) }
+func (f *adoFixture) RateLimitNextPR() bool { f.az.RateLimitOnce = true; return true }
+
+// pushPayload is the git.push body of service-hooks-events.md ("git.push", sample
+// payload), trimmed to the fields the receiver reads.
+func pushPayload(project, repo, updated, defaultBranch string) map[string]any {
+	return map[string]any{
+		"id": "a0a0a0a0-bbbb-cccc-dddd-e1e1e1e1e1e1", "eventType": "git.push", "publisherId": "tfs",
+		"resource": map[string]any{
+			"refUpdates": []map[string]any{{"name": updated, "oldObjectId": "d3d3", "newObjectId": "e4e4"}},
+			"repository": map[string]any{"id": "f5f5", "name": repo, "defaultBranch": defaultBranch,
+				"project": map[string]any{"id": "a6a6", "name": project}},
+		},
+	}
+}
+
+// PushHasNoFileList: git.push lists commits but no changed files
+// (service-hooks-events.md), so every push to the default branch re-scans.
+func (f *adoFixture) PushHasNoFileList() bool { return true }

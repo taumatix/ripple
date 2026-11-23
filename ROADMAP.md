@@ -231,9 +231,6 @@ Everything else:
     (the DynamoDB Local run is CI-only, real AWS never). Measure the Scan and the per-package recount on a large table,
     page them with a rate limit so they cannot starve live traffic, and decide whether the server should run the drift
     check itself (log the gap) instead of leaving it to an operator.
-146. **e2e: run the suite with `-count=2` in CI.** Entry 139 made `waitRepo` wait for the first scan; repeating the suite
-    would show any test that still depends on a run order or leftover state. Do it once the container-runtimes job is not
-    the long pole. The podman fake-runtime container failure that CI missed on PR #53 was not reproduced.
 148. **npm: regenerate lockfiles offline.** ripple edits package.json and reports the lockfiles it could not refresh
     (`package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, `pnpm-lock.yaml`, bun). The abbreviated metadata carries
     `dist.integrity` and `dist.tarball` per version, so a package-lock v2/v3 entry for a leaf package whose own dependencies did

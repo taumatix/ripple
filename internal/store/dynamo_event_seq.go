@@ -61,9 +61,13 @@ func (d *Dynamo) EnqueueSequenced(ctx context.Context, e model.Event) (model.Eve
 			put.ExpressionAttributeNames = map[string]string{"#n": "N"}
 			put.ExpressionAttributeValues = map[string]types.AttributeValue{":n": n(c.N)}
 		}
+		mk, err := d.markerPut(e)
+		if err != nil {
+			return e, false, wrapD("enqueue sequenced event", err)
+		}
 		_, err = d.db.TransactWriteItems(ctx, &dynamodb.TransactWriteItemsInput{TransactItems: []types.TransactWriteItem{
 			{Put: &types.Put{TableName: &d.table, Item: ev, ConditionExpression: aws.String("attribute_not_exists(PK)")}},
-			{Put: put},
+			{Put: put}, mk,
 		}})
 		var tc *types.TransactionCanceledException
 		if errors.As(err, &tc) {

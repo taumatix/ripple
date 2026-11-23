@@ -24,12 +24,12 @@ func (d *Dynamo) leaseCheck(l Lease) types.TransactWriteItem {
 // fencedWrite runs w behind the lease check. A cancelled transaction names its failed item:
 // the lease (item 0) is ErrLeaseLost; any other failure is the write's own condition, which
 // each caller declares benign through gone.
-func (d *Dynamo) fencedWrite(ctx context.Context, op string, l Lease, w types.TransactWriteItem, gone bool) error {
+func (d *Dynamo) fencedWrite(ctx context.Context, op string, l Lease, gone bool, ws ...types.TransactWriteItem) error {
 	_, err := d.db.TransactWriteItems(ctx, &dynamodb.TransactWriteItemsInput{
-		TransactItems: []types.TransactWriteItem{d.leaseCheck(l), w}})
+		TransactItems: append([]types.TransactWriteItem{d.leaseCheck(l)}, ws...)})
 	var tc *types.TransactionCanceledException
 	if errors.As(err, &tc) {
-		if gone && len(tc.CancellationReasons) == 2 && aws.ToString(tc.CancellationReasons[0].Code) == "None" {
+		if gone && len(tc.CancellationReasons) == 1+len(ws) && aws.ToString(tc.CancellationReasons[0].Code) == "None" {
 			return nil
 		}
 		return ErrLeaseLost
@@ -46,22 +46,29 @@ func (d *Dynamo) SetCursorFenced(ctx context.Context, n, v string, l Lease) erro
 	if err != nil {
 		return wrapD("set cursor", err)
 	}
-	return d.fencedWrite(ctx, "set cursor", l, types.TransactWriteItem{Put: &types.Put{TableName: &d.table, Item: m}}, false)
+	return d.fencedWrite(ctx, "set cursor", l, false, types.TransactWriteItem{Put: &types.Put{TableName: &d.table, Item: m}})
 }
 
 // UpdateEventFenced is store.Store. Transactions here carry a Put rather than an Update, so
-// the whole item is rewritten, guarded by attribute_exists so a deleted event stays deleted.
+// the whole item is rewritten, guarded by attribute_exists so a deleted event stays deleted;
+// the event's marker follows it (see dynamo_eventmarks.go).
 func (d *Dynamo) UpdateEventFenced(ctx context.Context, e model.Event, l Lease) error {
-	m, err := attributevalue.MarshalMap(eventItem(e))
+	ws, err := d.eventWrites(e, aws.String("attribute_exists(PK)"), nil)
 	if err != nil {
 		return wrapD("update event", err)
 	}
-	return d.fencedWrite(ctx, "update event", l, types.TransactWriteItem{Put: &types.Put{TableName: &d.table, Item: m,
-		ConditionExpression: aws.String("attribute_exists(PK)")}}, true)
+	return d.fencedWrite(ctx, "update event", l, true, ws...)
 }
 
 // DeleteEventFenced is store.Store.
 func (d *Dynamo) DeleteEventFenced(ctx context.Context, id string, l Lease) error {
-	return d.fencedWrite(ctx, "delete event", l, types.TransactWriteItem{Delete: &types.Delete{TableName: &d.table,
-		Key: map[string]types.AttributeValue{"PK": s("EVENT#" + id), "SK": s("META")}}}, false)
+	ws, err := d.deleteEventWrites(ctx, id)
+	if err != nil {
+		return wrapD("delete event", err)
+	}
+	if ws == nil {
+		ws = []types.TransactWriteItem{{Delete: &types.Delete{TableName: &d.table,
+			Key: map[string]types.AttributeValue{"PK": s("EVENT#" + id), "SK": s("META")}}}}
+	}
+	return d.fencedWrite(ctx, "delete event", l, false, ws...)
 }

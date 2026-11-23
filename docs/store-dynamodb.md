@@ -14,6 +14,8 @@ Billing is on-demand. `Store.EnsureTable` creates both.
 | package shards | `PKGCOUNT#<ds>#<line>` | `META` | | |
 | event | `EVENT#<id>` | `META` | `EVENTS` | `<seq, 20 digits>\x1f<id>` |
 | dead event | `EVENT#<id>` | `META` | `EVENTS#dead` | `<dead_at, fixed width>\x1f<id>` |
+| event marker | `REPOEVENTS#<repo>` | `<seq, 20 digits>\x1f<id>` | | |
+| markers built | `EVENTMARKS` | `BUILT` | | |
 | lease | `LEASE#<name>` | `META` | | |
 | repo listing | `REPOS` | `<repo>` | | |
 | repo listing built | `REPOSMETA` | `BUILT` | | |
@@ -30,6 +32,7 @@ Billing is on-demand. `Store.EnsureTable` creates both.
 | Job by key / cursor / repo | GetItem, strongly consistent |
 | Queued webhook events, oldest first (at start, then every 30s to find requeued ones) | Query `gsi1`, `GSI1PK = EVENTS` |
 | Dead events, earliest first (`ripple events list`) | Query `gsi1`, `GSI1PK = EVENTS#dead` |
+| Is there an older live event of this repo? (`HasOlderEvent`) | Query base table, `ConsistentRead`, `PK = REPOEVENTS#<repo>`, `SK < <seq>\x1f<id>`; each marker found is checked against its event with a GetItem, and a marker whose event is gone or dead is deleted |
 | Purge dead events older than `t` | Query `gsi1`, `GSI1PK = EVENTS#dead`, `GSI1SK < ts(t)`, then a delete conditional on `GSI1PK = EVENTS#dead` |
 | Requeue a dead event | strongly consistent GetItem, then a Put conditional on `GSI1PK = EVENTS#dead` that moves it back to `EVENTS` with attempts 0 |
 

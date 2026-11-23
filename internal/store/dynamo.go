@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -57,6 +58,8 @@ type Dynamo struct {
 	pkgShards sync.Map
 	// leaseSkew is the clock-skew margin of lease takeover (see dynamo_lease.go).
 	leaseSkew time.Duration
+	// marksBuilt is set once every live event is known to have its marker (dynamo_eventmarks.go).
+	marksBuilt atomic.Bool
 }
 
 // DynamoOption configures NewDynamo.

@@ -88,11 +88,18 @@ type Server struct {
 	DynamoAdaptiveDependents int
 	// DynamoCounterStripes spreads each package's dependents counter over this many items (1..MaxDynamoShards).
 	DynamoCounterStripes int
-	MinimumReleaseAge    time.Duration
-	OpenPRLimit          int
-	AllowAutomerge       bool
-	Workers              int
-	WorkDir              string
+	// DynamoScanPage and DynamoScanPause pace the whole-table Scans of `ripple dynamodb` and
+	// the drift check: items read per page, and the wait between pages. Zero is unpaced.
+	DynamoScanPage  int
+	DynamoScanPause time.Duration
+	// DynamoDriftCheck, when positive, has the server compare the dependents counters with
+	// their index that often and log the gap. 0 is off.
+	DynamoDriftCheck  time.Duration
+	MinimumReleaseAge time.Duration
+	OpenPRLimit       int
+	AllowAutomerge    bool
+	Workers           int
+	WorkDir           string
 	// MaxFiles and MaxDependencies cap one repo scan; a repo over either is skipped.
 	MaxFiles        int
 	MaxDependencies int
@@ -170,6 +177,9 @@ RIPPLE_DYNAMODB_DEPENDENT_SHARDS  default 1 (1-64): partitions per package's dep
 RIPPLE_DYNAMODB_QUERY_CONCURRENCY default 4 (1-64): shard queries one read runs at once; 1 reads shards in turn
 RIPPLE_DYNAMODB_ADAPTIVE_DEPENDENTS default 0 (off): dependents one partition may hold before a package gets more shards
 RIPPLE_DYNAMODB_COUNTER_STRIPES default 1 (1-64): items each package's dependents counter is spread over; raise for a package imported by very many repos
+RIPPLE_DYNAMODB_SCAN_PAGE     default 0 (unpaced): items one page of a whole-table scan (ripple dynamodb ..., the drift check) reads; set with the pause below
+RIPPLE_DYNAMODB_SCAN_PAUSE_MS default 0: milliseconds to wait between those pages (and between packages), so a scan cannot use all the table's read capacity
+RIPPLE_DYNAMODB_DRIFT_CHECK_INTERVAL default 0 (off): how often the server compares the dependents counters with their index and logs the gap; read only
 RIPPLE_MINIMUM_RELEASE_AGE    default 3d; a repo may only raise it
 RIPPLE_OPEN_PR_LIMIT          default 5; a repo may only lower it
 RIPPLE_ALLOW_AUTOMERGE        default true; false forbids automerge everywhere
@@ -316,6 +326,9 @@ func LoadServer(getenv func(string) string) (*Server, error) {
 		DynamoQueryConcurrency:   shards("RIPPLE_DYNAMODB_QUERY_CONCURRENCY", DefaultDynamoQueryConcurrency),
 		DynamoAdaptiveDependents: num("RIPPLE_DYNAMODB_ADAPTIVE_DEPENDENTS", 0, 0),
 		DynamoCounterStripes:     shards("RIPPLE_DYNAMODB_COUNTER_STRIPES", DefaultDynamoCounterStripes),
+		DynamoScanPage:           num("RIPPLE_DYNAMODB_SCAN_PAGE", 0, 0),
+		DynamoScanPause:          time.Duration(num("RIPPLE_DYNAMODB_SCAN_PAUSE_MS", 0, 0)) * time.Millisecond,
+		DynamoDriftCheck:         dur("RIPPLE_DYNAMODB_DRIFT_CHECK_INTERVAL", "0"),
 		MinimumReleaseAge:        dur("RIPPLE_MINIMUM_RELEASE_AGE", "3d"),
 		OpenPRLimit:              num("RIPPLE_OPEN_PR_LIMIT", 5, 1),
 		AllowAutomerge:           true,
@@ -351,6 +364,9 @@ func LoadServer(getenv func(string) string) (*Server, error) {
 			errs = append(errs, errors.New("RIPPLE_OSV: want true or false"))
 		}
 		s.OSV = b
+	}
+	if s.DynamoDriftCheck > 0 && s.Store != "dynamodb" {
+		errs = append(errs, errors.New("RIPPLE_DYNAMODB_DRIFT_CHECK_INTERVAL needs RIPPLE_STORE=dynamodb"))
 	}
 	if s.OSV {
 		if s.OSVInterval <= 0 {

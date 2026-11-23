@@ -3,7 +3,9 @@ package store
 import (
 	"context"
 	"errors"
+	"math"
 	"sort"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
@@ -26,6 +28,9 @@ func (d *Dynamo) scanItems(ctx context.Context, filter, projection string, names
 	if projection != "" {
 		in.ProjectionExpression = aws.String(projection)
 	}
+	if d.scanPage > 0 {
+		in.Limit = aws.Int32(int32(min(d.scanPage, math.MaxInt32)))
+	}
 	for {
 		out, err := d.db.Scan(ctx, in)
 		if err != nil {
@@ -40,6 +45,24 @@ func (d *Dynamo) scanItems(ctx context.Context, filter, projection string, names
 			return nil
 		}
 		in.ExclusiveStartKey = out.LastEvaluatedKey
+		if err := d.pace(ctx); err != nil {
+			return err
+		}
+	}
+}
+
+// pace waits the configured scan pause, or returns early with ctx's error.
+func (d *Dynamo) pace(ctx context.Context) error {
+	if d.scanPause <= 0 {
+		return ctx.Err()
+	}
+	t := time.NewTimer(d.scanPause)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
 	}
 }
 
@@ -93,7 +116,12 @@ func (d *Dynamo) CheckDependentCounts(ctx context.Context) ([]CountDrift, error)
 		return nil, wrapD("check dependent counts", err)
 	}
 	var out []CountDrift
-	for _, b := range bases {
+	for i, b := range bases {
+		if i > 0 {
+			if err := d.pace(ctx); err != nil {
+				return nil, wrapD("check dependent counts", err)
+			}
+		}
 		idx, err := d.indexedDependents(ctx, b)
 		if err != nil {
 			return nil, wrapD("check dependent counts", err)
@@ -122,6 +150,11 @@ func (d *Dynamo) RecountAllDependents(ctx context.Context) (int, error) {
 		return 0, wrapD("recount dependents", err)
 	}
 	for i, b := range bases {
+		if i > 0 {
+			if err := d.pace(ctx); err != nil {
+				return i, wrapD("recount dependents", err)
+			}
+		}
 		if _, err := d.recountBase(ctx, b); err != nil {
 			return i, wrapD("recount dependents", err)
 		}

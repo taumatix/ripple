@@ -56,6 +56,10 @@ type Dynamo struct {
 	// pkgShards caches each package's recorded shard count for the write path. It only
 	// grows, and a stale (lower) value is safe to write with; reads never use it.
 	pkgShards sync.Map
+	// scanPage and scanPause pace the whole-table Scans of the operator commands (see
+	// WithScanPaging); zero leaves them unpaced.
+	scanPage  int
+	scanPause time.Duration
 	// leaseSkew is the clock-skew margin of lease takeover (see dynamo_lease.go).
 	leaseSkew time.Duration
 	// marksBuilt is set once every live event is known to have its marker (dynamo_eventmarks.go).
@@ -77,6 +81,15 @@ func WithDependentShards(n int) DynamoOption { return func(d *Dynamo) { d.depSha
 // The merged result does not depend on it.
 func WithQueryConcurrency(n int) DynamoOption {
 	return func(d *Dynamo) { d.concurrency = clampShards(n) }
+}
+
+// WithScanPaging paces the whole-table Scans of CheckDependentCounts, RecountAllDependents
+// and BackfillFailedJobs so they cannot starve live traffic of the table's read capacity:
+// each Scan page reads at most pageSize items (before the filter) and the next page is
+// requested pause later; a recount also waits pause between packages. Zero values leave
+// that half unpaced. It never changes what the commands find.
+func WithScanPaging(pageSize int, pause time.Duration) DynamoOption {
+	return func(d *Dynamo) { d.scanPage, d.scanPause = max(pageSize, 0), max(pause, 0) }
 }
 
 // WithAdaptiveDependents turns on per-package dependent sharding: a package's dependents

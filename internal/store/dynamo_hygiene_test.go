@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
@@ -150,6 +151,44 @@ func TestDynamoBackfillFailedJobs(t *testing.T) {
 		}
 		if n, err := d.BackfillFailedJobs(ctx); err != nil || n != 0 {
 			t.Fatalf("second BackfillFailedJobs = %d, %v, want 0", n, err)
+		}
+	})
+}
+
+// With paging on, the commands read the table a page at a time with a pause between pages
+// and find exactly what they find unpaced; a cancelled context ends the wait.
+func TestDynamoHygieneScansArePaced(t *testing.T) {
+	eachDynamo(t, func(t *testing.T, db *dynamodb.Client, fake *dynamofake.Fake) {
+		ctx := context.Background()
+		table := "ripple_test_" + suffix()
+		seedLegacy(t, db, table, 12)
+		const pause = 40 * time.Millisecond
+		paced := newDynamoTable(t, db, table, store.WithScanPaging(5, pause))
+		var before int
+		if fake != nil {
+			before = fake.Calls("Scan")
+		}
+		start := time.Now()
+		drift, err := paced.CheckDependentCounts(ctx)
+		took := time.Since(start)
+		if err != nil || len(drift) != 1 || drift[0].Indexed != 12 {
+			t.Fatalf("paced check = %+v, %v, want the one package with 12 indexed", drift, err)
+		}
+		if took < 2*pause { // 12 dependents and their index entries span at least three pages of 5
+			t.Fatalf("paced check took %s, want at least %s", took, 2*pause)
+		}
+		if fake != nil {
+			if pages := fake.Calls("Scan") - before; pages < 3 {
+				t.Fatalf("scan pages = %d, want at least 3 of 5 items", pages)
+			}
+		}
+		cctx, cancel := context.WithTimeout(ctx, pause/2)
+		defer cancel()
+		if _, err := paced.CheckDependentCounts(cctx); err == nil {
+			t.Fatal("a cancelled context did not end a paced scan")
+		}
+		if _, err := paced.CheckDependentCounts(ctx); err != nil {
+			t.Fatalf("the check after a cancelled one: %v", err)
 		}
 	})
 }

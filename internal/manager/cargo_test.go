@@ -66,7 +66,7 @@ func TestCargoExtract(t *testing.T) {
 		}
 		got = append(got, d.Package+"@"+d.Version)
 	}
-	want := "serde@1.0.100 tokio@~1.2.3 real-name@=4.5.6 pretty_assertions@^1.4.0 cc@1.0.79 libc@0.2.150 anyhow@1.0.70"
+	want := "serde@1.0.100 tokio@~1.2.3 short@1.2 real-name@=4.5.6 pretty_assertions@^1.4.0 cc@1.0.79 libc@0.2.150 anyhow@1.0.70"
 	if strings.Join(got, " ") != want {
 		t.Errorf("got  %v\nwant %s", got, want)
 	}
@@ -79,6 +79,7 @@ func TestCargoApplyKeepsEverythingElse(t *testing.T) {
 		{"tokio", "~1.2.3", "1.2.9", `version = "~1.2.3"`, `version = "~1.2.9"`},
 		{"real-name", "=4.5.6", "4.6.0", `version = "=4.5.6"`, `version = "=4.6.0"`},
 		{"cc", "1.0.79", "1.0.99", `version = "1.0.79"`, `version = "1.0.99"`},
+		{"short", "1.2", "1.7.4", `short = "1.2"`, `short = "1.7"`},
 		{"libc", "0.2.150", "0.2.160", `libc = "0.2.150"`, `libc = "0.2.160"`},
 		{"anyhow", "1.0.70", "1.0.80", `anyhow = "1.0.70"`, `anyhow = "1.0.80"`},
 	}
@@ -117,5 +118,43 @@ func TestCargoApplyStaleAndRefusals(t *testing.T) {
 	}
 	if _, err := c.Apply([]byte(cargoToml), model.Dependency{File: "Cargo.toml", Package: "serde", Version: "1.0.100"}, "other", "1.0.200"); !errors.Is(err, ErrUnsupported) {
 		t.Errorf("rename err = %v", err)
+	}
+}
+
+func TestCargoPartialRequirementsKeepTheirPrecision(t *testing.T) {
+	c := Cargo{Dir: "/"}
+	for _, tc := range []struct{ spec, to, want string }{
+		{"1", "2.3.4", "2"},
+		{"^1.2", "1.9.1", "^1.9"},
+		{"~1.2", "1.3.0", "~1.3"},
+		{"=0.2", "0.3.5", "=0.3"},
+		{"0.2.3", "0.3.0", "0.3.0"},
+	} {
+		in := "[dependencies]\nfoo = \"" + tc.spec + "\"\n"
+		out, err := c.Apply([]byte(in), model.Dependency{File: "Cargo.toml", Package: "foo", Version: tc.spec}, "", tc.to)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.spec, err)
+		}
+		if want := "[dependencies]\nfoo = \"" + tc.want + "\"\n"; string(out) != want {
+			t.Errorf("%s -> %s: got %q, want %q", tc.spec, tc.to, out, want)
+		}
+	}
+}
+
+func TestCargoReqBreaking(t *testing.T) {
+	for spec, want := range map[string]int{
+		"1.2.3": 0, "^1": 0, "1.2": 0, "0": 0, "~1": 0, "~1.2.3": 0, "=1.2.3": 0,
+		"0.2.3": 1, "^0.2": 1, "~0.2.3": 1, "=0.2": 1, "0.0": 1,
+		"0.0.3": 2, "~0.0.3": 2, "0.0.0": 2,
+	} {
+		r, ok := ParseCargoReq(spec)
+		if !ok || r.Breaking() != want {
+			t.Errorf("%s: breaking position %d (parsed %v), want %d", spec, r.Breaking(), ok, want)
+		}
+	}
+	for _, spec := range []string{"*", "1.*", ">=1.2", ">=1, <2", "1.2.3-rc.1", "1.2.3.4", ""} {
+		if _, ok := ParseCargoReq(spec); ok {
+			t.Errorf("%q must not parse", spec)
+		}
 	}
 }

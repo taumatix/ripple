@@ -21,15 +21,22 @@ one-line inline table `name = { version = "req", ... }`, or as a `[dependencies.
 | Requirement | Handling |
 |---|---|
 | `1.2.3`, `=1.2.3`, `^1.2.3`, `~1.2.3` | moved to a newer release; the operator is kept (`~1.2.3` -> `~1.2.9`) |
-| `*`, `1.*`, `1.2`, `>=1.2`, `>=1, <2`, prereleases | ignored: not a requirement ripple reads with certainty |
+| `1`, `1.2`, `^1.2`, `~1.2`, `=0.2` | moved at the precision written (`1.2` and 1.7.4 give `1.7`); not moved when it already names the new version at that precision (`1` stays `1` for 1.9.0, `1.2` for 1.2.9) |
+| `*`, `1.*`, `>=1.2`, `>=1, <2`, prereleases | ignored: not a requirement ripple reads with certainty |
 | a `path`, `git` or `registry` key, `workspace = true` | ignored (a local or other-registry crate is not on crates.io; an inherited one has no version of its own) |
 | multi-line inline tables, dotted keys (`foo.version = "1"`) | ignored |
+| `name = { workspace = true }` in a member | has no version of its own; the root's `[workspace.dependencies]` entry is the one that moves, for every member |
 
 A bumped requirement is raised to the new version even when it already allowed it (`1.0.100` with 1.0.200 published
 becomes `1.0.200`): without a lockfile refresh that is the only change a PR can carry. Only the requirement's string is
 edited; layout, comments and key order are kept byte for byte. One crate moves per PR, on branch
-`ripple/cargo/<crate>-<version>`. For a `0.x` crate cargo treats a minor bump as breaking, but ripple classifies by the
-version numbers (0.2 -> 0.3 is "minor"), so `ignore` and automerge rules see it as one.
+`ripple/cargo/<crate>-<version>`.
+
+An update's type follows cargo's compatibility rule, which puts the break at the leftmost nonzero number the
+requirement writes: `1.2.3` breaks on the major, `0.2.3` on the minor (0.2.3 -> 0.3.0 is "major"), `0.0.3` on the patch
+(0.0.3 -> 0.0.4 is "major"). The operator does not change that. So `ignore`, cooldown and automerge rules see a 0.x
+minor bump as the breaking change it is. For each dependency ripple considers the newest release of each type and takes
+the newest one the repo's rules allow: with majors ignored, `0.2.3` still gets 0.2.9 while 0.3.0 exists.
 
 ## Which version
 

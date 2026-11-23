@@ -1,0 +1,78 @@
+<!-- Source: https://scm-manager.org/plugins/scm-review-plugin/docs/3.17.x/en/details-page/ ; fetched 2026-11-23 ; text extracted from the page's HTML -->
+
+# Details Page
+## The details page is divided into two parts. The upper part shows all information and options for the pull request. The lower part shows the changes of the pull request in different tabs and it offers the possibility to leave comments.
+
+### 
+Comments
+The "Comments" tab contains all comments and tasks that were created for the pull request.
+
+### 
+Commits
+The "Commits" tab shows all commits from the source branch starting from where both branches differ.
+
+### 
+Diff
+The "Diff" tab shows the changes between the source branch and the root of source and target branches on a file level.
+On the left there is a files tree that shows every file that has been changed.
+To jump to a specific file it is possible to select this file in the tree.
+
+For each file, you will find multiple buttons for various options, like
+
+- zoom the diff
+
+- show or hide whitespace characters
+
+- mark the file as reviewed (this is for your personal workflow only and has no further effect; if a file marked as
+reviewed is changed, the mark will be removed)
+
+- create a comment on file level
+
+- jump to the source or the target file
+
+- a button indicating a merge conflict for this file, if there is one
+
+On the left side just above the diff view you are able to see new, modified, deleted, renamed and copied files summarized
+
+On the right side, just opposite of the summarized files there is a coghweel button with the following options:
+
+- The first checkbox show and hide the whitespace changes.
+
+- The second checkbox can collapse all changesets.
+
+There are three radio buttons to change the layout in the changeset:
+
+- With the first button, only the diffs are displayed.
+
+- The second button shows the diffs and the file tree.
+
+- With the last button, only the file tree is displayed.
+
+The changes are indicated based on the established format:
+
+- White: no changes
+
+- Green: Line added
+
+- Red: Line deleted
+
+- Red + green: Line changed
+
+### 
+Conflicts
+In the case that there are merge conflicts in a pull request, there is the additional tab "Conflicts".  This tab shows the merge conflicts between the source and the target branch.
+
+Above the conflict itself is a hint on how the conflict could be resolved.
+
+The conflict is shown in the Git-conflict format within a diff in yellow. The head of the conflict is highlighted with a tag that indicates where the conflict originated.
+
+These tags are available:
+
+- Conflict: The file was modified in both branches.
+
+- Deleted in target: The file was changed in the source branch and deleted in the target branch.
+
+- Deleted in source: The file was deleted in the source branch and changed in the target branch.
+
+- Added in source and target: The file was added with the same name and path, but with different content in both branches.
+

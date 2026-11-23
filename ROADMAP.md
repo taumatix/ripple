@@ -84,8 +84,13 @@ auth model, rate limits); the notes below are what I expect, **unverified** unti
 17. **Gerrit.** Changes, not pull requests: push to `refs/for/<branch>`, one change per update with a
     stable Change-Id so a re-push amends it, labels and submit rules instead of auto-merge. Events from the webhooks
     plugin or `stream-events`; the project listing and ACLs are per instance.
-18. **SCM-Manager.** Pull requests and webhooks via its REST API and the webhook plugin
-    (<https://docs.renovatebot.com/modules/platform/scm-manager/> is Renovate's reference for what it needs from the host).
+18. **SCM-Manager against a real instance.** The host shipped from vendored docs, the plugins' source and a
+    fake only (see [docs/platform-scmmanager.md](docs/platform-scmmanager.md)). Verify on a real SCM-Manager 3.x
+    with the Review and Webhook plugins: `Authorization: Bearer <api key>` on the REST API, git basic auth with
+    an API key, the webhook plugin's custom-header table and `branches` in its changesets, the 201 `Location`,
+    modifications of a merge commit, `shouldDeleteSourceBranch`, and what a rate limit looks like if any.
+    Then: create the webhook through the plugin's REST API instead of by hand (not yet read), and confirm one
+    global webhook with `${repository.namespace}` in the URL works.
 
 Everything else:
 

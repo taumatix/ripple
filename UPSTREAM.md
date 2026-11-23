@@ -91,6 +91,19 @@ upstream:
     events: [EventBridge referenceCreated and referenceUpdated via an SNS HTTPS subscription, "SNS signature SignatureVersion 1 (SHA1) and 2 (SHA256), RSA PKCS1v15"]
     unverified: "everything against real AWS: signature acceptance, cn and eusc endpoints, SNS certificate chain, title limit (100 or 150), EventBridge input shape through SNS, clock-skew rejection; the fake is written from the docs, not recorded"
     checked: 2026-11-23
+  - name: scm-manager
+    kind: http-api
+    reference: https://scm-manager.org/docs/3.12.x/en/
+    docs: https://scm-manager.org/plugins/scm-review-plugin/docs/3.17.x/en/
+    vendored: docs/vendor/scm-manager/
+    api-version: "v2 (vnd.scmm media types, ;v=2)"
+    docs-pinned: "SCM-Manager docs 3.12.x, scm-review-plugin 3.17.x (source d833d89b), scm-webhook-plugin 3.2.x (source 55d3605e), scm-manager develop b14c0fb2"
+    used: [GET /api/v2/repositories, GET /api/v2/config/git/{ns}/{name}/default-branch, GET and POST /api/v2/pull-requests/{ns}/{name} (review plugin >= 3.11.0, status OPEN or DRAFT), GET /api/v2/repositories/{ns}/{name}/modifications/{revision}, git over HTTP at /repo/{ns}/{name}]
+    webhooks: ["webhook plugin, JSON {changeset: [...]} per push; no signature exists, ripple authenticates with a shared secret in the custom header X-Ripple-Webhook-Secret, and the repository comes from ?namespace=&name= in the URL"]
+    auth: "API key as Authorization: Bearer on the API and as the git basic-auth password (username ignored)"
+    capabilities: "no auto-merge (not implemented, reported absent), drafts yes, rate limit undocumented"
+    unverified: "everything: no real SCM-Manager was available. Bearer on the REST API, git basic auth, webhook header support and changeset branches in the deployed plugin, the 201 Location, merge-commit modifications and the 429 answer are from docs and source; the fake in internal/platform/scmmanager is written from them, not recorded"
+    checked: 2026-11-23
 ```
 
 Not pinned, because they are not wire contracts: `git` (any version with `GIT_CONFIG_COUNT`,

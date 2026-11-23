@@ -278,8 +278,7 @@ Everything else:
     (guard against dependency confusion); supporting it needs credentials and a registry setting per scope. Nothing here has run
     against registry.npmjs.org: the client and fake come from the vendored excerpts (scoped-name encoding, 404 for private
     packages, the `deprecated` shape, a `latest` tag that exists are assumed; see UPSTREAM.md). Also: `npm:packages` is one
-    read-modify-write cursor (see 151), versions carry no publication date (the full document has `time` but is much larger),
-    and the PR footer still says "module index" (see 152).
+    read-modify-write cursor (see 151), versions carry no publication date (the full document has `time` but is much larger).
 150. **Replicas: a consistent older-event check on DynamoDB.** Events are now numbered by the store (shipped), but
     `HasOlderEvent` on DynamoDB still reads the eventually consistent `gsi1`, so an older event written a moment ago can be
     missed (DynamoDB refuses `ConsistentRead` on a GSI); Postgres and the memory store have no such window. Write a base-table
@@ -292,8 +291,6 @@ Everything else:
     read-modify-write cursor: replicas can still lose each other's additions until the next scan of a repo that uses the
     package. Actions now prune a package no repo uses (entry 96); the rest needs a per-package key and a store method
     listing cursors by prefix (`internal/store`, all three backends), then `notePackages` moves to it.
-152. **PR footer for Docker and npm.** Actions PRs now say "a new tag appeared upstream", but Docker and npm PRs still use the
-    Go module footer ("appeared in the module index"); `footerSource` in `internal/engine/run.go` needs a case each.
 153. **Actions: verify against real GitHub and a real GHES.** The workflows-permission refusal text, the upstream fallback
     (`RIPPLE_ACTIONS_UPSTREAM_URL`, 404 on the host then the configured upstream) and superseding of stale actions PRs were
     written against the fake; none ran against github.com or a GHES (see 61). The supersede sweep and closing of beaten PRs

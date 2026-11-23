@@ -697,22 +697,32 @@ func releaseNotes(pkg, version string) string {
 	return fmt.Sprintf("https://pkg.go.dev/%s@%s", pkg, version)
 }
 
-// footerSource says where the new version was seen: the Go module index, unless the PR
-// updates GitHub Actions, whose versions are tags of the action's repository.
+// footerSource says where the new version was seen. Each manager says what is true
+// of its own datasource; a PR that mixes datasources says only that it came from
+// upstream.
 func footerSource(items []item) string {
-	actions := 0
-	for _, it := range items {
-		if it.job.Datasource == model.DatasourceGitHubTags {
-			actions++
+	phrase := ""
+	for i, it := range items {
+		p := datasourceFooter(it.job.Datasource)
+		if i > 0 && p != phrase {
+			return "a new version appeared upstream"
 		}
+		phrase = p
 	}
-	switch {
-	case actions == 0:
-		return "the new version appeared in the module index"
-	case actions == len(items):
+	return phrase
+}
+
+// datasourceFooter is the footer phrase for a PR made of one datasource.
+func datasourceFooter(datasource string) string {
+	switch datasource {
+	case model.DatasourceGitHubTags:
 		return "a new tag appeared upstream"
+	case model.DatasourceDocker:
+		return "a new tag appeared on the registry"
+	case model.DatasourceNpm:
+		return "a new version was published to the npm registry"
 	}
-	return "a new version appeared upstream"
+	return "the new version appeared in the module index"
 }
 
 func describe(p *prPlan, items []item) (title, body string) {

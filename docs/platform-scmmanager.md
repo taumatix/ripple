@@ -57,6 +57,18 @@ call (Renovate's page says the same). `Client` therefore does not implement `pla
 `automerge` in a repository's config opens the pull request and leaves the merge to a human. Merging at
 once would skip the checks.
 
+## Superseded pull requests
+
+Not implemented: when a newer ripple pull request replaces a stale one, the stale one stays open on
+SCM-Manager and ripple does not comment on it. The review plugin has a reject endpoint
+(`POST .../pull-requests/{id}/reject`) and comment and history sub-resources, but they exist only
+in the plugin's source: neither the plugin documentation nor `docs/vendor/scm-manager/` describes
+their request or response shapes. There is no documented, reliable read for "a person touched it":
+`lastModified` moves on system updates too, the history and comment payloads are unverified, and
+nothing reports a title or description edit. Closing on a guess could discard someone's review, so
+ripple closes nothing here. A source note is in
+`docs/vendor/scm-manager/review-plugin-reject-source-note.md`.
+
 ## Unverified
 
 Written from SCM-Manager's own documents and the plugins' public source (`docs/vendor/scm-manager/`,

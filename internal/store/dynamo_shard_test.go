@@ -82,7 +82,7 @@ func TestMergeDueJobsOrdersAcrossShardsAndLimits(t *testing.T) {
 }
 
 func TestConfigShardLimitsMatchStore(t *testing.T) {
-	if config.DefaultDynamoJobShards != DefaultJobShards || config.DefaultDynamoDependentShards != DefaultDependentShards || config.MaxDynamoShards != MaxShards {
+	if config.DefaultDynamoJobShards != DefaultJobShards || config.DefaultDynamoDependentShards != DefaultDependentShards || config.MaxDynamoShards != MaxShards || config.DefaultDynamoQueryConcurrency != DefaultQueryConcurrency {
 		t.Fatal("internal/config shard constants drifted from internal/store")
 	}
 }

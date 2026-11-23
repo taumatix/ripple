@@ -125,14 +125,6 @@ Everything else:
     repository's build can reach anything that network can. Ship a recipe, then a built-in option, that creates an
     internal network holding only a proxy sidecar; also run `git` and `go` together in one image with a
     documented, pinned Go version so `GOTOOLCHAIN=local` always satisfies the repo's `go` line.
-40. **Adaptive dependent sharding.** `RIPPLE_DYNAMODB_DEPENDENT_SHARDS` applies to every package, so
-    each `ListDependents` costs that many queries. Record a per-package hot flag (a counter on the release
-    item) and shard only the packages that cross a threshold, keeping the default at one query.
-41. **Run the shard queries concurrently.** `ListDueJobs` and `ListDependents` query their shards one after
-    another; at 64 shards that is latency worth removing.
-42. **A DynamoDB test double that runs without a container.** The Dynamo store is exercised only against
-    DynamoDB Local in CI; an in-process fake of the few operations used would let the sharding code run in
-    every local `go test`.
 43. **Verify a Go bump with the Go it names.** Verification runs with the server's installed Go
     (`GOTOOLCHAIN=local`), so a directive above it opens a draft and a toolchain bump is checked
     against a different Go. Offer a toolchain image per supported minor; CI stays the real check until then.
@@ -219,3 +211,19 @@ Everything else:
     dashboard until its next write, and a crash between the job write and the copy write leaves a stale copy
     until the next one. Add a one-off backfill from the job index and reconcile on read. Postgres and DynamoDB
     paths are covered only by CI.
+70. **Backfill and recount the adaptive dependent counters.** `RIPPLE_DYNAMODB_ADAPTIVE_DEPENDENTS` counts only the
+    dependents a scan adds or removes after it is turned on, so a package that already had many is under-counted
+    until they are rewritten, and the count drifts after a crash between the item writes and the counter ADD or
+    while the option is off. Add a one-off recount from the index (a Query per shard with `Select=COUNT`) that sets
+    `Deps` and raises `Shards`, and move items to their hashed shard instead of waiting for their next scan.
+71. **The adaptive counter is itself a hot item.** Every dependent change of a package ADDs to one
+    `PKGCOUNT#<ds>#<line>` item, which has the same 1000 writes/s limit the sharding exists to avoid. Count in
+    batches per scan (already one ADD per package per scan) and, if that still throttles, stripe the counter or
+    sample it.
+72. **Close the DynamoDB fake's gaps.** `internal/store/dynamofake` follows the documented Query, BatchWriteItem,
+    conditional write and UpdateItem rules but is strongly consistent (a GSI is never stale), never throttles
+    (`ProvisionedThroughputExceededException`, partial `UnprocessedItems` other than the test hook), has no
+    Scan, TransactWriteItems or BatchGetItem, does not reject reserved words, and approximates item and page
+    size. Add what the store starts to use as it does, a stale-GSI mode to test the eventual-consistency
+    paths, and a CI step that runs the whole suite against both and diffs the results, since DynamoDB Local
+    stays the source of truth.

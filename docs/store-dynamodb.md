@@ -11,6 +11,7 @@ Billing is on-demand. `Store.EnsureTable` creates both.
 | job | `JOB#<key>` | `META` | `JOBS#pending[#<shard>]` (only while pending) | `<not_before, fixed width>\x1f<key>` |
 | cursor | `CURSOR#<name>` | `META` | | |
 | shard marks | `CONFIG#shards` | `META` | | |
+| package shards | `PKGCOUNT#<ds>#<line>` | `META` | | |
 | event | `EVENT#<id>` | `META` | `EVENTS` | `<seq, 20 digits>\x1f<id>` |
 | dead event | `EVENT#<id>` | `META` | `EVENTS#dead` | `<dead_at, fixed width>\x1f<id>` |
 
@@ -59,7 +60,7 @@ Billing is on-demand. `Store.EnsureTable` creates both.
   - `RIPPLE_DYNAMODB_DEPENDENT_SHARDS` (default 1, 1 to 64). Every `ListDependents` costs that many
     Queries, for every package, popular or not, because the writer cannot know which will be.
     The default keeps today's single Query; raise it only when one package's dependents throttle
-    (a partition serves about 1000 writes/s and 3000 reads/s). Per-package adaptive sharding is on the roadmap.
+    (a partition serves about 1000 writes/s and 3000 reads/s). Or let a package earn its shards, below.
   - A read never costs more than `MaxShards` (64) Queries, and none scans.
   - Releases (`PKG#<ds>#<pkg>`, base table) are not sharded: one item is written per release.
   - **Existing tables need no migration.** Shard 0 is the old key (`JOBS#pending`, `PKG#<ds>#<line>`),
@@ -70,9 +71,56 @@ Billing is on-demand. `Store.EnsureTable` creates both.
     it never strands items in shards that are no longer read, it only stops using the shard count
     you asked for. Shrinking for good means dropping the `CONFIG#shards` item after the queue has
     drained and dependencies have been rescanned.
+  - **Adaptive dependent sharding** (`RIPPLE_DYNAMODB_ADAPTIVE_DEPENDENTS=<k>`, default off). A package
+    starts with one partition and its shard count doubles each time it has more than `k` dependents per
+    shard: `n = 1; while count > k*n { n *= 2 }`, at most 64. `ReplaceDependencies` and `DeleteRepo` move a
+    counter (`Deps` on `PKGCOUNT#<ds>#<line>`) with `ADD` and record the new shard count (`Shards`, only ever
+    raised) in the same item. A package's shard count is `max(DEPENDENT_SHARDS, Shards)`; `ListDependents`
+    reads it fresh, writers may use a cached, possibly lower, value. `CONFIG#shards` also records that
+    adaptive sharding was ever on (`Adaptive`), so with the option off again reads and writes still consult
+    the package item.
+    - **Growing never loses or duplicates a read.** A dependency has one `GSI1PK`, so it is in one shard;
+      items written under a lower count are in a shard below the new count, which reads cover; a rewrite
+      replaces the item in place. Shard 0 is always the legacy key. `TestDynamoAdaptiveDependentsMigration`
+      walks a legacy table through 1, 2, 4 and 8 shards and turns the option off, checking every dependent
+      is listed once at each step.
+    - **The counter only steers growth.** It is not transactional with the item writes, so a crash can leave it
+      off by one; dependents that existed before the option was turned on are not counted until rewritten, and
+      the counter is a single hot item per package. Roadmap entries 70 and 71 cover recount and striping.
+      None of this affects what a read returns.
+    - A small package keeps one Query per `ListDependents`, plus one strongly consistent GetItem for its shard
+      record.
+  - **Concurrent shard queries.** A read runs its shard Queries at most `RIPPLE_DYNAMODB_QUERY_CONCURRENCY`
+    (default 4, 1 is sequential) at a time. Results are merged by shard index and then sorted, so the order
+    is the same whatever finishes first (`TestDynamoConcurrentReadsMatchSequential`); the first error, or a
+    cancelled context, cancels the Queries still running and the read returns without waiting out the rest.
   - The test `TestDynamoPendingQueueIsSpread` counts items per index partition and fails if one holds
     more than 1.5x its share.
 - **Sparse index.** Only dependency and pending-job items carry `GSI1` attributes, so the index
   stays small and finished jobs drop out of it.
 - **Releases are stored only for packages that have dependents.** The feed carries every
   module; keeping all of them would make the table a mirror of the proxy.
+
+## Testing: the in-process fake and DynamoDB Local
+
+`internal/store/dynamofake` is an HTTP server speaking DynamoDB's JSON 1.0 protocol that the real AWS SDK
+client talks to, so the store runs unchanged. It implements what the store uses: CreateTable, DescribeTable,
+DeleteTable, PutItem, GetItem, DeleteItem, UpdateItem (`SET`, `ADD`), BatchWriteItem, Query on the table and on
+`gsi1`, with key-condition, filter, condition and projection expressions. It is written from the API
+documentation, and follows the rules the store depends on: `Limit` counts items before the filter; a page
+stops at 1 MB; `LastEvaluatedKey` is returned whenever `Limit` stopped the read, even when nothing remains;
+`ConsistentRead` on a GSI is rejected; BatchWriteItem takes at most 25 requests, no duplicate keys, no
+conditions and can return `UnprocessedItems`; an item is at most 400 KB; unused expression names and values
+and unsupported syntax are `ValidationException`s; sort order is by UTF-8 bytes; a GSI is sparse.
+
+Every Dynamo store test runs twice, as the subtests `fake` and `dynamodb-local`. The fake always runs, so a
+plain `go test ./...` covers the sharding, concurrency and adaptive code. DynamoDB Local runs when
+`RIPPLE_TEST_DYNAMODB_ENDPOINT` is set (`make test-services`, and CI, which fails on a skip) and is the
+source of truth: a fake that passes proves the code agrees with the documentation as read, not with the
+service.
+
+Where the fake differs from DynamoDB: it is strongly consistent (a GSI is never stale, so the eventual-consistency
+paths are not exercised); it never throttles; the only `UnprocessedItems` it returns are the ones the test hook
+`DropOneFromNextBatch` asks for; it has no Scan, TransactWriteItems or BatchGetItem and rejects other
+operations; it does not reject reserved words; item and page sizes are an approximation of the documented
+accounting. Roadmap entry 72 tracks these.

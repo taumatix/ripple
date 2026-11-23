@@ -152,6 +152,22 @@ func TestServerDynamoShards(t *testing.T) {
 	}
 }
 
+func TestServerDynamoConcurrencyAndAdaptive(t *testing.T) {
+	s, err := LoadServer(env(base))
+	if err != nil || s.DynamoQueryConcurrency != 4 || s.DynamoAdaptiveDependents != 0 {
+		t.Fatalf("defaults: %+v %v", s, err)
+	}
+	s, err = LoadServer(env(with("RIPPLE_DYNAMODB_QUERY_CONCURRENCY", "1", "RIPPLE_DYNAMODB_ADAPTIVE_DEPENDENTS", "5000")))
+	if err != nil || s.DynamoQueryConcurrency != 1 || s.DynamoAdaptiveDependents != 5000 {
+		t.Fatalf("set: %+v %v", s, err)
+	}
+	for _, kv := range [][2]string{{"RIPPLE_DYNAMODB_QUERY_CONCURRENCY", "0"}, {"RIPPLE_DYNAMODB_QUERY_CONCURRENCY", "65"}, {"RIPPLE_DYNAMODB_ADAPTIVE_DEPENDENTS", "-1"}, {"RIPPLE_DYNAMODB_ADAPTIVE_DEPENDENTS", "x"}} {
+		if _, err := LoadServer(env(with(kv[0], kv[1]))); err == nil {
+			t.Errorf("%s=%s accepted", kv[0], kv[1])
+		}
+	}
+}
+
 func TestServerOSV(t *testing.T) {
 	s, err := LoadServer(env(base))
 	if err != nil || s.OSV || s.OSVInterval != 10*time.Minute || s.OSVMaxFetch != 100 || s.OSVURL != "https://api.osv.dev" {

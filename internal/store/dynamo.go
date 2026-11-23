@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -26,7 +27,8 @@ import (
 //	release     PK=PKG#<ds>#<pkg>     SK=REL#<version>                  (no GSI attributes)
 //	job         PK=JOB#<key>          SK=META    GSI1PK=JOBS#pending[#<shard>] (only while pending)  GSI1SK=<not_before fixed-width>\x1f<key>
 //	open job    PK=REPO#<repo>        SK=OPENJOB#<key>  a copy of the job, present only while it is pending or failed (no GSI attributes)
-//	shard marks PK=CONFIG#shards      SK=META    (high-water mark of both shard counts)
+//	shard marks PK=CONFIG#shards      SK=META    (high-water mark of both shard counts, and whether adaptive sharding was ever on)
+//	pkg shards  PK=PKGCOUNT#<ds>#<line> SK=META  Deps (approximate dependent count), Shards (high-water, adaptive sharding only)
 //	cursor      PK=CURSOR#<name>      SK=META
 //
 // Reverse lookup (package -> repos) is a Query on gsi1 with GSI1PK=PKG#<ds>#<pkg>.
@@ -42,6 +44,16 @@ type Dynamo struct {
 	// mark recorded in the table, so a restart with smaller settings still reads every
 	// shard that holds items. See dynamo_shard.go.
 	jobShards, depShards int
+	// concurrency bounds how many shard Queries one read runs at once (1 = sequential).
+	concurrency int
+	// adaptive is the dependents-per-shard threshold (0 = adaptive sharding off).
+	// adaptiveSeen is set once the table has ever been written with it on, after which
+	// reads and writes consult the per-package shard record even if the option is off.
+	adaptive     int
+	adaptiveSeen bool
+	// pkgShards caches each package's recorded shard count for the write path. It only
+	// grows, and a stale (lower) value is safe to write with; reads never use it.
+	pkgShards sync.Map
 }
 
 // DynamoOption configures NewDynamo.
@@ -54,6 +66,22 @@ func WithJobShards(n int) DynamoOption { return func(d *Dynamo) { d.jobShards = 
 // (1..MaxShards, default DefaultDependentShards). Every ListDependents costs this many Queries.
 func WithDependentShards(n int) DynamoOption { return func(d *Dynamo) { d.depShards = clampShards(n) } }
 
+// WithQueryConcurrency bounds how many shard Queries one read runs at once
+// (1..MaxShards, default DefaultQueryConcurrency; 1 reads shards one after another).
+// The merged result does not depend on it.
+func WithQueryConcurrency(n int) DynamoOption {
+	return func(d *Dynamo) { d.concurrency = clampShards(n) }
+}
+
+// WithAdaptiveDependents turns on per-package dependent sharding: a package's dependents
+// move to more GSI partitions as their number grows, so the default stays one partition
+// per package and only a hot package pays for fan-out. perShard is how many dependents one
+// partition may hold before the package's shard count doubles (0 leaves it off). See
+// dynamo_shard.go for the rule.
+func WithAdaptiveDependents(perShard int) DynamoOption {
+	return func(d *Dynamo) { d.adaptive = max(perShard, 0) }
+}
+
 const (
 	gsi1 = "gsi1"
 	sep  = "\x1f"
@@ -61,7 +89,7 @@ const (
 )
 
 func NewDynamo(db *dynamodb.Client, table string, opts ...DynamoOption) *Dynamo {
-	d := &Dynamo{db: db, table: table, jobShards: DefaultJobShards, depShards: DefaultDependentShards}
+	d := &Dynamo{db: db, table: table, jobShards: DefaultJobShards, depShards: DefaultDependentShards, concurrency: DefaultQueryConcurrency}
 	for _, o := range opts {
 		o(d)
 	}
@@ -84,6 +112,7 @@ func (d *Dynamo) reconcileShards(ctx context.Context) error {
 	var a struct {
 		item
 		Jobs, Dependents int
+		Adaptive         int
 	}
 	ok, err := d.get(ctx, "CONFIG#shards", "META", &a)
 	if err != nil {
@@ -92,21 +121,28 @@ func (d *Dynamo) reconcileShards(ctx context.Context) error {
 	if ok {
 		d.jobShards, d.depShards = max(d.jobShards, clampShards(a.Jobs)), max(d.depShards, clampShards(a.Dependents))
 	}
-	if ok && a.Jobs >= d.jobShards && a.Dependents >= d.depShards {
+	d.adaptiveSeen = d.adaptiveSeen || d.adaptive > 0 || (ok && a.Adaptive > 0)
+	adaptive := 0
+	if d.adaptiveSeen {
+		adaptive = 1
+	}
+	if ok && a.Jobs >= d.jobShards && a.Dependents >= d.depShards && a.Adaptive >= adaptive {
 		return nil
 	}
 	m, err := attributevalue.MarshalMap(struct {
 		item
 		Jobs, Dependents int
-	}{item{PK: "CONFIG#shards", SK: "META"}, d.jobShards, d.depShards})
+		Adaptive         int
+	}{item{PK: "CONFIG#shards", SK: "META"}, d.jobShards, d.depShards, adaptive})
 	if err != nil {
 		return err
 	}
 	_, err = d.db.PutItem(ctx, &dynamodb.PutItemInput{
 		TableName: &d.table, Item: m,
-		ConditionExpression:      aws.String("attribute_not_exists(PK) OR (#j <= :j AND #d <= :d)"),
-		ExpressionAttributeNames: map[string]string{"#j": "Jobs", "#d": "Dependents"},
+		ConditionExpression:      aws.String("attribute_not_exists(PK) OR (#j <= :j AND #d <= :d AND (attribute_not_exists(#a) OR #a <= :a))"),
+		ExpressionAttributeNames: map[string]string{"#j": "Jobs", "#d": "Dependents", "#a": "Adaptive"},
 		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":a": &types.AttributeValueMemberN{Value: strconv.Itoa(adaptive)},
 			":j": &types.AttributeValueMemberN{Value: strconv.Itoa(d.jobShards)}, ":d": &types.AttributeValueMemberN{Value: strconv.Itoa(d.depShards)}},
 	})
 	var cc *types.ConditionalCheckFailedException
@@ -202,10 +238,10 @@ func parseTS(s string) time.Time {
 
 func pkgBase(ds, pkg string) string { return "PKG#" + ds + "#" + model.Line(ds, pkg) }
 
-func (st *Dynamo) depKeys(d model.Dependency) item {
+func (st *Dynamo) depKeys(d model.Dependency, shards int) item {
 	return item{
 		PK: "REPO#" + d.Repo, SK: "DEP#" + d.File + sep + d.Datasource + sep + d.Package,
-		GSI1PK: dependentsPK(pkgBase(d.Datasource, d.Package), shardOf(d.Repo, st.depShards)), GSI1SK: d.Repo + sep + d.File,
+		GSI1PK: dependentsPK(pkgBase(d.Datasource, d.Package), shardOf(d.Repo, shards)), GSI1SK: d.Repo + sep + d.File,
 	}
 }
 
@@ -289,7 +325,16 @@ func (d *Dynamo) DeleteRepo(ctx context.Context, n string) error {
 	for _, k := range keys {
 		reqs = append(reqs, types.WriteRequest{DeleteRequest: &types.DeleteRequest{Key: k}})
 	}
-	return wrapD("delete repo", d.batch(ctx, reqs))
+	if err := d.batch(ctx, reqs); err != nil {
+		return wrapD("delete repo", err)
+	}
+	delta := map[string]int{}
+	for _, k := range keys {
+		if sk := k["SK"].(*types.AttributeValueMemberS).Value; strings.HasPrefix(sk, "DEP#") {
+			delta[depBaseOf(sk)]--
+		}
+	}
+	return wrapD("delete repo", d.adjustCounts(ctx, delta))
 }
 
 func (d *Dynamo) batch(ctx context.Context, reqs []types.WriteRequest) error {
@@ -340,13 +385,26 @@ func (d *Dynamo) ReplaceDependencies(ctx context.Context, repo string, deps []mo
 	}
 	var reqs []types.WriteRequest
 	seen := map[string]bool{}
+	delta := map[string]int{}
+	shards := map[string]int{}
 	for _, dep := range deps {
 		dep.Repo = repo
-		k := d.depKeys(dep)
+		base := pkgBase(dep.Datasource, dep.Package)
+		n, ok := shards[base]
+		if !ok {
+			if n, err = d.depShardsFor(ctx, base, false); err != nil {
+				return wrapD("replace dependencies", err)
+			}
+			shards[base] = n
+		}
+		k := d.depKeys(dep, n)
 		if seen[k.SK] {
 			continue
 		}
 		seen[k.SK] = true
+		if _, had := have[k.SK]; !had {
+			delta[base]++
+		}
 		m, err := attributevalue.MarshalMap(depAttrs{item: k, Repo: repo, File: dep.File, Manager: dep.Manager, Datasource: dep.Datasource, Package: dep.Package, Version: dep.Version})
 		if err != nil {
 			return err
@@ -355,10 +413,14 @@ func (d *Dynamo) ReplaceDependencies(ctx context.Context, repo string, deps []mo
 	}
 	for sk, key := range have {
 		if !seen[sk] {
+			delta[depBaseOf(sk)]--
 			reqs = append(reqs, types.WriteRequest{DeleteRequest: &types.DeleteRequest{Key: key}})
 		}
 	}
-	return wrapD("replace dependencies", d.batch(ctx, reqs))
+	if err := d.batch(ctx, reqs); err != nil {
+		return wrapD("replace dependencies", err)
+	}
+	return wrapD("replace dependencies", d.adjustCounts(ctx, delta))
 }
 
 func (d *Dynamo) collectDeps(ctx context.Context, in *dynamodb.QueryInput) ([]model.Dependency, error) {
@@ -385,19 +447,27 @@ func (d *Dynamo) ListRepoDependencies(ctx context.Context, repo string) ([]model
 }
 
 // ListDependents reads gsi1, which is eventually consistent. It issues one Query per
-// dependent shard (at most MaxShards, default one).
+// dependent shard of the package (at most MaxShards, default one), concurrently up to the
+// configured bound; the merged result is sorted, so it does not depend on completion order.
 func (d *Dynamo) ListDependents(ctx context.Context, ds, pkg string) ([]model.Dependency, error) {
-	var out []model.Dependency
-	for sh := 0; sh < d.depShards; sh++ {
-		part, err := d.collectDeps(ctx, &dynamodb.QueryInput{
+	base := pkgBase(ds, pkg)
+	n, err := d.depShardsFor(ctx, base, true)
+	if err != nil {
+		return nil, wrapD("list dependents", err)
+	}
+	parts, err := fanOut(ctx, n, d.concurrency, func(ctx context.Context, sh int) ([]model.Dependency, error) {
+		return d.collectDeps(ctx, &dynamodb.QueryInput{
 			IndexName:                 aws.String(gsi1),
 			KeyConditionExpression:    aws.String("GSI1PK = :pk"),
-			ExpressionAttributeValues: map[string]types.AttributeValue{":pk": s(dependentsPK(pkgBase(ds, pkg), sh))},
+			ExpressionAttributeValues: map[string]types.AttributeValue{":pk": s(dependentsPK(base, sh))},
 		})
-		if err != nil {
-			return nil, wrapD("list dependents", err)
-		}
-		out = append(out, part...)
+	})
+	if err != nil {
+		return nil, wrapD("list dependents", err)
+	}
+	var out []model.Dependency
+	for _, p := range parts {
+		out = append(out, p...)
 	}
 	SortDependencies(out)
 	return out, nil
@@ -544,8 +614,7 @@ func (d *Dynamo) ListDueJobsExcluding(ctx context.Context, now time.Time, limit 
 		}
 		filter, names = aws.String(strings.Join(conds, " AND ")), map[string]string{"#repo": "Repo"}
 	}
-	parts := make([][]model.Job, 0, d.jobShards)
-	for sh := 0; sh < d.jobShards; sh++ {
+	parts, err := fanOut(ctx, d.jobShards, d.concurrency, func(ctx context.Context, sh int) ([]model.Job, error) {
 		var part []model.Job
 		err := d.query(ctx, &dynamodb.QueryInput{
 			IndexName:                 aws.String(gsi1),
@@ -562,10 +631,10 @@ func (d *Dynamo) ListDueJobsExcluding(ctx context.Context, now time.Time, limit 
 			part = append(part, fromJobItem(a))
 			return nil
 		})
-		if err != nil {
-			return nil, wrapD("list due jobs", err)
-		}
-		parts = append(parts, part)
+		return part, err
+	})
+	if err != nil {
+		return nil, wrapD("list due jobs", err)
 	}
 	return mergeDueJobs(parts, limit), nil
 }

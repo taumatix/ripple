@@ -14,9 +14,10 @@ import (
 // and store.MaxShards because importing the store here would pull every database driver into
 // config; a test in package store keeps the two in step.
 const (
-	DefaultDynamoJobShards       = 8
-	DefaultDynamoDependentShards = 1
-	MaxDynamoShards              = 64
+	DefaultDynamoJobShards        = 8
+	DefaultDynamoDependentShards  = 1
+	DefaultDynamoQueryConcurrency = 4
+	MaxDynamoShards               = 64
 )
 
 // Server is the service-wide configuration, read from the environment. Repo files
@@ -60,11 +61,16 @@ type Server struct {
 	// package's dependents over that many index partitions (1..MaxDynamoShards).
 	DynamoJobShards       int
 	DynamoDependentShards int
-	MinimumReleaseAge     time.Duration
-	OpenPRLimit           int
-	AllowAutomerge        bool
-	Workers               int
-	WorkDir               string
+	// DynamoQueryConcurrency bounds the shard Queries one read runs at once (1..MaxDynamoShards).
+	DynamoQueryConcurrency int
+	// DynamoAdaptiveDependents, when above zero, shards a package's dependents by how many it
+	// has: the shard count doubles each time the package passes this many per shard. 0 is off.
+	DynamoAdaptiveDependents int
+	MinimumReleaseAge        time.Duration
+	OpenPRLimit              int
+	AllowAutomerge           bool
+	Workers                  int
+	WorkDir                  string
 	// MaxFiles and MaxDependencies cap one repo scan; a repo over either is skipped.
 	MaxFiles        int
 	MaxDependencies int
@@ -112,6 +118,8 @@ RIPPLE_DYNAMODB_TABLE         default ripple (dynamodb)
 RIPPLE_DYNAMODB_ENDPOINT      optional, for DynamoDB Local
 RIPPLE_DYNAMODB_JOB_SHARDS    default 8 (1-64): partitions holding pending jobs; a due-jobs poll costs this many queries
 RIPPLE_DYNAMODB_DEPENDENT_SHARDS  default 1 (1-64): partitions per package's dependents; each lookup costs this many queries
+RIPPLE_DYNAMODB_QUERY_CONCURRENCY default 4 (1-64): shard queries one read runs at once; 1 reads shards in turn
+RIPPLE_DYNAMODB_ADAPTIVE_DEPENDENTS default 0 (off): dependents one partition may hold before a package gets more shards
 RIPPLE_MINIMUM_RELEASE_AGE    default 3d; a repo may only raise it
 RIPPLE_OPEN_PR_LIMIT          default 5; a repo may only lower it
 RIPPLE_ALLOW_AUTOMERGE        default true; false forbids automerge everywhere
@@ -184,44 +192,46 @@ func LoadServer(getenv func(string) string) (*Server, error) {
 		ghAPI, ghGit, ghGraphQL = ghes+"/api/v3", ghes, ghes+"/api/graphql"
 	}
 	s := &Server{
-		Listen:                str("RIPPLE_LISTEN", ":8080"),
-		WebhookSecret:         getenv("RIPPLE_WEBHOOK_SECRET"),
-		GitHubAppID:           getenv("RIPPLE_GITHUB_APP_ID"),
-		GitHubKeyFile:         getenv("RIPPLE_GITHUB_KEY_FILE"),
-		GitHubAPIURL:          strings.TrimRight(str("RIPPLE_GITHUB_API_URL", ghAPI), "/"),
-		GitHubGitURL:          strings.TrimRight(str("RIPPLE_GITHUB_GIT_URL", ghGit), "/"),
-		GitHubGraphQLURL:      strings.TrimRight(str("RIPPLE_GITHUB_GRAPHQL_URL", ghGraphQL), "/"),
-		GitHubAPIVersion:      getenv("RIPPLE_GITHUB_API_VERSION"),
-		FeedURL:               strings.TrimRight(str("RIPPLE_FEED_URL", "https://index.golang.org"), "/"),
-		GoReleasesURL:         strings.TrimRight(str("RIPPLE_GO_RELEASES_URL", "https://go.dev/dl/"), "/"),
-		FeedInterval:          dur("RIPPLE_FEED_INTERVAL", "1m"),
-		OSVURL:                strings.TrimRight(str("RIPPLE_OSV_URL", "https://api.osv.dev"), "/"),
-		OSVDumpURL:            strings.TrimRight(str("RIPPLE_OSV_DUMP_URL", "https://storage.googleapis.com/osv-vulnerabilities"), "/"),
-		OSVInterval:           dur("RIPPLE_OSV_INTERVAL", "10m"),
-		OSVMaxFetch:           num("RIPPLE_OSV_MAX_FETCH", 100, 1),
-		GoProxy:               strings.TrimRight(str("RIPPLE_GOPROXY", "https://proxy.golang.org"), "/"),
-		GoProxyUser:           getenv("RIPPLE_GOPROXY_USER"),
-		GoProxyToken:          getenv("RIPPLE_GOPROXY_TOKEN"),
-		GoCC:                  getenv("RIPPLE_GO_CC"),
-		Sandbox:               str("RIPPLE_SANDBOX", "none"),
-		ContainerImage:        getenv("RIPPLE_CONTAINER_IMAGE"),
-		ContainerCPUs:         getenv("RIPPLE_CONTAINER_CPUS"),
-		ContainerMemory:       getenv("RIPPLE_CONTAINER_MEMORY"),
-		ContainerPull:         getenv("RIPPLE_CONTAINER_PULL"),
-		ContainerNetwork:      getenv("RIPPLE_CONTAINER_NETWORK"),
-		Store:                 str("RIPPLE_STORE", "memory"),
-		PostgresDSN:           getenv("RIPPLE_POSTGRES_DSN"),
-		DynamoTable:           str("RIPPLE_DYNAMODB_TABLE", "ripple"),
-		DynamoEndpoint:        getenv("RIPPLE_DYNAMODB_ENDPOINT"),
-		DynamoJobShards:       shards("RIPPLE_DYNAMODB_JOB_SHARDS", DefaultDynamoJobShards),
-		DynamoDependentShards: shards("RIPPLE_DYNAMODB_DEPENDENT_SHARDS", DefaultDynamoDependentShards),
-		MinimumReleaseAge:     dur("RIPPLE_MINIMUM_RELEASE_AGE", "3d"),
-		OpenPRLimit:           num("RIPPLE_OPEN_PR_LIMIT", 5, 1),
-		AllowAutomerge:        true,
-		Workers:               num("RIPPLE_WORKERS", 4, 1),
-		WorkDir:               getenv("RIPPLE_WORK_DIR"),
-		MaxFiles:              num("RIPPLE_MAX_FILES", DefaultMaxFiles, 1),
-		MaxDependencies:       num("RIPPLE_MAX_DEPENDENCIES", DefaultMaxDependencies, 1),
+		Listen:                   str("RIPPLE_LISTEN", ":8080"),
+		WebhookSecret:            getenv("RIPPLE_WEBHOOK_SECRET"),
+		GitHubAppID:              getenv("RIPPLE_GITHUB_APP_ID"),
+		GitHubKeyFile:            getenv("RIPPLE_GITHUB_KEY_FILE"),
+		GitHubAPIURL:             strings.TrimRight(str("RIPPLE_GITHUB_API_URL", ghAPI), "/"),
+		GitHubGitURL:             strings.TrimRight(str("RIPPLE_GITHUB_GIT_URL", ghGit), "/"),
+		GitHubGraphQLURL:         strings.TrimRight(str("RIPPLE_GITHUB_GRAPHQL_URL", ghGraphQL), "/"),
+		GitHubAPIVersion:         getenv("RIPPLE_GITHUB_API_VERSION"),
+		FeedURL:                  strings.TrimRight(str("RIPPLE_FEED_URL", "https://index.golang.org"), "/"),
+		GoReleasesURL:            strings.TrimRight(str("RIPPLE_GO_RELEASES_URL", "https://go.dev/dl/"), "/"),
+		FeedInterval:             dur("RIPPLE_FEED_INTERVAL", "1m"),
+		OSVURL:                   strings.TrimRight(str("RIPPLE_OSV_URL", "https://api.osv.dev"), "/"),
+		OSVDumpURL:               strings.TrimRight(str("RIPPLE_OSV_DUMP_URL", "https://storage.googleapis.com/osv-vulnerabilities"), "/"),
+		OSVInterval:              dur("RIPPLE_OSV_INTERVAL", "10m"),
+		OSVMaxFetch:              num("RIPPLE_OSV_MAX_FETCH", 100, 1),
+		GoProxy:                  strings.TrimRight(str("RIPPLE_GOPROXY", "https://proxy.golang.org"), "/"),
+		GoProxyUser:              getenv("RIPPLE_GOPROXY_USER"),
+		GoProxyToken:             getenv("RIPPLE_GOPROXY_TOKEN"),
+		GoCC:                     getenv("RIPPLE_GO_CC"),
+		Sandbox:                  str("RIPPLE_SANDBOX", "none"),
+		ContainerImage:           getenv("RIPPLE_CONTAINER_IMAGE"),
+		ContainerCPUs:            getenv("RIPPLE_CONTAINER_CPUS"),
+		ContainerMemory:          getenv("RIPPLE_CONTAINER_MEMORY"),
+		ContainerPull:            getenv("RIPPLE_CONTAINER_PULL"),
+		ContainerNetwork:         getenv("RIPPLE_CONTAINER_NETWORK"),
+		Store:                    str("RIPPLE_STORE", "memory"),
+		PostgresDSN:              getenv("RIPPLE_POSTGRES_DSN"),
+		DynamoTable:              str("RIPPLE_DYNAMODB_TABLE", "ripple"),
+		DynamoEndpoint:           getenv("RIPPLE_DYNAMODB_ENDPOINT"),
+		DynamoJobShards:          shards("RIPPLE_DYNAMODB_JOB_SHARDS", DefaultDynamoJobShards),
+		DynamoDependentShards:    shards("RIPPLE_DYNAMODB_DEPENDENT_SHARDS", DefaultDynamoDependentShards),
+		DynamoQueryConcurrency:   shards("RIPPLE_DYNAMODB_QUERY_CONCURRENCY", DefaultDynamoQueryConcurrency),
+		DynamoAdaptiveDependents: num("RIPPLE_DYNAMODB_ADAPTIVE_DEPENDENTS", 0, 0),
+		MinimumReleaseAge:        dur("RIPPLE_MINIMUM_RELEASE_AGE", "3d"),
+		OpenPRLimit:              num("RIPPLE_OPEN_PR_LIMIT", 5, 1),
+		AllowAutomerge:           true,
+		Workers:                  num("RIPPLE_WORKERS", 4, 1),
+		WorkDir:                  getenv("RIPPLE_WORK_DIR"),
+		MaxFiles:                 num("RIPPLE_MAX_FILES", DefaultMaxFiles, 1),
+		MaxDependencies:          num("RIPPLE_MAX_DEPENDENCIES", DefaultMaxDependencies, 1),
 
 		EventWorkers:                num("RIPPLE_EVENT_WORKERS", 4, 1),
 		EventWorkersPerInstallation: num("RIPPLE_EVENT_WORKERS_PER_INSTALLATION", 2, 1),

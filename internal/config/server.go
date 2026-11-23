@@ -69,6 +69,7 @@ type Server struct {
 	EventWorkersPerInstallation int
 	EventBacklog                int
 	EventInstallationBacklog    int
+	EventDeadRetention          time.Duration
 }
 
 // Default scan caps (RIPPLE_MAX_FILES, RIPPLE_MAX_DEPENDENCIES).
@@ -113,6 +114,7 @@ RIPPLE_EVENT_WORKERS          webhook events handled at once (default 4)
 RIPPLE_EVENT_WORKERS_PER_INSTALLATION  of which one installation may use (default 2)
 RIPPLE_EVENT_BACKLOG          events stored and waiting before the receiver answers 503 (default 10000)
 RIPPLE_EVENT_INSTALLATION_BACKLOG  the same cap for one installation (default 1000)
+RIPPLE_EVENT_DEAD_RETENTION   how long an event that failed 3 times is kept for "ripple events" before it is purged (default 30d)
 `
 
 func isLoopback(u *url.URL) bool {
@@ -209,6 +211,7 @@ func LoadServer(getenv func(string) string) (*Server, error) {
 		EventWorkersPerInstallation: num("RIPPLE_EVENT_WORKERS_PER_INSTALLATION", 2, 1),
 		EventBacklog:                num("RIPPLE_EVENT_BACKLOG", 10_000, 1),
 		EventInstallationBacklog:    num("RIPPLE_EVENT_INSTALLATION_BACKLOG", 1_000, 1),
+		EventDeadRetention:          dur("RIPPLE_EVENT_DEAD_RETENTION", "30d"),
 	}
 	if v := getenv("RIPPLE_OSV"); v != "" {
 		b, err := strconv.ParseBool(v)
@@ -238,6 +241,9 @@ func LoadServer(getenv func(string) string) (*Server, error) {
 		if v == "" {
 			errs = append(errs, fmt.Errorf("%s is required", k))
 		}
+	}
+	if s.EventDeadRetention <= 0 {
+		errs = append(errs, errors.New("RIPPLE_EVENT_DEAD_RETENTION must be positive"))
 	}
 	if s.FeedInterval <= 0 {
 		errs = append(errs, errors.New("RIPPLE_FEED_INTERVAL must be positive"))

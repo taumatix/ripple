@@ -31,6 +31,13 @@ var (
 	errDepCap  = errors.New("dependency cap exceeded")
 )
 
+func (e *Engine) dueBatch() int {
+	if e.DueBatch > 0 {
+		return e.DueBatch
+	}
+	return dueBatch
+}
+
 // BranchPrefix marks every branch ripple owns.
 const BranchPrefix = "ripple/"
 
@@ -53,6 +60,8 @@ type Engine struct {
 	// MaxBackfill bounds the jobs one scan creates for dependencies new to the repo; zero
 	// means DefaultMaxBackfill.
 	MaxBackfill int
+	// DueBatch is how many due jobs one listing reads; zero means 1000.
+	DueBatch int
 
 	// GoCC is the C compiler for repositories that opt into cgo; empty means cc.
 	// GoProxyUser and GoProxyToken authenticate to the configured module proxy for the

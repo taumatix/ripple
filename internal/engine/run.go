@@ -63,7 +63,7 @@ func (it item) migrates() bool {
 // RunDue processes every job whose NotBefore has passed, one repo at a time per
 // worker, and returns how many jobs reached a terminal state.
 func (e *Engine) RunDue(ctx context.Context) (int, error) {
-	jobs, err := e.Store.ListDueJobs(ctx, e.now(), dueBatch)
+	jobs, err := e.Store.ListDueJobs(ctx, e.now(), e.dueBatch())
 	if err != nil {
 		return 0, err
 	}

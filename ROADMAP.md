@@ -23,10 +23,6 @@ Ordered by how much each entry limits real deployments. The top is next.
    replicas would both load the same queued events and both pick the same due jobs. Claim work with a lease
    (Postgres `FOR UPDATE SKIP LOCKED` with an owner and expiry; DynamoDB a conditional owner/lease write), so
    replicas share the queue and a crashed one's work is retaken when its lease lapses.
-8. **Dead letters and fairer due-job listing.** An event that fails 3 times is logged and deleted; keep it in
-   a failed state an operator can list and requeue instead. Due jobs are listed 1000 at a time, oldest first,
-   and a repo whose run is in flight is skipped, so a repo with more than 1000 due jobs can hold back every
-   other repo's until it finishes: list per repo, or exclude repos in flight from the query.
 9. **Close the residual webhook gaps.** A request with a well-formed but forged signature still buffers its body (up to `MaxBody`, at most `MaxInflight` at once) before the HMAC fails, and a slow sender can hold those slots until the server read timeout, so genuine deliveries get 503 meanwhile: spool to a temp file or hash while reading with a per-read deadline. The delivery id is an unsigned header and the table is in memory: persist it in the Store and key on the body signature too (queued events already key on it, so a redelivery of a still-queued delivery is not queued twice; once handled, only the in-memory table remembers it).
 
 Platforms (code hosts). The goal is the whole list Renovate supports, each behind the one `Platform`
@@ -190,3 +186,9 @@ Everything else:
 59. **Private modules without a proxy.** Modules reachable only by direct VCS fetch are not supported, because
     `GOVCS=*:off` forbids it. Consider `GOAUTH`, or a ripple-run caching proxy fed from the repo's own credentials,
     and make `build`/`vet` stop asking the proxy for `.info` so a proxy that rejects it cannot fail verification.
+60. **Dead-letter residuals.** There is no metric for dead events (the service has none yet; the log line
+    `event failed; dead-lettered` is all there is). A rescan lists the whole live event set every 30s: on
+    DynamoDB use a stream or a narrower index, and on Postgres LISTEN/NOTIFY. DynamoDB's due-job exclusion
+    is a filter applied after the read, so it still reads the excluded repo's items. A failed *job* is not
+    requeueable from `ripple events`. If persisting the dead state fails the event stays live and is retried
+    after a restart rather than looping.

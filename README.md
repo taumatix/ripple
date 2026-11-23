@@ -200,7 +200,12 @@ stored backlog is capped at `RIPPLE_EVENT_BACKLOG` (default 10000) events overal
 `RIPPLE_EVENT_INSTALLATION_BACKLOG` (default 1000) per installation, one event per repo named in a delivery;
 past a cap the receiver answers 503 and stores nothing, and GitHub does not redeliver by itself, so that
 delivery is lost unless redelivered from the App's Recent Deliveries page. A failing event is retried
-3 times with backoff, then logged and dropped. The webhook receiver refuses unsigned requests before reading the body,
+3 times with backoff, then logged (`event failed; dead-lettered`) and kept dead, with its last error, attempt
+count and times, for `RIPPLE_EVENT_DEAD_RETENTION` (default 30d), after which it is purged. Dead events are
+not work, so they do not count against the backlog caps. `ripple events list` shows them, `ripple events
+requeue ID` (or `--all`) makes one live again with a fresh 3 attempts, and `ripple events purge [AGE]`
+deletes them early; the commands read the store named by the same `RIPPLE_STORE` variables, so there is no
+HTTP endpoint, and a running server picks a requeued event up within 30 seconds. The webhook receiver refuses unsigned requests before reading the body,
 buffers at most 4 bodies at once, and drops a repeated `X-GitHub-Delivery` for an hour (in memory, per
 process; the id is an unsigned header, so this stops redelivery and naive replays, not a rewritten header). See
 [ROADMAP.md](ROADMAP.md) for the planned fixes.

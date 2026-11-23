@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"sort"
+	"time"
 
 	"github.com/taumatix/ripple/internal/model"
 )
@@ -34,10 +35,55 @@ func (m *Memory) ListEvents(_ context.Context) ([]model.Event, error) {
 	defer m.mu.Unlock()
 	out := make([]model.Event, 0, len(m.events))
 	for _, e := range m.events {
-		out = append(out, copyEvent(e))
+		if !e.Dead() {
+			out = append(out, copyEvent(e))
+		}
 	}
 	SortEvents(out)
 	return out, nil
+}
+
+func (m *Memory) ListDeadEvents(_ context.Context) ([]model.Event, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []model.Event
+	for _, e := range m.events {
+		if e.Dead() {
+			out = append(out, copyEvent(e))
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].DeadAt.Equal(out[j].DeadAt) {
+			return out[i].DeadAt.Before(out[j].DeadAt)
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out, nil
+}
+
+func (m *Memory) RequeueDeadEvent(_ context.Context, id string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	e, ok := m.events[id]
+	if !ok || !e.Dead() {
+		return false, nil
+	}
+	e.Attempts, e.NotBefore, e.DeadAt = 0, time.Time{}, time.Time{}
+	m.events[id] = e
+	return true, nil
+}
+
+func (m *Memory) PurgeDeadEvents(_ context.Context, before time.Time) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n := 0
+	for id, e := range m.events {
+		if e.Dead() && e.DeadAt.Before(before) {
+			delete(m.events, id)
+			n++
+		}
+	}
+	return n, nil
 }
 
 func (m *Memory) UpdateEvent(_ context.Context, e model.Event) error {
@@ -45,6 +91,7 @@ func (m *Memory) UpdateEvent(_ context.Context, e model.Event) error {
 	defer m.mu.Unlock()
 	if old, ok := m.events[e.ID]; ok {
 		old.Attempts, old.NotBefore = e.Attempts, e.NotBefore
+		old.LastError, old.LastAttemptAt, old.DeadAt = e.LastError, e.LastAttemptAt, e.DeadAt
 		m.events[e.ID] = old
 	}
 	return nil

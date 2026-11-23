@@ -277,6 +277,38 @@ func Run(t *testing.T, mk func(t *testing.T) store.Store) {
 		}
 	})
 
+	// Repos whose run is in flight are left out before the limit applies, so a repo with
+	// more due jobs than one batch cannot hold back the jobs of every other repo.
+	t.Run("due jobs excluding repos", func(t *testing.T) {
+		s := mk(t)
+		base := time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC)
+		add := func(repo string, i int, nb time.Time) {
+			j := model.Job{Key: model.JobKey(repo, "go", fmt.Sprintf("example.com/p%d", i), "v1.0.0"), Repo: repo, Datasource: "go",
+				Package: fmt.Sprintf("example.com/p%d", i), Version: "v1.0.0", ReleasedAt: base, State: model.JobPending, NotBefore: nb}
+			if ok, err := s.EnqueueJob(ctx, j); err != nil || !ok {
+				t.Fatalf("enqueue: ok=%v err=%v", ok, err)
+			}
+		}
+		for i := 0; i < 5; i++ {
+			add("acme/big", i, base.Add(-time.Hour+time.Duration(i)*time.Second))
+		}
+		add("acme/small", 0, base.Add(-time.Minute))
+		add("acme/other", 0, base.Add(-30*time.Second))
+		due, err := s.ListDueJobsExcluding(ctx, base, 3, []string{"acme/big"})
+		if err != nil || len(due) != 2 || due[0].Repo != "acme/small" || due[1].Repo != "acme/other" {
+			t.Fatalf("excluding big: %v err=%v", due, err)
+		}
+		if due, _ = s.ListDueJobsExcluding(ctx, base, 3, nil); len(due) != 3 || due[0].Repo != "acme/big" {
+			t.Fatalf("no exclusion is ListDueJobs: %v", due)
+		}
+		if due, _ = s.ListDueJobsExcluding(ctx, base, 10, []string{"acme/big", "acme/small"}); len(due) != 1 || due[0].Repo != "acme/other" {
+			t.Fatalf("two excluded: %v", due)
+		}
+		if due, _ = s.ListDueJobsExcluding(ctx, base, 4, []string{"acme/small", "acme/other"}); len(due) != 4 {
+			t.Fatalf("limit applies after the exclusion: %v", due)
+		}
+	})
+
 	t.Run("many dependents of one package", func(t *testing.T) {
 		s := mk(t)
 		const n = 60
@@ -336,6 +368,85 @@ func Run(t *testing.T, mk func(t *testing.T) store.Store) {
 		evs, _ = s.ListEvents(ctx)
 		if want := []model.Event{push, later}; !reflect.DeepEqual(evs, want) {
 			t.Fatalf("after update and delete:\n got %+v\nwant %+v", evs, want)
+		}
+	})
+
+	t.Run("dead events", func(t *testing.T) {
+		s := mk(t)
+		at := time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC)
+		a := model.Event{ID: "a/0", Seq: 10, InstallationID: 7, Kind: "push", Repo: "acme/a", Ref: "refs/heads/main", Files: []string{"go.mod"}}
+		b := model.Event{ID: "b/0", Seq: 20, InstallationID: 7, Kind: "repos_added", Repo: "acme/b"}
+		c := model.Event{ID: "c/0", Seq: 30, InstallationID: 8, Kind: "repos_added", Repo: "acme/c"}
+		for _, ev := range []model.Event{a, b, c} {
+			if ok, err := s.EnqueueEvent(ctx, ev); err != nil || !ok {
+				t.Fatalf("enqueue %s: ok=%v err=%v", ev.ID, ok, err)
+			}
+		}
+		if dead, err := s.ListDeadEvents(ctx); err != nil || len(dead) != 0 {
+			t.Fatalf("no dead events yet: %v err=%v", dead, err)
+		}
+		// A failed attempt is recorded on the live event.
+		b.Attempts, b.NotBefore, b.LastError, b.LastAttemptAt = 1, at, "boom", at.Add(-time.Second)
+		if err := s.UpdateEvent(ctx, b); err != nil {
+			t.Fatal(err)
+		}
+		// b dies first, then a.
+		b.Attempts, b.LastError, b.LastAttemptAt, b.DeadAt = 3, "boom 3", at, at
+		a.Attempts, a.LastError, a.LastAttemptAt, a.DeadAt = 3, "later", at.Add(time.Hour), at.Add(time.Hour)
+		for _, ev := range []model.Event{a, b} {
+			if err := s.UpdateEvent(ctx, ev); err != nil {
+				t.Fatal(err)
+			}
+		}
+		live, _ := s.ListEvents(ctx)
+		if len(live) != 1 || live[0].ID != c.ID {
+			t.Fatalf("dead events must leave the live list: %+v", live)
+		}
+		dead, err := s.ListDeadEvents(ctx)
+		if err != nil || !reflect.DeepEqual(dead, []model.Event{b, a}) {
+			t.Fatalf("dead, earliest first:\n got %+v err=%v\nwant %+v", dead, err, []model.Event{b, a})
+		}
+		if ok, err := s.RequeueDeadEvent(ctx, "nope"); err != nil || ok {
+			t.Fatalf("requeue of an unknown id: ok=%v err=%v", ok, err)
+		}
+		if ok, err := s.RequeueDeadEvent(ctx, c.ID); err != nil || ok {
+			t.Fatalf("requeue of a live event: ok=%v err=%v", ok, err)
+		}
+		if ok, err := s.RequeueDeadEvent(ctx, a.ID); err != nil || !ok {
+			t.Fatalf("requeue: ok=%v err=%v", ok, err)
+		}
+		if ok, _ := s.RequeueDeadEvent(ctx, a.ID); ok {
+			t.Fatal("a requeued event is no longer dead")
+		}
+		a.Attempts, a.DeadAt, a.NotBefore = 0, time.Time{}, time.Time{}
+		live, _ = s.ListEvents(ctx)
+		if want := []model.Event{a, c}; !reflect.DeepEqual(live, want) {
+			t.Fatalf("after requeue:\n got %+v\nwant %+v", live, want)
+		}
+		if dead, _ = s.ListDeadEvents(ctx); !reflect.DeepEqual(dead, []model.Event{b}) {
+			t.Fatalf("dead after requeue: %+v", dead)
+		}
+		// Purge removes only dead events older than the cut-off.
+		if n, err := s.PurgeDeadEvents(ctx, at); err != nil || n != 0 {
+			t.Fatalf("nothing older than at: n=%d err=%v", n, err)
+		}
+		if n, err := s.PurgeDeadEvents(ctx, at.Add(time.Minute)); err != nil || n != 1 {
+			t.Fatalf("purge: n=%d err=%v", n, err)
+		}
+		if dead, _ = s.ListDeadEvents(ctx); len(dead) != 0 {
+			t.Fatalf("purged event still listed: %+v", dead)
+		}
+		if live, _ = s.ListEvents(ctx); len(live) != 2 {
+			t.Fatalf("purge touched live events: %+v", live)
+		}
+		// A dead event can be deleted by id like a live one.
+		c.DeadAt = at
+		_ = s.UpdateEvent(ctx, c)
+		if err := s.DeleteEvent(ctx, c.ID); err != nil {
+			t.Fatal(err)
+		}
+		if dead, _ = s.ListDeadEvents(ctx); len(dead) != 0 {
+			t.Fatalf("deleted dead event still listed: %+v", dead)
 		}
 	})
 

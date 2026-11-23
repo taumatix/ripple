@@ -19,13 +19,22 @@ const (
 	DefaultEventBacklog             = 10_000
 	DefaultEventInstallationBacklog = 1_000
 	DefaultEventMaxAttempts         = 3
+	// DefaultEventDeadRetention is how long a dead-lettered event is kept before it is purged.
+	DefaultEventDeadRetention = 30 * 24 * time.Hour
+	// DefaultEventRescan is how often the queue looks for events that appeared in the store
+	// without passing through Add (a requeue by `ripple events requeue`).
+	DefaultEventRescan = 30 * time.Second
+	purgeEvery         = time.Hour
 )
 
 // ErrBacklogFull means the persisted backlog is at its cap; the receiver answers 503.
 var ErrBacklogFull = errors.New("event backlog full")
 
 // Queue is the durable webhook event queue. Every event is persisted before Add
-// returns and deleted once handled, so a restart resumes where it stopped. Workers
+// returns and deleted once handled, so a restart resumes where it stopped. An event that
+// fails MaxAttempts times is not deleted but kept dead, with its last error, for an operator
+// to list and requeue (`ripple events`), and purged after DeadRetention. Dead events are not
+// work, so they do not count against the backlog caps. Workers
 // are shared fairly: installations take turns, each runs at most PerInstallation
 // events at once and all of them at most Workers, so one noisy installation cannot
 // starve the others. Events of one repo run one at a time, in the order received.
@@ -44,8 +53,13 @@ type Queue struct {
 	// DefaultEventInstallationBacklog.
 	Backlog, InstallationBacklog int
 	// MaxAttempts is how often a failing event is tried before it is logged and
-	// dropped; default DefaultEventMaxAttempts.
+	// dead-lettered; default DefaultEventMaxAttempts.
 	MaxAttempts int
+	// DeadRetention is how long a dead event is kept; default DefaultEventDeadRetention.
+	DeadRetention time.Duration
+	// Rescan is how often events requeued through the store are picked up; default
+	// DefaultEventRescan.
+	Rescan time.Duration
 	// Backoff is the delay before retry number attempt; default attempt * 30s.
 	Backoff func(attempt int) time.Duration
 	Now     func() time.Time
@@ -64,6 +78,8 @@ type Queue struct {
 	lastSeq  int64
 	wake     chan struct{}
 	wg       sync.WaitGroup
+
+	lastPurge time.Time // Run's goroutine only
 }
 
 type entry struct {
@@ -87,6 +103,12 @@ func (q *Queue) init() {
 	def(&q.Backlog, DefaultEventBacklog)
 	def(&q.InstallationBacklog, DefaultEventInstallationBacklog)
 	def(&q.MaxAttempts, DefaultEventMaxAttempts)
+	if q.DeadRetention <= 0 {
+		q.DeadRetention = DefaultEventDeadRetention
+	}
+	if q.Rescan <= 0 {
+		q.Rescan = DefaultEventRescan
+	}
 	if q.Backoff == nil {
 		q.Backoff = func(a int) time.Duration { return time.Duration(a) * 30 * time.Second }
 	}
@@ -218,6 +240,9 @@ func (q *Queue) Run(ctx context.Context) error {
 	}
 	timer := time.NewTimer(time.Hour)
 	defer timer.Stop()
+	rescan := time.NewTicker(q.Rescan)
+	defer rescan.Stop()
+	q.purgeDead(ctx)
 	for {
 		next := q.dispatch(ctx)
 		if !next.IsZero() {
@@ -229,7 +254,64 @@ func (q *Queue) Run(ctx context.Context) error {
 			return nil
 		case <-q.wake:
 		case <-timer.C:
+		case <-rescan.C:
+			q.rescan(ctx)
+			q.purgeDead(ctx)
 		}
+	}
+}
+
+// rescan queues the live events in the store that the queue does not hold: those an
+// operator requeued, possibly from another process. It excludes Add (as load does) so an
+// event persisted by Add but not yet queued is not queued twice, and holds q.mu across the
+// listing so an event deleted by a finishing worker is still held in memory when seen.
+func (q *Queue) rescan(ctx context.Context) {
+	q.admit.Lock()
+	defer q.admit.Unlock()
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	evs, err := q.Store.ListEvents(ctx)
+	if err != nil {
+		if ctx.Err() == nil {
+			q.Log.Error("rescan queued events", "err", err)
+		}
+		return
+	}
+	known := map[string]bool{}
+	for _, list := range q.byInst {
+		for _, c := range list {
+			known[c.ev.ID] = true
+		}
+	}
+	n := 0
+	for _, e := range evs {
+		if known[e.ID] {
+			continue
+		}
+		q.push(e)
+		q.total++
+		q.lastSeq = max(q.lastSeq, e.Seq)
+		n++
+	}
+	if n > 0 {
+		q.Log.Info("queued events picked up from the store", "events", n)
+		q.poke()
+	}
+}
+
+// purgeDead deletes the dead events older than DeadRetention, at most once an hour.
+func (q *Queue) purgeDead(ctx context.Context) {
+	now := q.Now()
+	if !q.lastPurge.IsZero() && now.Sub(q.lastPurge) < purgeEvery {
+		return
+	}
+	q.lastPurge = now
+	n, err := q.Store.PurgeDeadEvents(ctx, now.Add(-q.DeadRetention))
+	switch {
+	case err != nil && ctx.Err() == nil:
+		q.Log.Error("purge dead events", "err", err)
+	case n > 0:
+		q.Log.Info("purged dead events", "events", n, "older_than", q.DeadRetention.String())
 	}
 }
 
@@ -310,13 +392,30 @@ func (q *Queue) finish(ctx context.Context, e *entry, err error) {
 	case err == nil:
 		remove = true
 	default:
+		now := q.Now()
 		ev.Attempts++
+		ev.LastError, ev.LastAttemptAt = err.Error(), now
 		if ev.Attempts >= q.MaxAttempts {
-			q.Log.Error("event failed; giving up", "event", ev.ID, "kind", ev.Kind, "repo", ev.Repo, "attempts", ev.Attempts, "err", err)
-			remove = true
-			break
+			// Kept, not deleted: dead, with its error and times, until requeued or purged.
+			// If persisting that fails the event stays live in the store and is tried
+			// again after a restart, which is the at-least-once side to err on.
+			ev.DeadAt = now
+			q.Log.Error("event failed; dead-lettered", "event", ev.ID, "kind", ev.Kind, "repo", ev.Repo, "attempts", ev.Attempts, "err", err)
+			if uerr := q.Store.UpdateEvent(context.WithoutCancel(ctx), ev); uerr != nil {
+				q.Log.Error("persist dead event", "event", ev.ID, "err", uerr)
+			}
+			q.mu.Lock()
+			defer q.mu.Unlock()
+			e.running = false
+			e.ev = ev
+			q.running--
+			q.runInst[ev.InstallationID]--
+			delete(q.busyRepo, ev.Repo)
+			q.drop(e)
+			q.poke()
+			return
 		}
-		ev.NotBefore = q.Now().Add(q.Backoff(ev.Attempts))
+		ev.NotBefore = now.Add(q.Backoff(ev.Attempts))
 		q.Log.Warn("event failed; will retry", "event", ev.ID, "kind", ev.Kind, "repo", ev.Repo, "attempt", ev.Attempts, "retry_at", ev.NotBefore, "err", err)
 		if uerr := q.Store.UpdateEvent(context.WithoutCancel(ctx), ev); uerr != nil {
 			q.Log.Error("persist event retry", "event", ev.ID, "err", uerr)

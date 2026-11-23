@@ -82,6 +82,9 @@ func TestNpmRangeBump(t *testing.T) {
 					t.Errorf("%s: PR body lacks %q:\n%s", pr.Head, w, body)
 				}
 			}
+			if strings.Contains(body, "module index") || !strings.Contains(body, "when a new version was published to the npm registry") {
+				t.Errorf("%s: the footer must say where an npm version is seen:\n%s", pr.Head, body)
+			}
 			if !strings.HasPrefix(pr.Head, "ripple/npm/") {
 				t.Errorf("branch %q", pr.Head)
 			}

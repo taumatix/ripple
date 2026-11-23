@@ -47,6 +47,9 @@ func TestDockerTagBump(t *testing.T) {
 				t.Errorf("PR body lacks %q:\n%s", w, body)
 			}
 		}
+		if strings.Contains(body, "module index") || !strings.Contains(body, "when a new tag appeared on the registry") {
+			t.Errorf("the footer must say where a Docker tag is seen:\n%s", body)
+		}
 		if !strings.HasPrefix(head, "ripple/docker/") {
 			t.Errorf("branch %q", head)
 		}

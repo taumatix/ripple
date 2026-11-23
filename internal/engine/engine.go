@@ -143,6 +143,18 @@ func (e *Engine) lockRepo(name string) func() {
 	return m.Unlock
 }
 
+// RepoIdle reports whether no scan or run of the repo is in progress in this process.
+// Tests use it to wait for a webhook-driven scan to finish; a flush of the repo's
+// dashboard skips a repo that is not idle.
+func (e *Engine) RepoIdle(name string) bool {
+	m := e.repoMutex(name)
+	if !m.TryLock() {
+		return false
+	}
+	m.Unlock()
+	return true
+}
+
 func (e *Engine) repoMutex(name string) *sync.Mutex {
 	e.mu.Lock()
 	defer e.mu.Unlock()

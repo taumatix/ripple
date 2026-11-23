@@ -86,3 +86,41 @@ func TestScanFallsBackToFullCheckout(t *testing.T) {
 		}
 	})
 }
+
+// Hosts differ in what they serve (docs/bounds.md): one that filters a clone but
+// refuses a blob by object id cannot take the batched fetch, so the scan repeats on a
+// full checkout, once, and still finds the dependency and opens the PR. One that
+// serves a blob by id but ignores the filter needs no fallback: it sent everything.
+// The server speaks protocol v0, the only one that enforces the by-id setting (v2
+// serves any object it has).
+func TestScanOnHostsWithPartialCapabilities(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		filter, blobByID bool
+		wantFallbacks    int
+	}{
+		{"filter without blob by id", true, false, 1},
+		{"blob by id without filter", false, true, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			forEach(t, func(t *testing.T, st store.Store) {
+				e := newEnvOpts(t, st, defaultLimits(), opts{gitHTTP: true})
+				stubModule(e, "example.com/lib", "v1.0.0", "v1.1.0")
+				e.gh.AddRepo("acme/app", scanRepoFiles())
+				e.gh.SetPartialClone("acme/app", tc.filter, tc.blobByID)
+				e.git.SpeakProtocolV0()
+				start(t, e, "acme/app")
+				if n := len(e.deps("acme/app")); n != 1 {
+					t.Fatalf("scan found %d dependencies, want 1", n)
+				}
+				if n := e.logLines("partial scan unavailable", "repo=acme/app"); n != tc.wantFallbacks {
+					t.Errorf("fallback logged %d times, want %d\n%s", n, tc.wantFallbacks, e.logs.String())
+				}
+				e.release()
+				if n := len(e.gh.PRs("acme/app")); n != 1 {
+					t.Fatalf("got %d PRs, want 1", n)
+				}
+			})
+		})
+	}
+}

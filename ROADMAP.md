@@ -149,9 +149,10 @@ Everything else:
 76. **Remove the `Ref` overload on `model.Event`.** `Ref` is still populated beside the typed fields and marked
     deprecated. Remove the fallback in the minor release after the one that introduced it, once no queue holds old
     rows (`ripple:deprecated event-ref-overload` in MIGRATION.md).
-89. **Partial scan on other hosts.** The scan without a checkout is verified against GitHub and the fake
-    only. GitLab, Bitbucket, Gitea, Azure and the rest may not serve `filter=blob:none` or by-id blob
-    fetches; they fall back to a full checkout, unmeasured. Check each and record which saves anything.
+89. **Partial scan on real hosts.** The fallback is verified against a fake server in both half-way shapes
+    (filter without blob by id, blob by id without filter; docs/bounds.md), not against a real GitLab, Bitbucket,
+    Gitea/Forgejo, Azure DevOps, Gerrit or CodeCommit. Clone from one of each once with `RIPPLE_LIVE_SCAN_REPO` and
+    record which row of that table each falls in and what it saves.
 92. **Supersede against real hosts.** GitHub, GitLab, Gitea/Forgejo, Bitbucket Cloud and Data Center, Gerrit and
     CodeCommit close or abandon a stale PR, written from vendored docs and checked only against fakes. Several
     reads rest on source or assumptions (GitLab and Gitea system-note and timeline wording, CodeCommit commenting

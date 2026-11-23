@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -24,6 +25,8 @@ type issuedToken struct {
 type GitHTTP struct {
 	// URL is the git base URL (http://127.0.0.1:port), usable as Client.GitBase.
 	URL string
+
+	v0 atomic.Bool
 
 	mu       sync.Mutex
 	rejected int
@@ -45,6 +48,12 @@ func (c countWriter) Write(p []byte) (int, error) {
 	c.mu.Unlock()
 	return n, err
 }
+
+// SpeakProtocolV0 makes the server ignore the client's request for protocol v2, as a
+// host running an older git or a proxy that drops the Git-Protocol header does. Under
+// v0 the server enforces uploadpack.allowAnySHA1InWant, which v2 never does, so a
+// blob asked for by object id is refused unless the setting is on.
+func (h *GitHTTP) SpeakProtocolV0() { h.v0.Store(true) }
 
 // BytesServed is the total of response body bytes the server has sent, the
 // closest a test gets to "what a clone downloaded".
@@ -96,6 +105,9 @@ func (g *GitHub) ServeGit() *GitHTTP {
 			w.Header().Set("WWW-Authenticate", `Basic realm="git"`)
 			http.Error(w, "bad credentials", http.StatusUnauthorized)
 			return
+		}
+		if gh.v0.Load() {
+			r.Header.Del("Git-Protocol")
 		}
 		// git-http-backend is CGI, which cannot take a chunked body; buffer it.
 		if r.ContentLength < 0 {

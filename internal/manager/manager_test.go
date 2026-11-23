@@ -433,3 +433,46 @@ func TestRewriteGoFallsBackWhenBodyDoesNotParse(t *testing.T) {
 	want := "package p // import \"github.com/a/b/v3/p\"\n\nimport \"github.com/a/b/v3/x\"\n\n//go:generate go run github.com/a/b/v2/cmd/gen\nfunc ( {\n"
 	rewriteGoWant(t, src, want, 2, "p.go (go:generate lines not examined: file does not parse)")
 }
+
+func TestGoModMigrateFollowsToolDirectives(t *testing.T) {
+	in := `module example.com/app
+
+go 1.24
+
+require (
+	github.com/a/b/v2 v2.3.0
+	github.com/a/b/v2/nested v1.0.0
+)
+
+tool (
+	github.com/a/b/v2/cmd/gen
+	github.com/a/b/v2/nested/cmd/other
+	github.com/a/b/v3/cmd/else
+	github.com/other/x/cmd/y
+)
+`
+	want := `module example.com/app
+
+go 1.24
+
+require (
+	github.com/a/b/v2/nested v1.0.0
+	github.com/a/b/v3 v3.0.0
+)
+
+tool (
+	github.com/a/b/v2/nested/cmd/other
+	github.com/a/b/v3/cmd/else
+	github.com/a/b/v3/cmd/gen
+	github.com/other/x/cmd/y
+)
+`
+	dep := model.Dependency{File: "go.mod", Package: "github.com/a/b/v2", Version: "v2.3.0"}
+	out, err := GoMod{}.Apply([]byte(in), dep, "github.com/a/b/v3", "v3.0.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) != want {
+		t.Fatalf("got:\n%s\nwant:\n%s", out, want)
+	}
+}

@@ -69,6 +69,8 @@ updates:
   - ecosystem: gomod               # gomod, or regex (see README)
     directory: /                   # this directory and everything below it
     go-toolchain: toolchain        # optional, off by default: toolchain | directive (docs/go-toolchain.md)
+    directives: extended           # optional, off by default: also rewrite `go run pkg@version` and `go tool pkg` on a major bump
+    tidy: minimal                  # optional, off by default: keep unrelated go.mod requirements and go.sum lines (see below)
     cooldown: 7d                   # wait this long after a release (never less than the server minimum)
     schedule:
       days: [mon, tue]
@@ -151,10 +153,21 @@ refreshed and verified too. A module with a `vendor/modules.txt` gets `go mod ve
 vet of each used module. Without the `go` command, a minor or patch PR is opened as before and says it
 was not verified.
 
+`go mod tidy` also drops requirements the repo never imports. With `tidy: minimal` on a `gomod` entry ripple
+still runs it, then keeps every original `go.mod` requirement and `go.sum` line and adds only what tidy
+added or raised (go.sum lines below a version `go.mod` now selects are dropped), so the PR is the update and
+little else. A module that requires a `go.work` sibling without a `replace` is tidied with the sibling as a
+temporary local replace and built in workspace mode; a workspace-level `vendor/` is refreshed with `go work vendor`.
+
 A major bump also rewrites the package of a plain `//go:generate go run <package>` and canonical
 `package p // import "..."` comments (both found with go/parser, never by pattern). Directives that
 mention the old path in any other shape (`@version`, quoting, a variable, another command, a program
-argument) are left alone and listed in the PR body.
+argument) are left alone and listed in the PR body. Opt in with `directives: extended` on a `gomod` entry
+to also rewrite `go run <package>@<version>` (a full semantic version becomes the version being bumped
+to; `latest`, `upgrade` and `patch` stay) and `go tool <package>`, and to read the directives of a file whose
+body does not parse the way `go generate` does (as lines that start at column 1). `tool` directives in
+`go.mod` always follow the module to its new path. `mockgen` and other generators that take an import path
+as a program argument are still only listed.
 
 **cgo and private modules.** Verification builds with cgo off by default, so a module with cgo files that has
 a pure-Go fallback builds green without compiling its C; the PR then says the C code was not compiled. Set

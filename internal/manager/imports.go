@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"golang.org/x/mod/modfile"
+	"golang.org/x/mod/semver"
 
 	"github.com/taumatix/ripple/internal/platform"
 )
@@ -44,6 +45,23 @@ func RewriteGoImports(ws platform.Workspace, goModFile, oldPath, newPath string,
 // returned in skipped so the caller can tell a human. It returns the files it
 // changed.
 func RewriteGo(ws platform.Workspace, goModFile, oldPath, newPath string, goMod []byte) (res GoRewrite, err error) {
+	return RewriteGoWith(ws, goModFile, oldPath, newPath, goMod, GoRewriteOptions{})
+}
+
+// GoRewriteOptions are the opt-in extensions of RewriteGo; the zero value is RewriteGo.
+type GoRewriteOptions struct {
+	// Extended also rewrites the //go:generate forms that are not a plain "go run
+	// <package>": "go run <package>@<version>" (the version becomes NewVersion when it is
+	// a full semantic version, and stays for latest, upgrade and patch) and
+	// "go tool <package>", and reads the directives of a file whose body does not parse
+	// the way cmd/go does, as lines that start at column 1.
+	Extended bool
+	// NewVersion is the version of the new module path being bumped to.
+	NewVersion string
+}
+
+// RewriteGoWith is RewriteGo with the extensions in opts.
+func RewriteGoWith(ws platform.Workspace, goModFile, oldPath, newPath string, goMod []byte, opts GoRewriteOptions) (res GoRewrite, err error) {
 	f, err := modfile.ParseLax(goModFile, goMod, nil)
 	if err != nil {
 		return res, fmt.Errorf("parse %s: %w", goModFile, err)
@@ -78,7 +96,7 @@ func RewriteGo(ws platform.Workspace, goModFile, oldPath, newPath string, goMod 
 		if err != nil {
 			return res, err
 		}
-		out, n, amb, err := rewriteGo(p, src, oldPath, newPath, nested)
+		out, n, amb, err := rewriteGoOpts(p, src, oldPath, newPath, nested, opts)
 		if err != nil {
 			res.Skipped = append(res.Skipped, p)
 			continue
@@ -168,6 +186,10 @@ type edit struct {
 // body does not parse still gets its imports and import comment rewritten when its
 // header parses; its directives are then not examined, which is reported.
 func rewriteGo(name string, src []byte, oldPath, newPath string, nested []string) ([]byte, int, []string, error) {
+	return rewriteGoOpts(name, src, oldPath, newPath, nested, GoRewriteOptions{})
+}
+
+func rewriteGoOpts(name string, src []byte, oldPath, newPath string, nested []string, opts GoRewriteOptions) ([]byte, int, []string, error) {
 	fset := token.NewFileSet()
 	full := true
 	af, err := parser.ParseFile(fset, name, src, parser.ParseComments)
@@ -203,14 +225,21 @@ func rewriteGo(name string, src []byte, oldPath, newPath string, nested []string
 			if !full {
 				continue
 			}
-			es, amb := generateEdits(fset, c, oldPath, rewrite)
+			if fset.Position(c.Pos()).Column != 1 {
+				continue
+			}
+			es, amb := generateEdits(c.Text, fset.Position(c.Pos()).Offset, oldPath, rewrite, opts)
 			edits = append(edits, es...)
 			if amb {
 				ambiguous = append(ambiguous, fmt.Sprintf("%s:%d", name, fset.Position(c.Pos()).Line))
 			}
 		}
 	}
-	if !full && bytes.Contains(src, []byte("//go:generate")) {
+	if !full && opts.Extended {
+		es, amb := scanDirectives(name, src, oldPath, rewrite, opts)
+		edits = append(edits, es...)
+		ambiguous = append(ambiguous, amb...)
+	} else if !full && bytes.Contains(src, []byte("//go:generate")) {
 		ambiguous = append(ambiguous, name+" (go:generate lines not examined: file does not parse)")
 	}
 	if len(edits) == 0 {
@@ -336,28 +365,81 @@ func mentions(w, oldPath string) bool {
 	}
 }
 
-// generateEdits handles one comment: if it is a //go:generate directive it returns
-// the edit for the package of a plain "go run", and whether the directive mentions
-// oldPath anywhere it did not rewrite.
-func generateEdits(fset *token.FileSet, c *ast.Comment, oldPath string, rewrite func(string) (string, bool)) (edits []edit, ambiguous bool) {
+// scanDirectives reads the //go:generate lines of a file that does not parse the way
+// cmd/go does: every line that starts, at column 1, with the directive.
+func scanDirectives(name string, src []byte, oldPath string, rewrite func(string) (string, bool), opts GoRewriteOptions) (edits []edit, ambiguous []string) {
+	for off, line := 0, 1; off < len(src); line++ {
+		end := bytes.IndexByte(src[off:], '\n')
+		next := len(src)
+		if end >= 0 {
+			end, next = off+end, off+end+1
+		} else {
+			end = len(src)
+		}
+		text := strings.TrimSuffix(string(src[off:end]), "\r")
+		if strings.HasPrefix(text, "//go:generate") {
+			es, amb := generateEdits(text, off, oldPath, rewrite, opts)
+			edits = append(edits, es...)
+			if amb {
+				ambiguous = append(ambiguous, fmt.Sprintf("%s:%d", name, line))
+			}
+		}
+		off = next
+	}
+	return edits, ambiguous
+}
+
+// rewriteArg is the edit for one word that names a package, as "go run" and "go tool"
+// take it: "path" or, with opts.Extended, "path@version".
+func rewriteArg(w word, rewrite func(string) (string, bool), opts GoRewriteOptions) (string, bool) {
+	if !w.plain {
+		return "", false
+	}
+	pkg, ver, versioned := strings.Cut(w.text, "@")
+	if versioned && !opts.Extended {
+		return "", false
+	}
+	nv, ok := rewrite(pkg)
+	if !ok {
+		return "", false
+	}
+	if !versioned {
+		return nv, true
+	}
+	switch {
+	case ver == "latest" || ver == "upgrade" || ver == "patch":
+		return nv + "@" + ver, true
+	case opts.NewVersion != "" && semver.IsValid(ver) && semver.Canonical(ver) == ver:
+		return nv + "@" + opts.NewVersion, true
+	}
+	return "", false
+}
+
+// generateEdits handles one comment (its text, at offset base of the file): if it is a
+// //go:generate directive it returns the edit for the package of a plain "go run"
+// (and with opts.Extended "go run pkg@version" and "go tool pkg"), and whether the
+// directive mentions oldPath anywhere it did not rewrite.
+func generateEdits(text string, base int, oldPath string, rewrite func(string) (string, bool), opts GoRewriteOptions) (edits []edit, ambiguous bool) {
 	const prefix = "//go:generate"
-	if fset.Position(c.Pos()).Column != 1 || !strings.HasPrefix(c.Text, prefix) {
+	if !strings.HasPrefix(text, prefix) {
 		return nil, false
 	}
-	if rest := c.Text[len(prefix):]; rest == "" || (rest[0] != ' ' && rest[0] != '\t') {
+	if rest := text[len(prefix):]; rest == "" || (rest[0] != ' ' && rest[0] != '\t') {
 		return nil, false
 	}
-	ws := splitWords(c.Text)[1:] // [0] is the directive itself
+	ws := splitWords(text)[1:] // [0] is the directive itself
 	if len(ws) >= 2 && ws[0].text == "-command" {
 		ws = ws[2:] // //go:generate -command name args...: args is a command too
 	}
 	used := -1
-	if len(ws) >= 2 && ws[0].text == "go" && ws[1].text == "run" {
+	switch {
+	case len(ws) >= 2 && ws[0].text == "go" && ws[1].text == "run":
 		used = goRunPackage(ws)
+	case opts.Extended && len(ws) >= 3 && ws[0].text == "go" && ws[1].text == "tool":
+		used = goToolPackage(ws)
 	}
-	if used >= 0 && ws[used].plain && !strings.Contains(ws[used].text, "@") {
-		if nv, ok := rewrite(ws[used].text); ok {
-			base := fset.Position(c.Pos()).Offset
+	if used >= 0 {
+		if nv, ok := rewriteArg(ws[used], rewrite, opts); ok {
 			edits = append(edits, edit{base + ws[used].start, base + ws[used].end, nv})
 		}
 	}
@@ -370,6 +452,21 @@ func generateEdits(fset *token.FileSet, c *ast.Comment, oldPath string, rewrite 
 		}
 	}
 	return edits, ambiguous
+}
+
+// goToolPackage returns the index in ws of the command of "go tool": the only flag
+// before it that go tool has is -n (go help tool).
+func goToolPackage(ws []word) int {
+	for i := 2; i < len(ws); i++ {
+		switch t := ws[i].text; {
+		case t == "-n":
+		case strings.HasPrefix(t, "-"):
+			return -1
+		default:
+			return i
+		}
+	}
+	return -1
 }
 
 // goRunPackage returns the index in ws of the package argument of "go run", or -1

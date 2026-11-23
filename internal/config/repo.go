@@ -115,6 +115,13 @@ type Update struct {
 	// server's module proxy serves and the public checksum database does not know. Only a
 	// repo that lists them is given the server's proxy credential.
 	PrivateModules []string `yaml:"private-modules"`
+	// Directives is gomod only: "" (the default) rewrites only a plain "go run <package>"
+	// in //go:generate lines on a major bump; "extended" also rewrites "go run pkg@version"
+	// and "go tool pkg", and reads the directives of files that do not parse.
+	Directives string `yaml:"directives"`
+	// Tidy is gomod only: "" (the default) keeps whatever go mod tidy writes; "minimal"
+	// keeps the original go.mod and go.sum and adds only what the update made necessary.
+	Tidy string `yaml:"tidy"`
 	// regex ecosystem only
 	Files    []string `yaml:"files"`
 	Patterns []string `yaml:"patterns"`
@@ -265,7 +272,7 @@ func (c *checker) add(n *yaml.Node, format string, a ...any) {
 
 var (
 	rootKeys     = []string{"version", "open-pull-requests-limit", "close-superseded-pull-requests", "backfill-new-dependencies", "dependency-dashboard", "updates"}
-	updateKeys   = []string{"ecosystem", "directory", "schedule", "cooldown", "ignore", "groups", "automerge", "go-toolchain", "cgo", "private-modules", "files", "patterns", "package"}
+	updateKeys   = []string{"ecosystem", "directory", "schedule", "cooldown", "ignore", "groups", "automerge", "go-toolchain", "cgo", "private-modules", "directives", "tidy", "files", "patterns", "package"}
 	scheduleKeys = []string{"days", "from", "to", "timezone"}
 	ignoreKeys   = []string{"dependency", "update-types"}
 	groupKeys    = []string{"patterns", "update-types"}
@@ -427,6 +434,16 @@ func (c *checker) update(n *yaml.Node, u *Update, where string) {
 		default:
 			c.add(f["go-toolchain"], "%s.go-toolchain must be toolchain or directive (omit it to leave the go directive and toolchain line alone)", where)
 		}
+		switch u.Directives {
+		case "", "extended":
+		default:
+			c.add(f["directives"], "%s.directives must be extended (omit it to rewrite only a plain go run <package>)", where)
+		}
+		switch u.Tidy {
+		case "", "minimal":
+		default:
+			c.add(f["tidy"], "%s.tidy must be minimal (omit it to keep what go mod tidy writes)", where)
+		}
 		c.privateModules(f["private-modules"], u.PrivateModules, where)
 		if d := f["directory"]; d != nil {
 			if !strings.HasPrefix(u.Directory, "/") || strings.Contains(u.Directory, "..") || path.Clean(u.Directory) != strings.TrimRight(u.Directory, "/") && u.Directory != "/" {
@@ -434,7 +451,7 @@ func (c *checker) update(n *yaml.Node, u *Update, where string) {
 			}
 		}
 	case "regex":
-		for _, k := range []string{"cgo", "private-modules"} {
+		for _, k := range []string{"cgo", "private-modules", "directives", "tidy"} {
 			if v := f[k]; v != nil {
 				c.add(v, "%s.%s is only valid with ecosystem: gomod", where, k)
 			}

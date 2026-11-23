@@ -499,7 +499,9 @@ func (r *runner) apply(it item) (bool, error) {
 			return false, err
 		}
 		if d.Package != it.job.Package {
-			res, err := manager.RewriteGo(r.ws, d.File, d.Package, it.job.Package, content)
+			u, _ := r.cfg.UpdateFor("gomod", d.File)
+			res, err := manager.RewriteGoWith(r.ws, d.File, d.Package, it.job.Package, content,
+				manager.GoRewriteOptions{Extended: u.Directives == "extended", NewVersion: it.job.Version})
 			if err != nil {
 				return false, err
 			}

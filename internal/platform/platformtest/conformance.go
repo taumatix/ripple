@@ -2,6 +2,7 @@ package platformtest
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -275,5 +276,36 @@ func renamed(t *testing.T, f Fixture) {
 	e.tick()
 	if n := len(e.f.PRs(f.Path("after"))); n != 1 {
 		t.Fatalf("want 1 PR under the new name, got %d", n)
+	}
+}
+
+// A repo that opts in with dependency-dashboard gets one issue listing its deferred
+// job where the host implements platform.IssueTracker. A host that does not keeps the
+// job and reports the capability absent (ErrNoIssues), without an error or a retry.
+func dashboard(t *testing.T, f Fixture) {
+	e := newEnv(t, f, opts{})
+	e.stub("example.com/lib", "v1.0.0", "v1.1.0")
+	e.addRepo("dash", libRepo("example.com/dash", map[string]string{
+		".ripple.yaml": "dependency-dashboard: true\nupdates:\n  - ecosystem: gomod\n    cooldown: 3d\n"}))
+	e.register("dash")
+	e.clock.Advance(time.Minute)
+	e.publish("example.com/lib", "v1.1.0")
+	e.tick()
+	e.tick()
+	_, can := e.host.Platform.(platform.IssueTracker)
+	repo := model.Repo{FullName: e.name("dash")}
+	iss, found, err := platform.FindIssue(context.Background(), e.mux, repo, "ripple", "<!-- ripple:dependency-dashboard -->")
+	if !can {
+		if !errors.Is(err, platform.ErrNoIssues) {
+			t.Errorf("a host without issues must report ErrNoIssues, got found=%v err=%v", found, err)
+		}
+	} else if err != nil || !found || !strings.Contains(iss.Body, "`example.com/lib` `v1.1.0`") {
+		t.Errorf("want a dashboard naming the deferred job: found=%v err=%v body=%q", found, err, iss.Body)
+	}
+	if n := len(e.prs("dash")); n != 0 {
+		t.Errorf("the cooldown was ignored: %d PRs", n)
+	}
+	if j := e.job("dash", "example.com/lib", "v1.1.0"); j.State != model.JobPending || j.Attempts != 0 {
+		t.Errorf("the job must stay pending and unharmed: %+v", j)
 	}
 }

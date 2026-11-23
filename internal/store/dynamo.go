@@ -25,6 +25,7 @@ import (
 //	dependency  PK=REPO#<repo>        SK=DEP#<file>\x1f<ds>\x1f<pkg>   GSI1PK=PKG#<ds>#<line>  GSI1SK=<repo>\x1f<file>
 //	release     PK=PKG#<ds>#<pkg>     SK=REL#<version>                  (no GSI attributes)
 //	job         PK=JOB#<key>          SK=META    GSI1PK=JOBS#pending[#<shard>] (only while pending)  GSI1SK=<not_before fixed-width>\x1f<key>
+//	open job    PK=REPO#<repo>        SK=OPENJOB#<key>  a copy of the job, present only while it is pending or failed (no GSI attributes)
 //	shard marks PK=CONFIG#shards      SK=META    (high-water mark of both shard counts)
 //	cursor      PK=CURSOR#<name>      SK=META
 //
@@ -451,7 +452,46 @@ func (d *Dynamo) EnqueueJob(ctx context.Context, j model.Job) (bool, error) {
 	if errors.As(err, &cc) {
 		return false, nil
 	}
+	if err == nil {
+		err = d.syncOpenJob(ctx, j)
+	}
 	return err == nil, wrapD("enqueue job", err)
+}
+
+func isOpen(j model.Job) bool { return j.State == model.JobPending || j.State == model.JobFailed }
+
+// syncOpenJob keeps the repo-partition copy of a job in step with it: written while
+// the job is pending or failed, removed once it is not. It is a second write after
+// the job's own, so a failure between the two leaves the copy stale until the job's
+// next update; only the dependency dashboard reads it.
+func (d *Dynamo) syncOpenJob(ctx context.Context, j model.Job) error {
+	if isOpen(j) {
+		a := d.jobItem(j)
+		a.item = item{PK: "REPO#" + j.Repo, SK: "OPENJOB#" + j.Key}
+		return d.put(ctx, a, nil)
+	}
+	_, err := d.db.DeleteItem(ctx, &dynamodb.DeleteItemInput{TableName: &d.table,
+		Key: map[string]types.AttributeValue{"PK": s("REPO#" + j.Repo), "SK": s("OPENJOB#" + j.Key)}})
+	return err
+}
+
+// ListOpenJobs is store.OpenJobLister: one Query on the repo's partition. A job
+// enqueued by a ripple older than this index has no copy until its next update.
+func (d *Dynamo) ListOpenJobs(ctx context.Context, repo string) ([]model.Job, error) {
+	var out []model.Job
+	err := d.query(ctx, &dynamodb.QueryInput{
+		ConsistentRead:            aws.Bool(true),
+		KeyConditionExpression:    aws.String("PK = :pk AND begins_with(SK, :p)"),
+		ExpressionAttributeValues: map[string]types.AttributeValue{":pk": s("REPO#" + repo), ":p": s("OPENJOB#")},
+	}, 0, func(it map[string]types.AttributeValue) error {
+		var a jobAttrs
+		if err := attributevalue.UnmarshalMap(it, &a); err != nil {
+			return err
+		}
+		out = append(out, fromJobItem(a))
+		return nil
+	})
+	return out, wrapD("list open jobs", err)
 }
 
 func fromJobItem(a jobAttrs) model.Job {
@@ -470,7 +510,11 @@ func (d *Dynamo) GetJob(ctx context.Context, key string) (model.Job, bool, error
 }
 
 func (d *Dynamo) UpdateJob(ctx context.Context, j model.Job) error {
-	return wrapD("update job", d.put(ctx, d.jobItem(j), nil))
+	err := d.put(ctx, d.jobItem(j), nil)
+	if err == nil {
+		err = d.syncOpenJob(ctx, j)
+	}
+	return wrapD("update job", err)
 }
 
 // ListDueJobs queries every pending-job shard for its first limit due items and merges

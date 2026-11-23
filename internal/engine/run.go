@@ -96,6 +96,7 @@ func (e *Engine) RunDue(ctx context.Context) (int, error) {
 		}()
 	}
 	wg.Wait()
+	e.flushDashboards(ctx)
 	return finished, ctx.Err()
 }
 
@@ -158,6 +159,7 @@ func (r *runner) fail(j model.Job, err error) {
 
 func (e *Engine) runRepo(ctx context.Context, name string, jobs []model.Job) int {
 	defer e.lockRepo(name)()
+	defer func() { e.syncDashboard(ctx, name) }()
 	r := &runner{e: e, ctx: ctx}
 	var err error
 	var found bool

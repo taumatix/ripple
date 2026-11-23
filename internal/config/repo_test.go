@@ -258,3 +258,21 @@ func TestBackfillNewDependenciesDefaultsOn(t *testing.T) {
 		t.Error("a non-boolean value must be an error")
 	}
 }
+
+func TestDependencyDashboardIsOptIn(t *testing.T) {
+	for _, c := range []struct {
+		file string
+		want bool
+	}{{"", false}, {"version: 1\n", false}, {"dependency-dashboard: true\n", true}, {"dependency-dashboard: false\n", false}} {
+		r, err := Parse([]byte(c.file))
+		if err != nil {
+			t.Fatalf("%q: %v", c.file, err)
+		}
+		if r.DependencyDashboard != c.want {
+			t.Errorf("%q: DependencyDashboard = %v, want %v", c.file, r.DependencyDashboard, c.want)
+		}
+	}
+	if _, err := Parse([]byte("dependency-dashboard: maybe\n")); err == nil {
+		t.Error("a non-boolean value must be an error")
+	}
+}

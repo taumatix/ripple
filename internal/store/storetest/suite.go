@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"sort"
 	"testing"
 	"time"
 
@@ -236,6 +237,70 @@ func Run(t *testing.T, mk func(t *testing.T) store.Store) {
 		}
 		if _, ok, _ := s.GetJob(ctx, "nope"); ok {
 			t.Fatal("unexpected job")
+		}
+	})
+
+	t.Run("open jobs of a repo", func(t *testing.T) {
+		s := mk(t)
+		ol, ok := s.(store.OpenJobLister)
+		if !ok {
+			t.Fatal("store does not implement store.OpenJobLister")
+		}
+		base := time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC)
+		mkJob := func(repo, pkg string, st model.JobState, nb time.Time) model.Job {
+			return model.Job{Key: model.JobKey(repo, "go", pkg, "v1.1.0"), Repo: repo, Datasource: "go", Package: pkg,
+				Version: "v1.1.0", ReleasedAt: base, State: st, NotBefore: nb}
+		}
+		jobs := map[string]model.Job{
+			"due":      mkJob("acme/web", "example.com/due", model.JobPending, base.Add(-time.Hour)),
+			"deferred": mkJob("acme/web", "example.com/deferred", model.JobPending, base.Add(48*time.Hour)),
+			"failed":   mkJob("acme/web", "example.com/failed", model.JobFailed, base),
+			"done":     mkJob("acme/web", "example.com/done", model.JobDone, base),
+			"skipped":  mkJob("acme/web", "example.com/skipped", model.JobSkipped, base),
+			"other":    mkJob("acme/api", "example.com/other", model.JobPending, base),
+		}
+		for _, j := range jobs {
+			if _, err := s.EnqueueJob(ctx, j); err != nil {
+				t.Fatal(err)
+			}
+		}
+		keys := func() []string {
+			got, err := ol.ListOpenJobs(ctx, "acme/web")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var out []string
+			for _, j := range got {
+				out = append(out, j.Package)
+			}
+			sort.Strings(out)
+			return out
+		}
+		if got := keys(); !reflect.DeepEqual(got, []string{"example.com/deferred", "example.com/due", "example.com/failed"}) {
+			t.Fatalf("open jobs of acme/web: %v", got)
+		}
+		got, _ := ol.ListOpenJobs(ctx, "acme/web")
+		for _, j := range got {
+			if j.Package == "example.com/failed" && !reflect.DeepEqual(j, jobs["failed"]) {
+				t.Fatalf("job roundtrip:\n got %+v\nwant %+v", j, jobs["failed"])
+			}
+		}
+		// A job that finishes leaves the list; one that fails or is deferred joins or stays.
+		d := jobs["due"]
+		d.State = model.JobDone
+		if err := s.UpdateJob(ctx, d); err != nil {
+			t.Fatal(err)
+		}
+		f := jobs["deferred"]
+		f.State, f.Attempts, f.Reason = model.JobFailed, 5, "boom"
+		if err := s.UpdateJob(ctx, f); err != nil {
+			t.Fatal(err)
+		}
+		if got := keys(); !reflect.DeepEqual(got, []string{"example.com/deferred", "example.com/failed"}) {
+			t.Fatalf("after updates: %v", got)
+		}
+		if got, _ := ol.ListOpenJobs(ctx, "acme/none"); len(got) != 0 {
+			t.Fatalf("unknown repo: %v", got)
 		}
 	})
 

@@ -128,8 +128,11 @@ type Repo struct {
 	// CloseSuperseded is nil when the key is absent, which means true.
 	CloseSuperseded *bool `yaml:"close-superseded-pull-requests"`
 	// BackfillNewDependencies is nil when the key is absent, which means true.
-	BackfillNewDependencies *bool    `yaml:"backfill-new-dependencies"`
-	Updates                 []Update `yaml:"updates"`
+	BackfillNewDependencies *bool `yaml:"backfill-new-dependencies"`
+	// DependencyDashboard keeps one issue listing the repo's pending, deferred and
+	// failed jobs. Off unless the file says true.
+	DependencyDashboard bool     `yaml:"dependency-dashboard"`
+	Updates             []Update `yaml:"updates"`
 }
 
 // ClosesSuperseded reports whether ripple may close its own untouched PR once a newer
@@ -261,7 +264,7 @@ func (c *checker) add(n *yaml.Node, format string, a ...any) {
 }
 
 var (
-	rootKeys     = []string{"version", "open-pull-requests-limit", "close-superseded-pull-requests", "backfill-new-dependencies", "updates"}
+	rootKeys     = []string{"version", "open-pull-requests-limit", "close-superseded-pull-requests", "backfill-new-dependencies", "dependency-dashboard", "updates"}
 	updateKeys   = []string{"ecosystem", "directory", "schedule", "cooldown", "ignore", "groups", "automerge", "go-toolchain", "cgo", "private-modules", "files", "patterns", "package"}
 	scheduleKeys = []string{"days", "from", "to", "timezone"}
 	ignoreKeys   = []string{"dependency", "update-types"}

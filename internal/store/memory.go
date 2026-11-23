@@ -155,6 +155,19 @@ func (m *Memory) ListDueJobsExcluding(_ context.Context, now time.Time, limit in
 	return out, nil
 }
 
+// ListOpenJobs is store.OpenJobLister.
+func (m *Memory) ListOpenJobs(_ context.Context, repo string) ([]model.Job, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []model.Job
+	for _, j := range m.jobs {
+		if j.Repo == repo && (j.State == model.JobPending || j.State == model.JobFailed) {
+			out = append(out, j)
+		}
+	}
+	return out, nil
+}
+
 func (m *Memory) GetCursor(_ context.Context, n string) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

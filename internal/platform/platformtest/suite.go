@@ -98,6 +98,7 @@ func Run(t *testing.T, f Fixture) {
 	t.Run("AutoMergeRequestedOnlyWhereTheHostCan", func(t *testing.T) { autoMerge(t, f) })
 	t.Run("StalePRClosedOnlyWhereTheHostCan", func(t *testing.T) { supersede(t, f) })
 	t.Run("RateLimitHoldsBackTheHostThenRetries", func(t *testing.T) { rateLimit(t, f) })
+	t.Run("DependencyDashboardOnlyWhereTheHostHasIssues", func(t *testing.T) { dashboard(t, f) })
 	t.Run("RenameKeepsTheIndexWithoutAScan", func(t *testing.T) { renamed(t, f) })
 }
 

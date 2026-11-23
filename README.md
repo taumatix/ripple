@@ -64,6 +64,7 @@ version: 1
 open-pull-requests-limit: 3        # at most this many ripple PRs open at once
 close-superseded-pull-requests: true  # close ripple's own untouched PR when a newer version gets one (default: true)
 backfill-new-dependencies: true    # bring a dependency the repo starts using to the newest release already known (default: true)
+dependency-dashboard: false        # keep one issue listing pending, deferred and failed jobs (default: false)
 updates:
   - ecosystem: gomod               # gomod, or regex (see README)
     directory: /                   # this directory and everything below it
@@ -94,6 +95,12 @@ updates:
   does not delete the branch (turn on "automatically delete head branches" in the repository settings), and
   it does not notice an edited description. Only the GitHub host can close pull requests so far; on the
   others both PRs stay open. Set it to `false` to keep every PR.
+- `dependency-dashboard` (default `false`): keeps one issue per repo, labelled `ripple` and recognised by a
+  marker comment on its first line, listing the jobs that are pending (with the time they wait until, for
+  a cooldown or schedule), and the ones that failed. It is rewritten at the end of each pass, and not at
+  all when the text is unchanged. Edits to it are ignored: it is a report, not a control. It needs the App's
+  Issues read and write permission and issues enabled on the repo; without either ripple logs once and goes on.
+  A closed dashboard keeps being updated and is never reopened. GitHub only.
 - `backfill-new-dependencies` (default `true`): a repo that starts importing a module only hears about
   releases published afterwards, so when a scan finds a dependency the repo did not have, ripple compares it
   with the newest release of that exact module path already stored from the feed and opens a normal job when

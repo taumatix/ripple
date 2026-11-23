@@ -202,18 +202,6 @@ Everything else:
 103. **Replicas: metrics and one feed poller.** Expose a replica-count and lease-takeover metric (today only the
     `replica` start-up and `lease taken over` log lines exist) and elect one replica for the release-feed poll
     (two polling is safe, since job enqueue is insert-if-absent, but wasteful).
-104. **OSV: sweep DynamoDB repos and large repos.** The post-gap sweep needs `store.RepoLister`, which memory and
-    Postgres have; DynamoDB has no cheap listing (needs a repo index item) so it is not swept. The batch (10) is
-    not configurable, and a huge repo is still bound by `maxHistoryQueries` and `maxHistoryFetch`. Postgres
-    `ListRepos` is verified only in CI.
-105. **OSV: reconcile older and busy cases.** Corrections only reach jobs indexed under `osv-jobs` (made after this
-    release); a repo busy for over 2s keeps its stale job or PR until the next record change; a PR body is not
-    rewritten when a record is corrected; a record shared by twin GHSA and GO notes is reconciled per note.
-106. **OSV: conflict and pseudo-version residuals.** An already-open non-security toolchain PR is not closed when a
-    security one arrives (whoever merges second resolves it). A plain, non-advisory release move off a pseudo-
-    version is not implemented; rule to use: the first release above the pseudo-version and released after its
-    timestamp, opt-in. Decision recorded: `security-from-pseudo-versions` is opt-in and never automerged until real
-    PR diffs show otherwise.
 107. **Archive events on other hosts.** GitLab (`project_update`), Gitea/Forgejo, Bitbucket and Azure DevOps report no
     archive event in the docs checked (see each `docs/platform-*.md`). Poll the archived flag per host on a refresh,
     or map an event once a host documents one; Forgejo and Bitbucket Data Center were not checked.
@@ -280,3 +268,16 @@ Everything else:
     next run or write, but a per-item store write would remove it. Read-back finds the issue by its marker, so an
     edit that removes the marker is repaired by number and one that deletes the issue is recreated, both
     covered only against the fake.
+124. **OSV: sweep residuals.** The DynamoDB repo index (`REPOS` items) is built by one Scan the first time a listing is asked
+    for; that Scan and the listing are verified on the in-process fake, and DynamoDB Local runs them only in CI. A scan
+    (not the sweep) still runs one history round, so a repo with over 500 pairs or 100 records is completed only by a sweep
+    or a go.mod change; consider a few rounds per scan once real repo sizes are known. Postgres `ListRepos` is CI-only.
+125. **OSV: reconcile older cases.** Jobs made before the `osv-jobs` index are still not found: the sweep's `RepoLister` plus
+    `ListOpenJobs` could find them per repo. A PR body is not rewritten when a record is corrected (the fix version or
+    summary in it can be stale), and a record shared by twin GHSA and GO notes is reconciled per note. The busy-repo retry
+    list holds at most 100 ids.
+126. **OSV: conflict and pseudo-version residuals.** The beaten-PR close covers a non-security PR when a security
+    toolchain PR opens; a lower security toolchain PR open beside a higher one is not closed, and a toolchain PR opened by an
+    older run than the security job is only held, never closed, unless the security PR opens in a later run with it open.
+    A plain, non-advisory release move off a pseudo-version is still not implemented; rule to use: the first release above
+    the pseudo-version and released after its timestamp, opt-in.

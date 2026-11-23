@@ -164,9 +164,6 @@ Everything else:
 101. **Replicas: soak against real databases.** The shared suite races goroutines on one store handle and the
     e2e runs two replicas; neither is a real multi-node Postgres or DynamoDB under load, or with a skewed clock.
     Run three replicas against both with a clock offset and check one PR per job and ordered events.
-107. **Archive events on other hosts.** GitLab (`project_update`), Gitea/Forgejo, Bitbucket and Azure DevOps report no
-    archive event in the docs checked (see each `docs/platform-*.md`). Poll the archived flag per host on a refresh,
-    or map an event once a host documents one; Forgejo and Bitbucket Data Center were not checked.
 113. **DynamoDB: throttling and index lag against a real table.** `ThrottleNext` and `HoldIndex` model the errors and
     the stale reads, not their timing or frequency, and DynamoDB Local throttles and lags neither. Run the sharded
     and striped paths against a real on-demand table once (a throwaway account, a bounded run) and record the
@@ -343,3 +340,13 @@ Everything else:
     now stores its id (GitHub carries it in every added-repository object), but a signed push whose id differs from
     the stored one is still ignored, not resolved with a lookup of the name on the host. A GitHub lookup
     (`GET /repositories/{id}`) would say which name the id holds now and settle a missed rename or a reused name.
+174. **Archive on the hosts that still do not report it.** GitLab, Gitea/Forgejo and Bitbucket Data Center now read an
+    archive from their listing (entry 107); the Lister hosts SCM-Manager and Gerrit still drop an archived repo from
+    the listing, which forgets it with its jobs. SCM-Manager's repository object has an archived flag in its source
+    notes only, and Gerrit's read-only project state (`GET /projects/?state=READ_ONLY`) is not vendored: read both
+    from vendored docs, then implement `platform.ArchivedLister`. Bitbucket Cloud and Azure DevOps (whose
+    `isDisabled` is a different state) document no archive at all in `docs/vendor`; nothing to build for them.
+175. **Archive from the listing against real hosts.** The listing reads (`archived=true` on GitLab, the `archived` flag
+    of Gitea/Forgejo, `archived=ARCHIVED` on Data Center 8+) ran only against fakes; also check that GitLab's
+    `simple=true` listing under `archived=true` answers what the doc says, and that a Data Center before 8.0 lists no
+    archived repo. Folds into entry 92's real-host run.

@@ -61,7 +61,7 @@ func TestContainerConfinedNetworkLive(t *testing.T) {
 	work, _ := filepath.EvalSymlinks(t.TempDir())
 	cache, _ := filepath.EvalSymlinks(t.TempDir())
 	env := []string{"HOME=" + work, "TMPDIR=" + work, "GOPATH=" + work + "/gopath", "GOCACHE=" + cache, "GOENV=off",
-		"GOTOOLCHAIN=local", "CGO_ENABLED=0", "GOSUMDB=off", "GOFLAGS=-mod=mod", "GOPROXY=" + conf.ProxyURL}
+		"GOTOOLCHAIN=local", "CGO_ENABLED=0", "GOSUMDB=off", "GOFLAGS=-mod=mod -modcacherw", "GOPROXY=" + conf.ProxyURL}
 	p := Policy{Workdir: work, Writable: []string{work, cache}, Env: env, Proxy: conf.ProxyURL}
 	os.WriteFile(filepath.Join(work, "go.mod"), []byte("module x\n\ngo 1.21\n"), 0o644)
 	const long = 5 * time.Minute

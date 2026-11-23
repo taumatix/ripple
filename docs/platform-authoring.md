@@ -92,7 +92,7 @@ does not list them: that forces a re-scan, which is correct but costs a clone. S
 credential scope the event belongs to (0 if there is one credential); the queue shares workers
 between scopes. `model.Repo.InstallationID` carries that scope back to your client.
 Do not re-implement the hardening: `internal/webhook` provides `Guard` (read slots, per-body read deadline,
-`ReadBody` for header-authenticated hosts, `ReadVerified` for an HMAC over the body, which streams the digest so a
+`ReadBody` for header-authenticated hosts, `ReadVerifiedStream` for an HMAC over a body the receiver can parse as it arrives (nothing is held; the parse is discarded on a forgery, and keeping at most 16 MiB of values bounds it), `ReadVerified` for an HMAC over a body that must be held whole, which streams the digest so a
 forged body is not held in memory and spools anything over 64 KiB to a temp file, or holds it in memory under `RIPPLE_WEBHOOK_SPOOL=memory`) and `Dedupe` (a TTL table;
 key it on the host's own delivery header, and `Release` the key if the sink fails so a redelivery is handled).
 Embed a `Guard`, set `MaxInflight` from the receiver, and call `ReadBody`/`ReadVerified` where you read the body.

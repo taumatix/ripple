@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"net/http"
@@ -207,6 +208,71 @@ func (g *Guard) ReadVerified(w http.ResponseWriter, r *http.Request, max int64, 
 		return nil, ReadAnswered
 	}
 	return body, ReadOK
+}
+
+// ReadVerifiedStream is ReadVerified for a receiver that can use the body as it
+// arrives: consume reads it from a pipe fed while the HMAC is computed, so the body is
+// held neither in memory nor on disk. The body is not yet authentic while consume runs, so
+// its result must be discarded unless res is ReadOK; consumeErr is meaningful only then.
+// consume may stop reading early (the rest is still hashed), and a nil consume only hashes.
+func (g *Guard) ReadVerifiedStream(w http.ResponseWriter, r *http.Request, max int64, key, prefix []byte, authentic func(sum []byte) bool, consume func(io.Reader) error) (consumeErr error, res ReadResult) {
+	release, ok := g.Acquire(w, r, max)
+	if !ok {
+		return nil, ReadAnswered
+	}
+	defer release()
+	mac := hmac.New(sha256.New, key)
+	mac.Write(prefix)
+	var pw *io.PipeWriter
+	var done chan error
+	if consume != nil {
+		var pr *io.PipeReader
+		pr, pw = io.Pipe()
+		done = make(chan error, 1)
+		go func() {
+			defer func() {
+				if p := recover(); p != nil {
+					done <- fmt.Errorf("payload parser panicked: %v", p)
+				}
+				pr.Close() // a writer after this gets ErrClosedPipe and only hashes
+			}()
+			done <- consume(pr)
+		}()
+	}
+	finish := func(cause error) error {
+		if pw == nil {
+			return nil
+		}
+		pw.CloseWithError(cause) // nil closes with EOF
+		return <-done
+	}
+	src := http.MaxBytesReader(w, r.Body, max)
+	buf := make([]byte, readChunk)
+	piping := pw != nil
+	for {
+		n, err := src.Read(buf)
+		if n > 0 {
+			mac.Write(buf[:n])
+			if piping {
+				if _, werr := pw.Write(buf[:n]); werr != nil {
+					piping = false
+				}
+			}
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			finish(err)
+			answerReadError(w, err)
+			return nil, ReadAnswered
+		}
+	}
+	consumeErr = finish(nil)
+	if !authentic(mac.Sum(nil)) {
+		return nil, ReadForged
+	}
+	return consumeErr, ReadOK
 }
 
 // spool holds a body in memory up to limit bytes, then in a temporary file.

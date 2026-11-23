@@ -204,10 +204,6 @@ Everything else:
     module is missed; it is not cached across repos (every repo with the same new module asks again, up to 20 per
     scan); a module that skipped more than three majors is found only by the feed; and it was verified against a
     fake proxy, not the real one.
-122. **Webhook bodies: stream the parse.** A signed body is still held whole, on disk (default) or in memory
-    (`RIPPLE_WEBHOOK_SPOOL=memory`), because an HMAC cannot be checked before its last byte and each receiver
-    unmarshals the whole payload. Extracting only the fields ripple acts on while the stream is hashed, and
-    discarding the result of a forgery, would hold neither; it means a token-level parse per host's payload.
 123. **Dashboard: share the sets.** The refresh set
     (`dashboard-dirty`) and the repo list that drives the hourly read-back (`dashboard-watch`) are
     read-modify-write cursors, so two replicas marking at once can lose an entry; the loss heals at the repo's
@@ -336,3 +332,8 @@ Everything else:
     `webhook-id` where signed). Removal tombstones moved to `removed#<name>` and the Dynamo sweep is a Query; the
     legacy `removed|` read path and the `tombstones-legacy` marker can be deleted a release after every replica runs
     this version. The Query of `removed#` on a very large table is unmeasured.
+168. **Webhook bodies: stream the parse for Gitea, Bitbucket, Bitbucket Server and GitLab.** GitHub's delivery is
+    parsed as it streams (`ReadVerifiedStream`, `extract.go`); the other four receivers still use `ReadVerified`, which
+    holds a signed body whole (disk above 64 KiB, or memory) and unmarshals it. Each needs its payload's field tree in
+    the extractor. The extractor keeps at most 16 MiB of values while the signature is unchecked, so a forged body
+    can cost that much per inflight request where it used to cost 64 KiB; lower it or spill to disk if that is too much.

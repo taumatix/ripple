@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -16,15 +15,13 @@ import (
 
 	"github.com/taumatix/ripple/internal/model"
 	"github.com/taumatix/ripple/internal/platform"
+	"github.com/taumatix/ripple/internal/webhook"
 )
 
 const (
 	// maxBody bounds a delivery. Bitbucket documents no payload cap; a repo:push
 	// payload lists at most five commits per change, so this is generous.
-	maxBody            = 5 << 20
-	defaultMaxInflight = 4
-	dedupeTTL          = time.Hour
-	maxRemembered      = 100_000
+	maxBody = 5 << 20
 )
 
 // Sign is the X-Hub-Signature header value for body: "sha256=" and the hex HMAC-SHA256
@@ -81,58 +78,21 @@ type Receiver struct {
 	// Now is the clock for the dedupe window; default time.Now.
 	Now func() time.Time
 
-	once sync.Once
-	sem  chan struct{}
-	mu   sync.Mutex
-	seen map[string]time.Time
+	once   sync.Once
+	guard  webhook.Guard
+	dedupe webhook.Dedupe
 }
 
 func (h *Receiver) init() {
 	h.once.Do(func() {
-		if h.MaxInflight <= 0 {
-			h.MaxInflight = defaultMaxInflight
-		}
 		if h.Now == nil {
 			h.Now = time.Now
 		}
 		if h.Log == nil {
 			h.Log = slog.New(slog.DiscardHandler)
 		}
-		h.sem = make(chan struct{}, h.MaxInflight)
-		h.seen = map[string]time.Time{}
+		h.guard.MaxInflight = h.MaxInflight
 	})
-}
-
-// claim reserves a request id; false means it was already handled. The id is an
-// unsigned header, so this stops Bitbucket's own retries and naive replays only.
-func (h *Receiver) claim(id string) bool {
-	if id == "" {
-		return true
-	}
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	now := h.Now()
-	if exp, ok := h.seen[id]; ok && now.Before(exp) {
-		return false
-	}
-	if len(h.seen) >= maxRemembered {
-		for k, exp := range h.seen {
-			if !now.Before(exp) {
-				delete(h.seen, k)
-			}
-		}
-		if len(h.seen) >= maxRemembered {
-			return true // fail open rather than drop a delivery
-		}
-	}
-	h.seen[id] = now.Add(dedupeTTL)
-	return true
-}
-
-func (h *Receiver) release(id string) {
-	h.mu.Lock()
-	delete(h.seen, id)
-	h.mu.Unlock()
 }
 
 type pushRef struct {
@@ -175,24 +135,12 @@ func (h *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid signature", http.StatusUnauthorized)
 		return
 	}
-	if r.ContentLength > maxBody {
-		http.Error(w, "payload too large", http.StatusRequestEntityTooLarge)
+	want, _ := hex.DecodeString(strings.TrimPrefix(sig, "sha256="))
+	body, res := h.guard.ReadVerified(w, r, maxBody, h.Secret, nil, func(got []byte) bool { return hmac.Equal(got, want) })
+	switch res {
+	case webhook.ReadAnswered:
 		return
-	}
-	select {
-	case h.sem <- struct{}{}:
-	default:
-		w.Header().Set("Retry-After", "5")
-		http.Error(w, "busy", http.StatusServiceUnavailable)
-		return
-	}
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBody))
-	<-h.sem
-	if err != nil {
-		http.Error(w, "payload too large or unreadable", http.StatusRequestEntityTooLarge)
-		return
-	}
-	if !verify(h.Secret, body, sig) {
+	case webhook.ReadForged:
 		h.Log.Warn("bitbucket webhook signature rejected", "request", request)
 		http.Error(w, "invalid signature", http.StatusUnauthorized)
 		return
@@ -211,7 +159,7 @@ func (h *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad repository name", http.StatusBadRequest)
 		return
 	}
-	if !h.claim(request) {
+	if !h.dedupe.Claim(h.Now(), request) {
 		h.Log.Info("bitbucket webhook duplicate delivery dropped", "request", request)
 		w.WriteHeader(http.StatusAccepted)
 		return
@@ -242,7 +190,7 @@ func (h *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ev := platform.Event{Kind: platform.Push, Delivery: delivery, Repos: []string{repo},
 			Ref: "refs/heads/" + ch.New.Name, Files: files}
 		if err := h.Sink.HandleEvent(r.Context(), ev); err != nil {
-			h.release(request)
+			h.dedupe.Release(request)
 			h.Log.Error("bitbucket webhook sink", "repo", repo, "err", err)
 			http.Error(w, "busy", http.StatusServiceUnavailable)
 			return

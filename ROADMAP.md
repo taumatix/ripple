@@ -23,7 +23,6 @@ Ordered by how much each entry limits real deployments. The top is next.
    replicas would both load the same queued events and both pick the same due jobs. Claim work with a lease
    (Postgres `FOR UPDATE SKIP LOCKED` with an owner and expiry; DynamoDB a conditional owner/lease write), so
    replicas share the queue and a crashed one's work is retaken when its lease lapses.
-9. **Close the residual webhook gaps.** A request with a well-formed but forged signature still buffers its body (up to `MaxBody`, at most `MaxInflight` at once) before the HMAC fails, and a slow sender can hold those slots until the server read timeout, so genuine deliveries get 503 meanwhile: spool to a temp file or hash while reading with a per-read deadline. The delivery id is an unsigned header and the table is in memory: persist it in the Store and key on the body signature too (queued events already key on it, so a redelivery of a still-queued delivery is not queued twice; once handled, only the in-memory table remembers it).
 
 Platforms (code hosts). The goal is the whole list Renovate supports, each behind the one `Platform`
 interface, each with the same end-to-end test (a push or release event leads to exactly one PR in
@@ -89,9 +88,6 @@ Everything else:
 - **Listing state outside a single cursor.** `App.Discover` keeps a host's previous listing as one JSON
   store cursor, which DynamoDB caps at 400 KB (roughly 10k repo names). Store it per repo before a host
   with larger installations ships.
-- **Host-level receiver hardening shared, not copied.** `internal/webhook` (signature before body,
-  inflight cap, delivery dedupe) is GitHub-shaped; lift the host-neutral parts into a helper the other
-  receivers wrap, so each new host does not re-implement them.
 19. **`go work vendor` and workspace-only module graphs.** A workspace-level `vendor/` is not refreshed,
    and modules that reach each other only through `go.work` (no `replace`) fail the per-module
    `go mod tidy`, which ignores the workspace, so those PRs open as drafts.
@@ -199,3 +195,13 @@ Everything else:
     choose the API version up front instead of by a 410, and skip the auto-merge probe on a release known to lack it.
 63. **Several GitHub hosts.** One GitHub host (github.com or one GHES) per server. Serving github.com and a GHES together
     needs a second host name in the registry with its own webhook path, App and secret.
+64. **Webhook delivery ids in the Store.** The delivery table is in memory, per process, so a restart or a second
+    replica forgets a handled delivery (queued events still key on it). Persist ids with a TTL, and wire
+    `DedupeBySignature` (opt-in, off by default because a genuine identical redelivery is dropped) into the app
+    and the other signed hosts once a real redelivery has shown identical bodies are rare.
+65. **Webhook retry-id stability, verified.** Whether Bitbucket Cloud's `X-Request-UUID` and Azure DevOps' event
+    `id` stay the same across a retry is unverified; confirm against a real delivery before relying on dedupe.
+66. **Webhook bodies off the disk, and a server read timeout.** A forged body is no longer held in memory but a
+    signed body over 64 KiB is spooled to a temp file (`MaxInflight` x `MaxBody` of disk). Also set
+    `http.Server.ReadHeaderTimeout`/`ReadTimeout` in `cmd`, since the per-body deadline needs a ResponseWriter
+    that supports deadlines.

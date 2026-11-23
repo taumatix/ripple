@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/taumatix/ripple/internal/platform"
+	"github.com/taumatix/ripple/internal/webhook"
 )
 
 // HostName is GitLab's name in the host registry. Its repos are stored as
@@ -20,7 +21,7 @@ func NewHost(c *Client, r Receiver, log *slog.Logger) *platform.Host {
 		Platform: c,
 		Receiver: func(sink platform.Sink) http.Handler {
 			r := r
-			r.Sink, r.Log, r.sem = sink, log, make(chan struct{}, maxInflight)
+			r.Sink, r.Log, r.guard, r.dedupe = sink, log, &webhook.Guard{}, &webhook.Dedupe{}
 			return &r
 		},
 	}

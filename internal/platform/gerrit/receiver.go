@@ -5,19 +5,18 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
-	"io"
 	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
 
 	"github.com/taumatix/ripple/internal/platform"
+	"github.com/taumatix/ripple/internal/webhook"
 )
 
 const (
 	// maxBody bounds a delivery; an event is a few kilobytes.
-	maxBody            = 1 << 20
-	defaultMaxInflight = 4
+	maxBody = 1 << 20
 	// TokenParam is the query parameter that carries the webhook secret.
 	TokenParam = "token"
 )
@@ -45,19 +44,16 @@ type Receiver struct {
 	// MaxInflight bounds the bodies buffered at once; default 4.
 	MaxInflight int
 
-	once sync.Once
-	sem  chan struct{}
+	once  sync.Once
+	guard webhook.Guard
 }
 
 func (h *Receiver) init() {
 	h.once.Do(func() {
-		if h.MaxInflight <= 0 {
-			h.MaxInflight = defaultMaxInflight
-		}
 		if h.Log == nil {
 			h.Log = slog.New(slog.DiscardHandler)
 		}
-		h.sem = make(chan struct{}, h.MaxInflight)
+		h.guard.MaxInflight = h.MaxInflight
 	})
 }
 
@@ -104,21 +100,8 @@ func (h *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	if r.ContentLength > maxBody {
-		http.Error(w, "payload too large", http.StatusRequestEntityTooLarge)
-		return
-	}
-	select {
-	case h.sem <- struct{}{}:
-	default:
-		w.Header().Set("Retry-After", "5")
-		http.Error(w, "busy", http.StatusServiceUnavailable)
-		return
-	}
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBody))
-	<-h.sem
-	if err != nil {
-		http.Error(w, "payload too large or unreadable", http.StatusRequestEntityTooLarge)
+	body, res := h.guard.ReadBody(w, r, maxBody)
+	if res != webhook.ReadOK {
 		return
 	}
 	var ev event

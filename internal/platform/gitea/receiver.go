@@ -5,21 +5,17 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"io"
 	"log/slog"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/taumatix/ripple/internal/platform"
+	"github.com/taumatix/ripple/internal/webhook"
 )
 
 const (
-	maxBody     = 8 << 20
-	maxInflight = 4
-	dedupeTTL   = time.Hour
-	maxSeen     = 100_000
+	maxBody = 8 << 20
 )
 
 // Sign is the X-Gitea-Signature / X-Forgejo-Signature value for body: the
@@ -68,10 +64,8 @@ type Receiver struct {
 	Log    *slog.Logger
 	Now    func() time.Time
 
-	once sync.Once
-	sem  chan struct{}
-	mu   sync.Mutex
-	seen map[string]time.Time
+	guard  webhook.Guard
+	dedupe webhook.Dedupe
 }
 
 func (h *Receiver) now() time.Time {
@@ -81,42 +75,12 @@ func (h *Receiver) now() time.Time {
 	return time.Now()
 }
 
-func (h *Receiver) claim(id string) bool {
-	if id == "" {
-		return true
-	}
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	now := h.now()
-	if exp, ok := h.seen[id]; ok && now.Before(exp) {
-		return false
-	}
-	if len(h.seen) >= maxSeen {
-		for k, exp := range h.seen {
-			if !now.Before(exp) {
-				delete(h.seen, k)
-			}
-		}
-	}
-	if len(h.seen) < maxSeen {
-		h.seen[id] = now.Add(dedupeTTL)
-	}
-	return true
-}
-
-func (h *Receiver) release(id string) {
-	h.mu.Lock()
-	delete(h.seen, id)
-	h.mu.Unlock()
-}
-
 func (h *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", "POST")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	h.once.Do(func() { h.sem = make(chan struct{}, maxInflight); h.seen = map[string]time.Time{} })
 	delivery := header(r.Header, "X-Forgejo-Delivery", "X-Gitea-Delivery", "X-GitHub-Delivery")
 	sig, ok := signature(r.Header)
 	if len(h.Secret) == 0 || !ok {
@@ -124,27 +88,12 @@ func (h *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid signature", http.StatusUnauthorized)
 		return
 	}
-	if r.ContentLength > maxBody {
-		http.Error(w, "payload too large", http.StatusRequestEntityTooLarge)
-		return
-	}
-	select {
-	case h.sem <- struct{}{}:
-	default:
-		w.Header().Set("Retry-After", "5")
-		http.Error(w, "busy", http.StatusServiceUnavailable)
-		return
-	}
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBody))
-	<-h.sem
-	if err != nil {
-		http.Error(w, "payload too large or unreadable", http.StatusRequestEntityTooLarge)
-		return
-	}
 	want, _ := hex.DecodeString(sig)
-	m := hmac.New(sha256.New, h.Secret)
-	m.Write(body)
-	if !hmac.Equal(want, m.Sum(nil)) {
+	body, res := h.guard.ReadVerified(w, r, maxBody, h.Secret, nil, func(got []byte) bool { return hmac.Equal(got, want) })
+	switch res {
+	case webhook.ReadAnswered:
+		return
+	case webhook.ReadForged:
 		h.Log.Warn("webhook signature rejected", "delivery", delivery)
 		http.Error(w, "invalid signature", http.StatusUnauthorized)
 		return
@@ -159,12 +108,12 @@ func (h *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ev.Delivery = delivery
-	if !h.claim(delivery) {
+	if !h.dedupe.Claim(h.now(), delivery) {
 		w.WriteHeader(http.StatusAccepted)
 		return
 	}
 	if err := h.Sink.HandleEvent(r.Context(), ev); err != nil {
-		h.release(delivery)
+		h.dedupe.Release(delivery)
 		h.Log.Error("webhook sink", "event", ev.Kind, "err", err)
 		http.Error(w, "busy", http.StatusServiceUnavailable)
 		return

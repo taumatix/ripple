@@ -5,12 +5,12 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
-	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
 
 	"github.com/taumatix/ripple/internal/platform"
+	"github.com/taumatix/ripple/internal/webhook"
 )
 
 // BasicAuth is the credential configured as basicAuthCredentials on the service
@@ -33,6 +33,8 @@ type Receiver struct {
 	// and the engine re-scans the repository.
 	Files FileResolver
 	Log   *slog.Logger
+
+	guard webhook.Guard
 }
 
 // FileResolver looks up what commits changed in a repository (Client does).
@@ -86,14 +88,12 @@ func (h *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	body := http.MaxBytesReader(w, r.Body, maxBody)
+	body, res := h.guard.ReadBody(w, r, maxBody)
+	if res != webhook.ReadOK {
+		return
+	}
 	var p pushPayload
-	if err := json.NewDecoder(body).Decode(&p); err != nil {
-		var mbe *http.MaxBytesError
-		if errors.As(err, &mbe) {
-			http.Error(w, "payload too large", http.StatusRequestEntityTooLarge)
-			return
-		}
+	if err := json.Unmarshal(body, &p); err != nil {
 		http.Error(w, "bad payload", http.StatusBadRequest)
 		return
 	}

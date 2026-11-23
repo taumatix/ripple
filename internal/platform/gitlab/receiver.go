@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -16,14 +15,13 @@ import (
 	"time"
 
 	"github.com/taumatix/ripple/internal/platform"
+	"github.com/taumatix/ripple/internal/webhook"
 )
 
 const (
 	// maxBody bounds a delivery. A push payload carries at most 20 commits
 	// (user_project_integrations_webhook_events.md, "Push events"), far below this.
 	maxBody = 10 << 20
-	// maxInflight bounds how many request bodies are buffered at once.
-	maxInflight = 4
 	// SignatureTolerance is how far webhook-timestamp may be from now; the docs ask
 	// receivers to reject stale timestamps (user_project_integrations_webhooks.md,
 	// "Security considerations").
@@ -65,7 +63,8 @@ type Receiver struct {
 	Log         *slog.Logger
 	Now         func() time.Time
 
-	sem chan struct{} // set by NewHost
+	guard  *webhook.Guard  // set by NewHost
+	dedupe *webhook.Dedupe // set by NewHost
 }
 
 func (h *Receiver) log() *slog.Logger {
@@ -100,17 +99,28 @@ func (h *Receiver) headersOK(r *http.Request) bool {
 	return subtle.ConstantTimeCompare([]byte(r.Header.Get("X-Gitlab-Token")), []byte(h.SecretToken)) == 1
 }
 
-func (h *Receiver) verify(r *http.Request, body []byte) bool {
-	if len(h.SigningKey) == 0 {
-		return true
+// readBody reads the body under the shared guard. A signed delivery's signature is
+// computed while the body streams in, so a forged one is never held in memory.
+func (h *Receiver) readBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
+	if len(h.SigningKey) == 0 { // the secret token was checked from the headers alone
+		body, res := h.guard.ReadBody(w, r, maxBody)
+		return body, res == webhook.ReadOK
 	}
-	want := Signature(h.SigningKey, r.Header.Get("webhook-id"), r.Header.Get("webhook-timestamp"), body)
-	for _, got := range strings.Fields(r.Header.Get("webhook-signature")) {
-		if subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1 {
-			return true
+	id, ts := r.Header.Get("webhook-id"), r.Header.Get("webhook-timestamp")
+	got := strings.Fields(r.Header.Get("webhook-signature"))
+	body, res := h.guard.ReadVerified(w, r, maxBody, h.SigningKey, []byte(id+"."+ts+"."), func(sum []byte) bool {
+		want := "v1," + base64.StdEncoding.EncodeToString(sum)
+		for _, g := range got {
+			if subtle.ConstantTimeCompare([]byte(g), []byte(want)) == 1 {
+				return true
+			}
 		}
+		return false
+	})
+	if res == webhook.ReadForged {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
 	}
-	return false
+	return body, res == webhook.ReadOK
 }
 
 type pushPayload struct {
@@ -137,21 +147,8 @@ func (h *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	select {
-	case h.sem <- struct{}{}:
-		defer func() { <-h.sem }()
-	default:
-		w.Header().Set("Retry-After", "5")
-		http.Error(w, "busy", http.StatusServiceUnavailable)
-		return
-	}
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBody))
-	if err != nil {
-		http.Error(w, "bad body", http.StatusRequestEntityTooLarge)
-		return
-	}
-	if !h.verify(r, body) {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	body, ok := h.readBody(w, r)
+	if !ok {
 		return
 	}
 	// Only push events matter; the hook may subscribe to more and they are not errors.
@@ -179,7 +176,18 @@ func (h *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			e.Files = append(e.Files, c.Removed...)
 		}
 	}
+	// webhook-id is "consistent across webhook retries" (user_project_integrations_webhooks.md,
+	// "Delivery headers"); X-Gitlab-Event-UUID is shared by recursive webhooks, so it is not the key.
+	id := r.Header.Get("webhook-id")
+	if id == "" {
+		id = r.Header.Get("Idempotency-Key")
+	}
+	if !h.dedupe.Claim(h.now(), id) {
+		w.WriteHeader(http.StatusAccepted)
+		return
+	}
 	if err := h.Sink.HandleEvent(r.Context(), e); err != nil {
+		h.dedupe.Release(id)
 		h.log().Error("gitlab webhook: sink", "repo", p.Project.Path, "err", err)
 		http.Error(w, fmt.Sprintf("try again: %v", err), http.StatusServiceUnavailable)
 		return

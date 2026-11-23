@@ -88,7 +88,15 @@ paths, and for a push the ref, default branch and changed files. Leave `Files` e
 does not list them: that forces a re-scan, which is correct but costs a clone. Set `Scope` to the
 credential scope the event belongs to (0 if there is one credential); the queue shares workers
 between scopes. `model.Repo.InstallationID` carries that scope back to your client.
-`internal/webhook` is GitHub's receiver and a reference for the hardening (signature first, inflight cap, dedupe).
+Do not re-implement the hardening: `internal/webhook` provides `Guard` (read slots, per-body read deadline,
+`ReadBody` for header-authenticated hosts, `ReadVerified` for an HMAC over the body, which streams the digest so a
+forged body is not held in memory and spools anything over 64 KiB to a temp file) and `Dedupe` (a TTL table;
+key it on the host's own delivery header, and `Release` the key if the sink fails so a redelivery is handled).
+Embed a `Guard`, set `MaxInflight` from the receiver, and call `ReadBody`/`ReadVerified` where you read the body.
+Where the scheme cannot be checked before the whole body (CodeCommit's SNS signature covers parsed JSON fields),
+use `ReadBody` and say so: the bound is the size cap, the slots and the deadline.
+The delivery headers used: GitHub `X-GitHub-Delivery`, GitLab `webhook-id` (then `Idempotency-Key`), Bitbucket
+Cloud `X-Request-UUID`, Bitbucket Server `X-Request-Id`, CodeCommit SNS `MessageId`; Gitea/Forgejo `X-Forgejo-Delivery` or `X-Gitea-Delivery`.
 
 Two more kinds are optional, for a host that reports them: `RepoRenamed` (`Repos` holds the old path,
 `NewRepo` the new one; the stored repo, its dependencies and its pending jobs follow, no scan) and

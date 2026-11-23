@@ -143,3 +143,22 @@ func TestPushFilesFailureLeavesFilesEmptyForARescan(t *testing.T) {
 		t.Errorf("code %d events %+v", w.Code, s.events)
 	}
 }
+
+// The body is read under the shared guard's slot: a full house is told to retry, and the
+// slot comes back once the holder is done.
+func TestBodyReadsShareABoundedNumberOfSlots(t *testing.T) {
+	s := &sink{}
+	h := newReceiver(s)
+	h.guard.MaxInflight = 1
+	release, ok := h.guard.Acquire(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/", nil), maxBody)
+	if !ok {
+		t.Fatal("could not take the slot")
+	}
+	if w := post(h, "ripple", "s3cret", pushBody); w.Code != http.StatusServiceUnavailable || w.Header().Get("Retry-After") == "" {
+		t.Fatalf("busy: status %d", w.Code)
+	}
+	release()
+	if w := post(h, "ripple", "s3cret", pushBody); w.Code != http.StatusAccepted {
+		t.Fatalf("after release: status %d", w.Code)
+	}
+}

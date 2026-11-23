@@ -133,6 +133,8 @@ type runner struct {
 	npmLocks map[string]bool
 	// cargoLocks holds the Cargo.lock files that resolve the Cargo.toml files this PR edits.
 	cargoLocks map[string]bool
+	// pipLocks holds the lock files beside or above the Python files this PR edits.
+	pipLocks map[string]bool
 	// skipReasons says why a job was skipped when it is not the common "changed since indexed".
 	skipReasons map[string]string
 }
@@ -352,6 +354,9 @@ func (r *runner) plan(jobs []model.Job, deps []model.Dependency) []*prPlan {
 		if j.Datasource == model.DatasourceDocker {
 			branch = BranchPrefix + "docker/" + slug(j.Package) + "-" + slug(j.Version)
 		}
+		if j.Datasource == model.DatasourcePip {
+			branch = BranchPrefix + "pip/" + slug(j.Package) + "-" + slug(j.Version)
+		}
 		if j.Datasource == model.DatasourceCargo {
 			branch = BranchPrefix + "cargo/" + slug(j.Package) + "-" + slug(j.Version)
 		}
@@ -484,6 +489,7 @@ func (r *runner) openPR(p *prPlan) (*platform.PR, error) {
 	r.followed = nil
 	r.npmLocks = nil
 	r.cargoLocks = nil
+	r.pipLocks = nil
 	var applied []item
 	for _, it := range p.items {
 		ok, err := r.apply(it)
@@ -575,6 +581,7 @@ func (r *runner) openPR(p *prPlan) (*platform.PR, error) {
 	body += r.actionNotes(applied)
 	body += r.npmNotes()
 	body += r.cargoNotes()
+	body += r.pipNotes()
 	changed, err := r.ws.CommitAndPush(r.ctx, p.branch, title)
 	if err != nil {
 		if touchesWorkflows(applied) && workflowsDenied(err) {
@@ -635,6 +642,15 @@ func (r *runner) apply(it item) (bool, error) {
 		if d.Datasource == model.DatasourceDocker {
 			version = r.imageVersion(it.job.Package, version)
 		}
+		if d.Datasource == model.DatasourcePip {
+			if why := r.pipGuard(d); why != "" {
+				if r.skipReasons == nil {
+					r.skipReasons = map[string]string{}
+				}
+				r.skipReasons[it.job.Key] = why
+				continue
+			}
+		}
 		if d.Datasource == model.DatasourceCargo {
 			if why := r.cargoGuard(d); why != "" {
 				if r.skipReasons == nil {
@@ -665,6 +681,9 @@ func (r *runner) apply(it item) (bool, error) {
 		}
 		if d.Datasource == model.DatasourceCargo {
 			r.noteCargoLock(d)
+		}
+		if d.Datasource == model.DatasourcePip {
+			r.notePipLocks(d)
 		}
 		if d.Package != it.job.Package {
 			u, _ := r.cfg.UpdateFor("gomod", d.File)
@@ -740,6 +759,8 @@ func datasourceFooter(datasource string) string {
 		return "a new tag appeared on the registry"
 	case model.DatasourceNpm:
 		return "a new version was published to the npm registry"
+	case model.DatasourcePip:
+		return "a new version was published to PyPI"
 	}
 	return "the new version appeared in the module index"
 }

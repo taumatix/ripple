@@ -25,6 +25,7 @@ import (
 	"github.com/taumatix/ripple/internal/model"
 	"github.com/taumatix/ripple/internal/npmreg"
 	"github.com/taumatix/ripple/internal/platform/github"
+	"github.com/taumatix/ripple/internal/pypi"
 	"github.com/taumatix/ripple/internal/registry"
 	"github.com/taumatix/ripple/internal/rules"
 	"github.com/taumatix/ripple/internal/sandbox"
@@ -135,6 +136,8 @@ type opts struct {
 	npm *testutil.NpmRegistry
 	// crates, when set, is the fake Cargo sparse index the engine reads crate versions from.
 	crates *testutil.CratesIndex
+	// pypi, when set, is the fake PyPI the engine reads project versions from.
+	pypi *testutil.PyPI
 	// engine adjusts the engine before it runs (server-side go settings).
 	engine func(e *engine.Engine)
 }
@@ -174,6 +177,9 @@ func newEnvOpts(t *testing.T, st store.Store, lim rules.Limits, o opts) *env {
 	if o.engine != nil {
 		o.engine(eng)
 	}
+	if o.pypi != nil {
+		eng.PyPI = &pypi.Client{BaseURL: o.pypi.URL}
+	}
 	if o.crates != nil {
 		eng.Crates = &cratesindex.Client{BaseURL: o.crates.URL}
 	}
@@ -187,7 +193,7 @@ func newEnvOpts(t *testing.T, st store.Store, lim rules.Limits, o opts) *env {
 		a := &app.App{Engine: eng, Secret: []byte(secret), Log: slog.New(slog.NewTextHandler(io.MultiWriter(testWriter{t}, e.logs), nil)),
 			PollEvery: o.pollEvery, Queue: &app.Queue{},
 			Watcher: &engine.Watcher{Engine: eng, Feed: &feed.GoIndex{BaseURL: e.idx.URL}},
-			Actions: &engine.ActionsWatcher{Engine: eng}, Docker: &engine.DockerWatcher{Engine: eng}, Npm: &engine.NpmWatcher{Engine: eng}, Cargo: &engine.CargoWatcher{Engine: eng}}
+			Actions: &engine.ActionsWatcher{Engine: eng}, Docker: &engine.DockerWatcher{Engine: eng}, Npm: &engine.NpmWatcher{Engine: eng}, Cargo: &engine.CargoWatcher{Engine: eng}, Pip: &engine.PipWatcher{Engine: eng}}
 		if o.goDL != nil {
 			a.Toolchain = &engine.ToolchainWatcher{Engine: eng, Source: &feed.GoDL{BaseURL: o.goDL.URL}}
 		}

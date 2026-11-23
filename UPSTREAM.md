@@ -21,6 +21,14 @@ upstream:
     webhooks: [installation, installation_repositories, push, signature X-Hub-Signature-256 = sha256=HMAC-SHA256(body)]
     unverified: "enablePullRequestAutoMerge mutation shape; the labels endpoint creating missing labels (assumed); the fake GitHub in tests is written from the docs, not recorded"
     checked: 2026-11-22
+  - name: go-release-list
+    kind: http-feed
+    reference: https://go.dev/dl/?mode=json
+    format: "JSON array of releases, newest first, each with version (\"go1.N.P\"), stable, files; without include=all it lists only the supported stable minors, newest patch each; no release dates"
+    docs: https://go.dev/doc/devel/release#policy
+    verified-against: "the live endpoint's shape on 2026-11-23, reproduced by internal/testutil/godl.go; tests use that fake, not a recorded response"
+    unverified: "that the list keeps omitting unsupported releases without include=all (the support policy is inferred from it)"
+    checked: 2026-11-23
   - name: go-module-proxy
     kind: http-api
     reference: https://go.dev/ref/mod#goproxy-protocol

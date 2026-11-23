@@ -202,3 +202,23 @@ func TestParseNamedReportsTheFile(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestGoToolchainKey(t *testing.T) {
+	for _, v := range []string{"toolchain", "directive"} {
+		c, err := Parse([]byte("updates:\n  - ecosystem: gomod\n    go-toolchain: " + v + "\n"))
+		if err != nil || c.Updates[0].GoToolchain != v {
+			t.Errorf("%s: got %+v, %v", v, c, err)
+		}
+	}
+	if c, err := Parse(nil); err != nil || c.Updates[0].GoToolchain != "" {
+		t.Errorf("off by default: %+v, %v", c, err)
+	}
+	for name, in := range map[string]string{
+		"unknown value": "updates:\n  - ecosystem: gomod\n    go-toolchain: latest\n",
+		"regex":         "updates:\n  - ecosystem: regex\n    go-toolchain: toolchain\n    files: [Makefile]\n    patterns: ['(?P<name>a) (?P<version>b)']\n",
+	} {
+		if _, err := Parse([]byte(in)); err == nil || !strings.Contains(err.Error(), "go-toolchain") {
+			t.Errorf("%s: want a go-toolchain problem, got %v", name, err)
+		}
+	}
+}

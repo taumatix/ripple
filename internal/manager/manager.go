@@ -25,7 +25,7 @@ func Build(cfg *config.Repo) ([]Manager, error) {
 	for i, u := range cfg.Updates {
 		switch u.Ecosystem {
 		case "gomod":
-			out = append(out, GoMod{Dir: u.Directory})
+			out = append(out, GoMod{Dir: u.Directory, Toolchain: u.GoToolchain})
 		case "regex":
 			r, err := NewRegex(cfg.ManagerName(i), u)
 			if err != nil {

@@ -63,6 +63,7 @@ open-pull-requests-limit: 3        # at most this many ripple PRs open at once
 updates:
   - ecosystem: gomod               # gomod, or regex (see README)
     directory: /                   # this directory and everything below it
+    go-toolchain: toolchain        # optional, off by default: toolchain | directive (docs/go-toolchain.md)
     cooldown: 7d                   # wait this long after a release (never less than the server minimum)
     schedule:
       days: [mon, tue]

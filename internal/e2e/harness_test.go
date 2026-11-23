@@ -108,6 +108,8 @@ type opts struct {
 	queue func(q *app.Queue)
 	// sandbox confines the go and git commands run on checkouts; nil is unconfined.
 	sandbox sandbox.Backend
+	// goDL, when set, is the Go release list the app polls for go-toolchain updates.
+	goDL *testutil.GoDL
 }
 
 func newEnv(t *testing.T, st store.Store, lim rules.Limits) *env {
@@ -127,6 +129,9 @@ func newEnvOpts(t *testing.T, st store.Store, lim rules.Limits, o opts) *env {
 		a := &app.App{Engine: eng, Secret: []byte(secret), Log: slog.New(slog.NewTextHandler(testWriter{t}, nil)),
 			PollEvery: o.pollEvery, Queue: &app.Queue{},
 			Watcher: &engine.Watcher{Engine: eng, Feed: &feed.GoIndex{BaseURL: e.idx.URL}}}
+		if o.goDL != nil {
+			a.Toolchain = &engine.ToolchainWatcher{Engine: eng, Source: &feed.GoDL{BaseURL: o.goDL.URL}}
+		}
 		if o.queue != nil {
 			o.queue(a.Queue)
 		}

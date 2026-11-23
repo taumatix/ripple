@@ -30,6 +30,8 @@ type Server struct {
 	GitHubAPIURL  string
 	GitHubGitURL  string
 	FeedURL       string
+	// GoReleasesURL serves the Go release list (go-toolchain updates).
+	GoReleasesURL string
 	FeedInterval  time.Duration
 	GoProxy       string
 	Sandbox       string // none, auto, bwrap, seatbelt, container, docker, podman
@@ -74,6 +76,7 @@ RIPPLE_GITHUB_API_URL         default https://api.github.com
 RIPPLE_GITHUB_GIT_URL         default https://github.com
 RIPPLE_FEED_URL               default https://index.golang.org
 RIPPLE_FEED_INTERVAL          default 1m
+RIPPLE_GO_RELEASES_URL        Go release list for go-toolchain updates (default https://go.dev/dl/)
 RIPPLE_GOPROXY                module proxy used to verify major bumps (default https://proxy.golang.org)
 RIPPLE_STORE                  memory (default), postgres or dynamodb
 RIPPLE_POSTGRES_DSN           required for postgres
@@ -154,6 +157,7 @@ func LoadServer(getenv func(string) string) (*Server, error) {
 		GitHubAPIURL:          strings.TrimRight(str("RIPPLE_GITHUB_API_URL", "https://api.github.com"), "/"),
 		GitHubGitURL:          strings.TrimRight(str("RIPPLE_GITHUB_GIT_URL", "https://github.com"), "/"),
 		FeedURL:               strings.TrimRight(str("RIPPLE_FEED_URL", "https://index.golang.org"), "/"),
+		GoReleasesURL:         strings.TrimRight(str("RIPPLE_GO_RELEASES_URL", "https://go.dev/dl/"), "/"),
 		FeedInterval:          dur("RIPPLE_FEED_INTERVAL", "1m"),
 		GoProxy:               strings.TrimRight(str("RIPPLE_GOPROXY", "https://proxy.golang.org"), "/"),
 		Sandbox:               str("RIPPLE_SANDBOX", "none"),
@@ -196,7 +200,7 @@ func LoadServer(getenv func(string) string) (*Server, error) {
 	if s.FeedInterval <= 0 {
 		errs = append(errs, errors.New("RIPPLE_FEED_INTERVAL must be positive"))
 	}
-	for k, v := range map[string]string{"RIPPLE_GITHUB_API_URL": s.GitHubAPIURL, "RIPPLE_GITHUB_GIT_URL": s.GitHubGitURL, "RIPPLE_FEED_URL": s.FeedURL, "RIPPLE_GOPROXY": s.GoProxy} {
+	for k, v := range map[string]string{"RIPPLE_GITHUB_API_URL": s.GitHubAPIURL, "RIPPLE_GITHUB_GIT_URL": s.GitHubGitURL, "RIPPLE_FEED_URL": s.FeedURL, "RIPPLE_GO_RELEASES_URL": s.GoReleasesURL, "RIPPLE_GOPROXY": s.GoProxy} {
 		if err := checkURL(k, v); err != nil {
 			errs = append(errs, err)
 		}

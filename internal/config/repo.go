@@ -104,6 +104,10 @@ type Update struct {
 	// Automerge is "", "patch" (patch updates), "minor" (minor and patch) or "major" (all).
 	// Major updates are never merged unless the file says "major".
 	Automerge string `yaml:"automerge"`
+	// GoToolchain is gomod only: "" (the default) leaves the go directive and toolchain
+	// line alone, "toolchain" moves the toolchain line to the newest patch of its Go
+	// release, "directive" also moves the go directive once its release is out of support.
+	GoToolchain string `yaml:"go-toolchain"`
 	// regex ecosystem only
 	Files    []string `yaml:"files"`
 	Patterns []string `yaml:"patterns"`
@@ -235,7 +239,7 @@ func (c *checker) add(n *yaml.Node, format string, a ...any) {
 
 var (
 	rootKeys     = []string{"version", "open-pull-requests-limit", "updates"}
-	updateKeys   = []string{"ecosystem", "directory", "schedule", "cooldown", "ignore", "groups", "automerge", "files", "patterns", "package"}
+	updateKeys   = []string{"ecosystem", "directory", "schedule", "cooldown", "ignore", "groups", "automerge", "go-toolchain", "files", "patterns", "package"}
 	scheduleKeys = []string{"days", "from", "to", "timezone"}
 	ignoreKeys   = []string{"dependency", "update-types"}
 	groupKeys    = []string{"patterns", "update-types"}
@@ -392,12 +396,20 @@ func (c *checker) update(n *yaml.Node, u *Update, where string) {
 				c.add(v, "%s.%s is only valid with ecosystem: regex", where, k)
 			}
 		}
+		switch u.GoToolchain {
+		case "", "toolchain", "directive":
+		default:
+			c.add(f["go-toolchain"], "%s.go-toolchain must be toolchain or directive (omit it to leave the go directive and toolchain line alone)", where)
+		}
 		if d := f["directory"]; d != nil {
 			if !strings.HasPrefix(u.Directory, "/") || strings.Contains(u.Directory, "..") || path.Clean(u.Directory) != strings.TrimRight(u.Directory, "/") && u.Directory != "/" {
 				c.add(d, "%s.directory must be an absolute path inside the repo such as / or /services/api", where)
 			}
 		}
 	case "regex":
+		if v := f["go-toolchain"]; v != nil {
+			c.add(v, "%s.go-toolchain is only valid with ecosystem: gomod", where)
+		}
 		if v := f["directory"]; v != nil {
 			c.add(v, "%s.directory does not apply to ecosystem: regex; use files", where)
 		}

@@ -21,6 +21,14 @@ var ErrLeaseLost = store.ErrLeaseLost
 // LeaseName is the store lease that makes one replica at a time act on a repo.
 func LeaseName(repo string) string { return "repo:" + repo }
 
+// NewReplicaID returns a random replica id. A process that names itself neither through
+// Engine.Replica nor RIPPLE_REPLICA uses one, shared by its engine and event queue.
+func NewReplicaID() string {
+	b := make([]byte, 8)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
 // replicaID returns this engine's replica id: Replica when set, otherwise a random one chosen
 // once. Two engines on one store must differ; the random default guarantees it.
 func (e *Engine) replicaID() string {
@@ -29,9 +37,7 @@ func (e *Engine) replicaID() string {
 			e.id = e.Replica
 			return
 		}
-		b := make([]byte, 8)
-		_, _ = rand.Read(b)
-		e.id = hex.EncodeToString(b)
+		e.id = NewReplicaID()
 	})
 	return e.id
 }

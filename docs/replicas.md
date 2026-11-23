@@ -1,8 +1,12 @@
 # Running more than one replica
 
-Replicas share one store (Postgres or DynamoDB; the memory store is single-process). Nothing is
-configured: each process picks a random id. `engine.Engine.Replica`, `LeaseTTL` and `app.Queue.Owner`,
-`LeaseTTL` override it; the default lease is 30s. One replica behaves exactly as before.
+Replicas share one store (Postgres or DynamoDB; the memory store is single-process). Nothing needs
+configuring: each process picks a random id at start and logs it (`replica` line, with the lease TTL).
+`RIPPLE_REPLICA` names it instead (up to 64 characters; useful when logs should carry a stable name) and
+`RIPPLE_LEASE_TTL` sets how long a claim lasts without renewal (Go duration, default 30s, minimum 10s). One
+replica behaves exactly as before. A lease taken over from a holder that did not release it is logged
+(`lease taken over`, with the lease name and token); a release deletes the row, so a token above 1 only
+appears after a holder died or stalled.
 
 ## Design
 

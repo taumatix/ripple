@@ -81,7 +81,19 @@ type Server struct {
 	EventBacklog                int
 	EventInstallationBacklog    int
 	EventDeadRetention          time.Duration
+	// Replica names this process among the replicas sharing the store (empty: a random id)
+	// and LeaseTTL is how long its claims on events and repos last without renewal.
+	Replica  string
+	LeaseTTL time.Duration
 }
+
+// Lease TTL bounds (RIPPLE_LEASE_TTL): the default, and the floor, which keeps the TTL well
+// above the 5s clock-skew margin DynamoDB leases need (docs/replicas.md).
+const (
+	DefaultLeaseTTL = 30 * time.Second
+	MinLeaseTTL     = 10 * time.Second
+	maxReplicaName  = 64
+)
 
 // Default scan caps (RIPPLE_MAX_FILES, RIPPLE_MAX_DEPENDENCIES).
 const (
@@ -131,6 +143,9 @@ RIPPLE_EVENT_WORKERS          webhook events handled at once (default 4)
 RIPPLE_EVENT_WORKERS_PER_INSTALLATION  of which one installation may use (default 2)
 RIPPLE_EVENT_BACKLOG          events stored and waiting before the receiver answers 503 (default 10000)
 RIPPLE_EVENT_INSTALLATION_BACKLOG  the same cap for one installation (default 1000)
+RIPPLE_REPLICA                this process's name among replicas sharing one store (default: random per start); shows in logs
+RIPPLE_LEASE_TTL              how long a replica's claim on an event or repo lasts without renewal, so how long a dead replica's
+                              work waits for another (Go duration, default 30s, minimum 10s)
 RIPPLE_EVENT_DEAD_RETENTION   how long an event that failed 3 times is kept for "ripple events" before it is purged (default 30d)
 `
 
@@ -238,6 +253,19 @@ func LoadServer(getenv func(string) string) (*Server, error) {
 		EventBacklog:                num("RIPPLE_EVENT_BACKLOG", 10_000, 1),
 		EventInstallationBacklog:    num("RIPPLE_EVENT_INSTALLATION_BACKLOG", 1_000, 1),
 		EventDeadRetention:          dur("RIPPLE_EVENT_DEAD_RETENTION", "30d"),
+		Replica:                     getenv("RIPPLE_REPLICA"),
+		LeaseTTL:                    DefaultLeaseTTL,
+	}
+	if v := getenv("RIPPLE_LEASE_TTL"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d < MinLeaseTTL {
+			errs = append(errs, fmt.Errorf("RIPPLE_LEASE_TTL: want a Go duration of at least %s, such as 30s", MinLeaseTTL))
+		} else {
+			s.LeaseTTL = d
+		}
+	}
+	if len(s.Replica) > maxReplicaName {
+		errs = append(errs, fmt.Errorf("RIPPLE_REPLICA: at most %d characters", maxReplicaName))
 	}
 	if v := getenv("RIPPLE_OSV"); v != "" {
 		b, err := strconv.ParseBool(v)

@@ -325,4 +325,5 @@ Everything else:
 162. **pip: verify against the real index.** Nothing here ran against pypi.org: the client and fake come from the
     vendored excerpts (redirects for non-normalized names, 404 for a missing project, `releases` being documented as
     deprecated in favour of the PEP 691 index, large projects). PEP 440 ordering is implemented from the summary; compare
-    it with the `packaging` library on a corpus. `pip:packages` is one read-modify-write cursor (see 151).
+    it with the `packaging` library on a corpus. `pip:packages` is one read-modify-write cursor (see 151). `PipWatcher` is not in the replica poller election yet (158): every replica polls it, which is harmless but
+    wasteful; give it `PollElected`/`Elected`/`StepDown` like Cargo and list it in `App.sources`.

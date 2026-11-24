@@ -17,8 +17,15 @@ const HostName = "github"
 // (installation and installation_repositories register repos, push re-scans them),
 // authenticated with secret.
 func NewHost(c *Client, secret []byte, log *slog.Logger) *platform.Host {
+	return NewNamedHost(HostName, c, secret, log)
+}
+
+// NewNamedHost is NewHost under another name in the host registry: a second GitHub
+// (a GitHub Enterprise Server beside github.com, or beside another one) is its own
+// host, with its own App, secret, webhook path (/webhook/<name>) and "<name>:" repo prefix.
+func NewNamedHost(name string, c *Client, secret []byte, log *slog.Logger) *platform.Host {
 	return &platform.Host{
-		Name:     HostName,
+		Name:     name,
 		Platform: c,
 		Receiver: func(sink platform.Sink) http.Handler {
 			return &webhook.Handler{Secret: secret, Sink: Sink{sink}, Log: log}

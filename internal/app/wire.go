@@ -94,7 +94,7 @@ func New(ctx context.Context, s *config.Server, log *slog.Logger) (a *App, st st
 	}
 	eng.Lookup = &feed.GoProxyLookup{BaseURL: s.GoProxy, User: s.GoProxyUser, Token: s.GoProxyToken,
 		UserAgent: "ripple (+https://github.com/taumatix/ripple)"}
-	rc := &registry.Client{UserAgent: "ripple (+https://github.com/taumatix/ripple)"}
+	rc := &registry.Client{UserAgent: "ripple (+https://github.com/taumatix/ripple)", HubNewest: s.RegistryHubNewest}
 	if s.RegistryAuthFile != "" {
 		if rc.Auth, err = registry.LoadDockerConfig(s.RegistryAuthFile); err != nil {
 			return nil, nil, fmt.Errorf("RIPPLE_REGISTRY_AUTH_FILE: %w", err)

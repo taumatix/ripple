@@ -64,7 +64,22 @@ so the client refuses hosts that resolve to non-public addresses and plain-http 
 cooldown counts from the image's `created` time (read from its config: the index, the linux/amd64 manifest, then the
 config blob); when the registry cannot say, it counts from when ripple first saw the tag.
 
-## Private registries
+### Docker Hub: newest tags first (opt-in)
+
+The registry API lists tags by name, so for `nginx` at `1.25.3` ripple still reads every page from `1.100` up (see
+`registry.TagFloor`). With `RIPPLE_REGISTRY_HUB_NEWEST=true`, an image on `docker.io` with a `owner/name` repository
+(`library/nginx` for an official image) is read from Docker Hub's own listing instead
+(`hub.docker.com/v2/namespaces/.../tags?ordering=-last_updated`), newest push first, stopping one page (100 tags)
+after the page that holds a tag a dependency is on. An image with a long history costs a page or two per poll.
+
+It is a heuristic and says so: a tag pushed before your current one but versioned above it (a backport released
+late) can lie beyond the margin page and is missed until the current tag moves. Ripple falls back to the registry list,
+silently and with the same result as before, when the repository is not on Docker Hub, none of its tags is known, the
+Hub listing is not strictly newest-first by `last_updated` (the `ordering` values are not documented, so this is
+checked on every read), it needs more than 20 pages, or Hub errors. A rate limit is not fallen back from; it is
+reported like any other. ghcr.io and other registries have only the lexical list, so nothing changes for them. Default off; Hub's
+own API is read without a login.
+
 
 `RIPPLE_REGISTRY_AUTH_FILE` names a Docker `config.json` (what `docker login` writes; a Kubernetes
 `.dockerconfigjson` pull secret mounted as a file works as is):

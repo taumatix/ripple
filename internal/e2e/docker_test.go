@@ -21,6 +21,11 @@ func dockerEnv(t *testing.T, st store.Store) (*env, *testutil.Registry) {
 	return newEnvOpts(t, st, defaultLimits(), opts{registry: reg}), reg
 }
 
+func dockerEnvOpts(t *testing.T, st store.Store, hubNewest bool) (*env, *testutil.Registry) {
+	reg := testutil.NewRegistry(t)
+	return newEnvOpts(t, st, defaultLimits(), opts{registry: reg, hubNewest: hubNewest}), reg
+}
+
 func TestDockerTagBump(t *testing.T) {
 	forEach(t, func(t *testing.T, st store.Store) {
 		e, reg := dockerEnv(t, st)

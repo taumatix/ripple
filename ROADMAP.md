@@ -246,10 +246,6 @@ Everything else:
     may split the sources and one replica may hold all of them; there is no preference for spreading them. `App.Tick`
     (cron-driven) goes through the elections too. `sources_unpolled` names a source nobody polls but cannot say how long
     it has gone unpolled; it is verified on the memory store and the in-process DynamoDB, Postgres columns are CI-only.
-160. **pip: Poetry and other manifests, wider specifiers.** Poetry's `[tool.poetry.dependencies]` (caret and tilde
-    ranges), `Pipfile`, `setup.cfg`, `setup.py`, `[build-system] requires`, `.in` files and constraints files are not read;
-    nor are `>=1,<2` style ranges, `==1.*` and `!=`. The manager is a scanner for PEP 508 requirements and a line scanner
-    for TOML, not a parser, so a real TOML parser is the way to widen it safely.
 161. **pip: refresh lock files, Requires-Python, and other indexes.** `poetry.lock`, `uv.lock`, `pdm.lock` and a
     pip-compile output are reported, not regenerated (docs/pip.md). `Requires-Python` is ignored, so a bump may need a
     newer interpreter. A dependency on a private index is skipped, not read from its own index (needs per-index
@@ -406,3 +402,7 @@ Everything else:
     not read. The digest-pair, single-string and ARG-suffix readers were exercised against the fake registry and hand-made
     files, not real charts or kustomizations: run them over a sample and record what a real values.yaml does that they
     mis-read (a `digest:` that is not the image's own, say).
+210. **pip: `setup.py`, `setup.cfg`, wildcards and multi-constraint dependencies.** Poetry, Pipfile, `.in` files and `>=1,<2`
+    floors are read now (docs/pip.md). Still not read: `setup.py` (code), `setup.cfg` `install_requires`, `==1.*` and `<`
+    only ranges, Poetry's array-of-constraints form and `*`; a real TOML parser is still the way to widen the line
+    scanner (Pipfile and Poetry inline tables are matched on one line only).

@@ -123,7 +123,10 @@ func (c *Client) Project(ctx context.Context, name string) (Project, error) {
 // Newest is the newest version above cur that ripple will propose: a final or post
 // release (no pre-release, dev or local version) with at least one file, not yanked.
 // "" means none.
-func (p Project) Newest(cur string) string {
+func (p Project) Newest(cur string) string { return p.NewestWhere(cur, nil) }
+
+// NewestWhere is Newest restricted to versions allow accepts (nil accepts all).
+func (p Project) NewestWhere(cur string, allow func(Version) bool) string {
 	best, ok := Parse(cur)
 	if !ok {
 		return ""
@@ -131,7 +134,7 @@ func (p Project) Newest(cur string) string {
 	out := ""
 	for _, r := range p.Releases {
 		v, ok := Parse(r.Version)
-		if !ok || r.Yanked || r.Files == 0 || !v.IsRelease() || Compare(v, best) <= 0 {
+		if !ok || r.Yanked || r.Files == 0 || !v.IsRelease() || Compare(v, best) <= 0 || (allow != nil && !allow(v)) {
 			continue
 		}
 		best, out = v, r.Version

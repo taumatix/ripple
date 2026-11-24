@@ -44,11 +44,11 @@ func (p Pip) Matches(f string) bool {
 	}
 	base := path.Base(f)
 	switch {
-	case base == "pyproject.toml":
+	case base == "pyproject.toml" || base == "Pipfile":
 		return true
-	case !strings.HasSuffix(base, ".txt"):
+	case !strings.HasSuffix(base, ".txt") && !strings.HasSuffix(base, ".in"):
 		return false
-	case strings.HasPrefix(base, "requirements"):
+	case strings.HasPrefix(base, "requirements") || strings.HasPrefix(base, "constraints"):
 		return true
 	}
 	return path.Base(path.Dir(f)) == "requirements"
@@ -56,21 +56,75 @@ func (p Pip) Matches(f string) bool {
 
 var (
 	pipClauseRE = regexp.MustCompile(`^(==|~=|>=)\s*(\d+(?:\.\d+){0,3})$`)
-	pipReqRE    = regexp.MustCompile(`^\s*([A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)\s*(?:\[[^\]]*\])?\s*` +
+	// pipPoetryRE is Poetry's caret and tilde requirement and its bare exact version.
+	pipPoetryRE = regexp.MustCompile(`^(\^|~|)\s*(\d+(?:\.\d+){0,3})$`)
+	// pipBoundRE is a clause that may accompany a `>=` floor: an upper bound or an exclusion.
+	pipBoundRE = regexp.MustCompile(`^(?:<=|<|!=)\s*\d+(?:\.\d+)*(?:\.\*)?$`)
+	pipReqRE   = regexp.MustCompile(`^\s*([A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)\s*(?:\[[^\]]*\])?\s*` +
 		`((?:===|==|~=|!=|<=|>=|<|>)\s*[^\s,;()]+(?:\s*,\s*(?:===|==|~=|!=|<=|>=|<|>)\s*[^\s,;()]+)*)?\s*(?:;.*)?$`)
 )
 
-// PipSpecFloor is the version a trackable clause names and its operator; both "" when
-// the clause is not one ripple moves.
+// pipSpecParts splits a specifier on commas into trimmed clauses.
+func pipSpecParts(spec string) []string {
+	parts := strings.Split(spec, ",")
+	for i := range parts {
+		parts[i] = strings.TrimSpace(parts[i])
+	}
+	return parts
+}
+
+// pipFloorPart is the index of the clause whose version ripple edits in a tracked
+// specifier, or -1. Tracked: one clause `==X`, `~=X` or `>=X`; Poetry's `^X`, `~X` and
+// bare `X`; or a `>=X` floor with upper bounds and exclusions (`>=1.20,<2,!=1.5`), where
+// only the floor moves.
+func pipFloorPart(parts []string) (idx int, floor, op string) {
+	if len(parts) == 1 {
+		if m := pipClauseRE.FindStringSubmatch(parts[0]); m != nil {
+			if m[1] == "~=" && !strings.Contains(m[2], ".") {
+				return -1, "", ""
+			}
+			return 0, m[2], m[1]
+		}
+		if m := pipPoetryRE.FindStringSubmatch(parts[0]); m != nil {
+			return 0, m[2], m[1]
+		}
+		return -1, "", ""
+	}
+	idx = -1
+	for i, p := range parts {
+		switch m := pipClauseRE.FindStringSubmatch(p); {
+		case m != nil && m[1] == ">=" && idx < 0:
+			idx, floor, op = i, m[2], ">="
+		case pipBoundRE.MatchString(p):
+		default:
+			return -1, "", ""
+		}
+	}
+	return idx, floor, op
+}
+
+// PipSpecFloor is the version a trackable specifier names and its operator ("" for a
+// bare Poetry version); both "" when the specifier is not one ripple moves.
 func PipSpecFloor(spec string) (string, string) {
-	m := pipClauseRE.FindStringSubmatch(spec)
-	if m == nil {
+	idx, floor, op := pipFloorPart(pipSpecParts(spec))
+	if idx < 0 {
 		return "", ""
 	}
-	if m[1] == "~=" && !strings.Contains(m[2], ".") {
-		return "", ""
+	return floor, op
+}
+
+// PipSpecAllows is the test a new version must pass for the specifier: a `>=` floor with
+// bounds keeps to them (the bounds are not edited, so a release outside them would make
+// the PR a different change); every other tracked specifier accepts any newer release.
+// nil accepts everything.
+func PipSpecAllows(spec string) func(pypi.Version) bool {
+	if !strings.Contains(spec, ",") {
+		return nil
 	}
-	return m[2], m[1]
+	return func(v pypi.Version) bool {
+		ok, known := pypi.Satisfies(spec, v)
+		return ok && known
+	}
 }
 
 // pipEntry is one tracked requirement.
@@ -80,25 +134,43 @@ type pipEntry struct {
 	start, end int
 }
 
+// pipSpecEntry reads a specifier; base is the offset of s in the file.
+func pipSpecEntry(pkg, s string, base int) (pipEntry, bool) {
+	parts := pipSpecParts(s)
+	idx, _, _ := pipFloorPart(parts)
+	if idx < 0 {
+		return pipEntry{}, false
+	}
+	off := 0
+	for i := 0; i < idx; i++ {
+		off += strings.IndexByte(s[off:], ',') + 1
+	}
+	rel := strings.IndexFunc(s[off:], func(r rune) bool { return r >= '0' && r <= '9' })
+	end := rel + off
+	for end < len(s) && (s[end] >= '0' && s[end] <= '9' || s[end] == '.') {
+		end++
+	}
+	return pipEntry{pkg: pkg, spec: strings.Map(func(r rune) rune {
+		if r == ' ' || r == '\t' {
+			return -1
+		}
+		return r
+	}, strings.Join(parts, ",")), start: base + off + rel, end: base + end}, true
+}
+
 // parsePipReq reads one PEP 508 requirement; base is the offset of s in the file.
 func parsePipReq(s string, base int) (pipEntry, bool) {
 	m := pipReqRE.FindStringSubmatchIndex(s)
 	if m == nil || m[4] < 0 {
 		return pipEntry{}, false
 	}
-	clause := s[m[4]:m[5]]
-	cm := pipClauseRE.FindStringSubmatchIndex(clause)
-	if cm == nil {
-		return pipEntry{}, false
-	}
-	op, ver := clause[cm[2]:cm[3]], clause[cm[4]:cm[5]]
-	if floor, _ := PipSpecFloor(op + ver); floor == "" {
-		return pipEntry{}, false
-	}
-	return pipEntry{pkg: pypi.NormalizeName(s[m[2]:m[3]]), spec: op + ver, start: base + m[4] + cm[4], end: base + m[4] + cm[5]}, true
+	return pipSpecEntry(pypi.NormalizeName(s[m[2]:m[3]]), s[m[4]:m[5]], base+m[4])
 }
 
 var pipOptionCut = regexp.MustCompile(`\s--?[A-Za-z]`)
+
+// PipGenerated reports a requirements file a resolver wrote (a lock file).
+func PipGenerated(content []byte) bool { return pipGenerated(string(content)) }
 
 // pipGenerated reports a requirements file a resolver wrote: it is a lock file.
 func pipGenerated(src string) bool {
@@ -210,7 +282,54 @@ func tomlArray(src string, i int) (strs []struct {
 	return strs, len(src)
 }
 
-func pipPyprojectEntries(src string) []pipEntry {
+var pipInlineVersionRE = regexp.MustCompile(`[{,]\s*version\s*=\s*("[^"\\]*"|'[^']*')`)
+var pipInlineSourceRE = regexp.MustCompile(`[{,]\s*(?:git|path|url|file|develop)\s*=`)
+
+// pipDepTable says what a TOML table holds: "array" tables list PEP 508 strings under
+// the keys named, "map" tables are `name = spec` dependency tables (Poetry, Pipfile),
+// "detail" is one dependency's own table (`[tool.poetry.dependencies.name]`).
+func pipDepTable(table string, pipfile bool) (kind, name string) {
+	if pipfile {
+		if table == "packages" || table == "dev-packages" {
+			return "map", ""
+		}
+		return "", ""
+	}
+	const poetry = "tool.poetry."
+	switch {
+	case table == "project" || table == "project.optional-dependencies" || table == "dependency-groups" || table == "build-system":
+		return "array", ""
+	case table == poetry+"dependencies" || table == poetry+"dev-dependencies":
+		return "map", ""
+	case strings.HasPrefix(table, poetry+"group.") && strings.HasSuffix(table, ".dependencies"):
+		return "map", ""
+	case strings.HasPrefix(table, poetry+"dependencies."):
+		return "detail", tomlUnquote(strings.TrimPrefix(table, poetry+"dependencies."))
+	case strings.HasPrefix(table, poetry+"dev-dependencies."):
+		return "detail", tomlUnquote(strings.TrimPrefix(table, poetry+"dev-dependencies."))
+	case strings.HasPrefix(table, poetry+"group."):
+		if rest := strings.TrimPrefix(table, poetry+"group."); strings.Contains(rest, ".dependencies.") {
+			return "detail", tomlUnquote(rest[strings.Index(rest, ".dependencies.")+len(".dependencies."):])
+		}
+	}
+	return "", ""
+}
+
+// pipQuoted reads the plain quoted string at the start of s: its text and offset.
+func pipQuoted(s string) (text string, at int, ok bool) {
+	if s == "" || (s[0] != '"' && s[0] != '\'') {
+		return "", 0, false
+	}
+	j := strings.IndexByte(s[1:], s[0])
+	if j < 0 || strings.ContainsAny(s[1:1+j], "\\\n") {
+		return "", 0, false
+	}
+	return s[1 : 1+j], 1, true
+}
+
+func pipPyprojectEntries(src string) []pipEntry { return pipTomlEntries(src, false) }
+
+func pipTomlEntries(src string, pipfile bool) []pipEntry {
 	var out []pipEntry
 	table := ""
 	for off := 0; off < len(src); {
@@ -233,30 +352,59 @@ func pipPyprojectEntries(src string) []pipEntry {
 			continue
 		}
 		key, rest, ok := strings.Cut(line, "=")
-		if !ok || !strings.HasPrefix(strings.TrimSpace(rest), "[") {
+		if !ok {
 			continue
 		}
+		kind, detail := pipDepTable(table, pipfile)
 		key = tomlUnquote(key)
-		if !(table == "project" && key == "dependencies") && table != "project.optional-dependencies" && table != "dependency-groups" {
-			continue
-		}
-		open := lineStart + strings.Index(line, "=") + 1 + strings.Index(rest, "[")
-		strs, end := tomlArray(src, open)
-		for _, s := range strs {
-			if e, ok := parsePipReq(s.s, s.start); ok {
-				out = append(out, e)
+		valOff := lineStart + strings.Index(line, "=") + 1
+		value := strings.TrimLeft(rest, " \t")
+		valOff += len(rest) - len(value)
+		switch {
+		case kind == "array" && strings.HasPrefix(value, "["):
+			if !(table == "project" && key == "dependencies") && table != "project.optional-dependencies" && table != "dependency-groups" && !(table == "build-system" && key == "requires") {
+				continue
 			}
-		}
-		if end > off {
-			off = end
+			strs, end := tomlArray(src, valOff)
+			for _, s := range strs {
+				if e, ok := parsePipReq(s.s, s.start); ok {
+					out = append(out, e)
+				}
+			}
+			if end > off {
+				off = end
+			}
+		case kind == "map" && key != "python" && pypi.ValidName(key):
+			if text, at, ok := pipQuoted(value); ok {
+				if e, ok := pipSpecEntry(pypi.NormalizeName(key), text, valOff+at); ok {
+					out = append(out, e)
+				}
+			} else if strings.HasPrefix(value, "{") && !pipInlineSourceRE.MatchString(value) {
+				if m := pipInlineVersionRE.FindStringSubmatchIndex(value); m != nil {
+					if text, at, ok := pipQuoted(value[m[2]:m[3]]); ok {
+						if e, ok := pipSpecEntry(pypi.NormalizeName(key), text, valOff+m[2]+at); ok {
+							out = append(out, e)
+						}
+					}
+				}
+			}
+		case kind == "detail" && key == "version" && pypi.ValidName(detail):
+			if text, at, ok := pipQuoted(value); ok {
+				if e, ok := pipSpecEntry(pypi.NormalizeName(detail), text, valOff+at); ok {
+					out = append(out, e)
+				}
+			}
 		}
 	}
 	return out
 }
 
 func pipEntries(file string, content []byte) []pipEntry {
-	if path.Base(file) == "pyproject.toml" {
+	switch path.Base(file) {
+	case "pyproject.toml":
 		return pipPyprojectEntries(string(content))
+	case "Pipfile":
+		return pipTomlEntries(string(content), true)
 	}
 	return pipRequirementsEntries(string(content))
 }
@@ -314,6 +462,8 @@ func PipIndexOverride(name string, content []byte) bool {
 	switch base := path.Base(name); {
 	case base == "pyproject.toml":
 		return pipPyprojectHdr.Match(content) || pipPyprojectKey.Match(content)
+	case base == "Pipfile":
+		return pipfileOverride(content)
 	case base == "pip.conf" || base == "pip.ini" || base == "uv.toml":
 		return pipConfKeyRE.Match(content) || pipPyprojectKey.Match(content)
 	case strings.HasSuffix(base, ".txt"):
@@ -324,4 +474,24 @@ func PipIndexOverride(name string, content []byte) bool {
 		}
 	}
 	return false
+}
+
+var pipfileURLRE = regexp.MustCompile(`(?m)^\s*url\s*=\s*["']([^"']*)["']`)
+
+// pipfileOverride reports a [[source]] other than pypi.org's. A Pipfile names the
+// default index explicitly, so that one is not an override.
+func pipfileOverride(content []byte) bool {
+	for _, m := range pipfileURLRE.FindAllSubmatch(content, -1) {
+		if !pipIsPyPIURL(string(m[1])) {
+			return true
+		}
+	}
+	return false
+}
+
+// pipIsPyPIURL reports the pypi.org index, whichever of its spellings.
+func pipIsPyPIURL(u string) bool {
+	u = strings.TrimRight(strings.ToLower(strings.TrimSpace(u)), "/")
+	u = strings.TrimPrefix(strings.TrimPrefix(u, "https://"), "http://")
+	return u == "pypi.org/simple" || u == "pypi.org" || u == "pypi.python.org/simple"
 }

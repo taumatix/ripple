@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path"
 	"sort"
+	"strings"
 
 	"github.com/taumatix/ripple/internal/manager"
 	"github.com/taumatix/ripple/internal/model"
@@ -107,7 +108,7 @@ func (w *PipWatcher) Poll(ctx context.Context) (int, error) {
 			if floor == "" {
 				continue
 			}
-			target := pr.Newest(floor)
+			target := pr.NewestWhere(floor, manager.PipSpecAllows(d.Version))
 			if target == "" {
 				continue
 			}
@@ -147,7 +148,7 @@ func (w *PipWatcher) Poll(ctx context.Context) (int, error) {
 
 // pipIndexFiles are the files, in the manifest's directory and each parent, that can
 // point resolution at an index other than PyPI.
-var pipIndexFiles = []string{"pip.conf", "pip.ini", "uv.toml", "requirements.txt", "pyproject.toml"}
+var pipIndexFiles = []string{"pip.conf", "pip.ini", "uv.toml", "requirements.txt", "pyproject.toml", "Pipfile"}
 
 // pipGuard is called before a pip dependency is rewritten. A non-empty reason means
 // the update must not be proposed.
@@ -198,6 +199,16 @@ func (r *runner) notePipLocks(d model.Dependency) {
 		for _, name := range pipLockNames {
 			p := path.Join(base, name)
 			if _, err := r.ws.ReadFile(p); err == nil {
+				if r.pipLocks == nil {
+					r.pipLocks = map[string]bool{}
+				}
+				r.pipLocks[p] = true
+			}
+		}
+		// A requirements.in beside a pip-compile output: the output is the lock.
+		if f := path.Base(d.File); dir == path.Dir(d.File) && strings.HasSuffix(f, ".in") {
+			p := path.Join(base, strings.TrimSuffix(f, ".in")+".txt")
+			if content, err := r.ws.ReadFile(p); err == nil && manager.PipGenerated(content) {
 				if r.pipLocks == nil {
 					r.pipLocks = map[string]bool{}
 				}

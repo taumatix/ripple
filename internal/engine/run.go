@@ -505,6 +505,10 @@ func (r *runner) execute(plans []*prPlan, deps []model.Dependency) {
 				r.supersede(p, *pr, open)
 				r.closeBeaten(p, *pr, open)
 			}
+			// Later plans of this run see it: a module with advisories fixed in several
+			// releases opens one plan per fix, and the highest must replace the lower ones
+			// this run opened a moment ago.
+			open = append(open, *pr)
 		}
 	}
 }

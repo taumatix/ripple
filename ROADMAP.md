@@ -58,7 +58,7 @@ auth model, rate limits); the notes below are what I expect, **unverified** unti
     ([docs/aws-emulator.md](docs/aws-emulator.md)); it cannot say whether real AWS agrees. Needs a
     sandbox account: confirm SigV4 API calls and the git password are accepted, the title limit
     (100 or 150), the EventBridge input shape through SNS, the cn and eusc endpoints, and a shallow
-    checkout and push. Residuals: one AWS account per ripple, labels and auto-merge do not exist on the
+    checkout (the emulator refuses shallow and serves the whole clone and the push, so only real AWS can say that shallow is served). Residuals: one AWS account per ripple, labels and auto-merge do not exist on the
     service, the SNS certificate chain is not validated beyond the signature.
 17. **Gerrit: verify against a real instance.** Built from the docs and a fake ([docs/platform-gerrit.md](docs/platform-gerrit.md)),
     never run for real. Check the webhooks payload and URL token, 429 headers, clone and change URLs, WIP and hashtag
@@ -292,12 +292,6 @@ Everything else:
     pull request (the Review plugin's history tracks "source branch revision" but its list shape is not documented
     here). Read a real list answer (or the plugin source), fill it if a field exists, else keep a touched PR
     touched until it closes and say so in docs/platform-scmmanager.md.
-188. **Emulator: read what the first run says about the whole clone.** `gitws.Checkout` now falls back to a whole
-    clone when shallow is refused, and the emulator CodeCommit test accepts either outcome (it asserts the
-    checkout's files if the emulator serves a whole clone, logs the refusal if not). Read the `codecommit` job's
-    log: if the clone worked, extend the test to commit and push a ripple/ branch and open the PR through the host
-    (closing the last CodeCommit gap in ROADMAP 16); if it did not, record the emulator's answer in
-    docs/aws-emulator.md and stop.
 189. **DynamoDB: the registration window against real index lag.** `ListDependents` adds the rows registered in the last five
     minutes (docs/store-dynamodb.md), a constant chosen far above the usual index lag and proved only against the fake's
     `HoldIndex`, which freezes the index outright. Nobody has measured real GSI propagation delay (or the cost of the extra

@@ -68,12 +68,23 @@ own fidelity tests, not ripple's behaviour, so they say where to look, not that 
 | SNS | 318 of 334 | ripple does not call SNS. A real SNS message would have to be produced by the emulator to test the receiver end to end; the receiver rejects any `SigningCertURL` outside an AWS domain, so a loopback certificate URL is refused by design (see CodeCommit below). |
 | EventBridge | 663 of 708 | Not called. |
 
-**CodeCommit git transport.** The emulator announces a `cloneUrlHttp` on its own HTTPS port. Its release notes
-and `issues/` list three relevant problems at the time of writing: the git transport authenticated any
-credentials ("authenticates nobody any password"), the announced clone URL was served with a certificate no git
-client trusts by default, and `CreateBranch` was a 501 stub (`things-that-do-not-work`). Whether
-ripple's git-over-HTTPS path (the SigV4-derived git password) can be driven against it is decided by the job in
-ROADMAP 16, not assumed here.
+**CodeCommit git transport.** Ripple's host (API plus git) was run against it on 2026-11-24 (emulator 1.0.598,
+`codecommit` job, `internal/platform/codecommit/emulator_test.go`, build tag `emulator`):
+
+- API: `ListRepositories`, `CreatePullRequest`, `ListPullRequests`, `GetPullRequest`, `GetDifferences`, `GetCommit`,
+  `GetCommentsForPullRequest`, `DescribePullRequestEvents`, `UpdatePullRequestStatus` and `PostCommentForPullRequest`
+  worked through ripple's client. `CreateBranch` and `PutFile`, used only for setup, also work.
+- Git credentials: the emulator's git transport answers 401 to any user name that one of its own stores did not
+  mint, even with `--auth off`. The test mints an IAM user with `codecommit:*` and an access key, and ripple's
+  SigV4-derived git password for that key is accepted by `git ls-remote`; an unknown user is refused. The emulator
+  checks the identity, not the signature, so this proves ripple's header shape and user name, not that its
+  signature is the one AWS verifies (the signature itself is checked against botocore's output in
+  `client_test.go`).
+- Not covered: **`git clone --depth 1` fails** ("Server does not support shallow clients"), so ripple's checkout and
+  push cannot run against it (ROADMAP 182). The SNS/EventBridge receiver is not driven: the receiver only trusts AWS
+  certificate URLs.
+- The job installs the emulator's CA into the runner's system store because ripple's git runs with a clean
+  environment and no CA override.
 
 ## Result of the first run (2026-11-24, emulator 1.0.598)
 

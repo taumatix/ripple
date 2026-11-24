@@ -78,3 +78,58 @@ jobs:
             emulator-test.log
             emulator.log
             emulator-version.txt
+  codecommit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      RIPPLE_TEST_CODECOMMIT_ENDPOINT: https://127.0.0.1:9298
+      AWS_CA_BUNDLE: /home/runner/.aws/emulator/9298/ca.pem
+      AWS_EC2_METADATA_DISABLED: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: install the AWS Emulator (latest of the accepted major)
+        run: |
+          set -euo pipefail
+          base=https://downloads.aws.com/aws-emulator/packages/aws-emulator/LTS
+          pkg=aws-emulator_amd64.deb
+          curl -fsSLO "$base/latest/$pkg"
+          curl -fsSLO "$base/latest/$pkg.sig"
+          curl -fsSLo aws-publishing.asc https://downloads.aws.com/keys/gpg/current.asc
+          gpg --import aws-publishing.asc
+          # The fingerprint the user guide documents; a different key means do not install.
+          gpg --fingerprint ssm-publishing@amazon.com | tr -d ' ' | grep -q 98BCF336A3BE53B734E967C52E5BF49BD940F624
+          gpg --verify "$pkg.sig" "$pkg"
+          sudo apt-get install -y "./$pkg"
+          aws-emulator -v | tee emulator-version.txt
+          grep -qE "(^|[^0-9.])${EMULATOR_MAJOR}\.[0-9]+\.[0-9]+" emulator-version.txt
+          { echo '### AWS Emulator'; echo '```'; cat emulator-version.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - name: start the emulator and trust its CA
+        run: |
+          # git has no CA bundle override in ripple's clean environment, so the emulator's self-signed
+          # CA goes in the runner's system store (a throwaway VM).
+          aws-emulator --telemetry off --auth off -p 9298 > emulator.log 2>&1 &
+          for i in $(seq 60); do
+            curl -sf --cacert "$AWS_CA_BUNDLE" https://127.0.0.1:9298/__admin/health && break
+            sleep 1
+          done
+          curl -sf --cacert "$AWS_CA_BUNDLE" https://127.0.0.1:9298/__admin/health
+          sudo cp "$AWS_CA_BUNDLE" /usr/local/share/ca-certificates/aws-emulator.crt
+          sudo update-ca-certificates
+      - name: CodeCommit host against the emulator
+        run: |
+          set -o pipefail
+          go test -count=1 -v -tags emulator -run Emulator ./internal/platform/codecommit 2>&1 | tee codecommit-test.log
+      - name: emulator log
+        if: always()
+        run: tail -n 100 emulator.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: emulator-codecommit-logs
+          path: |
+            codecommit-test.log
+            emulator.log
+            emulator-version.txt

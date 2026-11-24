@@ -212,9 +212,9 @@ upstream:
     version: "1.0.598 (ran in CI 2026-11-24, release date 2026.11.24)"
     commit: fc05151cc5015eb457b31a79871539af51fb9fdd
     package: "https://downloads.aws.com/aws-emulator/packages/aws-emulator/LTS/latest/aws-emulator_amd64.deb (the versioned URLs in the user guide answered 403 on 2026-11-24, so CI installs latest and accepts major 1; the version that ran is in the job summary)"
-    used: [".github/workflows/emulator.yml: DynamoDB (store suite, e2e, admin commands) with --auth off --telemetry off"]
+    used: [".github/workflows/emulator.yml: DynamoDB (store suite, e2e, admin commands) and CodeCommit (host API, git credential) with --auth off --telemetry off"]
     verified-against: "CI run 2026-11-24: 95 store subtests plus e2e and app tests pass on emulator as on the fake (parity check green); release v1.0.597 scores.json.gz read 2026-11-24 (DynamoDB 2127/2398, CodeCommit 194/225); docs/aws-emulator.md"
-    unverified: "throttling, index lag, latency, IAM, regions other than us-west-2, certificates; CodeCommit not yet run"
+    unverified: "throttling, index lag, latency, IAM, regions other than us-west-2, certificates; git clone --depth 1 not served; SNS receiver not driven"
     checked: 2026-11-24
 ```
 

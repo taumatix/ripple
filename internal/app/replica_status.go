@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"sort"
 	"time"
 
 	"github.com/taumatix/ripple/internal/store"
@@ -38,6 +39,10 @@ func (a *App) replicaStatus(w http.ResponseWriter, r *http.Request) {
 		ReplicasLive   *int   `json:"replicas_live,omitempty"`
 		FeedPollers    *int   `json:"feed_pollers,omitempty"`
 		TakeoversTotal *int64 `json:"lease_takeovers_all_replicas,omitempty"`
+		// SourcesUnpolled names the sources some live replica has configured and none polls
+		// now (empty is healthy), so an alert can fire on a source nobody polls; it needs
+		// every replica to run a version that reports its sources.
+		SourcesUnpolled []string `json:"sources_unpolled,omitempty"`
 	}{LeaseTakeovers: store.LeaseTakeovers()}
 	if a.Engine != nil {
 		out.Replica, out.LeaseTTLSeconds = a.Engine.ReplicaID(), int(a.Engine.LeaseDuration().Seconds())
@@ -70,6 +75,7 @@ func (a *App) replicaStatus(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			out.ReplicasLive, out.FeedPollers, out.TakeoversTotal = &n, &pollers, &total
+			out.SourcesUnpolled = unpolledSources(live)
 		} else {
 			a.Log.Warn("list live replicas", "err", err)
 		}
@@ -96,7 +102,9 @@ func (a *App) beat(ctx context.Context) {
 	info := store.ReplicaInfo{ID: a.Engine.ReplicaID(), Takeovers: store.LeaseTakeovers()}
 	// FeedPoller is true for a replica that polls any source, so feed_pollers counts the
 	// replicas doing the polling.
-	info.FeedPoller = len(a.electedNames()) > 0
+	info.Polled = a.electedNames()
+	info.FeedPoller = len(info.Polled) > 0
+	info.Configured = a.sourceNames()
 	if err := t.Heartbeat(ctx, info, a.Engine.LeaseDuration()); err != nil && ctx.Err() == nil {
 		a.Log.Warn("replica heartbeat", "err", err)
 	}
@@ -122,4 +130,26 @@ func (a *App) heartbeatLoop(ctx context.Context) {
 		case <-t.C:
 		}
 	}
+}
+
+// unpolledSources is every source a live replica has configured that no live replica polls,
+// sorted.
+func unpolledSources(live []store.ReplicaInfo) []string {
+	polled, configured := map[string]bool{}, map[string]bool{}
+	for _, r := range live {
+		for _, s := range r.Polled {
+			polled[s] = true
+		}
+		for _, s := range r.Configured {
+			configured[s] = true
+		}
+	}
+	var out []string
+	for s := range configured {
+		if !polled[s] {
+			out = append(out, s)
+		}
+	}
+	sort.Strings(out)
+	return out
 }

@@ -268,6 +268,7 @@ type AdvisoryWatcher struct {
 
 	failID string
 	failN  int
+	elect  election // PollElected's claim
 }
 
 // Poll fans out the records modified since the cursor and returns how many jobs it

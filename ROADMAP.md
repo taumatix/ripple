@@ -242,11 +242,10 @@ Everything else:
     fine, but neither was measured under contention against DynamoDB Local or real DynamoDB. The marker backfill reads the
     eventually consistent index once, so an event an older replica wrote just before the first check can lack a marker until
     that replica's version is gone; Postgres also numbers a duplicate delivery (a gap, harmless).
-158. **Replicas: elect the advisory poll, and say which sources a replica polls in the fleet count.** The OSV advisory poll
-    (`pollAdvisories`, its own loop) still runs on every replica. Each source is elected on its own lease, so two replicas
-    starting together may split the sources; `feed_pollers` counts replicas polling any source and cannot say which one is
-    unpolled. Heartbeat the set of sources (needs a `store.ReplicaInfo` field and a column or attribute per store) so the
-    fleet view can alert on a source nobody polls. Also: `App.Tick` (cron-driven) now goes through the elections too.
+158. **Replicas: split sources deliberately.** Each source is elected on its own lease, so two replicas starting together
+    may split the sources and one replica may hold all of them; there is no preference for spreading them. `App.Tick`
+    (cron-driven) goes through the elections too. `sources_unpolled` names a source nobody polls but cannot say how long
+    it has gone unpolled; it is verified on the memory store and the in-process DynamoDB, Postgres columns are CI-only.
 160. **pip: Poetry and other manifests, wider specifiers.** Poetry's `[tool.poetry.dependencies]` (caret and tilde
     ranges), `Pipfile`, `setup.cfg`, `setup.py`, `[build-system] requires`, `.in` files and constraints files are not read;
     nor are `>=1,<2` style ranges, `==1.*` and `!=`. The manager is a scanner for PEP 508 requirements and a line scanner

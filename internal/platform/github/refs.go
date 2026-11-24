@@ -26,14 +26,14 @@ func (c *Client) repoURL(target, suffix string) string {
 // readRepo is GET /repos/{target}{suffix} on the host, or on UpstreamAPIBase when the host
 // does not have the repository and one is configured. The upstream is asked for nothing else.
 func (c *Client) readRepo(ctx context.Context, via model.Repo, target, suffix string, out any) (int, error) {
-	status, err := c.do(ctx, via, http.MethodGet, c.repoURL(target, suffix), nil, out)
+	status, err := c.doWith(ctx, via, http.MethodGet, c.repoURL(target, suffix), nil, out, true)
 	if status != http.StatusNotFound || c.UpstreamAPIBase == "" {
 		return status, err
 	}
 	// A 404 may also be a tag or release the host's own copy lacks: only a repository the
 	// host does not have is read from upstream, never a different one's tag or release.
 	if suffix != "" {
-		if pstatus, perr := c.do(ctx, via, http.MethodGet, c.repoURL(target, "/tags?per_page=1"), nil, &[]struct{}{}); perr == nil {
+		if pstatus, perr := c.doWith(ctx, via, http.MethodGet, c.repoURL(target, "/tags?per_page=1"), nil, &[]struct{}{}, true); perr == nil {
 			return status, err
 		} else if pstatus != http.StatusNotFound {
 			return pstatus, perr
@@ -45,23 +45,36 @@ func (c *Client) readRepo(ctx context.Context, via model.Repo, target, suffix st
 // upstreamGet reads public data from UpstreamAPIBase. It never sends an installation
 // token: the host's credentials stay with the host.
 func (c *Client) upstreamGet(ctx context.Context, rawURL string, out any) (int, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
-	if err != nil {
-		return 0, err
-	}
-	setHeaders(req, c.Versions.Current())
-	if c.UpstreamToken != "" {
-		req.Header.Set("Authorization", "Bearer "+c.UpstreamToken)
-	}
-	resp, err := c.client().Do(req)
-	if err != nil {
-		return 0, fmt.Errorf("github upstream GET %s: %w", req.URL.Path, err)
+	var (
+		resp *http.Response
+		req  *http.Request
+		lw   limitWaiter
+	)
+	for {
+		var err error
+		req, err = http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+		if err != nil {
+			return 0, err
+		}
+		setHeaders(req, c.Versions.Current())
+		if c.UpstreamToken != "" {
+			req.Header.Set("Authorization", "Bearer "+c.UpstreamToken)
+		}
+		resp, err = c.client().Do(req)
+		if err != nil {
+			return 0, fmt.Errorf("github upstream GET %s: %w", req.URL.Path, err)
+		}
+		if !isRateLimited(resp) {
+			break
+		}
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+		resp.Body.Close()
+		if err := c.wait(ctx, &lw, req, resp); err != nil {
+			return resp.StatusCode, err
+		}
 	}
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
-	if resp.StatusCode == http.StatusTooManyRequests || (resp.StatusCode == http.StatusForbidden && (resp.Header.Get("X-RateLimit-Remaining") == "0" || resp.Header.Get("Retry-After") != "")) {
-		return resp.StatusCode, &platform.RateLimitError{Until: retryAt(resp, c.now())}
-	}
 	if resp.StatusCode >= 300 {
 		return resp.StatusCode, fmt.Errorf("github upstream GET %s: status %d: %s", req.URL.Path, resp.StatusCode, snippet(data))
 	}

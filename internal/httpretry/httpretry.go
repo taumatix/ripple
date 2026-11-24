@@ -118,6 +118,36 @@ func limited(resp *http.Response) bool {
 		(resp.StatusCode == http.StatusServiceUnavailable && resp.Header.Get("Retry-After") != "")
 }
 
+// Next decides what follows a limited answer. le describes it (Attempts is the number of
+// requests sent so far; Waited the time already spent waiting). wait is the delay the server
+// asked for, and known is false when it named none, which means a short growing backoff.
+// Next sleeps and returns nil when the caller should send the request again, or returns le,
+// with Limit (and Cause) filled in, when the policy gives up. It is for callers whose notion
+// of "limited" is wider than a 429, such as a 403 carrying GitHub's rate-limit headers.
+func (p Policy) Next(ctx context.Context, le *LimitError, wait time.Duration, known bool) error {
+	if !known {
+		wait = baseBackoff << (le.Attempts - 1)
+		if wait > p.maxWait() {
+			wait = p.maxWait()
+		}
+	}
+	switch {
+	case wait > p.maxWait():
+		le.Limit = fmt.Sprintf("max wait %s (server asked for %s)", p.maxWait(), wait)
+		return le
+	case le.Attempts >= p.attempts():
+		le.Limit = fmt.Sprintf("%d attempts", p.attempts())
+		return le
+	}
+	if err := p.sleep(ctx, wait); err != nil {
+		le.Limit = "context ended while waiting"
+		le.Cause = err
+		return le
+	}
+	le.Waited += wait
+	return nil
+}
+
 // Do sends the request build returns, again after a 429 or 503 per the policy, and
 // returns the first other response (the caller closes its body). build is called once per
 // attempt so a body is fresh each time. A response that is still limited when the policy
@@ -141,25 +171,9 @@ func (p Policy) Do(ctx context.Context, c *http.Client, build func() (*http.Requ
 		resp.Body.Close()
 		le := &LimitError{URL: req.URL.Redacted(), Status: resp.StatusCode, RetryAfter: resp.Header.Get("Retry-After"), Attempts: attempt, Waited: waited}
 		wait, ok := ParseRetryAfter(resp.Header, now())
-		if !ok {
-			wait = baseBackoff << (attempt - 1)
-			if wait > p.maxWait() {
-				wait = p.maxWait()
-			}
+		if err := p.Next(ctx, le, wait, ok); err != nil {
+			return nil, err
 		}
-		switch {
-		case wait > p.maxWait():
-			le.Limit = fmt.Sprintf("max wait %s (server asked for %s)", p.maxWait(), wait)
-			return nil, le
-		case attempt >= p.attempts():
-			le.Limit = fmt.Sprintf("%d attempts", p.attempts())
-			return nil, le
-		}
-		if err := p.sleep(ctx, wait); err != nil {
-			le.Limit = "context ended while waiting"
-			le.Cause = err
-			return nil, le
-		}
-		waited += wait
+		waited = le.Waited
 	}
 }

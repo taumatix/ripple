@@ -49,6 +49,8 @@ type PR struct {
 // GitHub is a fake GitHub: the REST API for apps, pulls and GraphQL over HTTP, and
 // bare git repositories served from the local disk (GitBase is a file:// URL).
 type GitHub struct {
+	// Throttle lets a test refuse or slow matching requests like a rate-limited api.github.com.
+	Throttle
 	APIURL  string
 	GitBase string
 	Auth    *github.AppAuth
@@ -315,6 +317,10 @@ func (g *GitHub) verifyJWT(tok string) bool {
 }
 
 func (g *GitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	g.Throttle.Wrap(http.HandlerFunc(g.serve)).ServeHTTP(w, r)
+}
+
+func (g *GitHub) serve(w http.ResponseWriter, r *http.Request) {
 	auth := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 	if r.Header.Get("X-GitHub-Api-Version") != github.APIVersion {
 		g.fail(w, http.StatusBadRequest, "missing or wrong X-GitHub-Api-Version %q", r.Header.Get("X-GitHub-Api-Version"))

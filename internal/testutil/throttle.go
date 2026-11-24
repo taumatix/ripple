@@ -23,6 +23,7 @@ type throttleRule struct {
 	remaining  int // negative: refuse forever
 	status     int
 	retryAfter string
+	headers    map[string]string
 }
 
 type slowRule struct {
@@ -35,7 +36,15 @@ type slowRule struct {
 func (t *Throttle) Refuse(match string, n, status int, retryAfter string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.rules = append(t.rules, &throttleRule{match, n, status, retryAfter})
+	t.rules = append(t.rules, &throttleRule{match: match, remaining: n, status: status, retryAfter: retryAfter})
+}
+
+// RefuseWithHeaders is Refuse with arbitrary response headers (GitHub's X-RateLimit-Reset
+// and X-RateLimit-Remaining, for one).
+func (t *Throttle) RefuseWithHeaders(match string, n, status int, headers map[string]string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.rules = append(t.rules, &throttleRule{match: match, remaining: n, status: status, headers: headers})
 }
 
 // Slow delays every request whose path or query contains match by d (the delay ends early when
@@ -85,6 +94,9 @@ func (t *Throttle) Wrap(next http.Handler) http.Handler {
 		if hit != nil {
 			if hit.retryAfter != "" {
 				w.Header().Set("Retry-After", hit.retryAfter)
+			}
+			for k, v := range hit.headers {
+				w.Header().Set(k, v)
 			}
 			http.Error(w, "slow down", hit.status)
 			return

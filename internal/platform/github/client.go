@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/taumatix/ripple/internal/httpretry"
 	"github.com/taumatix/ripple/internal/model"
 	"github.com/taumatix/ripple/internal/platform"
 	"github.com/taumatix/ripple/internal/platform/gitws"
@@ -69,6 +70,11 @@ type Client struct {
 	Sandbox sandbox.Backend
 	// Now is the clock a Retry-After is counted from; nil means time.Now.
 	Now func() time.Time
+	// Retry bounds the waiting on a rate-limited read of a tag, commit or release (a 429,
+	// or a 403 carrying Retry-After or an exhausted X-RateLimit-Remaining, waited until
+	// Retry-After or X-RateLimit-Reset). The zero value is three attempts, none waited on
+	// longer than 30s. Writes are never retried.
+	Retry httpretry.Policy
 
 	mu      sync.Mutex
 	limited map[int64]time.Time
@@ -134,6 +140,53 @@ func checkRepo(r model.Repo) error {
 }
 
 func (c *Client) do(ctx context.Context, repo model.Repo, method, rawURL string, in, out any) (int, error) {
+	return c.doWith(ctx, repo, method, rawURL, in, out, false)
+}
+
+// isRateLimited reports a primary or secondary rate-limit answer.
+func isRateLimited(resp *http.Response) bool {
+	return resp.StatusCode == http.StatusTooManyRequests || (resp.StatusCode == http.StatusForbidden && (resp.Header.Get("X-RateLimit-Remaining") == "0" || resp.Header.Get("Retry-After") != ""))
+}
+
+// limitGiveUp is what a read returns when it stayed limited after the retry policy gave up:
+// a *platform.RateLimitError, so the host is held back as before, and the
+// *httpretry.LimitError that says which limit stopped the waiting.
+type limitGiveUp struct {
+	rl *platform.RateLimitError
+	le *httpretry.LimitError
+}
+
+func (e *limitGiveUp) Error() string   { return e.le.Error() + "; " + e.rl.Error() }
+func (e *limitGiveUp) Unwrap() []error { return []error{e.rl, e.le} }
+
+// limitWaiter counts the limited answers of one read.
+type limitWaiter struct {
+	attempts int
+	waited   time.Duration
+}
+
+// wait decides what a rate-limited resp means for the read: nil to send it again (after
+// sleeping the time GitHub named, within the policy), or the give-up error.
+func (c *Client) wait(ctx context.Context, w *limitWaiter, req *http.Request, resp *http.Response) error {
+	w.attempts++
+	now := c.now()
+	le := &httpretry.LimitError{URL: req.URL.Redacted(), Status: resp.StatusCode, RetryAfter: resp.Header.Get("Retry-After"), Attempts: w.attempts, Waited: w.waited}
+	d, known := httpretry.ParseRetryAfter(resp.Header, now)
+	if !known {
+		if s, err := strconv.ParseInt(resp.Header.Get("X-RateLimit-Reset"), 10, 64); err == nil {
+			d, known = max(time.Unix(s, 0).Sub(now), 0), true
+		}
+	}
+	if err := c.Retry.Next(ctx, le, d, known); err != nil {
+		return &limitGiveUp{rl: &platform.RateLimitError{Until: retryAt(resp, now)}, le: le}
+	}
+	w.waited = le.Waited
+	return nil
+}
+
+// doWith is do; with retry, a rate-limited answer is waited out per c.Retry, which is for
+// reads only (a write is not repeated blindly).
+func (c *Client) doWith(ctx context.Context, repo model.Repo, method, rawURL string, in, out any, retry bool) (int, error) {
 	cred, err := c.credentials().Credential(ctx, repo)
 	if err != nil {
 		return 0, err
@@ -145,6 +198,7 @@ func (c *Client) do(ctx context.Context, repo model.Repo, method, rawURL string,
 	var (
 		req  *http.Request
 		resp *http.Response
+		lw   limitWaiter
 	)
 	for {
 		var body io.Reader
@@ -173,11 +227,23 @@ func (c *Client) do(ctx context.Context, repo model.Repo, method, rawURL string,
 			}
 			continue
 		}
+		if retry && isRateLimited(resp) {
+			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+			resp.Body.Close()
+			if err := c.wait(ctx, &lw, req, resp); err != nil {
+				var gu *limitGiveUp
+				if errors.As(err, &gu) {
+					c.noteLimit(repo.InstallationID, gu.rl.Until)
+				}
+				return resp.StatusCode, err
+			}
+			continue
+		}
 		break
 	}
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
-	if resp.StatusCode == http.StatusTooManyRequests || (resp.StatusCode == http.StatusForbidden && (resp.Header.Get("X-RateLimit-Remaining") == "0" || resp.Header.Get("Retry-After") != "")) {
+	if isRateLimited(resp) {
 		until := retryAt(resp, c.now())
 		c.noteLimit(repo.InstallationID, until)
 		return resp.StatusCode, &platform.RateLimitError{Until: until}

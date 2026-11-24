@@ -65,6 +65,13 @@ marker in the code. Deprecations of third-party names (for example GitLab's
 - **To migrate:** nothing to do. The queued-event schema grows by columns/attributes with empty defaults
   (Postgres migration `004_event_typed_fields.sql`).
 
+## Behaviour notes
+
+- **GitLab delivery key.** The store-side delivery id of a GitLab push is now the `webhook-id` header (else
+  `Idempotency-Key`) instead of `X-Gitlab-Event-UUID`, which recursive webhooks share. A GitLab delivery carrying
+  neither header (an unsigned secret-token webhook) is no longer deduplicated in the store, only by the in-memory
+  window. Nothing to configure; ids already recorded under the old key simply expire.
+
 ## Removed
 
 Nothing has been removed yet.

@@ -206,10 +206,10 @@ Everything else:
     Bitbucket Cloud's `X-Request-UUID` and Azure DevOps' payload `id` stay the same across a retry is still
     unverified: the vendored docs state neither (see docs/platform-bitbucket.md, docs/platform-azuredevops.md). A
     retry under a new id is handled again, which is safe. Needs a real workspace and organisation to observe.
-133. **Signature dedupe across replicas and a default.** `RIPPLE_WEBHOOK_DEDUPE_SIGNATURE=true` is wired into every signed
-    host that has a signature to key on, but it is off by default and its table is in memory, so a replayed body that
-    reaches another replica is handled again. Turn it on by default only once real redelivery data shows identical
-    bodies are rare; to span replicas, claim `signature:<sig>` through `store.DeliveryTable` like the delivery id.
+133. **Signature dedupe: the default.** `RIPPLE_WEBHOOK_DEDUPE_SIGNATURE=true` now spans replicas (the signed-body key is
+    claimed in `store.DeliveryTable` beside the delivery id), but it is still off by default. Turn it on by default
+    only once real redelivery data shows identical signed bodies are rare; that needs a real deployment, and flipping
+    it needs a `MIGRATION.md` note.
 140. **Credentialed private proxy under a confined container network.** `RIPPLE_CONTAINER_CONFINE` is refused with
     `RIPPLE_GOPROXY_TOKEN`: go sends GOPROXY userinfo only over https and the sidecar speaks http. Give the sidecar
     TLS (a per-start certificate the image trusts) or have it add the Authorization header for the steps that may carry
@@ -283,13 +283,12 @@ Everything else:
     setups), a login limited to the repos that name it in `.ripple.yaml` (today one login serves every repo the server reads, so
     a repo can make ripple present it to a registry only by naming that registry's images), reloading the file without a restart,
     and a real private registry run (see 130).
-167. **Delivery dedupe: what is still keyed in memory, and retiring the legacy tombstone name.** Gerrit and SCM-Manager now
-    derive a delivery id from the ref transition / changeset ids, so the store's table drops their redeliveries; an
-    SCM-Manager payload with no changeset ids, and GitLab, still lack a safe one (GitLab's `X-Gitlab-Event-UUID`, which
-    the event carries, is shared by recursive webhooks, so a persistent claim on it could drop a distinct push: key it on
-    `webhook-id` where signed). Removal tombstones moved to `removed#<name>` and the Dynamo sweep is a Query; the
-    legacy `removed|` read path and the `tombstones-legacy` marker can be deleted a release after every replica runs
-    this version. The Query of `removed#` on a very large table is unmeasured.
+167. **Delivery dedupe: SCM-Manager without changeset ids, and retiring the legacy tombstone name.** GitLab now keys
+    its delivery on `webhook-id` (else `Idempotency-Key`), so a signed redelivery is dropped by any replica; an
+    SCM-Manager payload with no changeset ids still lacks a safe key. Removal tombstones moved to `removed#<name>` and
+    the Dynamo sweep is a Query; the legacy `removed|` read path and the `tombstones-legacy` marker can be deleted a
+    release after every replica runs a version that no longer writes it (v0.3.0 wrote it; the release after it must
+    ship first). The Query of `removed#` on a very large table is unmeasured.
 169. **Backfill lookup: far majors.** A module that skipped more than three majors is found only by the feed, and the
     lookup was spot-checked against proxy.golang.org only for a stable module, an unknown one and a missing path;
     a prerelease-only or retracted real module has not been tried. Probe the proxy's own listing for higher majors

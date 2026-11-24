@@ -198,7 +198,13 @@ func (h *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad project path", http.StatusBadRequest)
 		return
 	}
-	e := platform.Event{Kind: platform.Push, Delivery: r.Header.Get("X-Gitlab-Event-UUID"), Repos: []string{p.Project.Path},
+	// webhook-id is "consistent across webhook retries" (user_project_integrations_webhooks.md,
+	// "Delivery headers"); X-Gitlab-Event-UUID is shared by recursive webhooks, so it is not the key.
+	id := r.Header.Get("webhook-id")
+	if id == "" {
+		id = r.Header.Get("Idempotency-Key")
+	}
+	e := platform.Event{Kind: platform.Push, Delivery: id, Repos: []string{p.Project.Path},
 		Ref: p.Ref, DefaultBranch: p.Project.DefaultBranch}
 	// A push of more than 20 commits lists only the newest 20, so the changed files
 	// are incomplete: leave Files empty and the repo is scanned in full.
@@ -208,12 +214,6 @@ func (h *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			e.Files = append(e.Files, c.Modified...)
 			e.Files = append(e.Files, c.Removed...)
 		}
-	}
-	// webhook-id is "consistent across webhook retries" (user_project_integrations_webhooks.md,
-	// "Delivery headers"); X-Gitlab-Event-UUID is shared by recursive webhooks, so it is not the key.
-	id := r.Header.Get("webhook-id")
-	if id == "" {
-		id = r.Header.Get("Idempotency-Key")
 	}
 	if !h.dedupe.Claim(h.now(), id) {
 		w.WriteHeader(http.StatusAccepted)

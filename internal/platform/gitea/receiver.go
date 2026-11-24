@@ -119,7 +119,8 @@ func (h *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ev.Delivery = delivery
-	keys := []string{delivery, webhook.SignatureKey(sig)}
+	ev.BodyKey = webhook.SignatureKey(sig)
+	keys := []string{delivery, ev.BodyKey}
 	if !h.dedupe.Claim(h.now(), keys...) {
 		w.WriteHeader(http.StatusAccepted)
 		return

@@ -55,14 +55,14 @@ func serve(t *testing.T, r gitlab.Receiver, hdr map[string]string, body string) 
 
 func TestSecretTokenAuth(t *testing.T) {
 	r := gitlab.Receiver{SecretToken: "s3cret"}
-	ok := map[string]string{"X-Gitlab-Event": "Push Hook", "X-Gitlab-Token": "s3cret", "X-Gitlab-Event-UUID": "uuid-1"}
+	ok := map[string]string{"X-Gitlab-Event": "Push Hook", "X-Gitlab-Token": "s3cret", "X-Gitlab-Event-UUID": "uuid-1", "Idempotency-Key": "idem-1"}
 	w, sink := serve(t, r, ok, pushBody)
 	if w.Code != http.StatusAccepted {
 		t.Fatalf("status %d", w.Code)
 	}
 	e := sink.events()
 	if len(e) != 1 || e[0].Kind != platform.Push || e[0].Repos[0] != "mike/sub/diaspora" || e[0].Ref != "refs/heads/master" ||
-		e[0].DefaultBranch != "master" || e[0].Delivery != "uuid-1" {
+		e[0].DefaultBranch != "master" || e[0].Delivery != "idem-1" {
 		t.Fatalf("events = %+v", e)
 	}
 	slices.Sort(e[0].Files)

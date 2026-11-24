@@ -174,6 +174,28 @@ func (a *App) enqueue(ctx context.Context, host string, ev platform.Event) (retE
 			}
 		}()
 	}
+	if ev.BodyKey != "" {
+		// The same verified body under another delivery id (a replay, or a redelivery that got
+		// a new id) is claimed once across replicas. The receiver sets BodyKey only when
+		// signature dedupe is on.
+		key := ev.BodyKey
+		if host != a.defaultHost() {
+			key = host + "/" + key
+		}
+		fresh, release, err := a.claimDelivery(ctx, key)
+		if err != nil {
+			return err
+		}
+		if !fresh {
+			a.log().Info("webhook body already handled; dropped", "host", host)
+			return nil
+		}
+		defer func() {
+			if retErr != nil {
+				release()
+			}
+		}()
+	}
 	evs := make([]model.Event, 0, len(ev.Repos))
 	for i, repo := range ev.Repos {
 		if host == a.defaultHost() && strings.Contains(repo, ":") {

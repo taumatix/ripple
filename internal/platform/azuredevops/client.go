@@ -204,6 +204,11 @@ type prJSON struct {
 	ID            int      `json:"pullRequestId"`
 	SourceRefName string   `json:"sourceRefName"`
 	CreatedBy     identity `json:"createdBy"`
+	// LastMergeSourceCommit is the source branch's commit as of the last merge
+	// calculation (rest-pull-requests-get-list.md); absent until the service has one.
+	LastMergeSourceCommit struct {
+		CommitID string `json:"commitId"`
+	} `json:"lastMergeSourceCommit"`
 }
 
 func (c *Client) webURL(org, project, repo string, id int) string {
@@ -211,7 +216,7 @@ func (c *Client) webURL(org, project, repo string, id int) string {
 }
 
 func (p prJSON) pr(webURL string) platform.PR {
-	return platform.PR{Number: p.ID, URL: webURL, ID: p.CreatedBy.ID, Head: strings.TrimPrefix(p.SourceRefName, "refs/heads/")}
+	return platform.PR{Number: p.ID, URL: webURL, ID: p.CreatedBy.ID, Head: strings.TrimPrefix(p.SourceRefName, "refs/heads/"), HeadSHA: p.LastMergeSourceCommit.CommitID}
 }
 
 func (c *Client) prsURL(org, project, repo string) string {

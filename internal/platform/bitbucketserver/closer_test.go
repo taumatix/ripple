@@ -135,3 +135,25 @@ func TestCloseUntouchedPRFailedCommentStillCountsAsClosed(t *testing.T) {
 		t.Error("not declined")
 	}
 }
+
+// ListOpenPRs reports the pull request's source commit (fromRef.latestCommit), and it
+// moves when a person pushes to the branch.
+func TestListOpenPRsReportsHeadSHA(t *testing.T) {
+	c, b, _ := openRipplePR(t)
+	list := func() platform.PR {
+		t.Helper()
+		open, err := c.ListOpenPRs(context.Background(), appRepo, "ripple/")
+		if err != nil || len(open) != 1 {
+			t.Fatalf("%v %v", open, err)
+		}
+		return open[0]
+	}
+	first := b.BranchHead("ACME/app", rippleBranch)
+	if got := list().HeadSHA; got == "" || got != first {
+		t.Fatalf("HeadSHA %q, want %q", got, first)
+	}
+	b.PushCommit("ACME/app", 1)
+	if got, want := list().HeadSHA, b.BranchHead("ACME/app", rippleBranch); got == first || got != want {
+		t.Fatalf("after a push HeadSHA %q, want %q (not %q)", got, want, first)
+	}
+}

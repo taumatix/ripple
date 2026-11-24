@@ -209,3 +209,26 @@ func TestCloseUntouchedPRFailedCommentStillCounts(t *testing.T) {
 		t.Fatal("not closed")
 	}
 }
+
+// ListOpenPRs reports the merge request's head commit (the list's `sha`), and it moves
+// when a person pushes to the branch, which is what lets the engine tell a touched
+// merge request that was since reset from one still touched.
+func TestListOpenPRsReportsHeadSHA(t *testing.T) {
+	e := newSupEnv(t)
+	list := func() platform.PR {
+		t.Helper()
+		open, err := e.c.ListOpenPRs(context.Background(), repo(supPath), "ripple/")
+		if err != nil || len(open) != 1 {
+			t.Fatalf("%v %v", open, err)
+		}
+		return open[0]
+	}
+	first := e.gl.BranchHead(supPath, supBranch)
+	if got := list().HeadSHA; got == "" || got != first {
+		t.Fatalf("HeadSHA %q, want %q", got, first)
+	}
+	e.gl.HumanCommitOnBranch(supPath, 1)
+	if got, want := list().HeadSHA, e.gl.BranchHead(supPath, supBranch); got == first || got != want {
+		t.Fatalf("after a push HeadSHA %q, want %q (not %q)", got, want, first)
+	}
+}

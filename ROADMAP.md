@@ -344,23 +344,9 @@ Everything else:
     packages with dependents in a small index item (or a sparse GSI) so the check reads that instead. The server only
     reports drift; whether it should recount a package it finds drifted on its own (rate-limited, one replica at a time
     under the lease) is undecided.
-177. **Head commit on every host's open-PR listing.** `platform.PR.HeadSHA` is filled for GitHub (tested against the fake),
-    and read for GitLab (`sha`) and Gitea/Forgejo (`head.sha`) from their documented fields with no fake emitting it
-    and no test. Make the GitLab and Gitea fakes report it and add the supersede e2e for each; Bitbucket Cloud
-    (`source.commit.hash`), Data Center (`fromRef.latestCommit`) and Azure DevOps (`lastMergeSourceCommit`) still
-    report none, so a touched PR there stays touched until it closes.
 179. **Supersede on a later run.** Within one run, PRs opened for the same module are now closed by the next one (fixed
     with the live OSV run). A sweep on a later run did not close lower PRs in one observed case after a rerun and a tick;
     reproduce it with a fake and either fix it or explain it in docs/osv.md.
-182. **Git hosts that refuse a shallow clone.** `gitws.Checkout` always clones `--depth 1`; the AWS Emulator's
-    upload-pack answers "Server does not support shallow clients", so the CodeCommit checkout and push cannot be
-    exercised against it (the emulator test pins the refusal). Real CodeCommit serves shallow clones, so this is
-    an emulator gap; a full-clone fallback after the filtered and unfiltered shallow attempts would be additive
-    and would also cover a dumb or older git server. Do it if a real host needs it, and flip the emulator test.
-183. **CodeCommit: report the head commit of an open PR.** `ListOpenPRs` leaves `platform.PR.HeadSHA` empty though
-    `GetPullRequest` carries `sourceCommit` (seen on the emulator, and documented), so the engine cannot notice a
-    moved head on CodeCommit the way it does elsewhere. Fill it from the target's `sourceCommit` and check what
-    the engine then does differently.
 184. **Retry-After in the other clients.** `internal/httpretry` now waits out a 429 (and a 503 with Retry-After) for the
     Go index, the Go proxy lookup, OSV and the registry client; `npmreg`, `pypi`, `cratesindex` and the GitHub tag reads
     still treat both as a plain error and retry on the next poll. Give each an `httpretry.Policy` field and a fake test.
@@ -372,3 +358,14 @@ Everything else:
 186. **Registry tag lists: stop early.** A 429 or a slow page is now waited out or ended by the context, but a large image
     (ghcr.io, ~20s over many pages) is still read to the last page. Stop at the first tag newer than the current one of the
     same shape, or page with `last=` from the current tag, and measure it against the registry fake with a page counter.
+187. **SCM-Manager: head commit on the open-PR listing.** `platform.PR.HeadSHA` is the one host field still empty on
+    every host that lists open PRs: the vendored SCM-Manager docs show no source-revision field on an in-progress
+    pull request (the Review plugin's history tracks "source branch revision" but its list shape is not documented
+    here). Read a real list answer (or the plugin source), fill it if a field exists, else keep a touched PR
+    touched until it closes and say so in docs/platform-scmmanager.md.
+188. **Emulator: read what the first run says about the whole clone.** `gitws.Checkout` now falls back to a whole
+    clone when shallow is refused, and the emulator CodeCommit test accepts either outcome (it asserts the
+    checkout's files if the emulator serves a whole clone, logs the refusal if not). Read the `codecommit` job's
+    log: if the clone worked, extend the test to commit and push a ripple/ branch and open the PR through the host
+    (closing the last CodeCommit gap in ROADMAP 16); if it did not, record the emulator's answer in
+    docs/aws-emulator.md and stop.

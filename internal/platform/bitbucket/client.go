@@ -215,11 +215,14 @@ type prJSON struct {
 		Branch struct {
 			Name string `json:"name"`
 		} `json:"branch"`
+		Commit struct {
+			Hash string `json:"hash"`
+		} `json:"commit"`
 	} `json:"source"`
 }
 
 func (p prJSON) pr() platform.PR {
-	return platform.PR{Number: p.ID, URL: p.Links.HTML.Href, Head: p.Source.Branch.Name}
+	return platform.PR{Number: p.ID, URL: p.Links.HTML.Href, Head: p.Source.Branch.Name, HeadSHA: p.Source.Commit.Hash}
 }
 
 func (c *Client) ListOpenPRs(ctx context.Context, repo model.Repo, prefix string) ([]platform.PR, error) {

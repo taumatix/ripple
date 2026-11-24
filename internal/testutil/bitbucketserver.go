@@ -187,6 +187,11 @@ func (b *BitbucketServer) FileAt(repo, branch, path string) (string, bool) {
 	return string(out), true
 }
 
+// BranchHead is the commit branch points at in repo.
+func (b *BitbucketServer) BranchHead(repo, branch string) string {
+	return branchTip(b.bare(repo), branch)
+}
+
 // HasBranch reports whether the branch exists in the repository.
 func (b *BitbucketServer) HasBranch(repo, branch string) bool { return b.hasBranch(repo, branch) }
 
@@ -379,8 +384,12 @@ func (b *BitbucketServer) prURL(repo string, p *bbPR) string {
 func (b *BitbucketServer) prJSON(repo string, p *bbPR) map[string]any {
 	key, slug, _ := strings.Cut(repo, "/")
 	ref := func(branch string) map[string]any {
-		return map[string]any{"id": "refs/heads/" + branch, "displayId": branch, "repository": map[string]any{
+		m := map[string]any{"id": "refs/heads/" + branch, "displayId": branch, "repository": map[string]any{
 			"slug": slug, "project": map[string]any{"key": key}}}
+		if sha := branchTip(b.bare(repo), branch); sha != "" {
+			m["latestCommit"] = sha // the ref's commit, as in the event payloads' fromRef
+		}
+		return m
 	}
 	return map[string]any{"id": p.Number, "version": p.version, "title": p.Title, "description": p.Body, "state": p.state(), "open": !p.Closed,
 		"closed": p.Closed, "draft": p.Draft, "fromRef": ref(p.Head), "toRef": ref(p.Base),

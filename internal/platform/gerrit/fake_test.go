@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -439,7 +440,13 @@ func (f *fakeGerrit) queryChanges(w http.ResponseWriter, r *http.Request) {
 		if (status == "open" && c.Status != "NEW") || (project != "" && c.Project != project) {
 			continue
 		}
-		all = append(all, f.changeJSON(c))
+		m := f.changeJSON(c)
+		// o=CURRENT_REVISION adds the current patch set's commit id (rest-api-changes.md);
+		// without the option the field is absent, as on the service.
+		if slices.Contains(r.URL.Query()["o"], "CURRENT_REVISION") && len(c.Revisions) > 0 {
+			m["current_revision"] = c.Revisions[len(c.Revisions)-1]
+		}
+		all = append(all, m)
 	}
 	cap := f.pageCap
 	f.mu.Unlock()

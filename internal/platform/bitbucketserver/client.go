@@ -222,9 +222,10 @@ func (c *Client) paged(ctx context.Context, repo model.Repo, path string, fn fun
 }
 
 type refJSON struct {
-	ID         string `json:"id"`
-	DisplayID  string `json:"displayId"`
-	Repository struct {
+	ID           string `json:"id"`
+	DisplayID    string `json:"displayId"`
+	LatestCommit string `json:"latestCommit"`
+	Repository   struct {
 		Slug    string `json:"slug"`
 		Project struct {
 			Key string `json:"key"`
@@ -251,7 +252,7 @@ func (c *Client) pr(key, slug string, p prJSON) platform.PR {
 	if u == "" {
 		u = fmt.Sprintf("%s/projects/%s/repos/%s/pull-requests/%d", strings.TrimRight(c.APIBase, "/"), key, slug, p.ID)
 	}
-	return platform.PR{Number: p.ID, URL: u, Head: strings.TrimPrefix(p.FromRef.ID, branches)}
+	return platform.PR{Number: p.ID, URL: u, Head: strings.TrimPrefix(p.FromRef.ID, branches), HeadSHA: p.FromRef.LatestCommit}
 }
 
 func (c *Client) ListOpenPRs(ctx context.Context, repo model.Repo, prefix string) ([]platform.PR, error) {

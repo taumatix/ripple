@@ -310,6 +310,17 @@ func (p pullRequest) head(name string) string {
 	return ""
 }
 
+// headSHA is the commit the source branch pointed at when the pull request was read
+// (GetPullRequest pullRequestTargets[].sourceCommit); "" when the target is absent.
+func (p pullRequest) headSHA(name string) string {
+	for _, t := range p.Targets {
+		if t.Repository == name {
+			return t.SourceSHA
+		}
+	}
+	return ""
+}
+
 func prURL(region, name, id string) string {
 	return "https://" + region + ".console.aws.amazon.com/codesuite/codecommit/repositories/" + name + "/pull-requests/" + id + "?region=" + region
 }
@@ -317,7 +328,7 @@ func prURL(region, name, id string) string {
 func (c *Client) pr(region, name string, p pullRequest, head string) platform.PR {
 	n := 0
 	fmt.Sscanf(p.ID, "%d", &n)
-	return platform.PR{Number: n, URL: prURL(region, name, p.ID), Head: head}
+	return platform.PR{Number: n, URL: prURL(region, name, p.ID), Head: head, HeadSHA: p.headSHA(name)}
 }
 
 // ListOpenPRs lists the open pull requests whose source branch starts with prefix.

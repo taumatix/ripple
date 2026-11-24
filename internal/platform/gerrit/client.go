@@ -211,17 +211,20 @@ func snippet(b []byte) string {
 }
 
 type changeJSON struct {
-	ID         string `json:"id"`
-	Project    string `json:"project"`
-	Branch     string `json:"branch"`
-	Topic      string `json:"topic"`
-	Number     int    `json:"_number"`
-	WIP        bool   `json:"work_in_progress"`
-	MoreChange bool   `json:"_more_changes"`
+	ID      string `json:"id"`
+	Project string `json:"project"`
+	Branch  string `json:"branch"`
+	Topic   string `json:"topic"`
+	Number  int    `json:"_number"`
+	WIP     bool   `json:"work_in_progress"`
+	// CurrentRevision is the current patch set's commit id; set only when the query
+	// asked for o=CURRENT_REVISION (rest-api-changes.md).
+	CurrentRevision string `json:"current_revision"`
+	MoreChange      bool   `json:"_more_changes"`
 }
 
 func (c *Client) pr(ch changeJSON) platform.PR {
-	return platform.PR{Number: ch.Number, Head: ch.Topic, ID: ch.ID,
+	return platform.PR{Number: ch.Number, Head: ch.Topic, ID: ch.ID, HeadSHA: ch.CurrentRevision,
 		URL: fmt.Sprintf("%s/c/%s/+/%d", strings.TrimRight(c.BaseURL, "/"), ch.Project, ch.Number)}
 }
 
@@ -240,7 +243,7 @@ func (c *Client) ListOpenPRs(ctx context.Context, repo model.Repo, prefix string
 		if pages >= 50 {
 			return nil, fmt.Errorf("more than %d changes open in %s", 50*pageSize, repo.FullName)
 		}
-		q := url.Values{"q": {"status:open project:" + repo.FullName}, "n": {strconv.Itoa(pageSize)}, "S": {strconv.Itoa(skip)}}
+		q := url.Values{"q": {"status:open project:" + repo.FullName}, "n": {strconv.Itoa(pageSize)}, "S": {strconv.Itoa(skip)}, "o": {"CURRENT_REVISION"}}
 		var changes []changeJSON
 		if err := c.do(ctx, http.MethodGet, c.apiURL("changes/")+"?"+q.Encode(), nil, &changes); err != nil {
 			return nil, err

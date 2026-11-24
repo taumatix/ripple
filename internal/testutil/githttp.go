@@ -26,7 +26,7 @@ type GitHTTP struct {
 	// URL is the git base URL (http://127.0.0.1:port), usable as Client.GitBase.
 	URL string
 
-	v0 atomic.Bool
+	v0, noShallow atomic.Bool
 
 	mu       sync.Mutex
 	rejected int
@@ -54,6 +54,10 @@ func (c countWriter) Write(p []byte) (int, error) {
 // v0 the server enforces uploadpack.allowAnySHA1InWant, which v2 never does, so a
 // blob asked for by object id is refused unless the setting is on.
 func (h *GitHTTP) SpeakProtocolV0() { h.v0.Store(true) }
+
+// RefuseShallow makes the server answer any request asking for a shallow clone
+// (a "deepen" line) with an error, as a host without shallow support does.
+func (h *GitHTTP) RefuseShallow() { h.noShallow.Store(true) }
 
 // BytesServed is the total of response body bytes the server has sent, the
 // closest a test gets to "what a clone downloaded".
@@ -108,6 +112,18 @@ func (g *GitHub) ServeGit() *GitHTTP {
 		}
 		if gh.v0.Load() {
 			r.Header.Del("Git-Protocol")
+		}
+		if gh.noShallow.Load() && r.Method == http.MethodPost {
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if bytes.Contains(body, []byte("deepen")) {
+				http.Error(w, "Server does not support shallow clients", http.StatusBadRequest)
+				return
+			}
+			r.Body, r.ContentLength = io.NopCloser(bytes.NewReader(body)), int64(len(body))
 		}
 		// git-http-backend is CGI, which cannot take a chunked body; buffer it.
 		if r.ContentLength < 0 {

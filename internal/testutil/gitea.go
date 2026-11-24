@@ -293,7 +293,7 @@ func (g *Gitea) pulls(w http.ResponseWriter, r *http.Request, repo string) {
 		lo, hi := g.page(w, r, len(all))
 		out := []map[string]any{}
 		for _, p := range all[lo:hi] {
-			out = append(out, giteaPR(repo, p))
+			out = append(out, g.giteaPR(repo, p))
 		}
 		g.mu.Unlock()
 		_ = json.NewEncoder(w).Encode(out)
@@ -324,7 +324,7 @@ func (g *Gitea) pulls(w http.ResponseWriter, r *http.Request, repo string) {
 		p := &PR{Repo: repo, Head: head, Base: base, Title: title, Body: body, Number: len(g.prs[repo]) + 1,
 			Draft: strings.HasPrefix(strings.ToUpper(title), "WIP:")}
 		g.prs[repo] = append(g.prs[repo], p)
-		resp := giteaPR(repo, p)
+		resp := g.giteaPR(repo, p)
 		g.mu.Unlock()
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(resp)
@@ -385,11 +385,18 @@ func (g *Gitea) labels(w http.ResponseWriter, r *http.Request, repo, num string)
 	g.fail(w, http.StatusNotFound, "no pull request %d", n)
 }
 
-func giteaPR(repo string, p *PR) map[string]any {
+func (g *Gitea) giteaPR(repo string, p *PR) map[string]any {
+	head := map[string]any{"ref": p.Head, "label": p.Head, "repo": map[string]any{"full_name": repo}}
+	if sha := branchTip(g.bare(repo), p.Head); sha != "" {
+		head["sha"] = sha // head.sha: the source branch's commit
+	}
 	return map[string]any{"number": p.Number, "html_url": fmt.Sprintf("https://gitea.example/%s/pulls/%d", repo, p.Number),
 		"state": giteaState(p), "draft": p.Draft, "title": p.Title, "body": p.Body, "merged": false,
-		"head": map[string]any{"ref": p.Head, "label": p.Head, "repo": map[string]any{"full_name": repo}}, "base": map[string]any{"ref": p.Base}}
+		"head": head, "base": map[string]any{"ref": p.Base}}
 }
+
+// BranchHead is the commit branch points at in repo.
+func (g *Gitea) BranchHead(repo, branch string) string { return branchTip(g.bare(repo), branch) }
 
 func giteaState(p *PR) string {
 	if p.Closed {
@@ -427,7 +434,7 @@ func (g *Gitea) pull(w http.ResponseWriter, r *http.Request, repo, num string) {
 	}
 	switch r.Method {
 	case http.MethodGet:
-		out := giteaPR(repo, p)
+		out := g.giteaPR(repo, p)
 		if !g.Forgejo {
 			v := 0
 			if p.BodyEdited {
@@ -447,7 +454,7 @@ func (g *Gitea) pull(w http.ResponseWriter, r *http.Request, repo, num string) {
 			return
 		}
 		p.Closed = true
-		_ = json.NewEncoder(w).Encode(giteaPR(repo, p))
+		_ = json.NewEncoder(w).Encode(g.giteaPR(repo, p))
 	default:
 		g.fail(w, http.StatusMethodNotAllowed, "method")
 	}

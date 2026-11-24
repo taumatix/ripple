@@ -207,3 +207,25 @@ func TestCloseUntouchedBadRepoPathIsAnError(t *testing.T) {
 		t.Errorf("err %v", err)
 	}
 }
+
+// ListOpenPRs reports the commit the source branch points at (GetPullRequest
+// sourceCommit), and it follows the branch when a person pushes to it.
+func TestListOpenPRsReportsHeadSHA(t *testing.T) {
+	c, cc, _ := openRipplePR(t)
+	list := func() platform.PR {
+		t.Helper()
+		open, err := c.ListOpenPRs(context.Background(), model.Repo{FullName: closePath}, "ripple/")
+		if err != nil || len(open) != 1 {
+			t.Fatalf("%v %v", open, err)
+		}
+		return open[0]
+	}
+	first := cc.BranchHead(closePath, closeHead)
+	if got := list().HeadSHA; got == "" || got != first {
+		t.Fatalf("HeadSHA %q, want %q", got, first)
+	}
+	cc.PushBranch(closePath, closeHead, "person@example.invalid")
+	if got, want := list().HeadSHA, cc.BranchHead(closePath, closeHead); got == first || got != want {
+		t.Fatalf("after a push HeadSHA %q, want %q (not %q)", got, want, first)
+	}
+}

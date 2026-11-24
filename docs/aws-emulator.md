@@ -80,8 +80,10 @@ own fidelity tests, not ripple's behaviour, so they say where to look, not that 
   checks the identity, not the signature, so this proves ripple's header shape and user name, not that its
   signature is the one AWS verifies (the signature itself is checked against botocore's output in
   `client_test.go`).
-- Not covered: **`git clone --depth 1` fails** ("Server does not support shallow clients"), so ripple's checkout and
-  push cannot run against it (ROADMAP 182). The SNS/EventBridge receiver is not driven: the receiver only trusts AWS
+- **`git clone --depth 1` fails** ("Server does not support shallow clients"); `gitws.Checkout` now falls back to a
+  whole clone. Whether the emulator serves that is only known from the workflow's run: the test asserts the
+  checkout's files when it does and logs the refusal when it does not (ROADMAP 188). Push is not driven.
+  Not covered either: the SNS/EventBridge receiver is not driven: the receiver only trusts AWS
   certificate URLs.
 - The job installs the emulator's CA into the runner's system store because ripple's git runs with a clean
   environment and no CA override.

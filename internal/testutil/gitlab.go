@@ -306,10 +306,19 @@ func (g *GitLab) mrJSON(project string, p *GitLabPR) map[string]any {
 	if p.Closed {
 		state = "closed"
 	}
-	return map[string]any{"iid": p.IID, "id": 1000 + p.IID, "state": state, "title": p.Title,
+	m := map[string]any{"iid": p.IID, "id": 1000 + p.IID, "state": state, "title": p.Title,
 		"source_branch": p.Head, "target_branch": p.Base, "source_project_id": 7, "target_project_id": 7,
 		"web_url": "https://gitlab.example/" + project + "/-/merge_requests/" + strconv.Itoa(p.IID)}
+	// sha is the head commit of the source branch (api_merge_requests.md), absent here
+	// when the branch is gone.
+	if sha := branchTip(g.bare(project), p.Head); sha != "" {
+		m["sha"] = sha
+	}
+	return m
 }
+
+// BranchHead is the commit branch points at in path.
+func (g *GitLab) BranchHead(path, branch string) string { return branchTip(g.bare(path), branch) }
 
 func (g *GitLab) mergeRequests(w http.ResponseWriter, r *http.Request, project string) {
 	switch r.Method {

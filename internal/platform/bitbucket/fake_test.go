@@ -303,11 +303,24 @@ func (f *fakeBB) listRepos(w http.ResponseWriter, r *http.Request, ws string) {
 	f.paginate(w, r, items)
 }
 
+// BranchHead is the commit branch points at in repo, "" when it does not exist.
+func (f *fakeBB) BranchHead(repo, branch string) string {
+	cmd := exec.Command("git", "rev-parse", "--verify", "--quiet", "refs/heads/"+branch)
+	cmd.Dir = f.bare(repo)
+	cmd.Env = gitEnv()
+	out, _ := cmd.Output()
+	return strings.TrimSpace(string(out))
+}
+
 func (f *fakeBB) prJSON(repo string, p *fakePR) map[string]any {
+	src := map[string]any{"branch": map[string]any{"name": p.Head}, "repository": map[string]any{"type": "repository", "full_name": repo}}
+	if sha := f.BranchHead(repo, p.Head); sha != "" {
+		src["commit"] = map[string]any{"hash": sha} // source.commit.hash, pullrequests-api.md
+	}
 	return map[string]any{"type": "pullrequest", "id": p.ID, "title": p.Title, "description": p.Desc, "state": p.state(), "draft": p.Draft, "queued": p.Queued,
 		"comment_count": len(p.Comments), "task_count": 0,
 		"links":       map[string]any{"html": map[string]any{"href": fmt.Sprintf("https://bitbucket.example/%s/pull-requests/%d", repo, p.ID)}},
-		"source":      map[string]any{"branch": map[string]any{"name": p.Head}, "repository": map[string]any{"type": "repository", "full_name": repo}},
+		"source":      src,
 		"destination": map[string]any{"branch": map[string]any{"name": p.Base}}}
 }
 

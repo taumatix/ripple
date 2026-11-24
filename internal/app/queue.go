@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/taumatix/ripple/internal/model"
@@ -41,6 +42,9 @@ var ErrBacklogFull = errors.New("event backlog full")
 // events at once and all of them at most Workers, so one noisy installation cannot
 // starve the others. Events of one repo run one at a time, in the order received.
 type Queue struct {
+	// deadLettered counts the events this process gave up on since it started (see DeadLettered).
+	deadLettered atomic.Int64
+
 	Store   store.Store
 	Process func(ctx context.Context, ev model.Event) error
 	Log     *slog.Logger
@@ -535,6 +539,7 @@ func (q *Queue) finish(ctx context.Context, e *entry, held *store.Held, err erro
 			// If persisting that fails the event stays live in the store and is tried
 			// again after a restart, which is the at-least-once side to err on.
 			ev.DeadAt = now
+			q.deadLettered.Add(1)
 			q.Log.Error("event failed; dead-lettered", "event", ev.ID, "kind", ev.Kind, "repo", ev.Repo, "attempts", ev.Attempts, "err", err)
 			if uerr := q.updateEvent(ctx, held, ev); uerr != nil {
 				q.Log.Error("persist dead event", "event", ev.ID, "err", uerr)
@@ -632,3 +637,7 @@ func (q *Queue) drop(e *entry) {
 		q.turn = 0
 	}
 }
+
+// DeadLettered is how many events this process has dead-lettered since it started: the
+// counter an operator alerts on a rise of (GET /replica reports it as events_dead_lettered).
+func (q *Queue) DeadLettered() int64 { return q.deadLettered.Load() }

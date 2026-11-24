@@ -223,3 +223,85 @@ func TestCargoPartialRequirementsAndZeroVersionSemantics(t *testing.T) {
 		}
 	})
 }
+
+// Comparators, wildcards and every TOML spelling of a dependency are read; an upper
+// bound is never moved and a wildcard moves only to a version it does not match.
+func TestCargoComparatorsWildcardsAndTOMLSpellings(t *testing.T) {
+	forEach(t, func(t *testing.T, st store.Store) {
+		e, idx := cargoEnv(t, st)
+		for crate, v := range map[string]string{"cmp": "1.2.0", "capped": "1.2.0", "wild": "1.4.0", "multi": "1.0.0", "dotted": "2.0.0", "stuck": "1.0.0"} {
+			idx.Publish(crate, v)
+		}
+		manifest := `[dependencies]
+cmp = ">=1.2"      # at least
+capped = ">=1.2, <2"
+wild = "1.*"
+multi = {
+    version = "1.0.0", # kept
+    features = ["a"],
+}
+dotted.version = "2.0.0"
+dotted.default-features = false
+stuck = "1.*"
+`
+		e.gh.AddRepo("acme/app", map[string]string{".ripple.yaml": cargoConfig, "Cargo.toml": manifest})
+		start(t, e, "acme/app")
+		if n := len(e.deps("acme/app")); n != 6 {
+			t.Fatalf("all six are tracked, got %+v", e.deps("acme/app"))
+		}
+		e.clock.Advance(time.Minute)
+		idx.Publish("cmp", "1.7.4")
+		idx.Publish("capped", "1.9.1")
+		idx.Publish("capped", "2.0.0") // beyond the upper bound: never a target
+		idx.Publish("wild", "1.9.0")   // already matched by 1.*
+		idx.Publish("wild", "2.1.0")
+		idx.Publish("multi", "1.0.5")
+		idx.Publish("dotted", "2.3.0")
+		idx.Publish("stuck", "1.8.0") // matched by 1.*: nothing to do
+		e.tick()
+		e.tick()
+		prs := e.gh.PRs("acme/app")
+		if len(prs) != 5 {
+			t.Fatalf("want five PRs (not stuck), got %d", len(prs))
+		}
+		for _, pr := range prs {
+			got, _ := e.gh.FileAt("acme/app", pr.Head, "Cargo.toml")
+			var from, to string
+			switch {
+			case strings.Contains(pr.Head, "/cmp-"):
+				from, to = `">=1.2"      # at least`, `">=1.7"      # at least`
+			case strings.Contains(pr.Head, "/capped-"):
+				from, to = `">=1.2, <2"`, `">=1.9, <2"`
+			case strings.Contains(pr.Head, "/wild-"):
+				from, to = `wild = "1.*"`, `wild = "2.*"`
+			case strings.Contains(pr.Head, "/multi-"):
+				from, to = `version = "1.0.0", # kept`, `version = "1.0.5", # kept`
+			case strings.Contains(pr.Head, "/dotted-"):
+				from, to = `dotted.version = "2.0.0"`, `dotted.version = "2.3.0"`
+			default:
+				t.Fatalf("unexpected branch %q", pr.Head)
+			}
+			if want := strings.Replace(manifest, from, to, 1); got != want {
+				t.Errorf("%s: only that requirement moves:\n%s", pr.Head, got)
+			}
+		}
+	})
+}
+
+func TestCargoUnparsableManifestIsSkipped(t *testing.T) {
+	forEach(t, func(t *testing.T, st store.Store) {
+		e, idx := cargoEnv(t, st)
+		idx.Publish("serde", "1.0.100")
+		e.gh.AddRepo("acme/app", map[string]string{".ripple.yaml": cargoConfig,
+			"bad/Cargo.toml": "[dependencies]\nserde = \"1.0.100\n", "good/Cargo.toml": "[dependencies]\nserde = \"1.0.100\"\n"})
+		start(t, e, "acme/app")
+		e.clock.Advance(time.Minute)
+		idx.Publish("serde", "1.0.101")
+		e.tick()
+		e.tick()
+		head, _ := onePR(t, e, "acme/app", false)
+		if got, _ := e.gh.FileAt("acme/app", head, "good/Cargo.toml"); !strings.Contains(got, "1.0.101") {
+			t.Errorf("the readable manifest still moves:\n%s", got)
+		}
+	})
+}

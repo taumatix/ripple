@@ -265,10 +265,6 @@ Everything else:
     pre-release handling, non-normalized names, 404, and that every version of four large projects parses). Still open:
     ordering was only checked for antisymmetry, not against `packaging` on a corpus; `releases` is documented as deprecated
     in favour of the PEP 691 index and could be dropped; rate limits and private indexes.
-163. **Cargo: wildcards, comparators, and a real TOML parser.** Partial requirements (`1.2`) and 0.x semantics are done
-    (docs/cargo.md). Still left alone: wildcards (`1.*`), comparators (`>=1.2`), multi-part requirements (`>=1, <2`),
-    multi-line inline tables and dotted keys (`foo.version = "1"`); the manager is a line scanner, not a TOML parser, so a
-    real parser is the way to widen it safely. The same newest-only target still applies to npm (see 147).
 164. **npm: comparators, unions, and other sections.** Partial ranges, x-ranges and the newest target per update type are
     done (docs/npm.md). Still left alone: comparators (`>=1.2.3`), unions (`1.2 || 2`), hyphen ranges, a current
     prerelease, `peerDependencies`, `overrides`/`resolutions`, `npm:` aliases and workspace specs. Also npm classifies by
@@ -384,3 +380,8 @@ Everything else:
     container and the daemon then started it (a product race, harmless for a minutes-long job timeout, real for a short
     one). The live test now logs `inspect` of a container still present after the wait: still running means (b), in which
     case `Reap` should look again after a short delay, bounded. Act on the next failure's log, not before.
+198. **Cargo: requirements still left alone, and a corpus check.** A bare `*`, a lone `>` or `<`, several lower bounds and
+    the `x`/`X` wildcards are not read; `dev_dependencies` and `build_dependencies` (underscore aliases) are not
+    sections. The TOML scanner (`internal/manager/toml.go`) was checked against a handful of real manifests and the
+    unit tables, not a corpus of crates.io manifests, and it skips a file it cannot parse with a warning. The same
+    newest-only target still applies to npm (see 147).

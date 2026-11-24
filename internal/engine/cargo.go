@@ -27,7 +27,8 @@ type CratesIndex interface {
 }
 
 // applicableCargo judges an index version for a Cargo dependency: the same crate, a
-// requirement ripple can move, and a release newer than the requirement's floor. The
+// requirement ripple can move, and a release it can move to (CargoReq.Applicable: newer
+// than the floor, inside any upper bound, and outside a wildcard). The
 // type follows cargo's compatibility rule, not the number position: ^0.2.3 to 0.3.0 and
 // ^0.0.3 to 0.0.4 are "major" because cargo treats them as breaking. A partial
 // requirement that already names the version at its precision ("1.2" for 1.2.9) has
@@ -40,13 +41,10 @@ func applicableCargo(d model.Dependency, pkg, version string) (rules.UpdateType,
 	if !ok {
 		return "", false
 	}
+	if !req.Applicable(version) {
+		return "", false
+	}
 	floor := req.Floor()
-	if _, ok := rules.Classify("v"+floor, "v"+version); !ok {
-		return "", false
-	}
-	if len(req.Parts) < 3 && req.Text(version) == d.Version {
-		return "", false
-	}
 	return cargoClassify(req, floor, version), true
 }
 

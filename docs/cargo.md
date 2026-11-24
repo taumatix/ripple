@@ -15,21 +15,25 @@ Only `directory` applies (and the shared keys such as cooldown and grouping). Wi
 
 The dependency tables of every `Cargo.toml` under `directory`: `[dependencies]`, `[dev-dependencies]`,
 `[build-dependencies]`, their `[target.<cfg>.*]` forms and `[workspace.dependencies]`, written as `name = "req"`, as a
-one-line inline table `name = { version = "req", ... }`, or as a `[dependencies.name]` table with a `version` key. A
-`package = "real-name"` key names the crate that is looked up.
+inline table `name = { version = "req", ... }` (one line or several), a dotted key (`name.version = "req"`), or a
+`[dependencies.name]` table with a `version` key. A `package = "real-name"` key names the crate that is looked up.
+The file is read with a TOML scanner that keeps byte offsets; a file that is not valid TOML (an unterminated string, a
+duplicate key) is skipped with a warning.
 
 | Requirement | Handling |
 |---|---|
 | `1.2.3`, `=1.2.3`, `^1.2.3`, `~1.2.3` | moved to a newer release; the operator is kept (`~1.2.3` -> `~1.2.9`) |
 | `1`, `1.2`, `^1.2`, `~1.2`, `=0.2` | moved at the precision written (`1.2` and 1.7.4 give `1.7`); not moved when it already names the new version at that precision (`1` stays `1` for 1.9.0, `1.2` for 1.2.9) |
-| `*`, `1.*`, `>=1.2`, `>=1, <2`, prereleases | ignored: not a requirement ripple reads with certainty |
+| `>=1.2`, `>=1.2.3` | the lower bound moves like a caret requirement, at the precision written (`>=1.2` and 1.7.4 give `>=1.7`) |
+| `>=1.2, <2`, `^1.2, <1.5` | the lower bound moves, but only to a version the upper bounds allow; an upper bound (`<`, `<=`) is a decision and is never edited, so 2.0.0 is not a target for `<2` |
+| `1.*`, `1.2.*` | moves only to a version the wildcard does not already match, keeping the wildcard (`1.*` -> `2.*`, `1.2.*` -> `1.3.*`); `1.*` with 1.9.0 published has nothing to do |
+| `*`, `>1`, `<2` alone, several lower bounds, prereleases | ignored: not a requirement ripple reads with certainty |
 | a `path`, `git` or `registry` key, `workspace = true` | ignored (a local or other-registry crate is not on crates.io; an inherited one has no version of its own) |
-| multi-line inline tables, dotted keys (`foo.version = "1"`) | ignored |
 | `name = { workspace = true }` in a member | has no version of its own; the root's `[workspace.dependencies]` entry is the one that moves, for every member |
 
 A bumped requirement is raised to the new version even when it already allowed it (`1.0.100` with 1.0.200 published
 becomes `1.0.200`): without a lockfile refresh that is the only change a PR can carry. Only the requirement's string is
-edited; layout, comments and key order are kept byte for byte. One crate moves per PR, on branch
+edited, whatever shape the dependency was written in; layout, comments and key order are kept byte for byte. One crate moves per PR, on branch
 `ripple/cargo/<crate>-<version>`.
 
 An update's type follows cargo's compatibility rule, which puts the break at the leftmost nonzero number the

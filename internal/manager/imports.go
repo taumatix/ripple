@@ -517,12 +517,15 @@ var mockgenValueFlags = map[string]bool{
 	"archive": true, "source": true, "destination": true, "package": true, "imports": true,
 	"aux_files": true, "build_flags": true, "mock_names": true, "self_package": true,
 	"copyright_file": true, "exclude_interfaces": true,
+	// go.uber.org/mock v0.6.0 declares these beyond the README's list (mockgen.go).
+	"build_constraint": true, "model_gob": true,
 	// github.com/golang/mock's own: -exec_only (README, reflect mode).
 	"exec_only": true,
 }
 var mockgenBoolFlags = map[string]bool{
 	"debug_parser": true, "write_package_comment": true, "write_generate_directive": true,
 	"write_source_comment": true, "typed": true,
+	"write_command_comment": true, // go.uber.org/mock v0.6.0 mockgen.go
 	// github.com/golang/mock's own: -prog_only, -version (README, mockgen.go).
 	"prog_only": true, "version": true,
 }

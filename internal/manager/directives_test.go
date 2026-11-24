@@ -179,3 +179,14 @@ func TestExtendedStringerHasNothingToRewrite(t *testing.T) {
 		"//go:generate go run golang.org/x/tools/cmd/stringer -type=Pill\n"
 	rewriteExt(t, src, src, 0)
 }
+
+// The flags go.uber.org/mock v0.6.0 declares beyond the README's list (mockgen.go and
+// package_mode.go: -write_command_comment, -build_constraint, -model_gob and a bool
+// spelled -f=false) are read, so a line using them is rewritten, not given up on.
+func TestExtendedMockgenFlagsNewerReleasesAdded(t *testing.T) {
+	src := "package p\n\n" +
+		"//go:generate mockgen -write_command_comment=false -build_constraint=linux -destination=m.go github.com/a/b/v2/store Reader\n" +
+		"//go:generate go run go.uber.org/mock/mockgen -write_command_comment -model_gob /tmp/m.gob -self_package=github.com/a/b/v2/store -destination=m.go github.com/a/b/v2/store Reader\n"
+	want := strings.ReplaceAll(src, "b/v2/store", "b/v3/store")
+	rewriteExt(t, src, want, 3)
+}

@@ -37,24 +37,27 @@ upstream:
     docs: https://github.com/npm/registry/blob/main/docs/REGISTRY-API.md
     format: "GET /<package> with Accept application/vnd.npm.install-v1+json (abbreviated metadata: name, modified, dist-tags, versions with deprecated), anonymous; scoped names as @scope%2Fname"
     verified-against: "docs/vendor/npm excerpts read 2026-11-23; tests use internal/testutil/npm.go, a fake written from them"
-    unverified: "any real registry: the %2F encoding of scoped names, 404 or 401/403 for private packages, the exact shape of deprecated, a latest tag that exists, rate limits, abbreviated documents for very large packages (see docs/vendor/npm/README.md); .npmrc and node-semver grammar are read only as far as docs/npm.md says"
-    checked: 2026-11-23
+    verified-live: "2026-11-24 (go test -tags live ./internal/npmreg, .github/workflows/live.yml): registry.npmjs.org serves the abbreviated document (content type application/vnd.npm.install-v1+json) with dist-tags and versions; left-pad 1.3.0 is the latest tag and deprecated, and is not proposed; @types/ms works with %2F; a missing package, scoped or not, is 404; typescript prereleases are skipped and nothing above latest is proposed"
+    unverified: "private packages (401/403 or 404), rate limits, a very large package (react, @types/node), .npmrc and node-semver grammar beyond docs/npm.md, versions carry no publication date"
+    checked: 2026-11-24
   - name: cargo-sparse-index
     kind: http-api
     reference: https://doc.rust-lang.org/cargo/reference/registry-index.html
     docs: https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html
     format: "GET {index}/{prefix}/{lowercase name} (1/, 2/, 3/{c}/, {aa}/{bb}/), anonymous; one JSON object per line with vers and yanked"
     verified-against: "docs/vendor/cargo excerpts read 2026-11-23; tests use internal/testutil/cratesindex.go, a fake written from them"
-    unverified: "any real index: index.crates.io's path rules for mixed-case names, 404 for a missing crate, response size for large crates, conditional requests, rate limits (see docs/vendor/cargo/README.md); TOML is read by a line scanner as far as docs/cargo.md says, not parsed"
-    checked: 2026-11-23
+    verified-live: "2026-11-24 (go test -tags live ./internal/cratesindex): index.crates.io serves the 2, 3 and 4+ letter prefixes (cc, log, rand), a mixed-case name (Serde_Json) is read through the lowercase path, a missing crate is 404, serde 1.0.95 is yanked and serde 0.8.0-rc1 is skipped"
+    unverified: "another registry, response size for the largest crates, conditional requests (ETag), rate limits; TOML is read by a line scanner as far as docs/cargo.md says, not parsed"
+    checked: 2026-11-24
   - name: pypi-json-api
     kind: http-api
     reference: https://docs.pypi.org/api/json/
     docs: https://peps.python.org/pep-0440/
     format: "GET {index}/pypi/{PEP 503 normalized name}/json, anonymous; releases maps a version to its files, each with yanked"
     verified-against: "docs/vendor/pip excerpts read 2026-11-23; tests use internal/testutil/pypi.go, a fake written from them"
-    unverified: "any real index: pypi.org's handling of non-normalized names, 404 for a missing project, response size for large projects, whether `releases` (documented as deprecated) is kept, rate limits (see docs/vendor/pip/README.md); PEP 440 is implemented from the summary, not checked against the packaging library; requirements files and TOML are read by a scanner as far as docs/pip.md says, not parsed"
-    checked: 2026-11-23
+    verified-live: "2026-11-24 (go test -tags live ./internal/pypi): pypi.org answers the JSON API with `releases` (still present) for Typing_Extensions and zope.interface without the caller normalising; requests 2.32.0 and 2.32.1 are yanked and not proposed, 2.15.0 has no files and is not proposed; django pre-releases are skipped; a missing project is 404; every version of django, requests, numpy and setuptools parses with the PEP 440 code"
+    unverified: "private indexes, rate limits, the largest projects, whether `releases` (documented as deprecated) is kept; PEP 440 ordering was not compared with the packaging library (only parse and antisymmetry were checked on that corpus); requirements files and TOML are read by a scanner as far as docs/pip.md says"
+    checked: 2026-11-24
   - name: github-enterprise-server
     kind: http-api
     reference: https://docs.github.com/en/enterprise-server@latest/rest

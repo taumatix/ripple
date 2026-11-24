@@ -56,11 +56,13 @@ auth model, rate limits); the notes below are what I expect, **unverified** unti
     `path.toString` in `compare/changes`, and Basic versus Bearer for project tokens. Also: `repo:modified`
     renames are left to periodic discovery, and a repository with no commits may list but not clone.
 16. **AWS CodeCommit: verify against real AWS.** Built from the vendored docs and a fake
-    ([docs/platform-codecommit.md](docs/platform-codecommit.md)); no AWS account has run it. Needs a
+    ([docs/platform-codecommit.md](docs/platform-codecommit.md)). The AWS Emulator now runs the API half
+    (list, create, list-open, changed files, close) and checks the git credential is accepted
+    ([docs/aws-emulator.md](docs/aws-emulator.md)); it cannot say whether real AWS agrees. Needs a
     sandbox account: confirm SigV4 API calls and the git password are accepted, the title limit
-    (100 or 150), the EventBridge input shape through SNS, the cn and eusc endpoints. Residuals: one
-    AWS account per ripple, labels and auto-merge do not exist on the service, the SNS certificate
-    chain is not validated beyond the signature.
+    (100 or 150), the EventBridge input shape through SNS, the cn and eusc endpoints, and a shallow
+    checkout and push. Residuals: one AWS account per ripple, labels and auto-merge do not exist on the
+    service, the SNS certificate chain is not validated beyond the signature.
 17. **Gerrit: verify against a real instance.** Built from the docs and a fake ([docs/platform-gerrit.md](docs/platform-gerrit.md)),
     never run for real. Check the webhooks payload and URL token, 429 headers, clone and change URLs, WIP and hashtag
     permissions, "no new changes" on identical re-push. Residuals: auto-merge through submit-on-label if the docs
@@ -362,3 +364,12 @@ Everything else:
     Retry-After, never waited out (see 178 for the other clients). ghcr.io's tag list for a large image took about 20s over
     many pages; consider an early stop when a tag newer than the current one of the same shape is found, or `last=` paging
     from the current tag.
+182. **Git hosts that refuse a shallow clone.** `gitws.Checkout` always clones `--depth 1`; the AWS Emulator's
+    upload-pack answers "Server does not support shallow clients", so the CodeCommit checkout and push cannot be
+    exercised against it (the emulator test pins the refusal). Real CodeCommit serves shallow clones, so this is
+    an emulator gap; a full-clone fallback after the filtered and unfiltered shallow attempts would be additive
+    and would also cover a dumb or older git server. Do it if a real host needs it, and flip the emulator test.
+183. **CodeCommit: report the head commit of an open PR.** `ListOpenPRs` leaves `platform.PR.HeadSHA` empty though
+    `GetPullRequest` carries `sourceCommit` (seen on the emulator, and documented), so the engine cannot notice a
+    moved head on CodeCommit the way it does elsewhere. Fill it from the target's `sourceCommit` and check what
+    the engine then does differently.

@@ -265,6 +265,10 @@ type AdvisoryWatcher struct {
 	// SweepBatch is how many repos a poll re-checks while a sweep runs (see
 	// advisory_sweep.go); zero means DefaultSweepBatch.
 	SweepBatch int
+	// BackfillOpenPRs also walks each repo's open ripple PRs once to index the jobs that
+	// finished before the osv-jobs index existed (advisory_backfill.go). Off by default: it
+	// costs one open-PR listing per repo.
+	BackfillOpenPRs bool
 
 	failID string
 	failN  int

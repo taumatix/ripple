@@ -54,7 +54,10 @@ type Server struct {
 	OSVInterval   time.Duration
 	OSVMaxFetch   int
 	OSVSweepBatch int
-	GoProxy       string
+	// OSVBackfillOpenPRs: also index the jobs behind open PRs made before the osv-jobs
+	// index (RIPPLE_OSV_BACKFILL_OPEN_PRS, default false; docs/osv.md).
+	OSVBackfillOpenPRs bool
+	GoProxy            string
 	// GoProxyUser and GoProxyToken are the credential for GoProxy (HTTP basic auth). They
 	// reach only the go commands that run no repository code, and need RIPPLE_GOPROXY set to a private proxy. GoCC is the C compiler cgo
 	// verification uses; empty is cc.
@@ -394,6 +397,13 @@ func LoadServer(getenv func(string) string) (*Server, error) {
 			errs = append(errs, errors.New("RIPPLE_OSV: want true or false"))
 		}
 		s.OSV = b
+	}
+	if v := getenv("RIPPLE_OSV_BACKFILL_OPEN_PRS"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			errs = append(errs, errors.New("RIPPLE_OSV_BACKFILL_OPEN_PRS: want true or false"))
+		}
+		s.OSVBackfillOpenPRs = b
 	}
 	if s.DynamoDriftCheck > 0 && s.Store != "dynamodb" {
 		errs = append(errs, errors.New("RIPPLE_DYNAMODB_DRIFT_CHECK_INTERVAL needs RIPPLE_STORE=dynamodb"))

@@ -349,18 +349,9 @@ Everything else:
     and no test. Make the GitLab and Gitea fakes report it and add the supersede e2e for each; Bitbucket Cloud
     (`source.commit.hash`), Data Center (`fromRef.latestCommit`) and Azure DevOps (`lastMergeSourceCommit`) still
     report none, so a touched PR there stays touched until it closes.
-178. **Honour Retry-After and 429 in the feed and advisory clients.** `feed.GoIndex`, `feed.GoProxyLookup` and
-    `advisory.Client` treat a 429 or 503 as a plain error and retry on the next poll; only the live-test transport
-    (`internal/livetest`) waits out `Retry-After`. Add it (capped, bounded attempts) with a fake that answers 429 first.
 179. **Supersede on a later run.** Within one run, PRs opened for the same module are now closed by the next one (fixed
     with the live OSV run). A sweep on a later run did not close lower PRs in one observed case after a rerun and a tick;
     reproduce it with a fake and either fix it or explain it in docs/osv.md.
-180. **Live: a module whose `@latest` is retracted.** `feed.GoProxyLookup` reads `@latest` and the list but not
-    retractions; pin a module whose latest is retracted and a pre-release-only module, and decide what ripple proposes.
-181. **Registries: wait out 429 and slow tag lists.** Docker Hub's anonymous pull limit and any 429 are reported as an error naming
-    Retry-After, never waited out (see 178 for the other clients). ghcr.io's tag list for a large image took about 20s over
-    many pages; consider an early stop when a tag newer than the current one of the same shape is found, or `last=` paging
-    from the current tag.
 182. **Git hosts that refuse a shallow clone.** `gitws.Checkout` always clones `--depth 1`; the AWS Emulator's
     upload-pack answers "Server does not support shallow clients", so the CodeCommit checkout and push cannot be
     exercised against it (the emulator test pins the refusal). Real CodeCommit serves shallow clones, so this is
@@ -370,3 +361,14 @@ Everything else:
     `GetPullRequest` carries `sourceCommit` (seen on the emulator, and documented), so the engine cannot notice a
     moved head on CodeCommit the way it does elsewhere. Fill it from the target's `sourceCommit` and check what
     the engine then does differently.
+184. **Retry-After in the other clients.** `internal/httpretry` now waits out a 429 (and a 503 with Retry-After) for the
+    Go index, the Go proxy lookup, OSV and the registry client; `npmreg`, `pypi`, `cratesindex` and the GitHub tag reads
+    still treat both as a plain error and retry on the next poll. Give each an `httpretry.Policy` field and a fake test.
+185. **Live: a retracted `@latest` and a prerelease-only module.** The fake and unit tests cover a module whose `@latest`
+    is retracted (it proposes the newest version that is not), all versions retracted (the module is still answered) and
+    prerelease-only; `go.mongodb.org/mongo-driver` is the one real retraction fixture in `live.yml`. Find a real module whose
+    highest stable version retracts itself and a real prerelease-only module and pin them read-only, so the proxy's own
+    `@latest` behaviour for them is observed, not assumed.
+186. **Registry tag lists: stop early.** A 429 or a slow page is now waited out or ended by the context, but a large image
+    (ghcr.io, ~20s over many pages) is still read to the last page. Stop at the first tag newer than the current one of the
+    same shape, or page with `last=` from the current tag, and measure it against the registry fake with a page counter.

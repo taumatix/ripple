@@ -24,6 +24,7 @@ import (
 // in-memory file sets, so the go command can tidy and build a migrated checkout
 // without the network.
 type GoProxy struct {
+	Throttle
 	URL string
 	srv *httptest.Server
 	mu  sync.Mutex
@@ -57,7 +58,7 @@ func (p *GoProxy) Requests() []GoProxyReq {
 func NewGoProxy(t testing.TB) *GoProxy {
 	t.Helper()
 	p := &GoProxy{mod: map[string]map[string]map[string]string{}}
-	p.srv = httptest.NewServer(http.HandlerFunc(p.serve))
+	p.srv = httptest.NewServer(p.Wrap(http.HandlerFunc(p.serve)))
 	t.Cleanup(p.srv.Close)
 	p.URL = p.srv.URL
 	return p

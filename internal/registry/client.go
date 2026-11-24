@@ -14,6 +14,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/taumatix/ripple/internal/httpretry"
 )
 
 var (
@@ -48,6 +50,10 @@ type Client struct {
 	UserAgent string
 	// Auth holds per-registry logins; nil means anonymous everywhere.
 	Auth *Credentials
+	// Retry bounds the waiting on a 429 or a 503 with Retry-After, for every request
+	// including the token endpoint; the zero value is three attempts, none of them waited
+	// on longer than 30s. A registry still limiting after that is an error naming the limit.
+	Retry httpretry.Policy
 }
 
 var safeHTTP = &http.Client{
@@ -262,22 +268,24 @@ func (c *Client) do(ctx context.Context, method, target string, ref Ref, accept 
 	user, pass, haveLogin := c.Auth.For(ref.Registry)
 	token, basic := "", false
 	for attempt := 0; ; attempt++ {
-		req, err := http.NewRequestWithContext(ctx, method, target, nil)
+		resp, err := c.Retry.Do(ctx, c.http(), func() (*http.Request, error) {
+			req, err := http.NewRequestWithContext(ctx, method, target, nil)
+			if err != nil {
+				return nil, err
+			}
+			req.Header.Set("Accept", accept)
+			if c.UserAgent != "" {
+				req.Header.Set("User-Agent", c.UserAgent)
+			}
+			if token != "" {
+				req.Header.Set("Authorization", "Bearer "+token)
+			} else if basic {
+				req.SetBasicAuth(user, pass)
+			}
+			return req, nil
+		})
 		if err != nil {
-			return nil, err
-		}
-		req.Header.Set("Accept", accept)
-		if c.UserAgent != "" {
-			req.Header.Set("User-Agent", c.UserAgent)
-		}
-		if token != "" {
-			req.Header.Set("Authorization", "Bearer "+token)
-		} else if basic {
-			req.SetBasicAuth(user, pass)
-		}
-		resp, err := c.http().Do(req)
-		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("registry: %w", err)
 		}
 		switch {
 		case resp.StatusCode == http.StatusOK:
@@ -303,8 +311,6 @@ func (c *Client) do(ctx context.Context, method, target string, ref Ref, accept 
 			return nil, fmt.Errorf("%w: %s", ErrNotFound, target)
 		case http.StatusUnauthorized, http.StatusForbidden:
 			return nil, fmt.Errorf("%w: %s", ErrDenied, target)
-		case http.StatusTooManyRequests:
-			return nil, fmt.Errorf("registry: rate limited by %s (Retry-After %q)", target, resp.Header.Get("Retry-After"))
 		}
 		return nil, fmt.Errorf("registry: %s %s: %s", method, target, resp.Status)
 	}
@@ -336,19 +342,21 @@ func (c *Client) token(ctx context.Context, challenge, repo, user, pass string, 
 	}
 	q.Set("scope", scope)
 	realm.RawQuery = q.Encode()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, realm.String(), nil)
+	resp, err := c.Retry.Do(ctx, c.http(), func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, realm.String(), nil)
+		if err != nil {
+			return nil, err
+		}
+		if c.UserAgent != "" {
+			req.Header.Set("User-Agent", c.UserAgent)
+		}
+		if haveLogin {
+			req.SetBasicAuth(user, pass)
+		}
+		return req, nil
+	})
 	if err != nil {
-		return "", err
-	}
-	if c.UserAgent != "" {
-		req.Header.Set("User-Agent", c.UserAgent)
-	}
-	if haveLogin {
-		req.SetBasicAuth(user, pass)
-	}
-	resp, err := c.http().Do(req)
-	if err != nil {
-		return "", err
+		return "", fmt.Errorf("registry: token endpoint: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {

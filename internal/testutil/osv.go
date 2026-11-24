@@ -27,6 +27,7 @@ type osvRecord struct {
 // advisory.Vuln's evaluator: what is verified against it is the wire format and the
 // request volume, not OSV's own matching, which only the live check can show.
 type OSV struct {
+	Throttle
 	URL string // serves both /osv-vulnerabilities/... and /v1/...
 
 	mu      sync.Mutex
@@ -40,7 +41,7 @@ type OSV struct {
 
 func NewOSV(t *testing.T) *OSV {
 	o := &OSV{}
-	srv := httptest.NewServer(http.HandlerFunc(o.serve))
+	srv := httptest.NewServer(o.Wrap(http.HandlerFunc(o.serve)))
 	t.Cleanup(srv.Close)
 	o.URL = srv.URL
 	return o

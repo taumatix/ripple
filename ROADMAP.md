@@ -198,8 +198,6 @@ Everything else:
 127. **OSV: conflict and pseudo-version residuals.** The beaten-PR close covers a non-security PR when a security
     toolchain PR opens (a lower security toolchain PR beside a higher one is closed by the supersede flow, pinned by an e2e
     test), and a toolchain PR opened by an older run than the security job is only held, never closed, unless the security PR opens in a later run with it open.
-    A plain, non-advisory release move off a pseudo-version is still not implemented; rule to use: the first release above
-    the pseudo-version and released after its timestamp, opt-in.
 132. **Webhook retry ids, verified on real hosts.** Delivery ids are now persisted (store delivery table), but whether
     Bitbucket Cloud's `X-Request-UUID` and Azure DevOps' payload `id` stay the same across a retry is still
     unverified: the vendored docs state neither (see docs/platform-bitbucket.md, docs/platform-azuredevops.md). A
@@ -382,3 +380,8 @@ Everything else:
     results come back non-increasing and that `page_size=100` is honoured, and fail loudly if Hub changes, since ripple
     then silently falls back to the lexical list. Until it exists the option stays off by default. ghcr.io has no
     equivalent listing (OCI tags are lexical only), so `TagFloor` stays its only narrowing.
+216. **`from-pseudo-versions`: real modules, and a "newest" mode.** The opt-in move of a pseudo-version dependency to the first
+    release released after the commit (docs/osv.md) is verified on the fake proxy and index only. It does not check that the
+    release really contains the commit (the proxy does not say; a release from a branch that never merged it passes), and it
+    stops at the first release, so a dependency that wants the newest has to wait for the next ordinary update. Check it
+    on a real pseudo-version dependency, then consider `from-pseudo-versions: newest`.

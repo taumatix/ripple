@@ -182,9 +182,6 @@ Everything else:
 119. **`tidy: minimal` evidence.** It stays opt-in: no real PR diffs exist to show the default would lose less
     than it risks (a kept requirement with missing go.sum lines opens a draft; the default `go mod tidy` result is
     what a maintainer reproduces by hand). Collect the diffs of repos that opted in and revisit.
-120. **Backfill reads the GSI consistently.** `ListDependents` is still an eventually consistent GSI read on
-    DynamoDB, so a release fanned out in that window can miss a repo that registered a moment before. The carried
-    backfill closes it only for dependencies new to the repo, not for the window itself.
 123. **Dashboard: share the sets.** The refresh set
     (`dashboard-dirty`) and the repo list that drives the hourly read-back (`dashboard-watch`) are
     read-modify-write cursors, so two replicas marking at once can lose an entry; the loss heals at the repo's
@@ -369,3 +366,8 @@ Everything else:
     log: if the clone worked, extend the test to commit and push a ripple/ branch and open the PR through the host
     (closing the last CodeCommit gap in ROADMAP 16); if it did not, record the emulator's answer in
     docs/aws-emulator.md and stop.
+189. **DynamoDB: the registration window against real index lag.** `ListDependents` adds the rows registered in the last five
+    minutes (docs/store-dynamodb.md), a constant chosen far above the usual index lag and proved only against the fake's
+    `HoldIndex`, which freezes the index outright. Nobody has measured real GSI propagation delay (or the cost of the extra
+    Query and BatchGetItem on a hot package during a mass install) on AWS; make the window a setting if it proves wrong.
+    A dependency a lagging index still lists after the repo dropped it is the mirror case and is not covered.

@@ -56,6 +56,29 @@ func Run(t *testing.T, mk func(t *testing.T) store.Store) {
 		}
 	})
 
+	t.Run("a repo registering, re-versioning and dropping is listed as it now is", func(t *testing.T) {
+		s := mk(t)
+		list := func() []model.Dependency {
+			got, err := s.ListDependents(ctx, "go", "example.com/lib")
+			if err != nil {
+				t.Fatal(err)
+			}
+			return got
+		}
+		_ = s.ReplaceDependencies(ctx, "acme/old", []model.Dependency{dep("acme/old", "go.mod", "example.com/lib", "v1.0.0")})
+		for _, v := range []string{"v1.0.0", "v1.1.0", "v1.2.0"} {
+			_ = s.ReplaceDependencies(ctx, "acme/new", []model.Dependency{dep("acme/new", "go.mod", "example.com/lib", v)})
+			want := []model.Dependency{dep("acme/new", "go.mod", "example.com/lib", v), dep("acme/old", "go.mod", "example.com/lib", "v1.0.0")}
+			if got := list(); !reflect.DeepEqual(got, want) {
+				t.Fatalf("at %s got %v want %v", v, got, want)
+			}
+		}
+		_ = s.ReplaceDependencies(ctx, "acme/new", nil)
+		if got := list(); len(got) != 1 || got[0].Repo != "acme/old" {
+			t.Fatalf("after the drop got %v", got)
+		}
+	})
+
 	t.Run("reverse index", func(t *testing.T) {
 		s := mk(t)
 		_ = s.ReplaceDependencies(ctx, "acme/web", []model.Dependency{

@@ -14,6 +14,7 @@ import (
 // name arriving as /@scope%2Fname. It is written from docs/vendor/npm. A package never
 // published answers 404, a Denied one 401, and every request is recorded.
 type NpmRegistry struct {
+	Throttle
 	URL string
 	srv *httptest.Server
 
@@ -34,7 +35,7 @@ type npmPkg struct {
 func NewNpmRegistry(t testing.TB) *NpmRegistry {
 	t.Helper()
 	r := &NpmRegistry{pkgs: map[string]*npmPkg{}, denied: map[string]bool{}}
-	r.srv = httptest.NewServer(http.HandlerFunc(r.serve))
+	r.srv = httptest.NewServer(r.Wrap(http.HandlerFunc(r.serve)))
 	r.URL = r.srv.URL
 	t.Cleanup(r.srv.Close)
 	return r

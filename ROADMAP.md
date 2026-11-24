@@ -323,17 +323,11 @@ Everything else:
 179. **Supersede on a later run.** Within one run, PRs opened for the same module are now closed by the next one (fixed
     with the live OSV run). A sweep on a later run did not close lower PRs in one observed case after a rerun and a tick;
     reproduce it with a fake and either fix it or explain it in docs/osv.md.
-184. **Retry-After in the other clients.** `internal/httpretry` now waits out a 429 (and a 503 with Retry-After) for the
-    Go index, the Go proxy lookup, OSV and the registry client; `npmreg`, `pypi`, `cratesindex` and the GitHub tag reads
-    still treat both as a plain error and retry on the next poll. Give each an `httpretry.Policy` field and a fake test.
 185. **Live: a retracted `@latest` and a prerelease-only module.** The fake and unit tests cover a module whose `@latest`
     is retracted (it proposes the newest version that is not), all versions retracted (the module is still answered) and
     prerelease-only; `go.mongodb.org/mongo-driver` is the one real retraction fixture in `live.yml`. Find a real module whose
     highest stable version retracts itself and a real prerelease-only module and pin them read-only, so the proxy's own
     `@latest` behaviour for them is observed, not assumed.
-186. **Registry tag lists: stop early.** A 429 or a slow page is now waited out or ended by the context, but a large image
-    (ghcr.io, ~20s over many pages) is still read to the last page. Stop at the first tag newer than the current one of the
-    same shape, or page with `last=` from the current tag, and measure it against the registry fake with a page counter.
 187. **SCM-Manager: head commit on the open-PR listing.** `platform.PR.HeadSHA` is the one host field still empty on
     every host that lists open PRs: the vendored SCM-Manager docs show no source-revision field on an in-progress
     pull request (the Review plugin's history tracks "source branch revision" but its list shape is not documented
@@ -373,3 +367,12 @@ Everything else:
     it in a sandbox job executes repo-chosen tools with network, which is a decision to take (opt-in, and which
     sandbox) before building it. Other generators that take an import path (`protoc-gen-go` options, `wire`, `ent`)
     are still only listed.
+194. **GitHub tag reads: wait out a 429.** `npmreg`, `pypi`, `cratesindex` and the registry client now carry an
+    `httpretry.Policy`; the GitHub tag reads (`internal/platform/github/refs.go`, behind `platform.ListTags`) still treat a 429
+    as a plain error until the next poll. Give the GitHub client the same policy (it already holds the host back on a
+    rate-limit header, so check how the two compose) and a fake test.
+195. **Registry tag lists: order by version, not by name.** `registry.Client.TagsFrom` starts a read at the lexical floor
+    `registry.TagFloor` computes, which is provably safe but low (`1.100` for a current `1.25.3`, since `1.100.0` is newer
+    and sorts first), so it skips only the oldest pages. A registry-specific API that lists newest first (if Docker Hub
+    or ghcr has one) would stop after one page; check what each really offers (`live.yml`) before building it, and keep
+    `TagsFrom` as the fallback.

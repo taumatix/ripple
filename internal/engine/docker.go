@@ -24,6 +24,13 @@ type TagRegistry interface {
 	Digest(ctx context.Context, pkg, tag string) (string, error)
 }
 
+// RangedRegistry is the optional part of a TagRegistry that reads only the tags at or
+// after a lexical floor (registry.TagFloor), so an image with a long history is not read
+// through its old pages; registry.Client implements it. Without it the whole list is read.
+type RangedRegistry interface {
+	TagsFrom(ctx context.Context, pkg, floor string) ([]string, error)
+}
+
 // CreatedRegistry is the optional part of a TagRegistry that reads when an image was
 // built (its config's "created"); registry.Client implements it. Without it, or when
 // the image records no time or the read fails, a tag's release time is the first poll
@@ -113,7 +120,7 @@ func (w *DockerWatcher) Poll(ctx context.Context) (int, error) {
 			}
 			continue
 		}
-		tags, err := e.Registry.Tags(ctx, pkg)
+		tags, err := e.readTags(ctx, pkg, deps)
 		if err != nil {
 			if errors.Is(err, registry.ErrDenied) || errors.Is(err, registry.ErrNotFound) {
 				e.log().Info("image not readable anonymously, left alone", "package", pkg, "err", err)
@@ -183,4 +190,21 @@ func (r *runner) imageVersion(pkg, tag string) string {
 	}
 	r.digests[key] = d
 	return tag + "@" + d
+}
+
+// readTags reads the tags of pkg that can matter to deps: from the lowest floor any of their
+// current tags allows, when the registry can read a range, else all of them. The newest tag of
+// a dependency's shape is the same either way (registry.TagFloor says why).
+func (e *Engine) readTags(ctx context.Context, pkg string, deps []model.Dependency) ([]string, error) {
+	rr, ok := e.Registry.(RangedRegistry)
+	if !ok {
+		return e.Registry.Tags(ctx, pkg)
+	}
+	floor := ""
+	for _, d := range deps {
+		if f := registry.TagFloor(d.Version); f != "" && (floor == "" || f < floor) {
+			floor = f
+		}
+	}
+	return rr.TagsFrom(ctx, pkg, floor)
 }

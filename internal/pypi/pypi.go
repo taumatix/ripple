@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/taumatix/ripple/internal/httpretry"
 )
 
 // DefaultBase is pypi.org.
@@ -36,6 +38,9 @@ type Client struct {
 	BaseURL   string
 	HTTP      *http.Client
 	UserAgent string
+	// Retry bounds the waiting on a 429 or a 503 with Retry-After; the zero value is
+	// three attempts, none of them waited on longer than 30s.
+	Retry httpretry.Policy
 }
 
 // Release is one published version.
@@ -71,16 +76,19 @@ func (c *Client) Project(ctx context.Context, name string) (Project, error) {
 	if base == "" {
 		base = DefaultBase
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/pypi/"+NormalizeName(name)+"/json", nil)
+	target := base + "/pypi/" + NormalizeName(name) + "/json"
+	resp, err := c.Retry.Do(ctx, c.client(), func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+		if err != nil {
+			return nil, err
+		}
+		if c.UserAgent != "" {
+			req.Header.Set("User-Agent", c.UserAgent)
+		}
+		return req, nil
+	})
 	if err != nil {
-		return Project{}, err
-	}
-	if c.UserAgent != "" {
-		req.Header.Set("User-Agent", c.UserAgent)
-	}
-	resp, err := c.client().Do(req)
-	if err != nil {
-		return Project{}, err
+		return Project{}, fmt.Errorf("pypi: %s: %w", name, err)
 	}
 	defer resp.Body.Close()
 	switch {

@@ -16,6 +16,7 @@ import (
 // fails against this fake. A crate never published answers 404, a Denied one 401, and
 // every request is recorded.
 type CratesIndex struct {
+	Throttle
 	URL string
 	srv *httptest.Server
 
@@ -36,7 +37,7 @@ type crateVers struct {
 func NewCratesIndex(t testing.TB) *CratesIndex {
 	t.Helper()
 	c := &CratesIndex{crates: map[string][]crateVers{}, denied: map[string]bool{}}
-	c.srv = httptest.NewServer(http.HandlerFunc(c.serve))
+	c.srv = httptest.NewServer(c.Wrap(http.HandlerFunc(c.serve)))
 	c.URL = c.srv.URL
 	t.Cleanup(c.srv.Close)
 	return c

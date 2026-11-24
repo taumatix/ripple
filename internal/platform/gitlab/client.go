@@ -272,10 +272,11 @@ type mrJSON struct {
 	IID          int    `json:"iid"`
 	WebURL       string `json:"web_url"`
 	SourceBranch string `json:"source_branch"`
+	SHA          string `json:"sha"`
 }
 
 func (m mrJSON) pr() platform.PR {
-	return platform.PR{Number: m.IID, URL: m.WebURL, Head: m.SourceBranch}
+	return platform.PR{Number: m.IID, URL: m.WebURL, Head: m.SourceBranch, HeadSHA: m.SHA}
 }
 
 // ListOpenPRs lists the opened merge requests whose source branch starts with prefix.

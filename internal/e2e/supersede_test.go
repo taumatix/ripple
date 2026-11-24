@@ -322,8 +322,33 @@ func TestTheTouchedMemoryIsDroppedWhenThePRCloses(t *testing.T) {
 		e.gh.HumanClosePR(repo, e.gh.PRs(repo)[0].Number)
 		e.rerun(repo, "example.com/lib", "v1.2.0")
 		e.tick()
-		if raw, err := e.st.GetCursor(context.Background(), "supersede-touched:"+repo); err != nil || raw != "" && raw != "[]" {
+		if raw, err := e.st.GetCursor(context.Background(), "supersede-touched:"+repo); err != nil || raw != "" && raw != "[]" && raw != "{}" {
 			t.Errorf("memory %q (err %v) must be empty once the PR is closed", raw, err)
+		}
+	})
+}
+
+// A person's commit makes the stale PR touched; when they take it back (the head moves to
+// a commit only ripple wrote) the host is asked again and the PR is superseded.
+func TestATouchedStalePRIsJudgedAgainWhenItsHeadMoves(t *testing.T) {
+	forEach(t, func(t *testing.T, st store.Store) {
+		e := supersedeEnv(t, st, "")
+		old := e.gh.PRs(repo)[0]
+		e.gh.HumanCommitOnBranch(repo, old.Head)
+		e.tick() // opens v1.2.0 and finds v1.1.0 touched
+		if prs := e.gh.PRs(repo); len(prs) != 2 || prs[0].Closed {
+			t.Fatalf("the touched PR must stay open: %+v", prs)
+		}
+		e.rerun(repo, "example.com/lib", "v1.2.0")
+		e.tick() // head unchanged: remembered, not read again
+		if prs := e.gh.PRs(repo); prs[0].Closed {
+			t.Fatalf("closed while still touched: %+v", prs)
+		}
+		e.gh.HumanResetBranch(repo, old.Head, 1)
+		e.rerun(repo, "example.com/lib", "v1.2.0")
+		e.tick()
+		if prs := e.gh.PRs(repo); !prs[0].Closed {
+			t.Errorf("the head moved back to ripple's own commit but the stale PR stayed open: %+v", prs)
 		}
 	})
 }

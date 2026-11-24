@@ -17,6 +17,9 @@ type PR struct {
 	Number int
 	URL    string
 	Head   string
+	// HeadSHA is the commit the head branch points at, when the host's open-PR listing
+	// reports it; empty otherwise. The engine uses it to notice a head that moved.
+	HeadSHA string
 	// ID is the host's own handle for the PR when its API needs one beyond Number
 	// (GitHub: the GraphQL node id that auto-merge takes). Only the platform that
 	// returned the PR reads it.

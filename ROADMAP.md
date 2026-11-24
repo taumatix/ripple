@@ -250,10 +250,6 @@ Everything else:
     pip-compile output are reported, not regenerated (docs/pip.md). `Requires-Python` is ignored, so a bump may need a
     newer interpreter. A dependency on a private index is skipped, not read from its own index (needs per-index
     credentials and a PEP 503/691 client); the guard also skips a file that names `https://pypi.org/simple` explicitly.
-162. **pip: compare PEP 440 with the `packaging` library.** pypi.org is verified live (2026-11-24: yanked, fileless and
-    pre-release handling, non-normalized names, 404, and that every version of four large projects parses). Still open:
-    ordering was only checked for antisymmetry, not against `packaging` on a corpus; `releases` is documented as deprecated
-    in favour of the PEP 691 index and could be dropped; rate limits and private indexes.
 167. **Delivery dedupe: SCM-Manager without changeset ids, and retiring the legacy tombstone name.** GitLab now keys
     its delivery on `webhook-id` (else `Idempotency-Key`), so a signed redelivery is dropped by any replica; an
     SCM-Manager payload with no changeset ids still lacks a safe key. Removal tombstones moved to `removed#<name>` and
@@ -400,3 +396,7 @@ Everything else:
     floors are read now (docs/pip.md). Still not read: `setup.py` (code), `setup.cfg` `install_requires`, `==1.*` and `<`
     only ranges, Poetry's array-of-constraints form and `*`; a real TOML parser is still the way to widen the line
     scanner (Pipfile and Poetry inline tables are matched on one line only).
+211. **pip: drop `releases` for the PEP 691 index; rate limits; private indexes.** PEP 440 ordering and specifier
+    matching now agree with `packaging` on a recorded vector table (internal/pypi/testdata/pep440.json, regenerate with
+    scripts/gen-pep440-vectors.py). Still open: `releases` is documented as deprecated in favour of the PEP 691 index and
+    could be dropped, 429 handling for PyPI, and a private index (needs credentials, so a human decision).

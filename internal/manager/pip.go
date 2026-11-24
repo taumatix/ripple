@@ -59,7 +59,7 @@ var (
 	// pipPoetryRE is Poetry's caret and tilde requirement and its bare exact version.
 	pipPoetryRE = regexp.MustCompile(`^(\^|~|)\s*(\d+(?:\.\d+){0,3})$`)
 	// pipBoundRE is a clause that may accompany a `>=` floor: an upper bound or an exclusion.
-	pipBoundRE = regexp.MustCompile(`^(?:<=|<|!=)\s*\d+(?:\.\d+)*(?:\.\*)?$`)
+	pipBoundRE = regexp.MustCompile(`^(?:<=|<|!=)\s*(?:\d+!)?\d+(?:\.\d+)*(?:\.\*|(?:[-_.]?(?:a|b|c|rc|alpha|beta|pre|preview|post|rev|r|dev)[-_.]?\d*)*(?:\+[A-Za-z0-9.]+)?)$`)
 	pipReqRE   = regexp.MustCompile(`^\s*([A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)\s*(?:\[[^\]]*\])?\s*` +
 		`((?:===|==|~=|!=|<=|>=|<|>)\s*[^\s,;()]+(?:\s*,\s*(?:===|==|~=|!=|<=|>=|<|>)\s*[^\s,;()]+)*)?\s*(?:;.*)?$`)
 )

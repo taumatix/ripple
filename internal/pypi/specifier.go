@@ -39,7 +39,8 @@ func Satisfies(spec string, v Version) (satisfied, ok bool) {
 				pass = !pass
 			}
 		case "<":
-			pass = Compare(v, w) < 0 && !(sameRelease(v, w) && w.Pre == "" && !w.Dev)
+			// <V excludes the pre-releases of V, which sort below it, unless V is one.
+			pass = Compare(v, w) < 0 && !((v.Pre != "" || v.Dev) && w.Pre == "" && !w.Dev && sameRelease(v, w))
 		case "<=":
 			pass = Compare(v, w) <= 0
 		case ">":

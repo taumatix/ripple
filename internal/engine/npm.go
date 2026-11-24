@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"path"
 	"sort"
-	"strings"
 
 	"github.com/taumatix/ripple/internal/manager"
 	"github.com/taumatix/ripple/internal/model"
@@ -156,34 +155,36 @@ var lockfiles = []string{"package-lock.json", "npm-shrinkwrap.json", "yarn.lock"
 // npmGuard is called before an npm dependency is rewritten. A non-empty reason means
 // the update must not be proposed.
 //
-// The registry ripple asks is registry.npmjs.org. A repository whose .npmrc names
-// another registry (for all packages, or for the package's @scope) resolves that
-// package somewhere else, and a public package of the same name is then not the one
-// the repo uses: proposing its version would be a dependency-confusion step.
+// The registry ripple asks is registry.npmjs.org. A repository whose npm-family config
+// (.npmrc, .yarnrc, .yarnrc.yml in the package.json's directory or any parent up to
+// the root; the nearest file that sets a key wins) names another registry, for all
+// packages or for the package's @scope, resolves that package somewhere else, and a
+// public package of the same name is then not the one the repo uses: proposing its
+// version would be a dependency-confusion step. A URL is public only when its host is
+// exactly the public registry's, and one ripple cannot read (an unexpanded ${VAR}) is
+// not public. ripple never fetches from a registry a repository names.
 func (r *runner) npmGuard(d model.Dependency) string {
-	scope := ""
-	if strings.HasPrefix(d.Package, "@") {
-		scope, _, _ = strings.Cut(d.Package, "/")
-	}
-	dirs := []string{path.Dir(d.File)}
-	if path.Dir(d.File) != "." {
-		dirs = append(dirs, "")
-	}
-	for _, dir := range dirs {
-		content, err := r.ws.ReadFile(path.Join(dir, ".npmrc"))
-		if err != nil {
-			continue
-		}
-		for _, line := range strings.Split(string(content), "\n") {
-			key, val, ok := strings.Cut(strings.TrimSpace(line), "=")
-			key, val = strings.TrimSpace(key), strings.TrimSpace(val)
-			if !ok || val == "" || strings.Contains(val, "registry.npmjs.org") {
-				continue
-			}
-			if key == "registry" || (scope != "" && key == scope+":registry") {
-				return fmt.Sprintf("%s sets a registry for %s; ripple reads only registry.npmjs.org and will not guess a version for a package that may live elsewhere", path.Join(dir, ".npmrc"), d.Package)
+	var rc npmreg.Rc
+	dir := path.Dir(d.File)
+	for {
+		var level npmreg.Rc
+		for _, f := range []struct {
+			name  string
+			parse func([]byte, string) npmreg.Rc
+		}{{".npmrc", npmreg.ParseNpmrc}, {".yarnrc.yml", npmreg.ParseYarnrcYml}, {".yarnrc", npmreg.ParseYarnrc}} {
+			p := path.Join(dir, f.name)
+			if content, err := r.ws.ReadFile(p); err == nil {
+				level = level.Join(f.parse(content, p))
 			}
 		}
+		rc = rc.Over(level) // rc is the nearer layers, level the next one out
+		if dir == "." || dir == "/" || dir == "" {
+			break
+		}
+		dir = path.Dir(dir)
+	}
+	if s := rc.For(d.Package); s.URL != "" && !npmreg.IsPublic(s.URL) {
+		return fmt.Sprintf("%s sets a registry for %s; ripple reads only registry.npmjs.org and will not guess a version for a package that may live elsewhere", s.File, d.Package)
 	}
 	return ""
 }

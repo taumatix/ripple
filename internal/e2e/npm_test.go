@@ -259,3 +259,73 @@ func TestNpmComparatorsAndUnions(t *testing.T) {
 		}
 	})
 }
+
+// Registry routing is read from every npm-family config file up the tree: the host must be
+// exactly the public registry's (a path that merely mentions it does not count), the nearest
+// file that sets a scope wins, comments are ignored, and .yarnrc.yml scopes count. A package
+// routed elsewhere is skipped with the reason; the rest still move.
+func TestNpmRegistryRoutingFromConfigFiles(t *testing.T) {
+	forEach(t, func(t *testing.T, st store.Store) {
+		e, reg := npmEnv(t, st)
+		names := []string{"@a/x", "@b/x", "@c/x", "@d/x", "@e/x", "@f/x"}
+		for _, n := range names {
+			reg.Publish(n, "1.0.0")
+		}
+		pj := "{\n  \"dependencies\": {\n"
+		for i, n := range names {
+			pj += `    "` + n + `": "^1.0.0"`
+			if i < len(names)-1 {
+				pj += ","
+			}
+			pj += "\n"
+		}
+		pj += "  }\n}\n"
+		e.gh.AddRepo("acme/app", map[string]string{
+			".ripple.yaml": npmConfig,
+			".npmrc": "; a comment\n@a:registry=https://mirror.example/registry.npmjs.org/\n# @b:registry=https://hidden.example/\n" +
+				"@c:registry = \"https://registry.npmjs.org/\"\n@e:registry=https://npm.e.example/\n@f:registry=https://npm.f.example/\n",
+			".yarnrc.yml":      "npmScopes:\n  d:\n    npmRegistryServer: \"https://npm.d.example\"\n",
+			"web/.npmrc":       "@e:registry=https://registry.npmjs.org/\n",
+			"web/package.json": pj,
+		})
+		start(t, e, "acme/app")
+		e.clock.Advance(time.Minute)
+		for _, n := range names {
+			reg.Publish(n, "1.1.0")
+		}
+		for i := 0; i < 3; i++ {
+			e.tick()
+		}
+		moved := map[string]bool{}
+		for _, pr := range e.gh.PRs("acme/app") {
+			moved[pr.Head] = true
+		}
+		if len(moved) != 3 {
+			t.Fatalf("want PRs for @b/x, @c/x and @e/x, got %v", moved)
+		}
+		for _, n := range []string{"b", "c", "e"} {
+			found := false
+			for h := range moved {
+				found = found || strings.Contains(h, "-"+n+"-x-") || strings.Contains(h, n+"-x")
+			}
+			if !found {
+				t.Errorf("no PR for @%s/x: %v", n, moved)
+			}
+		}
+		for _, n := range []string{"@a/x", "@d/x", "@f/x"} {
+			j, ok, err := e.st.GetJob(context.Background(), model.JobKey("acme/app", model.DatasourceNpm, n, "1.1.0"))
+			if err != nil || !ok || j.State != model.JobSkipped || !strings.Contains(j.Reason, "sets a registry") {
+				t.Errorf("%s: job = %+v, %v, %v", n, j, ok, err)
+			}
+		}
+		if reg := reg.Requests(); len(reg) == 0 {
+			t.Error("no registry request")
+		} else {
+			for _, r := range reg {
+				if r.Authorization != "" {
+					t.Errorf("a credential was sent: %+v", r)
+				}
+			}
+		}
+	})
+}

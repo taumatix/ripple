@@ -222,11 +222,6 @@ Everything else:
     `dist.integrity` and `dist.tarball` per version, so a package-lock v2/v3 entry for a leaf package whose own dependencies did
     not change could be rewritten without running npm; start there, and say what is still left to the owner. `npmreg` parses
     neither `dist` nor per-version `dependencies` yet (nor does the fake publish them): add both first.
-149. **npm: private registries.** A package whose `.npmrc` names another registry is skipped (guard against dependency
-    confusion); supporting it needs credentials and a registry setting per scope. The public registry is verified live
-    (2026-11-24, UPSTREAM.md); not verified: private registries and their 401/403 answers, rate limits, and a very large
-    package. Also: `npm:packages` is one package set kept per package (see 159), versions carry no publication date (the
-    full document has `time` but is much larger).
 153. **Actions: verify against a real GHES and the write paths.** The tag, commit and release reads from github.com were run live
     (2026-11-24, UPSTREAM.md). Still written against the fake only: the workflows-permission refusal text, the upstream fallback against
     a real GHES (`RIPPLE_ACTIONS_UPSTREAM_URL`, 404 on the host then the configured upstream) and superseding of stale actions
@@ -392,3 +387,10 @@ Everything else:
     `npm:` aliases and workspace specs. The union rule (move only the newest alternative) was reasoned, not checked
     against a corpus of real package.json files. npm still classifies by number position, so `0.2.3` -> `0.3.0` is
     "minor" (Cargo uses the leftmost-nonzero rule); do the same here once a repo reports it.
+200. **npm: reading a private registry.** Registry routing is read from `.npmrc`, `.yarnrc` and `.yarnrc.yml` up the tree and a
+    package routed off registry.npmjs.org is skipped (docs/npm.md). Not done, because it is a decision and not code: reading
+    from the registry a repository names means ripple's host fetches a URL chosen by repository content (an SSRF and
+    private-network question) and, for most private registries, holding a credential per registry. Needs a decision first:
+    an allowlist of registry hosts in server config (never from the repo), and where tokens live. `bunfig.toml` scopes and
+    `publishConfig` are not read. Not verified: a real private registry's 401/403 answers, rate limits, a very large
+    package; `npm:packages` is one package set kept per package (see 159) and versions carry no publication date.

@@ -87,3 +87,81 @@ func TestPolledPackagesFallBackWithoutCursorLister(t *testing.T) {
 		t.Errorf("set = %v", got)
 	}
 }
+
+// The first poll after an upgrade folds the legacy newline cursor into one key per package and
+// deletes it, so every later poll reads only the keys.
+func TestPolledPackagesFoldLegacyCursor(t *testing.T) {
+	ctx := context.Background()
+	st := store.NewMemory()
+	e := &Engine{Store: st}
+	if err := st.SetCursor(ctx, npmPackagesCursor, "left-pad\nis-odd"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetCursor(ctx, packageKey(npmPackagesCursor, "is-even"), "1"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := e.polledPackages(ctx, npmPackagesCursor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"is-even", "is-odd", "left-pad"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("set = %v, want %v", got, want)
+	}
+	if raw, _ := st.GetCursor(ctx, npmPackagesCursor); raw != "" {
+		t.Errorf("legacy cursor survived the fold: %q", raw)
+	}
+	for _, p := range []string{"left-pad", "is-odd", "is-even"} {
+		if v, _ := st.GetCursor(ctx, packageKey(npmPackagesCursor, p)); v == "" {
+			t.Errorf("no key for %s after the fold", p)
+		}
+	}
+	again, _ := e.polledPackages(ctx, npmPackagesCursor)
+	if !reflect.DeepEqual(again, got) {
+		t.Errorf("second read = %v, want %v", again, got)
+	}
+}
+
+// A store that cannot list cursors keeps the legacy list: there is nothing to fold into.
+func TestPolledPackagesNoFoldWithoutCursorLister(t *testing.T) {
+	ctx := context.Background()
+	e := &Engine{Store: onlyStore{store.NewMemory()}}
+	if err := e.Store.SetCursor(ctx, npmPackagesCursor, "left-pad"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := e.polledPackages(ctx, npmPackagesCursor); !reflect.DeepEqual(got, []string{"left-pad"}) {
+		t.Fatalf("set = %v", got)
+	}
+	if raw, _ := e.Store.GetCursor(ctx, npmPackagesCursor); raw != "left-pad" {
+		t.Errorf("legacy cursor = %q, want it kept", raw)
+	}
+}
+
+// Every datasource drops a package nobody uses, and keeps one that someone still does.
+func TestDropPackageEveryDatasource(t *testing.T) {
+	ctx := context.Background()
+	for _, c := range []struct{ ds, cursor string }{
+		{model.DatasourceDocker, dockerPackagesCursor},
+		{model.DatasourceNpm, npmPackagesCursor},
+		{model.DatasourceCargo, cargoPackagesCursor},
+		{model.DatasourcePip, pipPackagesCursor},
+	} {
+		t.Run(c.ds, func(t *testing.T) {
+			st := store.NewMemory()
+			e := &Engine{Store: st}
+			if err := e.notePackages(ctx, c.ds, c.cursor, []model.Dependency{dep(c.ds, "used"), dep(c.ds, "unused")}); err != nil {
+				t.Fatal(err)
+			}
+			if err := st.ReplaceDependencies(ctx, "acme/app", []model.Dependency{dep(c.ds, "used")}); err != nil {
+				t.Fatal(err)
+			}
+			for _, p := range []string{"used", "unused"} {
+				if err := e.dropPackage(ctx, c.ds, c.cursor, p); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if got, _ := e.polledPackages(ctx, c.cursor); !reflect.DeepEqual(got, []string{"used"}) {
+				t.Errorf("after drops = %v, want only used", got)
+			}
+		})
+	}
+}

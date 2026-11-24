@@ -1231,6 +1231,26 @@ func Run(t *testing.T, mk func(t *testing.T) store.Store) {
 		}
 	})
 
+	t.Run("deleting a plain cursor keeps the group keys named after it", func(t *testing.T) {
+		s := mk(t)
+		cl := s.(store.CursorLister)
+		for k, v := range map[string]string{"set:packages": "a\nb", "set:packages#a": "1", "set:packages#b": "1"} {
+			if err := s.SetCursor(ctx, k, v); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := cl.DeleteCursor(ctx, "set:packages"); err != nil {
+			t.Fatal(err)
+		}
+		if v, _ := s.GetCursor(ctx, "set:packages"); v != "" {
+			t.Errorf("deleted cursor reads %q", v)
+		}
+		got, err := cl.ListCursors(ctx, "set:packages#")
+		if err != nil || len(got) != 2 {
+			t.Fatalf("group after deleting the plain cursor = %v, %v; want both keys", got, err)
+		}
+	})
+
 	t.Run("cursor purge by group", func(t *testing.T) {
 		s := mk(t)
 		c := s.(store.CursorPurger)

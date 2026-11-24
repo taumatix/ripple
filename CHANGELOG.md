@@ -5,6 +5,7 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
 ## [Unreleased]
 
 ### Added
+- `RIPPLE_POLL_PACKAGES_PER_POLL` (default 0, every package; `engine.Engine.PollPackagesPerPoll`, additive) bounds how many packages of a datasource one poll visits, rotating through the set with a stored continuation so each package is visited once per cycle. Covered end to end (memory store locally; the other stores in CI). The listing of the package set itself is not yet sliced, and nothing was measured on a real install (ROADMAP 214).
 - SCM-Manager and Gerrit: an archived repository (SCM-Manager's `archived` flag) or a `READ_ONLY` project (Gerrit, `?state=READ_ONLY`) is now paused with its index and pending jobs kept, and resumed on unarchive, instead of being forgotten with its jobs. Both are held to the platform conformance suite's archive test against the fakes; no real instance was queried (ROADMAP 213).
 - OSV: `security-bypass-severity: [high, critical]` on a gomod update entry limits `security-bypass` to advisories with those GitHub ratings; unrated advisories never bypass while it is set. Covered end to end against the fake OSV (ROADMAP 172).
 - The AWS Emulator test now drives the rest of the CodeCommit write path: a whole-clone checkout, an edit, a push of a `ripple/` branch through the SigV4 git password, and the pull request opened and listed with its head commit through the host; CI-only (ROADMAP 188).

@@ -76,6 +76,13 @@ type Engine struct {
 	// BackfillMajors is how many majors above its own a Go dependency is searched for by
 	// backfill; zero means three. Beyond three only the module proxy (Lookup) is asked.
 	BackfillMajors int
+	// PollPackagesPerPoll bounds how many packages of one datasource a poll visits (the
+	// GitHub Actions, Docker, npm, cargo and pip pollers). Zero, the default, visits them all.
+	// With a bound each poll takes the next slice after the package the last one stopped at
+	// and wraps, so every package is still visited once per cycle of polls (a release is
+	// noticed up to a cycle later) while one poll's registry requests, dependent lookups and
+	// cooldown work are capped.
+	PollPackagesPerPoll int
 	// Lookup, when set, finds the latest release of a module with no stored release, so
 	// backfill reaches a module nobody else imports. Nil asks nothing (see ReleaseLookup).
 	Lookup ReleaseLookup

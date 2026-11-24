@@ -59,6 +59,20 @@ func TestServerBackfillMajors(t *testing.T) {
 	}
 }
 
+func TestServerPollPackagesPerPoll(t *testing.T) {
+	if s, err := LoadServer(env(with("RIPPLE_WORKERS", "4"))); err != nil || s.PollPackagesPerPoll != 0 {
+		t.Fatalf("default: %+v, %v", s, err)
+	}
+	if s, err := LoadServer(env(with("RIPPLE_POLL_PACKAGES_PER_POLL", "200"))); err != nil || s.PollPackagesPerPoll != 200 {
+		t.Fatalf("set: %+v, %v", s, err)
+	}
+	for _, v := range []string{"-1", "lots"} {
+		if _, err := LoadServer(env(with("RIPPLE_POLL_PACKAGES_PER_POLL", v))); err == nil {
+			t.Errorf("RIPPLE_POLL_PACKAGES_PER_POLL=%s accepted", v)
+		}
+	}
+}
+
 func TestServerScanCaps(t *testing.T) {
 	s, err := LoadServer(env(base))
 	if err != nil || s.MaxFiles != DefaultMaxFiles || s.MaxDependencies != DefaultMaxDependencies {

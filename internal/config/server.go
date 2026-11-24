@@ -112,6 +112,9 @@ type Server struct {
 	// BackfillMajors is how many newer majors backfill probes on a Go module's line; zero
 	// means three. A larger value also asks the module proxy for the majors beyond.
 	BackfillMajors int
+	// PollPackagesPerPoll bounds the packages one poll of a datasource visits; zero visits
+	// them all.
+	PollPackagesPerPoll int
 	// Event queue: workers overall and per installation, and the persisted backlog
 	// overall and per installation (past either cap the receiver answers 503).
 	EventWorkers                int
@@ -194,6 +197,7 @@ RIPPLE_WORKERS                default 4
 RIPPLE_MAX_FILES              default 100000; a repo with more files is skipped with a warning
 RIPPLE_MAX_DEPENDENCIES       default 5000; a repo with more dependencies is skipped with a warning
 RIPPLE_BACKFILL_MAJORS        default 3, max 50; newer majors backfill probes on a Go module's line (beyond 3 only the module proxy is asked)
+RIPPLE_POLL_PACKAGES_PER_POLL default 0 (every package each poll); a number visits that many packages per datasource per poll, rotating
 RIPPLE_MAX_BACKFILL           default 10; jobs one scan creates for dependencies new to a repo, the rest carry to the next scan
 RIPPLE_WORK_DIR               checkout directory (default: OS temp dir)
 RIPPLE_EVENT_WORKERS          webhook events handled at once (default 4)
@@ -358,6 +362,7 @@ func LoadServer(getenv func(string) string) (*Server, error) {
 		MaxDependencies:          num("RIPPLE_MAX_DEPENDENCIES", DefaultMaxDependencies, 1),
 		MaxBackfill:              numOpt("RIPPLE_MAX_BACKFILL", 1),
 		BackfillMajors:           cappedOpt("RIPPLE_BACKFILL_MAJORS", 50),
+		PollPackagesPerPoll:      numOpt("RIPPLE_POLL_PACKAGES_PER_POLL", 1),
 
 		EventWorkers:                num("RIPPLE_EVENT_WORKERS", 4, 1),
 		EventWorkersPerInstallation: num("RIPPLE_EVENT_WORKERS_PER_INSTALLATION", 2, 1),

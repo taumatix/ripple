@@ -52,6 +52,38 @@ func (e *Engine) polledPackages(ctx context.Context, cursor string) ([]string, e
 	}
 	sort.Strings(out)
 	e.log().Debug("polled packages listed", "cursor", cursor, "packages", len(out), "took", time.Since(start))
+	return e.nextSlice(ctx, cursor, out)
+}
+
+// resumeCursor holds the last package of the previous slice. Its name does not start with
+// "<cursor>#", so it is never listed as a package.
+func resumeCursor(cursor string) string { return cursor + "!resume" }
+
+// nextSlice is the packages of one poll: all of them unless Engine.PollPackagesPerPoll is
+// set and smaller than the set, else the next that many after the package the previous poll
+// stopped at, wrapping to the start. The position is stored before the slice is polled, so
+// a poll that fails midway does not retry its slice at once; the slice comes round again in
+// the next cycle. A package added or dropped in between only shifts which slice it falls in.
+func (e *Engine) nextSlice(ctx context.Context, cursor string, sorted []string) ([]string, error) {
+	n := e.PollPackagesPerPoll
+	if n <= 0 || len(sorted) <= n {
+		return sorted, nil
+	}
+	last, err := e.Store.GetCursor(ctx, resumeCursor(cursor))
+	if err != nil {
+		return nil, err
+	}
+	start := sort.SearchStrings(sorted, last)
+	if start < len(sorted) && sorted[start] == last {
+		start++
+	}
+	out := make([]string, 0, n)
+	for i := 0; i < n; i++ {
+		out = append(out, sorted[(start+i)%len(sorted)])
+	}
+	if err := e.Store.SetCursor(ctx, resumeCursor(cursor), out[len(out)-1]); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 

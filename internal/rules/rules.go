@@ -148,10 +148,16 @@ func Evaluate(l Limits, u *config.Update, pkg string, t UpdateType, releasedAt, 
 // repo's ignore rules, schedule, groups and automerge setting still decide, except that an
 // entry with security-bypass: [schedule] has no schedule for a security update.
 func EvaluateSecurity(l Limits, u *config.Update, pkg string, t UpdateType, now time.Time) Decision {
+	return EvaluateSecuritySeverity(l, u, pkg, t, now, "")
+}
+
+// EvaluateSecuritySeverity is EvaluateSecurity for an advisory with the given rating, so
+// that security-bypass-severity can restrict the schedule bypass to serious advisories.
+func EvaluateSecuritySeverity(l Limits, u *config.Update, pkg string, t UpdateType, now time.Time, severity string) Decision {
 	l.MinimumReleaseAge = 0
 	uu := *u
 	uu.Cooldown = nil
-	if u.Bypasses(config.BypassSchedule) {
+	if u.BypassesSeverity(config.BypassSchedule, severity) {
 		uu.Schedule = nil
 	}
 	return Evaluate(l, &uu, pkg, t, now, now)

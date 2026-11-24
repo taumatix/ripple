@@ -202,9 +202,6 @@ Everything else:
     test), and a toolchain PR opened by an older run than the security job is only held, never closed, unless the security PR opens in a later run with it open.
     A plain, non-advisory release move off a pseudo-version is still not implemented; rule to use: the first release above
     the pseudo-version and released after its timestamp, opt-in.
-130. **Docker: verify against real registries.** The client and the fake were written from the spec excerpts
-    (`docs/vendor/registry`); run it against Docker Hub and GHCR once (host, `library/` prefix, index digest
-    `Accept` types, 429 handling, the `created` read through an index and a blob redirect) and record the result in UPSTREAM.md.
 132. **Webhook retry ids, verified on real hosts.** Delivery ids are now persisted (store delivery table), but whether
     Bitbucket Cloud's `X-Request-UUID` and Azure DevOps' payload `id` stay the same across a retry is still
     unverified: the vendored docs state neither (see docs/platform-bitbucket.md, docs/platform-azuredevops.md). A
@@ -230,10 +227,12 @@ Everything else:
     (2026-11-24, UPSTREAM.md); not verified: private registries and their 401/403 answers, rate limits, and a very large
     package. Also: `npm:packages` is one package set kept per package (see 159), versions carry no publication date (the
     full document has `time` but is much larger).
-153. **Actions: verify against real GitHub and a real GHES.** The workflows-permission refusal text, the upstream fallback
-    (`RIPPLE_ACTIONS_UPSTREAM_URL`, 404 on the host then the configured upstream) and superseding of stale actions PRs were
-    written against the fake; none ran against github.com or a GHES (see 61). The supersede sweep and closing of beaten PRs
-    for actions rely on the branch name `ripple/actions/<slug>-<tag>`.
+153. **Actions: verify against a real GHES and the write paths.** The tag, commit and release reads from github.com were run live
+    (2026-11-24, UPSTREAM.md). Still written against the fake only: the workflows-permission refusal text, the upstream fallback against
+    a real GHES (`RIPPLE_ACTIONS_UPSTREAM_URL`, 404 on the host then the configured upstream) and superseding of stale actions
+    PRs on any real host (see 61). The supersede sweep and closing of beaten PRs for actions rely on the branch name
+    `ripple/actions/<slug>-<tag>`. Anonymous reads are 60 an hour per address, so a shared runner can be refused; the client
+    reports it as a rate limit.
 155. **Cargo: refresh Cargo.lock.** ripple edits Cargo.toml and reports the lock files it left stale (docs/cargo.md);
     a lock entry needs the checksum and dependency edges of the new version, which only cargo's resolver knows. The sparse
     index line carries `cksum` and `deps`, so a lock edit for a leaf crate whose dependencies did not change may be
@@ -355,3 +354,7 @@ Everything else:
     reproduce it with a fake and either fix it or explain it in docs/osv.md.
 180. **Live: a module whose `@latest` is retracted.** `feed.GoProxyLookup` reads `@latest` and the list but not
     retractions; pin a module whose latest is retracted and a pre-release-only module, and decide what ripple proposes.
+181. **Registries: wait out 429 and slow tag lists.** Docker Hub's anonymous pull limit and any 429 are reported as an error naming
+    Retry-After, never waited out (see 178 for the other clients). ghcr.io's tag list for a large image took about 20s over
+    many pages; consider an early stop when a tag newer than the current one of the same shape is found, or `last=` paging
+    from the current tag.

@@ -186,7 +186,8 @@ func (h *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad repository name", http.StatusBadRequest)
 		return
 	}
-	keys := []string{request, webhook.SignatureKey(sig)}
+	bodyKey := webhook.SignatureKey(sig)
+	keys := []string{request, bodyKey}
 	if !h.dedupe.Claim(h.Now(), keys...) {
 		h.Log.Info("bitbucket webhook duplicate delivery dropped", "request", request)
 		w.WriteHeader(http.StatusAccepted)
@@ -212,7 +213,7 @@ func (h *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if request != "" {
 			delivery = fmt.Sprintf("%s-%d", request, i)
 		}
-		ev := platform.Event{Kind: platform.Push, Delivery: delivery, Repos: []string{repo},
+		ev := platform.Event{Kind: platform.Push, Delivery: delivery, BodyKey: bodyKey, Repos: []string{repo},
 			Ref: "refs/heads/" + ch.NewName, Files: files}
 		if err := h.Sink.HandleEvent(r.Context(), ev); err != nil {
 			h.dedupe.Release(keys...)

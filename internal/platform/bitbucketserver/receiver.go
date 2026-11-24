@@ -132,7 +132,8 @@ func (h *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusAccepted)
 		return
 	}
-	keys := []string{delivery, webhook.SignatureKey(hexSig)}
+	bodyKey := webhook.SignatureKey(hexSig)
+	keys := []string{delivery, bodyKey}
 	if !h.dedupe.Claim(h.now(), keys...) {
 		w.WriteHeader(http.StatusAccepted)
 		return
@@ -148,7 +149,7 @@ func (h *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, ev := range evs {
-		ev.Delivery = delivery
+		ev.Delivery, ev.BodyKey = delivery, bodyKey
 		if err := h.Sink.HandleEvent(r.Context(), ev); err != nil {
 			h.dedupe.Release(keys...)
 			h.Log.Error("webhook sink", "event", ev.Kind, "err", err)

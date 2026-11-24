@@ -37,6 +37,6 @@ func NewNamedHost(name string, c *Client, secret []byte, log *slog.Logger) *plat
 type Sink struct{ platform.Sink }
 
 func (s Sink) Handle(ctx context.Context, e webhook.Event) error {
-	return s.HandleEvent(ctx, platform.Event{Kind: platform.EventKind(e.Kind), Scope: e.InstallationID, Delivery: e.Delivery,
+	return s.HandleEvent(ctx, platform.Event{Kind: platform.EventKind(e.Kind), Scope: e.InstallationID, Delivery: e.Delivery, BodyKey: e.BodyKey,
 		Repos: e.Repos, Ref: e.Ref, DefaultBranch: e.DefaultBranch, Files: e.Files, NewRepo: e.NewRepo, RepoID: e.RepoID, RepoIDs: e.RepoIDs})
 }

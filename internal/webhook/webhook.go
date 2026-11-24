@@ -51,7 +51,10 @@ type Event struct {
 	InstallationID int64
 	// Delivery is the X-GitHub-Delivery header, empty when absent. It is unsigned.
 	Delivery string
-	Repos    []string
+	// BodyKey is the verified signature's dedupe key, set only when signature dedupe is
+	// on (Handler.DedupeBySignature or DefaultDedupeBySignature); empty otherwise.
+	BodyKey string
+	Repos   []string
 	// push only
 	Ref           string
 	DefaultBranch string
@@ -183,10 +186,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ev.Delivery = delivery
 	keys := []string{delivery}
 	if h.DedupeBySignature {
-		keys = append(keys, signatureKey(sig))
+		ev.BodyKey = signatureKey(sig)
 	} else {
-		keys = append(keys, SignatureKey(sig))
+		ev.BodyKey = SignatureKey(sig)
 	}
+	keys = append(keys, ev.BodyKey)
 	if !h.dedupe.Claim(h.Now(), keys...) {
 		h.Log.Info("webhook duplicate delivery dropped", "delivery", delivery)
 		w.WriteHeader(http.StatusAccepted)

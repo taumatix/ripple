@@ -150,7 +150,12 @@ type Event struct {
 	Scope int64
 	// Delivery is the host's delivery id, empty when it has none. It may be unsigned.
 	Delivery string
-	Repos    []string
+	// BodyKey identifies the verified body itself (webhook.SignatureKey), empty unless the
+	// receiver was told to treat a repeated signed body as a repeat. The app claims it in
+	// the store's delivery table beside Delivery, so a body replayed under a new id is
+	// dropped by whichever replica it reaches.
+	BodyKey string
+	Repos   []string
 	// Push only.
 	Ref           string
 	DefaultBranch string

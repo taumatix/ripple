@@ -692,6 +692,19 @@ func (g *GitHub) HumanCommitOnBranch(repo, branch string) {
 	git(g.t, w, "push", "-q", "origin", branch)
 }
 
+// branchTip is the commit refs/heads/<branch> points at in the bare repository, or ""
+// when the branch does not exist.
+func branchTip(bare, branch string) string {
+	cmd := exec.Command("git", "rev-parse", "--verify", "--quiet", "refs/heads/"+branch)
+	cmd.Dir = bare
+	cmd.Env = gitEnv()
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
 // withHeadSHA adds the head commit the listing reports (head.sha); absent when the
 // branch does not exist in the bare repository.
 func (g *GitHub) withHeadSHA(repo string, p *PR, m map[string]any) map[string]any {

@@ -177,3 +177,29 @@ func TestCloseUntouchedTreatsAZeroVoteAsNoVote(t *testing.T) {
 		t.Fatalf("close: %v %v", ok, err)
 	}
 }
+
+// ListOpenPRs asks for the current revision and reports its commit as the head, and it
+// moves when a person uploads another patch set.
+func TestListOpenPRsReportsHeadSHA(t *testing.T) {
+	f, c, _ := openRipplePR(t)
+	list := func() platform.PR {
+		t.Helper()
+		open, err := c.ListOpenPRs(ctx, model.Repo{FullName: closeProject}, "ripple/")
+		if err != nil || len(open) != 1 {
+			t.Fatalf("%v %v", open, err)
+		}
+		return open[0]
+	}
+	current := func() string {
+		revs := f.Changes(closeProject)[0].Revisions
+		return revs[len(revs)-1]
+	}
+	first := current()
+	if got := list().HeadSHA; got == "" || got != first {
+		t.Fatalf("HeadSHA %q, want %q", got, first)
+	}
+	f.PatchSetBy(closeProject, closeTopic, "person@example.com", "person@example.com")
+	if got, want := list().HeadSHA, current(); got == first || got != want {
+		t.Fatalf("after a patch set HeadSHA %q, want %q (not %q)", got, want, first)
+	}
+}

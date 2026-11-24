@@ -219,3 +219,27 @@ func TestCloseUntouchedPRFailedCommentStillCounts(t *testing.T) {
 		t.Fatal("not closed")
 	}
 }
+
+// ListOpenPRs reports the pull request's head commit (head.sha), and it moves when a
+// person pushes to the branch.
+func TestListOpenPRsReportsHeadSHA(t *testing.T) {
+	for _, forgejo := range []bool{false, true} {
+		e := newSupEnv(t, forgejo)
+		list := func() platform.PR {
+			t.Helper()
+			open, err := e.c.ListOpenPRs(context.Background(), model.Repo{FullName: supRepo}, "ripple/")
+			if err != nil || len(open) != 1 {
+				t.Fatalf("%v %v", open, err)
+			}
+			return open[0]
+		}
+		first := e.g.BranchHead(supRepo, supBranch)
+		if got := list().HeadSHA; got == "" || got != first {
+			t.Fatalf("forgejo=%v HeadSHA %q, want %q", forgejo, got, first)
+		}
+		e.g.HumanCommitOnBranch(supRepo, 1)
+		if got, want := list().HeadSHA, e.g.BranchHead(supRepo, supBranch); got == first || got != want {
+			t.Fatalf("forgejo=%v after a push HeadSHA %q, want %q (not %q)", forgejo, got, want, first)
+		}
+	}
+}

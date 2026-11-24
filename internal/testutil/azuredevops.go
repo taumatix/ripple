@@ -148,6 +148,21 @@ func (a *AzureDevOps) Commit(path string, files map[string]string) string {
 	return strings.TrimSpace(git(a.t, w, "rev-parse", "HEAD"))
 }
 
+// PushBranch creates branch off main with one commit by the given identity.
+func (a *AzureDevOps) PushBranch(path, branch, authorEmail string) {
+	a.t.Helper()
+	pushBranchCommit(a.t, a.bare(path), branch, authorEmail)
+}
+
+// HumanCommitOnBranch pushes one more commit by a person onto branch.
+func (a *AzureDevOps) HumanCommitOnBranch(path, branch string) {
+	a.t.Helper()
+	humanCommit(a.t, a.bare(path), branch)
+}
+
+// BranchHead is the commit branch points at in path.
+func (a *AzureDevOps) BranchHead(path, branch string) string { return branchTip(a.bare(path), branch) }
+
 // FileAt is the content of file on branch, ok=false when absent.
 func (a *AzureDevOps) FileAt(path, branch, file string) (string, bool) {
 	cmd := exec.Command("git", "show", branch+":"+file)
@@ -333,6 +348,10 @@ func (a *AzureDevOps) prJSON(path, project, repo string, p *AzurePR) map[string]
 		"createdBy": map[string]any{"id": AzureCreatorID},
 		"title":     p.Title, "sourceRefName": p.sourceRef, "targetRefName": p.targetRef,
 		"url": fmt.Sprintf("%s/%s/_apis/git/repositories/%s/pullRequests/%d", a.URL, a.Org, "repo-"+repo, p.ID),
+	}
+	if sha := branchTip(a.bare(path), strings.TrimPrefix(p.sourceRef, "refs/heads/")); sha != "" {
+		// lastMergeSourceCommit.commitId: the source branch's commit (rest-pull-requests-get-list.md).
+		m["lastMergeSourceCommit"] = map[string]any{"commitId": sha}
 	}
 	if p.AutoCompleteSetBy != "" {
 		m["autoCompleteSetBy"] = map[string]any{"id": p.AutoCompleteSetBy}

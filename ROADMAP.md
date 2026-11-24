@@ -289,10 +289,6 @@ Everything else:
     the Dynamo sweep is a Query; the legacy `removed|` read path and the `tombstones-legacy` marker can be deleted a
     release after every replica runs a version that no longer writes it (v0.3.0 wrote it; the release after it must
     ship first). The Query of `removed#` on a very large table is unmeasured.
-170. **Generators: run the rewritten lines.** The mockgen (`-self_package`, golang/mock flags) and stringer grammar
-    comes from the vendored READMEs and flag declarations, and is checked by rewriting text; no rewritten
-    `go:generate` line has been run with the real tool. Run `go generate` in a sandbox job over a repo using
-    each, and add `-write_command_comment` and the other flags newer mockgen releases add as they are documented.
 171. **Go toolchain downloads, and published runner images.** The per-minor images (`RIPPLE_CONTAINER_GO_IMAGES`) are
     built by the operator, and the host sandboxes still only run releases an operator installed in
     `RIPPLE_GO_TOOLCHAIN_DIR`. A proxy-fed download (`golang.org/toolchain@v0.0.1-go<version>.<os>-<arch>` through
@@ -371,3 +367,9 @@ Everything else:
     pinned against the fake proxy only. A prerelease-only real module and a real retraction have not been tried
     against proxy.golang.org, and a raised probe has no measured cost on a repo with hundreds of new dependencies
     (each far major is one proxy request of the 20 a scan allows).
+193. **Generators: regenerate in the PR?** The rewritten `//go:generate` lines are now proven runnable with the real
+    mockgen (go.uber.org/mock v0.6.0, github.com/golang/mock v1.6.0) and stringer (`-tags live`), but ripple does not
+    run `go generate` after a bump, so a checked-in mock or `_string.go` stays as the old major produced it. Running
+    it in a sandbox job executes repo-chosen tools with network, which is a decision to take (opt-in, and which
+    sandbox) before building it. Other generators that take an import path (`protoc-gen-go` options, `wire`, `ent`)
+    are still only listed.

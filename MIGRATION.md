@@ -52,7 +52,7 @@ marker in the code. Deprecations of third-party names (for example GitLab's
 ### `Event.Ref` carrying a rename or a default branch
 
 - **Marker:** `event-ref-overload`
-- **Introduced in:** the release after v0.2.0 (ROADMAP entry 56)
+- **Introduced in:** v0.3.0 (ROADMAP entry 56)
 - **Removal not before:** the minor release after that one, and then only once no deployment logs the fallback below
 - **Replacement:** the typed `model.Event` fields `NewRepo` (a `repo_renamed` event's new name) and `DefaultBranch`
   (a `default_branch_changed` event's new branch), persisted by all three stores.

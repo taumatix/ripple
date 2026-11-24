@@ -90,6 +90,9 @@ func (w *NpmWatcher) Poll(ctx context.Context) (int, error) {
 			return n, fmt.Errorf("list dependents of %s: %w", pkg, err)
 		}
 		if len(deps) == 0 {
+			if err := e.dropPackage(ctx, model.DatasourceNpm, npmPackagesCursor, pkg); err != nil {
+				e.log().Warn("unused package not pruned", "package", pkg, "err", err)
+			}
 			continue
 		}
 		pv, err := e.Npm.Packument(ctx, pkg)

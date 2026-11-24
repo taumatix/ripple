@@ -88,35 +88,9 @@ func (e *Engine) notePackages(ctx context.Context, ds, cursor string, deps []mod
 	return e.Store.SetCursor(ctx, cursor, strings.Join(all, "\n"))
 }
 
-// dropActionPackage removes pkg from the polled set. It re-reads the cursor under the
-// lock and re-checks the dependents, so a repo that started using pkg since the poll
-// began keeps it; a lost update still only costs a re-add at the next scan.
+// dropActionPackage removes pkg from the polled set of GitHub Actions; see dropPackage.
 func (e *Engine) dropActionPackage(ctx context.Context, pkg string) error {
-	actionsPackagesMu.Lock()
-	defer actionsPackagesMu.Unlock()
-	deps, err := e.Store.ListDependents(ctx, model.DatasourceGitHubTags, pkg)
-	if err != nil || len(deps) > 0 {
-		return err
-	}
-	if cl, ok := e.Store.(store.CursorLister); ok {
-		if err := cl.DeleteCursor(ctx, packageKey(actionsPackagesCursor, pkg)); err != nil {
-			return err
-		}
-	}
-	raw, err := e.Store.GetCursor(ctx, actionsPackagesCursor)
-	if err != nil {
-		return err
-	}
-	var keep []string
-	for _, p := range strings.Fields(raw) {
-		if p != pkg {
-			keep = append(keep, p)
-		}
-	}
-	if len(keep) == len(strings.Fields(raw)) {
-		return nil
-	}
-	return e.Store.SetCursor(ctx, actionsPackagesCursor, strings.Join(keep, "\n"))
+	return e.dropPackage(ctx, model.DatasourceGitHubTags, actionsPackagesCursor, pkg)
 }
 
 var tagShapeRE = regexp.MustCompile(`^(v?)([0-9]+(?:\.[0-9]+){0,2})$`)

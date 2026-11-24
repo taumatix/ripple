@@ -88,6 +88,9 @@ func (w *PipWatcher) Poll(ctx context.Context) (int, error) {
 			return n, fmt.Errorf("list dependents of %s: %w", pkg, err)
 		}
 		if len(deps) == 0 {
+			if err := e.dropPackage(ctx, model.DatasourcePip, pipPackagesCursor, pkg); err != nil {
+				e.log().Warn("unused package not pruned", "package", pkg, "err", err)
+			}
 			continue
 		}
 		pr, err := e.PyPI.Project(ctx, pkg)

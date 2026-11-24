@@ -366,12 +366,13 @@ Everything else:
     it in a sandbox job executes repo-chosen tools with network, which is a decision to take (opt-in, and which
     sandbox) before building it. Other generators that take an import path (`protoc-gen-go` options, `wire`, `ent`)
     are still only listed.
-194. **GitHub tag reads: wait out a 429.** `npmreg`, `pypi`, `cratesindex` and the registry client now carry an
-    `httpretry.Policy`; the GitHub tag reads (`internal/platform/github/refs.go`, behind `platform.ListTags`) still treat a 429
-    as a plain error until the next poll. Give the GitHub client the same policy (it already holds the host back on a
-    rate-limit header, so check how the two compose) and a fake test.
 195. **Registry tag lists: order by version, not by name.** `registry.Client.TagsFrom` starts a read at the lexical floor
     `registry.TagFloor` computes, which is provably safe but low (`1.100` for a current `1.25.3`, since `1.100.0` is newer
     and sorts first), so it skips only the oldest pages. A registry-specific API that lists newest first (if Docker Hub
     or ghcr has one) would stop after one page; check what each really offers (`live.yml`) before building it, and keep
     `TagsFrom` as the fallback.
+196. **GitHub: wait out a rate limit on the other reads too.** Only the tag, commit and release reads wait
+    (`Client.Retry`); `ListOpenPRs`, the PR-touched checks and the issue reads still return the `RateLimitError` at once and
+    hold the installation back until the reset. Decide whether those should wait (they run inside a job, where a 30s wait
+    holds a worker) or keep deferring, and say why in the code. The 429 and 403 shapes are from GitHub's docs and the
+    fake; no real api.github.com limit has been provoked.

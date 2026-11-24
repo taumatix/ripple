@@ -35,3 +35,24 @@ func TestWithoutRetryAfterBackoffGrowsAndIsCapped(t *testing.T) {
 		t.Fatalf("err=%v waits=%v", err, waits)
 	}
 }
+
+// Next is the decision Do makes, for a caller with a wider idea of "limited".
+func TestNextSleepsThenGivesUp(t *testing.T) {
+	var waits []time.Duration
+	p := Policy{MaxAttempts: 2, MaxWait: 10 * time.Second, Sleep: func(_ context.Context, d time.Duration) error {
+		waits = append(waits, d)
+		return nil
+	}}
+	le := &LimitError{Attempts: 1}
+	if err := p.Next(context.Background(), le, 4*time.Second, true); err != nil || le.Waited != 4*time.Second || len(waits) != 1 {
+		t.Fatalf("first: err %v waited %v waits %v", err, le.Waited, waits)
+	}
+	le.Attempts = 2
+	if err := p.Next(context.Background(), le, time.Second, true); err != le || le.Limit != "2 attempts" {
+		t.Fatalf("second: err %v limit %q", err, le.Limit)
+	}
+	le = &LimitError{Attempts: 1}
+	if err := p.Next(context.Background(), le, time.Minute, true); err != le || len(waits) != 1 {
+		t.Fatalf("over the cap must not sleep: %v %v", err, waits)
+	}
+}

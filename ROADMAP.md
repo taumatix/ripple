@@ -6,12 +6,9 @@ Ordered by how much each entry limits real deployments. The top is next.
    module proxy, so `go` refuses to run under it, and bwrap has never run on a Linux host. Give it a
    network namespace with a forwarded socket to the gate (or run `go` with a prefilled module cache),
    and add a Linux CI job that runs the sandbox end-to-end tests. See [docs/sandbox.md](docs/sandbox.md).
-3. **Exercise the release workflow for real, and finish the smoke test.** `release.yml` has never run on a tag:
-   the tag trigger, the GHCR push, the release upload and the `verify` job (which installs the published
-   binary and image and runs `ripple version`) are **unverified** until the first release train tags, and
-   the first run may need fixes; check it right after that tag. The dry run (pull request or
-   `workflow_dispatch`) only builds. The GHCR package is private and a human must flip it public once in the UI
-   (no API). The image smoke test (`internal/smoke`) cannot assert the PR's `go.mod` content because the
+3. **Finish the image smoke test.** The release workflow ran for real on v0.3.0 (tag trigger, five binaries, a
+   multi-arch GHCR image, the release, and the `verify` job all green; the GHCR package answered an anonymous
+   pull). What is left is `internal/smoke`: it cannot assert the PR's `go.mod` content because the
    server has no `RIPPLE_GOSUMDB`: add that setting (also what a private-proxy deployment needs), set it
    off in the smoke test, import the fake module there, and assert the bumped `go.mod` and `go.sum`.
    Apple `container` has no `--network host`, so the smoke test runs against the image only in CI.

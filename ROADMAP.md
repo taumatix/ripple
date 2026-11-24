@@ -253,13 +253,6 @@ Everything else:
     starting together may split the sources; `feed_pollers` counts replicas polling any source and cannot say which one is
     unpolled. Heartbeat the set of sources (needs a `store.ReplicaInfo` field and a column or attribute per store) so the
     fleet view can alert on a source nobody polls. Also: `App.Tick` (cron-driven) now goes through the elections too.
-159. **Package cursors: retire the legacy list, page and bound the listing.** The polled-package sets (`github-tags:packages`,
-    `docker:packages`, `npm:packages`, `cargo:packages`) are now one `<cursor>#<package>` cursor each (`store.CursorLister`), and the
-    watchers read the union with the old newline cursor, which is never written again except to remove a dropped package. Left: a
-    one-time fold of the legacy list into per-package keys so the old cursor can be deleted, pruning for Docker, npm and Cargo (only
-    Actions prune), and measuring the per-poll listing (one index Query on DynamoDB, paginated, but it returns every package) on a
-    large install. Cursors named `<group>#<key>` written before this release carry no index attributes on DynamoDB and are not
-    listed by group; none existed.
 160. **pip: Poetry and other manifests, wider specifiers.** Poetry's `[tool.poetry.dependencies]` (caret and tilde
     ranges), `Pipfile`, `setup.cfg`, `setup.py`, `[build-system] requires`, `.in` files and constraints files are not read;
     nor are `>=1,<2` style ranges, `==1.*` and `!=`. The manager is a scanner for PEP 508 requirements and a line scanner
@@ -371,3 +364,10 @@ Everything else:
     `HoldIndex`, which freezes the index outright. Nobody has measured real GSI propagation delay (or the cost of the extra
     Query and BatchGetItem on a hot package during a mass install) on AWS; make the window a setting if it proves wrong.
     A dependency a lagging index still lists after the repo dropped it is the mirror case and is not covered.
+190. **Package cursors: bound the listing.** Every poll lists the whole `<cursor>#<package>` set of each datasource (one
+    paginated index Query on DynamoDB) and takes a debug line with the size and elapsed time ("polled packages listed"); the
+    legacy list is folded and deleted on first read and every datasource prunes packages nobody uses. Not done: reading the
+    set in slices across polls so a very large install does not list every package each time, and any measurement on a real
+    install. A fold racing a replica still running the old version can leave a package only in the legacy cursor until the
+    next read folds it again. Cursors named `<group>#<key>` written before per-package keys carry no index attributes on
+    DynamoDB and are not listed by group; none existed.

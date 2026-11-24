@@ -253,7 +253,7 @@ buffers at most 4 bodies at once (a GitHub delivery is parsed as it streams and 
 
 How config and API changes are deprecated and removed, and what is deprecated now: [MIGRATION.md](MIGRATION.md).
 
-The feed format and GitHub API version ripple was built against, with check dates: [UPSTREAM.md](UPSTREAM.md).
+The feed format and GitHub API version ripple was built against, with check dates: [UPSTREAM.md](UPSTREAM.md). The AWS-dependent code (DynamoDB store, CodeCommit host) is also run in CI against the public AWS Emulator, pinned there; what that does and does not prove: [docs/aws-emulator.md](docs/aws-emulator.md).
 
 ## Development
 

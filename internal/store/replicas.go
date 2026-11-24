@@ -11,6 +11,10 @@ type ReplicaInfo struct {
 	// Takeovers is LeaseTakeovers() of that process when it last beat.
 	Takeovers  int64
 	FeedPoller bool
+	// Polled names the sources this replica polls now and Configured every source it has
+	// configured (a name has no comma). A source configured by a live replica and polled by
+	// none is one nobody polls.
+	Polled, Configured []string
 	// Seen is when the beat was written, by the store's clock where it has one.
 	Seen time.Time
 }

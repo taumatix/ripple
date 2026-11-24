@@ -147,3 +147,18 @@ func (w *PipWatcher) Elected() bool { return w.elect.isHeld() }
 
 // StepDown gives the claim up; call it when stopping.
 func (w *PipWatcher) StepDown(ctx context.Context) { w.elect.stepDown(ctx, w.Engine) }
+
+// osvPollName names the OSV advisory poll's lease ("feed:osv"), like the other sources'.
+const osvPollName = "osv"
+
+// PollElected is Poll for replicas sharing a store: only the replica that holds the OSV
+// poll's claim polls, the others skip and report polled=false; see Watcher.PollElected.
+func (w *AdvisoryWatcher) PollElected(ctx context.Context, ttl time.Duration) (int, bool, error) {
+	return w.elect.poll(ctx, w.Engine, feedLease(osvPollName), ttl, w.Poll)
+}
+
+// Elected reports whether this replica held the claim at its last PollElected.
+func (w *AdvisoryWatcher) Elected() bool { return w.elect.isHeld() }
+
+// StepDown gives the claim up; call it when stopping.
+func (w *AdvisoryWatcher) StepDown(ctx context.Context) { w.elect.stepDown(ctx, w.Engine) }

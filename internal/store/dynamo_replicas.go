@@ -26,6 +26,8 @@ type replicaAttrs struct {
 	item
 	Takeovers     int64
 	FeedPoller    bool
+	Polled        []string `dynamodbav:",omitempty"`
+	Configured    []string `dynamodbav:",omitempty"`
 	Seen, Expires string
 }
 
@@ -34,7 +36,7 @@ func (d *Dynamo) Heartbeat(ctx context.Context, r ReplicaInfo, ttl time.Duration
 	now := time.Now()
 	return wrapD("heartbeat", d.put(ctx, replicaAttrs{
 		item:      item{PK: replicasPK, SK: "R#" + r.ID},
-		Takeovers: r.Takeovers, FeedPoller: r.FeedPoller, Seen: ts(now), Expires: ts(now.Add(ttl)),
+		Takeovers: r.Takeovers, FeedPoller: r.FeedPoller, Polled: r.Polled, Configured: r.Configured, Seen: ts(now), Expires: ts(now.Add(ttl)),
 	}, nil))
 }
 
@@ -55,7 +57,7 @@ func (d *Dynamo) LiveReplicas(ctx context.Context) ([]ReplicaInfo, error) {
 		exp := parseTS(a.Expires)
 		switch {
 		case exp.After(now):
-			out = append(out, ReplicaInfo{ID: strings.TrimPrefix(a.SK, "R#"), Takeovers: a.Takeovers, FeedPoller: a.FeedPoller, Seen: parseTS(a.Seen)})
+			out = append(out, ReplicaInfo{ID: strings.TrimPrefix(a.SK, "R#"), Takeovers: a.Takeovers, FeedPoller: a.FeedPoller, Polled: a.Polled, Configured: a.Configured, Seen: parseTS(a.Seen)})
 		case now.Sub(exp) > replicaGrace:
 			stale = append(stale, a.SK)
 		}

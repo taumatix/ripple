@@ -254,3 +254,16 @@ func unionOf(a, b []string) map[string]bool {
 	}
 	return m
 }
+
+func replicaStatusJSON(t *testing.T, a *App) (out struct {
+	Unpolled []string `json:"sources_unpolled"`
+	Fleet    int      `json:"feed_pollers"`
+}) {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	a.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/replica", nil))
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || rec.Code != http.StatusOK {
+		t.Fatalf("GET /replica = %d %v: %s", rec.Code, err, rec.Body.String())
+	}
+	return out
+}

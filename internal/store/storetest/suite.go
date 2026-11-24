@@ -1083,7 +1083,7 @@ func Run(t *testing.T, mk func(t *testing.T) store.Store) {
 				t.Fatal(err)
 			}
 		}
-		if err := r.Heartbeat(ctx, store.ReplicaInfo{ID: "b", Takeovers: 3}, time.Minute); err != nil { // a later beat replaces the earlier one
+		if err := r.Heartbeat(ctx, store.ReplicaInfo{ID: "b", Takeovers: 3, Polled: []string{"npm"}, Configured: []string{"npm", "osv"}}, time.Minute); err != nil { // a later beat replaces the earlier one
 			t.Fatal(err)
 		}
 		if err := r.Heartbeat(ctx, store.ReplicaInfo{ID: "gone"}, 50*time.Millisecond); err != nil {
@@ -1093,6 +1093,9 @@ func Run(t *testing.T, mk func(t *testing.T) store.Store) {
 		got, err := r.LiveReplicas(ctx)
 		if err != nil || len(got) != 2 || got[0].ID != "a" || got[1].ID != "b" || got[1].Takeovers != 3 || got[1].FeedPoller || got[1].Seen.IsZero() {
 			t.Fatalf("live = %+v, %v; want a and b (b at 3 takeovers, not polling), not the lapsed one", got, err)
+		}
+		if g := got[1]; len(g.Polled) != 1 || g.Polled[0] != "npm" || len(g.Configured) != 2 || g.Configured[1] != "osv" || len(got[0].Polled) != 0 || len(got[0].Configured) != 0 {
+			t.Fatalf("sources = a %v/%v, b %v/%v; want b polling npm of npm and osv, a none", got[0].Polled, got[0].Configured, g.Polled, g.Configured)
 		}
 		if err := r.RetireReplica(ctx, "a"); err != nil {
 			t.Fatal(err)

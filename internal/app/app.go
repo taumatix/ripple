@@ -393,6 +393,9 @@ func (a *App) sources() map[string]electedSource {
 	if a.Pip != nil {
 		m["pip"] = a.Pip
 	}
+	if a.Advisories != nil {
+		m["osv"] = a.Advisories
+	}
 	return m
 }
 
@@ -403,6 +406,16 @@ func (a *App) electedNames() []string {
 		if s.Elected() {
 			out = append(out, n)
 		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// sourceNames returns every configured elected source, sorted.
+func (a *App) sourceNames() []string {
+	var out []string
+	for n := range a.sources() {
+		out = append(out, n)
 	}
 	sort.Strings(out)
 	return out
@@ -420,7 +433,9 @@ func (a *App) pollAdvisories(ctx context.Context) {
 	if a.Advisories == nil {
 		return
 	}
-	if n, err := a.Advisories.Poll(ctx); err != nil {
+	// The claim outlives two OSV intervals (or feed intervals when only Tick drives it).
+	ttl := 2 * max(a.AdvisoryEvery, a.PollEvery)
+	if n, _, err := a.Advisories.PollElected(ctx, ttl); err != nil {
 		if ctx.Err() == nil {
 			a.Log.Warn("osv poll", "err", err)
 		}

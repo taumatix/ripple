@@ -289,10 +289,6 @@ Everything else:
     the Dynamo sweep is a Query; the legacy `removed|` read path and the `tombstones-legacy` marker can be deleted a
     release after every replica runs a version that no longer writes it (v0.3.0 wrote it; the release after it must
     ship first). The Query of `removed#` on a very large table is unmeasured.
-169. **Backfill lookup: far majors.** A module that skipped more than three majors is found only by the feed, and the
-    lookup was spot-checked against proxy.golang.org only for a stable module, an unknown one and a missing path;
-    a prerelease-only or retracted real module has not been tried. Probe the proxy's own listing for higher majors
-    instead of a fixed three, and try a real retraction.
 170. **Generators: run the rewritten lines.** The mockgen (`-self_package`, golang/mock flags) and stringer grammar
     comes from the vendored READMEs and flag declarations, and is checked by rewriting text; no rewritten
     `go:generate` line has been run with the real tool. Run `go generate` in a sandbox job over a repo using
@@ -371,3 +367,7 @@ Everything else:
     64 KiB; measure on a busy receiver and lower `maxExtract` or cap per-field length if it matters. GitLab with a plain
     secret token (no signing key) still reads its header-authenticated body whole before parsing it; Azure DevOps,
     Gerrit, SCM-Manager and CodeCommit authenticate from headers and read whole, bounded by their `maxBody`.
+192. **Backfill lookup: real proxy spot-checks.** The far-major probe (`RIPPLE_BACKFILL_MAJORS`) and the lookup are
+    pinned against the fake proxy only. A prerelease-only real module and a real retraction have not been tried
+    against proxy.golang.org, and a raised probe has no measured cost on a repo with hundreds of new dependencies
+    (each far major is one proxy request of the 20 a scan allows).

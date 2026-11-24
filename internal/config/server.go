@@ -106,6 +106,9 @@ type Server struct {
 	// MaxBackfill bounds the jobs one scan creates for dependencies new to a repo; zero
 	// means the engine's DefaultMaxBackfill. The unserved remainder carries to the next scan.
 	MaxBackfill int
+	// BackfillMajors is how many newer majors backfill probes on a Go module's line; zero
+	// means three. A larger value also asks the module proxy for the majors beyond.
+	BackfillMajors int
 	// Event queue: workers overall and per installation, and the persisted backlog
 	// overall and per installation (past either cap the receiver answers 503).
 	EventWorkers                int
@@ -186,6 +189,7 @@ RIPPLE_ALLOW_AUTOMERGE        default true; false forbids automerge everywhere
 RIPPLE_WORKERS                default 4
 RIPPLE_MAX_FILES              default 100000; a repo with more files is skipped with a warning
 RIPPLE_MAX_DEPENDENCIES       default 5000; a repo with more dependencies is skipped with a warning
+RIPPLE_BACKFILL_MAJORS        default 3, max 50; newer majors backfill probes on a Go module's line (beyond 3 only the module proxy is asked)
 RIPPLE_MAX_BACKFILL           default 10; jobs one scan creates for dependencies new to a repo, the rest carry to the next scan
 RIPPLE_WORK_DIR               checkout directory (default: OS temp dir)
 RIPPLE_EVENT_WORKERS          webhook events handled at once (default 4)
@@ -277,6 +281,14 @@ func LoadServer(getenv func(string) string) (*Server, error) {
 		}
 		return num(key, lo, lo)
 	}
+	cappedOpt := func(key string, hi int) int {
+		n := numOpt(key, 1)
+		if n > hi {
+			errs = append(errs, fmt.Errorf("%s: want an integer <= %d", key, hi))
+			return 0
+		}
+		return n
+	}
 	shards := func(key string, def int) int {
 		n := num(key, def, 1)
 		if n > MaxDynamoShards {
@@ -341,6 +353,7 @@ func LoadServer(getenv func(string) string) (*Server, error) {
 		MaxFiles:                 num("RIPPLE_MAX_FILES", DefaultMaxFiles, 1),
 		MaxDependencies:          num("RIPPLE_MAX_DEPENDENCIES", DefaultMaxDependencies, 1),
 		MaxBackfill:              numOpt("RIPPLE_MAX_BACKFILL", 1),
+		BackfillMajors:           cappedOpt("RIPPLE_BACKFILL_MAJORS", 50),
 
 		EventWorkers:                num("RIPPLE_EVENT_WORKERS", 4, 1),
 		EventWorkersPerInstallation: num("RIPPLE_EVENT_WORKERS_PER_INSTALLATION", 2, 1),

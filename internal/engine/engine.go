@@ -67,6 +67,9 @@ type Engine struct {
 	// MaxBackfill bounds the jobs one scan creates for dependencies new to the repo; zero
 	// means DefaultMaxBackfill.
 	MaxBackfill int
+	// BackfillMajors is how many majors above its own a Go dependency is searched for by
+	// backfill; zero means three. Beyond three only the module proxy (Lookup) is asked.
+	BackfillMajors int
 	// Lookup, when set, finds the latest release of a module with no stored release, so
 	// backfill reaches a module nobody else imports. Nil asks nothing (see ReleaseLookup).
 	Lookup ReleaseLookup

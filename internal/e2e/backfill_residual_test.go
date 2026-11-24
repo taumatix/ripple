@@ -76,3 +76,35 @@ func TestBackfillLookupSkipsARetractedLatest(t *testing.T) {
 		}
 	})
 }
+
+// A module that skipped past the three near majors is found when RIPPLE_BACKFILL_MAJORS reaches
+// it: the proxy is asked path by path, and the PR goes to the newest major it knows.
+func TestBackfillFindsAFarMajorWhenTheProbeIsRaised(t *testing.T) {
+	forEach(t, func(t *testing.T, st store.Store) {
+		e := backfillEnv(t, st, "", "example.com/far")
+		e.app.Engine.Lookup = &feed.GoProxyLookup{BaseURL: e.proxy.URL}
+		stubModule(e, "example.com/far/v6", "v6.1.0")
+		e.app.Engine.BackfillMajors = 8
+		e.importAll("example.com/far")
+		e.tick()
+		prs := e.gh.PRs(backfillApp)
+		if len(prs) != 1 || !strings.Contains(prs[0].Title, "example.com/far/v6") || !strings.HasSuffix(prs[0].Title, " v6.1.0") {
+			t.Fatalf("want one PR to example.com/far/v6 v6.1.0, got %+v", prs)
+		}
+	})
+}
+
+// Left at the default the probe stops at three majors, so the same far major is not reached.
+func TestBackfillDefaultProbeStopsAtThreeMajors(t *testing.T) {
+	forEach(t, func(t *testing.T, st store.Store) {
+		e := backfillEnv(t, st, "", "example.com/far")
+		e.app.Engine.Lookup = &feed.GoProxyLookup{BaseURL: e.proxy.URL}
+		stubModule(e, "example.com/far/v6", "v6.1.0")
+		e.importAll("example.com/far")
+		e.tick()
+		prs := e.gh.PRs(backfillApp)
+		if len(prs) != 1 || strings.Contains(prs[0].Title, "/v6") {
+			t.Fatalf("want one in-major PR, got %+v", prs)
+		}
+	})
+}

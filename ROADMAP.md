@@ -163,14 +163,18 @@ Everything else:
     e2e runs two replicas; neither is a real multi-node Postgres or DynamoDB under load, or with a skewed clock.
     Run three replicas against both with a clock offset and check one PR per job and ordered events.
 113. **DynamoDB: throttling and index lag against a real table.** `ThrottleNext` and `HoldIndex` model the errors and
-    the stale reads, not their timing or frequency, and DynamoDB Local throttles and lags neither. Run the sharded
-    and striped paths against a real on-demand table once (a throwaway account, a bounded run) and record the
-    retry counts, the index lag a recount or a `ListDependents` sees, and whether the SDK's three attempts are
-    enough for a burst.
+    the stale reads, not their timing or frequency. DynamoDB Local and the AWS Emulator (verified 2026-11-24, see
+    [docs/aws-emulator.md](docs/aws-emulator.md)) both pass the whole store suite but neither throttles nor lags
+    its index, so the sharded and striped paths are now checked for correctness against two backends and still for
+    behaviour under load against none. Run them against a real on-demand table once (a throwaway account, a
+    bounded run) and record the retry counts, the index lag a recount or a `ListDependents` sees, and whether the
+    SDK's three attempts are enough for a burst.
 114. **DynamoDB: tune and measure counter striping.** `RIPPLE_DYNAMODB_COUNTER_STRIPES` defaults to 1 and the
-    estimate that avoids summing the stripes on every write is a heuristic. Measure write throttling on one hot
-    package with and without stripes, choose a default or document how to size `n` from the dependent count, and
-    consider batching the counter per scan (already one ADD per package per scan) before striping.
+    estimate that avoids summing the stripes on every write is a heuristic. The emulator proves stripes stay
+    correct (TestDynamoCounterStripes* pass against it) but has no throttling model, so it cannot say whether
+    stripes relieve a hot partition; that needs a real table. Measure write throttling on one hot package with and
+    without stripes, choose a default or document how to size `n` from the dependent count, and consider batching
+    the counter per scan (already one ADD per package per scan) before striping.
 118. **Workspace-only graphs against a real repo.** A requirement on a sibling at a version no proxy serves
     still opens a draft: with the workspace on, Go reads the sibling's `.mod` at the required version and gets a 404
     (reproduced against the fake proxy). `go work sync` is skipped for such workspaces and a member's own `vendor/`
@@ -336,7 +340,7 @@ Everything else:
     `simple=true` listing under `archived=true` answers what the doc says, and that a Data Center before 8.0 lists no
     archived repo. Folds into entry 92's real-host run.
 176. **DynamoDB hygiene: measure it, and stop scanning for the package list.** Paging and the server's drift check (entry 145)
-    exist but were only run against the in-process fake and DynamoDB Local; nobody has timed a Scan or a per-package recount
+    exist but were only run against the in-process fake, DynamoDB Local and the AWS Emulator (in-memory, so its timings say nothing about AWS); nobody has timed a Scan or a per-package recount
     on a table with millions of items, or on real AWS with provisioned capacity, so the suggested page and pause are
     arithmetic, not measurement. The check still finds the packages by Scanning every item for `DEP#` keys: keep the set of
     packages with dependents in a small index item (or a sparse GSI) so the check reads that instead. The server only

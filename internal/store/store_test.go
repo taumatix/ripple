@@ -82,7 +82,13 @@ func eachDynamo(t *testing.T, fn func(t *testing.T, db *dynamodb.Client, fake *d
 		t.Cleanup(f.Close)
 		fn(t, dynamoSDK(t, f.URL()), f)
 	})
-	t.Run("dynamodb-local", func(t *testing.T) {
+	// The subtest takes its name from RIPPLE_TEST_DYNAMODB_BACKEND ("emulator" for the AWS Emulator
+	// job) so scripts/check-dynamo-parity.sh --backend can compare the fake with that backend.
+	backend := os.Getenv("RIPPLE_TEST_DYNAMODB_BACKEND")
+	if backend == "" {
+		backend = "dynamodb-local"
+	}
+	t.Run(backend, func(t *testing.T) {
 		ep := os.Getenv("RIPPLE_TEST_DYNAMODB_ENDPOINT")
 		if ep == "" {
 			testutil.SkipUnlessRequired(t, "RIPPLE_TEST_DYNAMODB_ENDPOINT not set; skipping the DynamoDB Local run (CI runs it)")

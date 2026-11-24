@@ -75,6 +75,17 @@ client trusts by default, and `CreateBranch` was a 501 stub (`things-that-do-not
 ripple's git-over-HTTPS path (the SigV4-derived git password) can be driven against it is decided by the job in
 ROADMAP 16, not assumed here.
 
+## Result of the first run (2026-11-24, emulator 1.0.598)
+
+The `emulator` workflow ran `./internal/store/...`, `./internal/e2e/...` and `./internal/app/...` with
+`--auth off --telemetry off`. All 95 DynamoDB store subtests passed on both the fake and the emulator, including the
+sharding, counter-stripe, recount, backfill and hygiene-scan tests, and `scripts/check-dynamo-parity.sh --backend
+emulator` found the two runs identical. No divergence between `dynamofake` and the emulator turned up, so neither
+the fake nor ripple changed. The emulator's own list of failing validation-order cases did not touch any call ripple makes.
+
+This is correctness evidence only. The emulator is in-memory and has no throttling model, so ROADMAP 113, 114 and 176
+keep their measurement halves for a real table.
+
 ## What it cannot tell us
 
 - **Throttling and capacity.** The emulator documents no throttling model. A clean run says nothing about the

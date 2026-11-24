@@ -58,7 +58,7 @@ upstream:
     format: "GET {index}/pypi/{PEP 503 normalized name}/json, anonymous; releases maps a version to its files, each with yanked"
     verified-against: "docs/vendor/pip excerpts read 2026-11-23; tests use internal/testutil/pypi.go, a fake written from them"
     verified-live: "2026-11-24 (go test -tags live ./internal/pypi): pypi.org answers the JSON API with `releases` (still present) for Typing_Extensions and zope.interface without the caller normalising; requests 2.32.0 and 2.32.1 are yanked and not proposed, 2.15.0 has no files and is not proposed; django pre-releases are skipped; a missing project is 404; every version of django, requests, numpy and setuptools parses with the PEP 440 code"
-    unverified: "private indexes, rate limits, the largest projects, whether `releases` (documented as deprecated) is kept; PEP 440 ordering was not compared with the packaging library (only parse and antisymmetry were checked on that corpus); requirements files and TOML are read by a scanner as far as docs/pip.md says"
+    unverified: "private indexes, rate limits, the largest projects, whether `releases` (documented as deprecated) is kept; PEP 440 ordering and specifiers were compared with packaging 26.4 through a recorded vector table (internal/pypi/testdata/pep440.json), not live; requirements files and TOML are read by a scanner as far as docs/pip.md says"
     checked: 2026-11-24
   - name: github-enterprise-server
     kind: http-api

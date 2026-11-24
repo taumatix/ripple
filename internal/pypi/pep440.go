@@ -121,7 +121,42 @@ func Compare(a, b Version) int {
 	if c := cmpInt(a.DevN, b.DevN); c != 0 && a.Dev {
 		return c
 	}
-	return strings.Compare(a.Local, b.Local)
+	return compareLocal(a.Local, b.Local)
+}
+
+// compareLocal orders local version labels (PEP 440, "Local version identifiers"):
+// segments split on ".", "-" or "_"; a numeric segment sorts above an alphanumeric
+// one and numerically against another; text compares lower-cased; with all common
+// segments equal the longer label is greater; no label sorts below any label.
+func compareLocal(a, b string) int {
+	if a == "" || b == "" {
+		return cmpInt(len(a), len(b))
+	}
+	as, bs := localSegments(a), localSegments(b)
+	for i := 0; i < len(as) && i < len(bs); i++ {
+		x, y := as[i], bs[i]
+		xn, xerr := strconv.Atoi(x)
+		yn, yerr := strconv.Atoi(y)
+		switch {
+		case xerr == nil && yerr == nil:
+			if c := cmpInt(xn, yn); c != 0 {
+				return c
+			}
+		case xerr == nil:
+			return 1
+		case yerr == nil:
+			return -1
+		default:
+			if c := strings.Compare(x, y); c != 0 {
+				return c
+			}
+		}
+	}
+	return cmpInt(len(as), len(bs))
+}
+
+func localSegments(s string) []string {
+	return strings.FieldsFunc(s, func(r rune) bool { return r == '.' || r == '-' || r == '_' })
 }
 
 // preRank: a release with only a dev segment (1.0.dev1) sorts below every

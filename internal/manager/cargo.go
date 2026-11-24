@@ -16,23 +16,27 @@ import (
 // operator: `serde = "1.0.100"` follows to `"1.0.200"`, `"~1.2.3"` to `"~1.2.9"`.
 //
 // Read: [dependencies], [dev-dependencies], [build-dependencies], their
-// [target.<cfg>.*] forms and [workspace.dependencies]; each as `name = "req"`, as a
-// one-line inline table `name = { version = "req", ... }`, or as a
-// `[dependencies.name]` table with a `version` key. A `package = "real"` key names the
-// crate the index knows.
+// [target.<cfg>.*] forms and [workspace.dependencies], written in any way TOML allows:
+// `name = "req"`, an inline table `name = { version = "req", ... }` (on one line or
+// several), a dotted key `name.version = "req"`, or a `[dependencies.name]` table with a
+// `version` key. A `package = "real"` key names the crate the index knows.
 //
-// Only a requirement ripple can read with certainty is tracked: one to three numeric
-// parts with no operator (cargo's caret default), `^`, `~` or `=` ("1", "1.2", "1.2.3").
-// A partial requirement keeps its precision when it moves ("1.2" follows 1.5.3 to "1.5").
-// Wildcards, comparators, prereleases, multi-part requirements and multi-line inline
-// tables are left alone, and so is every dependency with a `path`, `git` or `registry` key or
-// `workspace = true` (it has no version of its own). A bumped requirement is raised to
-// the new version even when it already allowed it, because without a Cargo.lock
-// refresh that is the only change a PR can carry (a partial requirement that already
-// names the new version at its precision is not touched).
+// A requirement ripple can read with certainty is tracked (see CargoReq): one to three
+// numeric parts with no operator (cargo's caret default), `^`, `~`, `=` or `>=`
+// ("1", "1.2", "1.2.3"), optionally followed by upper bounds (`>=1.2, <2`), and a
+// trailing wildcard (`1.*`, `1.2.*`). A partial requirement keeps its precision when it
+// moves ("1.2" follows 1.5.3 to "1.5"). Prereleases, `>`, `<` alone, a bare `*` and a
+// requirement with more than one lower bound are left alone, and so is every dependency
+// with a `path`, `git` or `registry` key or `workspace = true` (it has no version of its
+// own). A bumped requirement is raised to the new version even when it already allowed
+// it, because without a Cargo.lock refresh that is the only change a PR can carry (a
+// partial requirement that already names the new version at its precision is not
+// touched; a wildcard moves only to a version it does not already match).
 //
-// The file is edited in place: only the string of the requirement changes. Cargo.lock
-// is neither read nor written (see the engine's lockfile note).
+// The file is read with a TOML scanner that keeps byte offsets and edited in place: only
+// the string of the requirement changes, so comments, layout and key order stay. A file
+// that is not valid TOML is not read. Cargo.lock is neither read nor written (see the
+// engine's lockfile note).
 //
 // The dependency's Package is the crate name and its Version the requirement as
 // written. Apply takes the new bare version ("1.0.200").
@@ -54,32 +58,98 @@ func (c Cargo) Matches(p string) bool {
 	return true
 }
 
-var cargoReqRE = regexp.MustCompile(`^([\^~=]?)(\d+)(?:\.(\d+))?(?:\.(\d+))?$`)
+var (
+	cargoPrimaryRE = regexp.MustCompile(`^(\^|~|=|>=)?\s*(\d+)(?:\.(\d+))?(?:\.(\d+))?$`)
+	cargoWildRE    = regexp.MustCompile(`^(\d+)(?:\.(\d+))?\.\*$`)
+	cargoUpperRE   = regexp.MustCompile(`^(<=|<)\s*(\d+)(?:\.(\d+))?(?:\.(\d+))?$`)
+)
 
-// CargoReq is a single-comparator requirement ripple moves: an optional `^`, `~` or `=`
-// and one to three numeric parts ("1", "1.2", "1.2.3"). Wildcards, comparators and
-// multi-part requirements are not CargoReqs.
+// CargoReq is a requirement ripple moves: one lower bound, written as an optional `^`,
+// `~`, `=` or `>=` and one to three numeric parts ("1", "1.2", "1.2.3"), or as a
+// wildcard with one or two parts before it ("1.*", "1.2.*"); a lower bound may be
+// followed by upper bounds ("<2", "<=1.5"), which only limit the versions it moves to.
+// A bare `*`, a `>` or `<` on its own and several lower bounds are not CargoReqs.
 type CargoReq struct {
-	Op    string
-	Parts []int // 1 to 3 numbers, as written
+	Op    string // "", "^", "~", "=" or ">="
+	Parts []int  // 1 to 3 numbers of the lower bound, as written
+	// Wild says the lower bound is a wildcard: Parts are the numbers before the `.*`.
+	Wild bool
+
+	raw    string // the requirement as written
+	vs, ve int    // the span of raw that holds the lower bound's version text
+	upper  []cargoBound
 }
 
-// ParseCargoReq reads spec as a CargoReq; false when it is something else.
-func ParseCargoReq(spec string) (CargoReq, bool) {
-	m := cargoReqRE.FindStringSubmatch(spec)
-	if m == nil {
-		return CargoReq{}, false
-	}
-	r := CargoReq{Op: m[1]}
-	for _, p := range m[2:] {
+// cargoBound is an upper bound: `<parts` or `<=parts`.
+type cargoBound struct {
+	orEqual bool
+	parts   []int
+}
+
+func cargoNums(m []string) ([]int, bool) {
+	var out []int
+	for _, p := range m {
 		if p == "" {
 			break
 		}
 		n, err := strconv.Atoi(p)
 		if err != nil {
+			return nil, false
+		}
+		out = append(out, n)
+	}
+	return out, true
+}
+
+// ParseCargoReq reads spec as a CargoReq; false when it is something else.
+func ParseCargoReq(spec string) (CargoReq, bool) {
+	r := CargoReq{raw: spec}
+	var primary bool
+	off := 0
+	for _, comp := range strings.Split(spec, ",") {
+		start := off
+		off += len(comp) + 1
+		lead := len(comp) - len(strings.TrimLeft(comp, " \t"))
+		comp = strings.TrimSpace(comp)
+		if comp == "" {
 			return CargoReq{}, false
 		}
-		r.Parts = append(r.Parts, n)
+		if m := cargoUpperRE.FindStringSubmatch(comp); m != nil {
+			nums, ok := cargoNums(m[2:])
+			if !ok {
+				return CargoReq{}, false
+			}
+			r.upper = append(r.upper, cargoBound{orEqual: m[1] == "<=", parts: nums})
+			continue
+		}
+		if primary {
+			return CargoReq{}, false // a second lower bound
+		}
+		primary = true
+		start += lead
+		if m := cargoWildRE.FindStringSubmatch(comp); m != nil {
+			nums, ok := cargoNums(m[1:])
+			if !ok {
+				return CargoReq{}, false
+			}
+			r.Parts, r.Wild = nums, true
+			r.vs, r.ve = start, start+len(comp)
+			continue
+		}
+		m := cargoPrimaryRE.FindStringSubmatch(comp)
+		if m == nil {
+			return CargoReq{}, false
+		}
+		nums, ok := cargoNums(m[2:])
+		if !ok {
+			return CargoReq{}, false
+		}
+		r.Op, r.Parts = m[1], nums
+		rest := comp[len(m[1]):]
+		r.vs, r.ve = start+len(comp)-len(strings.TrimLeft(rest, " \t")), start+len(comp)
+	}
+	if !primary || (r.Wild && len(r.upper) > 0) {
+		return CargoReq{}, false
 	}
 	return r, true
 }
@@ -91,14 +161,83 @@ func (r CargoReq) Floor() string {
 	return fmt.Sprintf("%d.%d.%d", v[0], v[1], v[2])
 }
 
-// Text is the requirement that follows version at the precision written: the operator is
-// kept and a partial requirement stays partial ("1.2" and 1.5.3 give "1.5").
+// Text is the requirement that follows version at the precision written: the operator,
+// spacing and upper bounds are kept and a partial requirement stays partial ("1.2" and
+// 1.5.3 give "1.5", "1.*" and 2.4.0 give "2.*").
 func (r CargoReq) Text(version string) string {
 	parts := strings.Split(version, ".")
 	if len(parts) > len(r.Parts) {
 		parts = parts[:len(r.Parts)]
 	}
-	return r.Op + strings.Join(parts, ".")
+	moved := strings.Join(parts, ".")
+	if r.Wild {
+		moved += ".*"
+	}
+	return r.raw[:r.vs] + moved + r.raw[r.ve:]
+}
+
+// Applicable says whether version, a release, is something the requirement can move to:
+// newer than its floor, inside its upper bounds, not already the version at the
+// precision written ("1.2" for 1.2.9), and for a wildcard outside what it matches
+// already ("1.*" moves only to 2.0.0 or later).
+func (r CargoReq) Applicable(version string) bool {
+	v, ok := cargoVersion(version)
+	if !ok {
+		return false
+	}
+	floor, _ := cargoVersion(r.Floor())
+	if cargoCompare(v[:], floor[:]) <= 0 {
+		return false
+	}
+	if r.Wild {
+		return cargoCompare(v[:len(r.Parts)], r.Parts) != 0
+	}
+	for _, b := range r.upper {
+		if !b.allows(v) {
+			return false
+		}
+	}
+	return len(r.Parts) == 3 || r.Text(version) != r.raw
+}
+
+func (b cargoBound) allows(v [3]int) bool {
+	c := cargoCompare(v[:len(b.parts)], b.parts)
+	switch {
+	case b.orEqual:
+		return c <= 0 // `<=1.5` takes all of 1.5.x
+	case len(b.parts) < 3:
+		padded := append(append([]int(nil), b.parts...), make([]int, 3-len(b.parts))...)
+		return cargoCompare(v[:], padded) < 0
+	}
+	return c < 0
+}
+
+func cargoVersion(s string) ([3]int, bool) {
+	var v [3]int
+	parts := strings.Split(s, ".")
+	if len(parts) != 3 {
+		return v, false
+	}
+	for i, p := range parts {
+		n, err := strconv.Atoi(p)
+		if err != nil {
+			return v, false
+		}
+		v[i] = n
+	}
+	return v, true
+}
+
+func cargoCompare(a, b []int) int {
+	for i := range a {
+		if a[i] != b[i] {
+			if a[i] < b[i] {
+				return -1
+			}
+			return 1
+		}
+	}
+	return 0
 }
 
 // Breaking is the position (0 major, 1 minor, 2 patch) of the leftmost nonzero number
@@ -132,192 +271,66 @@ type cargoEntry struct {
 	start, end int
 }
 
-// cargoField is one `key = value` of an inline or named table.
-type cargoField struct {
-	str        string
-	isStr      bool
-	start, end int // the value, quotes included for a string
-}
-
-// cargoDepTable classifies a table header's segments: sect says it is a dependency
-// table, name is set for `[dependencies.name]`.
-func cargoDepTable(segs []string) (sect bool, name string) {
-	if len(segs) > 0 && segs[0] == "workspace" {
-		segs = segs[1:]
-	} else if len(segs) > 1 && segs[0] == "target" {
-		segs = segs[2:]
-	}
-	if len(segs) == 0 {
-		return false, ""
-	}
-	switch segs[0] {
-	case "dependencies", "dev-dependencies", "build-dependencies":
-	default:
-		return false, ""
-	}
-	switch len(segs) {
-	case 1:
-		return true, ""
-	case 2:
-		return true, segs[1]
-	}
-	return false, ""
-}
-
-// tomlSplit splits s on sep outside quotes and brackets.
-func tomlSplit(s string, sep byte) []string {
-	var out []string
-	var quote byte
-	depth, from := 0, 0
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		switch {
-		case quote != 0:
-			if c == quote {
-				quote = 0
-			}
-		case c == '"' || c == '\'':
-			quote = c
-		case c == '[' || c == '{':
-			depth++
-		case c == ']' || c == '}':
-			depth--
-		case c == sep && depth == 0:
-			out = append(out, s[from:i])
-			from = i + 1
-		}
-	}
-	return append(out, s[from:])
-}
-
-func tomlUnquote(s string) string {
-	s = strings.TrimSpace(s)
-	if len(s) >= 2 && (s[0] == '"' || s[0] == '\'') && s[len(s)-1] == s[0] {
-		return s[1 : len(s)-1]
-	}
-	return s
-}
-
-// tomlStripComment cuts a trailing # comment that is outside quotes.
-func tomlStripComment(s string) string {
-	var quote byte
-	for i := 0; i < len(s); i++ {
-		switch c := s[i]; {
-		case quote != 0:
-			if c == quote {
-				quote = 0
-			}
-		case c == '"' || c == '\'':
-			quote = c
-		case c == '#':
-			return s[:i]
-		}
-	}
-	return s
-}
-
-// tomlValue parses a scalar's text at content[start:end] (trimmed) as a field.
-func tomlValue(content string, start, end int) cargoField {
-	for start < end && (content[start] == ' ' || content[start] == '\t') {
-		start++
-	}
-	for end > start && (content[end-1] == ' ' || content[end-1] == '\t' || content[end-1] == '\r') {
-		end--
-	}
-	f := cargoField{start: start, end: end}
-	if end-start >= 2 && (content[start] == '"' || content[start] == '\'') && content[end-1] == content[start] && !strings.ContainsRune(content[start+1:end-1], rune(content[start])) && !strings.Contains(content[start+1:end-1], `\`) {
-		f.isStr, f.str = true, content[start+1:end-1]
-	}
-	return f
-}
+// cargoDepSections are the tables whose members are dependencies.
+var cargoDepSections = map[string]bool{"dependencies": true, "dev-dependencies": true, "build-dependencies": true}
 
 // cargoEntries lists the requirements ripple can read, in file order.
 func cargoEntries(content []byte) ([]cargoEntry, error) {
-	src := string(content)
-	var out []cargoEntry
-	var (
-		inSect   bool
-		named    string // crate key of a [dependencies.name] table
-		table    map[string]cargoField
-		finishCt = func() {
-			if named != "" {
-				out = appendCargo(out, named, table)
-			}
-			named, table = "", nil
-		}
-	)
-	for off := 0; off < len(src); {
-		nl := strings.IndexByte(src[off:], '\n')
-		lineEnd := len(src)
-		if nl >= 0 {
-			lineEnd = off + nl
-		}
-		line, lineStart := src[off:lineEnd], off
-		off = lineEnd + 1
-		trim := strings.TrimSpace(tomlStripComment(line))
-		if trim == "" {
-			continue
-		}
-		if strings.HasPrefix(trim, "[") {
-			finishCt()
-			inSect = false
-			if strings.HasPrefix(trim, "[[") || !strings.HasSuffix(trim, "]") {
-				continue
-			}
-			var segs []string
-			for _, s := range tomlSplit(trim[1:len(trim)-1], '.') {
-				segs = append(segs, tomlUnquote(s))
-			}
-			sect, name := cargoDepTable(segs)
-			if sect && name == "" {
-				inSect = true
-			} else if sect {
-				named, table = name, map[string]cargoField{}
-			}
-			continue
-		}
-		key, rest, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
-		key = tomlUnquote(key)
-		eq := lineStart + strings.IndexByte(line, '=') + 1
-		valEnd := lineStart + len(tomlStripComment(line))
-		switch {
-		case named != "":
-			table[key] = tomlValue(src, eq, valEnd)
-		case inSect:
-			if strings.Contains(key, ".") {
-				continue // dotted keys (`foo.version = ...`) are not read
-			}
-			v := strings.TrimSpace(tomlStripComment(rest))
-			if strings.HasPrefix(v, "{") {
-				if !strings.HasSuffix(v, "}") {
-					continue // a multi-line inline table: not read
-				}
-				fields := map[string]cargoField{}
-				bodyStart := eq + strings.Index(src[eq:valEnd], "{") + 1
-				bodyEnd := eq + strings.LastIndex(src[eq:valEnd], "}")
-				body := src[bodyStart:bodyEnd]
-				pos := bodyStart
-				for _, part := range tomlSplit(body, ',') {
-					if k, _, ok := strings.Cut(part, "="); ok {
-						fields[tomlUnquote(k)] = tomlValue(src, pos+strings.IndexByte(part, '=')+1, pos+len(part))
-					}
-					pos += len(part) + 1
-				}
-				out = appendCargo(out, key, fields)
-			} else {
-				out = appendCargo(out, key, map[string]cargoField{"version": tomlValue(src, eq, valEnd)})
-			}
-		}
+	leaves, err := tomlScan(string(content))
+	if err != nil {
+		return nil, err
 	}
-	finishCt()
+	type dep struct {
+		key    string
+		fields map[string]tomlLeaf
+	}
+	var order []*dep
+	byKey := map[string]*dep{}
+	for _, l := range leaves {
+		i := cargoDepIndex(l.path)
+		if i < 0 || len(l.path) < i+2 || len(l.path) > i+3 {
+			continue
+		}
+		id := strings.Join(l.path[:i+2], "\x01")
+		d := byKey[id]
+		if d == nil {
+			d = &dep{key: l.path[i+1], fields: map[string]tomlLeaf{}}
+			byKey[id] = d
+			order = append(order, d)
+		}
+		field := "version"
+		if len(l.path) == i+3 {
+			field = l.path[i+2]
+		} else if len(l.path) == i+2 && !l.isStr {
+			continue // `name = [..]` or a number: not a requirement
+		}
+		d.fields[field] = l
+	}
+	var out []cargoEntry
+	for _, d := range order {
+		out = appendCargo(out, d.key, d.fields)
+	}
 	return out, nil
 }
 
+// cargoDepIndex is the position of the dependency-section segment in a key path
+// (`dependencies`, `workspace.dependencies`, `target.<cfg>.dev-dependencies`), or -1.
+func cargoDepIndex(path []string) int {
+	i := 0
+	switch {
+	case len(path) > 0 && path[0] == "workspace":
+		i = 1
+	case len(path) > 1 && path[0] == "target":
+		i = 2
+	}
+	if i < len(path) && cargoDepSections[path[i]] {
+		return i
+	}
+	return -1
+}
+
 // appendCargo adds the entry a dependency's fields describe, if it is trackable.
-func appendCargo(out []cargoEntry, key string, f map[string]cargoField) []cargoEntry {
+func appendCargo(out []cargoEntry, key string, f map[string]tomlLeaf) []cargoEntry {
 	for _, k := range []string{"path", "git", "registry", "workspace"} {
 		if _, ok := f[k]; ok {
 			return out

@@ -66,7 +66,7 @@ func TestCargoExtract(t *testing.T) {
 		}
 		got = append(got, d.Package+"@"+d.Version)
 	}
-	want := "serde@1.0.100 tokio@~1.2.3 short@1.2 real-name@=4.5.6 pretty_assertions@^1.4.0 cc@1.0.79 libc@0.2.150 anyhow@1.0.70"
+	want := "serde@1.0.100 tokio@~1.2.3 rand@>=0.8 short@1.2 real-name@=4.5.6 pretty_assertions@^1.4.0 cc@1.0.79 libc@0.2.150 anyhow@1.0.70"
 	if strings.Join(got, " ") != want {
 		t.Errorf("got  %v\nwant %s", got, want)
 	}
@@ -152,9 +152,128 @@ func TestCargoReqBreaking(t *testing.T) {
 			t.Errorf("%s: breaking position %d (parsed %v), want %d", spec, r.Breaking(), ok, want)
 		}
 	}
-	for _, spec := range []string{"*", "1.*", ">=1.2", ">=1, <2", "1.2.3-rc.1", "1.2.3.4", ""} {
+	for _, spec := range []string{"*", ">1.2", "<2", "<=1.2", ">=1, >=2", "1.*, <2", "1.2.3-rc.1", "1.2.3.4", "", ">=1,", "1.x"} {
 		if _, ok := ParseCargoReq(spec); ok {
 			t.Errorf("%q must not parse", spec)
+		}
+	}
+}
+
+func TestCargoReqComparatorsAndWildcards(t *testing.T) {
+	// spec, a version it moves to, the text it becomes ("" when it must not move).
+	for _, tc := range []struct{ spec, to, want string }{
+		{">=0.8", "0.9.1", ">=0.9"},
+		{">=1.2.3", "1.4.0", ">=1.4.0"},
+		{">= 1.2", "1.7.4", ">= 1.7"},
+		{">=1, <2", "1.9.0", ""}, // ">=1" already names 1.x at its precision
+		{">=1.2, <2", "1.9.0", ">=1.9, <2"},
+		{">=1.2,<2", "1.9.0", ">=1.9,<2"},
+		{">=1.2, <2", "2.0.0", ""}, // the upper bound is a decision, never moved
+		{">=1.2.0, <=1.5.0", "1.5.0", ">=1.5.0, <=1.5.0"},
+		{">=1.2.0, <=1.5.0", "1.5.1", ""},
+		{">=1.2.0, <=1.5", "1.5.9", ">=1.5.9, <=1.5"}, // <=1.5 takes all of 1.5.x
+		{">=1.2.0, <1.5", "1.5.0", ""},
+		{"^1.2.3, <1.5", "1.4.2", "^1.4.2, <1.5"},
+		{"1.*", "2.0.0", "2.*"},
+		{"1.*", "1.9.0", ""}, // already matched
+		{"1.2.*", "1.3.0", "1.3.*"},
+		{"1.2.*", "1.2.9", ""},
+		{"1.2.*", "2.0.1", "2.0.*"},
+		{"0.*", "1.0.0", "1.*"},
+		{"1.*", "0.9.0", ""}, // older
+	} {
+		r, ok := ParseCargoReq(tc.spec)
+		if !ok {
+			t.Errorf("%q must parse", tc.spec)
+			continue
+		}
+		got := ""
+		if r.Applicable(tc.to) {
+			got = r.Text(tc.to)
+		}
+		if got != tc.want {
+			t.Errorf("%q -> %s: got %q, want %q", tc.spec, tc.to, got, tc.want)
+		}
+	}
+	if r, _ := ParseCargoReq("1.2.*"); !r.Wild || r.Floor() != "1.2.0" || r.Breaking() != 0 {
+		t.Errorf("wildcard parse: %+v", r)
+	}
+}
+
+// Every way TOML spells a dependency is read, and an edit changes the requirement's
+// string and nothing else.
+func TestCargoReadsEveryTOMLSpelling(t *testing.T) {
+	src := "# header\r\n[dependencies]\r\n" +
+		"multi = {\n  version = \"1.2.3\", # why\n  features = [\"a\", \"b\"],\n}\n" +
+		"dotted.version = \"2.0.0\"\n" +
+		"dotted.features = [\"x\"]\n" +
+		"'quoted' = 'literal-str-3.0.0'\n" +
+		"lit = { version = '4.0.0' }\n" +
+		"[dependencies.tbl]\n# c\nfeatures = [\"f\"]\nversion = \"5.0.0\"  # trailing\n" +
+		"[target.'cfg(target_os = \"linux\")'.dev-dependencies]\nlin = \"6.0.0\"\n" +
+		"[target.x86_64-pc-windows-msvc.build-dependencies]\nwin = \"7.0.0\"\n" +
+		"[[bin]]\nname = \"x\"\n" +
+		"[dependencies.skipped]\nversion = \"9.0.0\"\npath = \"../s\"\n" +
+		"[package.metadata]\nnotdep = \"8.0.0\"\n"
+	deps, err := Cargo{Dir: "/"}.Extract("Cargo.toml", []byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, d := range deps {
+		got = append(got, d.Package+"@"+d.Version)
+	}
+	// "quoted" holds a non-requirement string: tracked only if it parses.
+	want := "multi@1.2.3 dotted@2.0.0 lit@4.0.0 tbl@5.0.0 lin@6.0.0 win@7.0.0"
+	if strings.Join(got, " ") != want {
+		t.Fatalf("got  %v\nwant %s", got, want)
+	}
+	for _, tc := range []struct{ pkg, ver, to, from, into string }{
+		{"multi", "1.2.3", "1.2.4", `version = "1.2.3", # why`, `version = "1.2.4", # why`},
+		{"dotted", "2.0.0", "2.1.0", `dotted.version = "2.0.0"`, `dotted.version = "2.1.0"`},
+		{"lit", "4.0.0", "4.0.1", `version = '4.0.0'`, `version = '4.0.1'`},
+		{"tbl", "5.0.0", "5.0.2", `version = "5.0.0"  # trailing`, `version = "5.0.2"  # trailing`},
+		{"lin", "6.0.0", "6.1.0", `lin = "6.0.0"`, `lin = "6.1.0"`},
+		{"win", "7.0.0", "7.0.3", `win = "7.0.0"`, `win = "7.0.3"`},
+	} {
+		out, err := Cargo{Dir: "/"}.Apply([]byte(src), model.Dependency{File: "Cargo.toml", Package: tc.pkg, Version: tc.ver}, "", tc.to)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.pkg, err)
+		}
+		if want := strings.Replace(src, tc.from, tc.into, 1); string(out) != want {
+			t.Errorf("%s: only the requirement moves:\n%s", tc.pkg, out)
+		}
+	}
+}
+
+func TestCargoApplyComparatorsAndWildcardsInPlace(t *testing.T) {
+	in := "[dependencies]\na = \">=1.2, <2\"  # keep\nb = { version = \"1.*\", optional = true }\nc = \"1.2.*\"\n"
+	for _, tc := range []struct{ pkg, ver, to, from, into string }{
+		{"a", ">=1.2, <2", "1.9.0", `">=1.2, <2"  # keep`, `">=1.9, <2"  # keep`},
+		{"b", "1.*", "2.3.4", `"1.*", optional`, `"2.*", optional`},
+		{"c", "1.2.*", "1.4.0", `"1.2.*"`, `"1.4.*"`},
+	} {
+		out, err := Cargo{Dir: "/"}.Apply([]byte(in), model.Dependency{File: "Cargo.toml", Package: tc.pkg, Version: tc.ver}, "", tc.to)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.pkg, err)
+		}
+		if want := strings.Replace(in, tc.from, tc.into, 1); string(out) != want {
+			t.Errorf("%s:\n%s", tc.pkg, out)
+		}
+	}
+}
+
+func TestCargoInvalidTOMLIsAnError(t *testing.T) {
+	for _, src := range []string{
+		"[dependencies]\nserde = \"1.0\nx = 1\n",
+		"[dependencies\nserde = \"1\"\n",
+		"[dependencies]\nserde = \"1\"\nserde = \"2\"\n",
+		"[dependencies]\nserde \"1\"\n",
+		"[dependencies]\nserde = { version = \"1\" \n",
+		"[dependencies]\nserde = \"1\" junk\n",
+	} {
+		if _, err := (Cargo{Dir: "/"}).Extract("Cargo.toml", []byte(src)); err == nil {
+			t.Errorf("%q must not parse", src)
 		}
 	}
 }

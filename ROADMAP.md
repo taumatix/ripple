@@ -382,4 +382,3 @@ Everything else:
     results come back non-increasing and that `page_size=100` is honoured, and fail loudly if Hub changes, since ripple
     then silently falls back to the lexical list. Until it exists the option stays off by default. ghcr.io has no
     equivalent listing (OCI tags are lexical only), so `TagFloor` stays its only narrowing.
-

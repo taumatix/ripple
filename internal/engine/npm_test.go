@@ -28,7 +28,21 @@ func TestApplicableNpm(t *testing.T) {
 		{"1", "2.0.0", rules.Major, true},
 		{"1.x", "2.0.0", rules.Major, true},
 		{"*", "1.3.0", "", false},
-		{">=1.0.0", "1.3.0", "", false},
+		{">=1.0.0", "1.3.0", rules.Minor, true},
+		{">= 1.0.0", "1.3.0", rules.Minor, true},
+		{">=1", "1.3.0", "", false},
+		{">=1", "2.0.0", rules.Major, true},
+		{"<=1.0.0", "1.3.0", "", false},
+		{">1.0.0", "1.3.0", "", false},
+		{">=1.0.0 <2", "1.3.0", "", false},
+		{"1 - 2", "2.1.0", "", false},
+		{"^1.4.0 || ^2.0.0", "2.3.0", rules.Minor, true},
+		{"^1.4.0 || ^2.0.0", "1.9.0", "", false}, // below the newest alternative
+		{"^2.0.0 || ^1.4.0", "2.3.0", rules.Minor, true},
+		{"^1.2 || ^2.0", "2.0.5", "", false},
+		{"^1 || ^2", "2.5.0", "", false}, // "^2" already names it at its precision
+		{"^1.0.0 || *", "2.0.0", "", false},
+		{"^1.0.0 ||", "2.0.0", "", false},
 	} {
 		got, ok := applicableNpm(dep(c.cur), "left-pad", c.next)
 		if got != c.want || ok != c.ok {

@@ -33,12 +33,12 @@ func applicableNpm(d model.Dependency, pkg, version string) (rules.UpdateType, b
 	if d.Datasource != model.DatasourceNpm || d.Package != pkg {
 		return "", false
 	}
-	rng, ok := manager.ParseNpmRange(d.Version)
+	rng, ok := manager.ParseNpmSpec(d.Version)
 	if !ok {
 		return "", false
 	}
 	typ, ok := rules.Classify("v"+rng.Floor(), "v"+version)
-	if !ok || (len(rng.Parts) < 3 && rng.Text(version) == d.Version) {
+	if !ok || (rng.Text(version) == d.Version && len(rng.Moving().Parts) < 3) {
 		return "", false
 	}
 	return typ, true

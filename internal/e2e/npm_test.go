@@ -210,3 +210,52 @@ func TestNpmPartialRangesAndTargetPerUpdateType(t *testing.T) {
 		}
 	})
 }
+
+// A `>=` floor and a `||` union move through a real run: the floor of a comparator is
+// raised, and in a union only the newest alternative follows while the older ones keep
+// their bytes. Compound, hyphen and upper-bound ranges stay untouched.
+func TestNpmComparatorsAndUnions(t *testing.T) {
+	forEach(t, func(t *testing.T, st store.Store) {
+		e, reg := npmEnv(t, st)
+		for pkg, v := range map[string]string{"cmp": "1.2.3", "uni": "2.0.0", "spaced": "1.0.0", "compound": "1.0.0", "hyph": "1.0.0", "upper": "1.0.0"} {
+			reg.Publish(pkg, v)
+		}
+		pj := "{\n  \"dependencies\": {\n    \"cmp\": \">=1.2.3\",\n    \"uni\": \"^1.4.0  ||  ~2.0.0\",\n    \"spaced\": \">= 1.0.0\",\n" +
+			"    \"compound\": \">=1.0.0 <2\",\n    \"hyph\": \"1 - 2\",\n    \"upper\": \"<=1.0.0\"\n  }\n}\n"
+		e.gh.AddRepo("acme/app", map[string]string{".ripple.yaml": npmConfig, "package.json": pj})
+		start(t, e, "acme/app")
+		if n := len(e.deps("acme/app")); n != 3 {
+			t.Fatalf("cmp, uni and spaced are tracked, got %+v", e.deps("acme/app"))
+		}
+		e.clock.Advance(time.Minute)
+		reg.Publish("cmp", "1.5.0")
+		reg.Publish("uni", "2.1.0")
+		reg.Publish("spaced", "1.1.0")
+		for _, p := range []string{"compound", "hyph", "upper"} {
+			reg.Publish(p, "1.5.0")
+		}
+		e.tick()
+		e.tick()
+		prs := e.gh.PRs("acme/app")
+		if len(prs) != 3 {
+			t.Fatalf("PRs for cmp, uni and spaced only, got %d", len(prs))
+		}
+		for _, pr := range prs {
+			got, _ := e.gh.FileAt("acme/app", pr.Head, "package.json")
+			var from, to string
+			switch {
+			case strings.Contains(pr.Head, "cmp"):
+				from, to = `">=1.2.3"`, `">=1.5.0"`
+			case strings.Contains(pr.Head, "uni"):
+				from, to = `"^1.4.0  ||  ~2.0.0"`, `"^1.4.0  ||  ~2.1.0"`
+			case strings.Contains(pr.Head, "spaced"):
+				from, to = `">= 1.0.0"`, `">= 1.1.0"`
+			default:
+				t.Fatalf("unexpected branch %q", pr.Head)
+			}
+			if want := strings.Replace(pj, from, to, 1); got != want {
+				t.Errorf("%s:\n%s", pr.Head, got)
+			}
+		}
+	})
+}

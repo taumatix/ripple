@@ -52,8 +52,8 @@ func TestPipRequirementsExtract(t *testing.T) {
 		}
 		got = append(got, d.Package+d.Version)
 	}
-	// numpy is a floor with an upper bound (tracked); pandas has a wildcard, django a prerelease: not tracked.
-	want := "requests==2.31.0 flask-login~=0.6.2 click>=8.0 numpy>=1.20,<2 legacy==1.0"
+	// numpy is a floor with an upper bound (tracked); pandas is a `==2.*` wildcard (tracked, moves past its prefix), django a prerelease: not tracked.
+	want := "requests==2.31.0 flask-login~=0.6.2 click>=8.0 numpy>=1.20,<2 pandas==2.* legacy==1.0"
 	if strings.Join(got, " ") != want {
 		t.Errorf("got  %v\nwant %s", got, want)
 	}
@@ -179,7 +179,7 @@ func TestPipSpecFloorForms(t *testing.T) {
 	for spec, want := range map[string]string{
 		"==2.31.0": "2.31.0==", "~=8.1": "8.1~=", ">=8.0": "8.0>=", "^1.2.3": "1.2.3^", "~1.2": "1.2~", "1.2.3": "1.2.3",
 		">=1.20,<2": "1.20>=", "<2,>=1.20": "1.20>=", ">=1,<2,!=1.5.*": "1>=",
-		"~=3": "", "==1.*": "", ">=1,==1.2": "", ">=1,>=2": "", "<2": "", "!=1": "", ">=1,<2rc1": "1>=", "^1.*": "", "*": "",
+		"~=3": "", "==1.*": "1==*", "==1.2.*": "1.2==*", "==1.2.3.4.*": "", "==*": "", ">=1,==1.2": "", ">=1,>=2": "", "<2": "", "!=1": "", ">=1,<2rc1": "1>=", "^1.*": "", "*": "",
 	} {
 		floor, op := PipSpecFloor(spec)
 		if floor+op != want {

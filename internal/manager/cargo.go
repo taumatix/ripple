@@ -15,7 +15,7 @@ import (
 // Cargo moves the version requirements of a Cargo.toml's dependencies, keeping the
 // operator: `serde = "1.0.100"` follows to `"1.0.200"`, `"~1.2.3"` to `"~1.2.9"`.
 //
-// Read: [dependencies], [dev-dependencies], [build-dependencies], their
+// Read: [dependencies], [dev-dependencies], [build-dependencies] (and cargo's deprecated underscore spellings), their
 // [target.<cfg>.*] forms and [workspace.dependencies], written in any way TOML allows:
 // `name = "req"`, an inline table `name = { version = "req", ... }` (on one line or
 // several), a dotted key `name.version = "req"`, or a `[dependencies.name]` table with a
@@ -24,7 +24,7 @@ import (
 // A requirement ripple can read with certainty is tracked (see CargoReq): one to three
 // numeric parts with no operator (cargo's caret default), `^`, `~`, `=` or `>=`
 // ("1", "1.2", "1.2.3"), optionally followed by upper bounds (`>=1.2, <2`), and a
-// trailing wildcard (`1.*`, `1.2.*`). A partial requirement keeps its precision when it
+// trailing wildcard (`1.*`, `1.2.*`, and the `x`/`X` spellings, kept as written). A partial requirement keeps its precision when it
 // moves ("1.2" follows 1.5.3 to "1.5"). Prereleases, `>`, `<` alone, a bare `*` and a
 // requirement with more than one lower bound are left alone, and so is every dependency
 // with a `path`, `git` or `registry` key or `workspace = true` (it has no version of its
@@ -60,7 +60,7 @@ func (c Cargo) Matches(p string) bool {
 
 var (
 	cargoPrimaryRE = regexp.MustCompile(`^(\^|~|=|>=)?\s*(\d+)(?:\.(\d+))?(?:\.(\d+))?$`)
-	cargoWildRE    = regexp.MustCompile(`^(\d+)(?:\.(\d+))?\.\*$`)
+	cargoWildRE    = regexp.MustCompile(`^(\d+)(?:\.(\d+))?\.([*xX])$`)
 	cargoUpperRE   = regexp.MustCompile(`^(<=|<)\s*(\d+)(?:\.(\d+))?(?:\.(\d+))?$`)
 )
 
@@ -73,7 +73,8 @@ type CargoReq struct {
 	Op    string // "", "^", "~", "=" or ">="
 	Parts []int  // 1 to 3 numbers of the lower bound, as written
 	// Wild says the lower bound is a wildcard: Parts are the numbers before the `.*`.
-	Wild bool
+	Wild  bool
+	wildc string // the wildcard character as written: "*", "x" or "X"
 
 	raw    string // the requirement as written
 	vs, ve int    // the span of raw that holds the lower bound's version text
@@ -128,11 +129,12 @@ func ParseCargoReq(spec string) (CargoReq, bool) {
 		primary = true
 		start += lead
 		if m := cargoWildRE.FindStringSubmatch(comp); m != nil {
-			nums, ok := cargoNums(m[1:])
+			nums, ok := cargoNums(m[1:3])
 			if !ok {
 				return CargoReq{}, false
 			}
 			r.Parts, r.Wild = nums, true
+			r.wildc = m[3]
 			r.vs, r.ve = start, start+len(comp)
 			continue
 		}
@@ -171,7 +173,7 @@ func (r CargoReq) Text(version string) string {
 	}
 	moved := strings.Join(parts, ".")
 	if r.Wild {
-		moved += ".*"
+		moved += "." + r.wildc
 	}
 	return r.raw[:r.vs] + moved + r.raw[r.ve:]
 }
@@ -272,7 +274,9 @@ type cargoEntry struct {
 }
 
 // cargoDepSections are the tables whose members are dependencies.
-var cargoDepSections = map[string]bool{"dependencies": true, "dev-dependencies": true, "build-dependencies": true}
+var cargoDepSections = map[string]bool{"dependencies": true, "dev-dependencies": true, "build-dependencies": true,
+	// cargo still reads the underscore spellings, with a warning.
+	"dev_dependencies": true, "build_dependencies": true}
 
 // cargoEntries lists the requirements ripple can read, in file order.
 func cargoEntries(content []byte) ([]cargoEntry, error) {

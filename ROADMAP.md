@@ -267,12 +267,6 @@ Everything else:
     runtime has run a ripple verification in a per-minor image. Host toolchain downloads shipped
     (`RIPPLE_GO_TOOLCHAIN_DOWNLOAD`); left from them: a downloaded release is never pruned, and a pre-release
     (`go1.27rc1`) is not fetched.
-174. **Archive on the hosts that still do not report it.** GitLab, Gitea/Forgejo and Bitbucket Data Center now read an
-    archive from their listing (entry 107); the Lister hosts SCM-Manager and Gerrit still drop an archived repo from
-    the listing, which forgets it with its jobs. SCM-Manager's repository object has an archived flag in its source
-    notes only, and Gerrit's read-only project state (`GET /projects/?state=READ_ONLY`) is not vendored: read both
-    from vendored docs, then implement `platform.ArchivedLister`. Bitbucket Cloud and Azure DevOps (whose
-    `isDisabled` is a different state) document no archive at all in `docs/vendor`; nothing to build for them.
 175. **Archive from the listing against real hosts.** The listing reads (`archived=true` on GitLab, the `archived` flag
     of Gitea/Forgejo, `archived=ARCHIVED` on Data Center 8+) ran only against fakes; also check that GitLab's
     `simple=true` listing under `archived=true` answers what the doc says, and that a Data Center before 8.0 lists no
@@ -383,3 +377,9 @@ Everything else:
 212. **OSV: cap the PRs a security bypass opens.** `security-bypass: [open-pull-requests-limit]` (with the optional
     `security-bypass-severity`) still opens one PR per advisory past the limit, so one advisory that affects many modules
     opens that many. A per-advisory cap was left out until real use shows a repo wants it.
+213. **Archive on SCM-Manager and Gerrit against real instances.** Both hosts implement `platform.ArchivedLister` from vendored
+    docs and the fakes: SCM-Manager from the `archived` field of `GET repositories`, Gerrit from `GET /projects/?state=READ_ONLY`.
+    Check on real instances that an archived SCM-Manager repository still lists with `archived: true` (and `showArchived`
+    does not change it), that a Gerrit read-only project is absent from the `ACTIVE` listing and present in `READ_ONLY`,
+    and whether Gerrit's webhooks plugin or stream events can report the state change so the listing is not the only path.
+    Bitbucket Cloud and Azure DevOps document no archive in `docs/vendor`; nothing to build for them.

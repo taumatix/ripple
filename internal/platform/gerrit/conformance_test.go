@@ -52,6 +52,12 @@ func (f *gerritFixture) Push(t *testing.T, hook, path string, files map[string]s
 	deliverRefUpdated(t, hook, hookSecret, path, "refs/heads/main", old, f.fake.rev(path, "main"))
 }
 
+// SetArchived: Gerrit sends no event for a project's state; a READ_ONLY project is the
+// nearest thing to an archive and the listing by state tells it from a deletion.
+func (f *gerritFixture) SetArchived(_ *testing.T, _, path string, archived bool) {
+	f.fake.SetReadOnly(path, archived)
+}
+
 func deliverRefUpdated(t *testing.T, hook, secret, project, ref, old, head string) {
 	t.Helper()
 	body, _ := json.Marshal(refUpdatedBody(project, ref, old, head))

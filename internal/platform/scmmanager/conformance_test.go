@@ -80,6 +80,11 @@ func pushRequest(t *testing.T, hook string, secret []byte, repo, branch string, 
 	return req
 }
 
+// SetArchived: the webhook plugin sends no archive event; the listing's `archived` flag changes.
+func (f *scmFixture) SetArchived(_ *testing.T, _, path string, archived bool) {
+	f.fake.SetArchived(path, archived)
+}
+
 func (f *scmFixture) PRs(path string) []platformtest.PR {
 	var out []platformtest.PR
 	for _, p := range f.fake.PRs(path) {

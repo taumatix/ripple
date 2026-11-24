@@ -74,9 +74,16 @@ A workflow under a module's own `.github/workflows/` is not followed: GitHub onl
   release the module's go.mod names: the `toolchain` line exactly, else the newest installed patch of the `go`
   line's minor that is not older than the line. For a bump PR that is the go.mod as the bump left it, so a
   directive moved above the server's Go is checked by that Go and no longer opens a draft. A module with no
-  matching release, or no directory set, uses the server's Go as before. Still `GOTOOLCHAIN=local`: ripple
-  downloads nothing and the PR body says which release ran. Not available with the container sandboxes, whose
+  matching release, or no directory set, uses the server's Go as before. Still `GOTOOLCHAIN=local`; the PR body
+  says which release ran. Not available with the container sandboxes, whose
   image carries its own Go; the server refuses to start with both. A container sandbox picks the Go by image instead
   (`RIPPLE_CONTAINER_GO_IMAGES`, [sandbox.md](sandbox.md)).
+- **Downloading a missing release** is opt-in: `RIPPLE_GO_TOOLCHAIN_DOWNLOAD=true` (needs
+  `RIPPLE_GO_TOOLCHAIN_DIR`). When no installed release fits, ripple fetches `golang.org/toolchain` for the
+  host's platform through `RIPPLE_GOPROXY` with `go mod download`, which checks the zip against the checksum
+  database (the go command refuses this module with `GOSUMDB=off`), and unpacks it as `go<release>/bin/go`. The
+  `go` line alone picks the newest patch of its minor the proxy lists; a `toolchain` line is fetched as named.
+  The proxy credential, which needs an https `RIPPLE_GOPROXY`, goes with the download. A failed download is logged
+  and verification uses the server's Go, as with no directory. A release is about 70 MB and stays in the directory.
 
 The release list is fetched only while some repo has opted in.

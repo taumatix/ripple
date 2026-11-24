@@ -452,3 +452,21 @@ func TestServerDynamoScanPacingAndDriftCheck(t *testing.T) {
 		t.Error("a drift check on the memory store was accepted")
 	}
 }
+
+func TestServerGoToolchainDownload(t *testing.T) {
+	dir := t.TempDir()
+	s, err := LoadServer(env(base))
+	if err != nil || s.GoToolchainDownload {
+		t.Fatalf("default: %+v, %v", s, err)
+	}
+	s, err = LoadServer(env(with("RIPPLE_GO_TOOLCHAIN_DIR", dir, "RIPPLE_GO_TOOLCHAIN_DOWNLOAD", "true")))
+	if err != nil || !s.GoToolchainDownload {
+		t.Fatalf("set: %+v, %v", s, err)
+	}
+	if _, err = LoadServer(env(with("RIPPLE_GO_TOOLCHAIN_DOWNLOAD", "true"))); err == nil {
+		t.Fatal("download without a directory must be rejected")
+	}
+	if _, err = LoadServer(env(with("RIPPLE_GO_TOOLCHAIN_DIR", dir, "RIPPLE_GO_TOOLCHAIN_DOWNLOAD", "maybe"))); err == nil {
+		t.Fatal("a non-boolean must be rejected")
+	}
+}

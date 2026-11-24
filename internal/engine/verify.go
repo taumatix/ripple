@@ -316,6 +316,13 @@ func (r *runner) namedGo(members []string) string {
 			tc = f.Toolchain.Name
 		}
 		bin, rel := platform.FindGo(r.e.GoToolchainDir, f.Go.Version, tc)
+		if bin == "" && r.e.GoInstaller != nil {
+			var err error
+			if bin, rel, err = r.e.GoInstaller.Ensure(r.ctx, f.Go.Version, tc); err != nil {
+				r.e.log().Warn("go toolchain download failed; verification uses the server's Go", "go", f.Go.Version, "toolchain", tc, "err", err)
+				bin, rel = "", ""
+			}
+		}
 		if bin != "" && (best == "" || semver.Compare("v"+rel, "v"+bestRel) > 0) {
 			best, bestRel = bin, rel
 		}

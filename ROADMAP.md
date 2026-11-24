@@ -289,13 +289,12 @@ Everything else:
     the Dynamo sweep is a Query; the legacy `removed|` read path and the `tombstones-legacy` marker can be deleted a
     release after every replica runs a version that no longer writes it (v0.3.0 wrote it; the release after it must
     ship first). The Query of `removed#` on a very large table is unmeasured.
-171. **Go toolchain downloads, and published runner images.** The per-minor images (`RIPPLE_CONTAINER_GO_IMAGES`) are
-    built by the operator, and the host sandboxes still only run releases an operator installed in
-    `RIPPLE_GO_TOOLCHAIN_DIR`. A proxy-fed download (`golang.org/toolchain@v0.0.1-go<version>.<os>-<arch>` through
-    `RIPPLE_GOPROXY`, checked against the checksum database by `go mod download`, unpacked as `go<version>/bin/go`) would
-    remove the manual install; publish `ripple-runner:<minor>` images from CI too. The image selection was verified
-    against the fake runtime only; CI builds each minor and runs `go version` in it but no real runtime has run a
-    ripple verification in a per-minor image.
+171. **Published runner images.** The per-minor images (`RIPPLE_CONTAINER_GO_IMAGES`) are built by the operator;
+    publish `ripple-runner:<minor>` images from CI (a registry and its visibility are a human decision). The image
+    selection was verified against the fake runtime only; CI builds each minor and runs `go version` in it but no real
+    runtime has run a ripple verification in a per-minor image. Host toolchain downloads shipped
+    (`RIPPLE_GO_TOOLCHAIN_DOWNLOAD`); left from them: a downloaded release is never pruned, and a pre-release
+    (`go1.27rc1`) is not fetched.
 172. **OSV: security-bypass by severity.** `security-bypass` (entry 51) is per update entry and all or nothing. A
     `severity: [high, critical]` qualifier (bypass only for those) and a per-advisory cap on PRs opened past the limit were left
     out until real use shows whether a repo wants them.

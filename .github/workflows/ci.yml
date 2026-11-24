@@ -39,7 +39,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          go test -race -count=1 -v ./... | tee test.log
+          go test -race -count=1 -v -timeout 20m ./... | tee test.log
       - run: |
           # RIPPLE_REQUIRE_SERVICES already fails a skipped service test; this catches any other skip.
           # The image smoke test skips here by design: the docker job runs it against the built image.

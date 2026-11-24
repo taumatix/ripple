@@ -588,11 +588,19 @@ func (a *App) push(ctx context.Context, name string, ev model.Event) error {
 				return err
 			}
 		case repo.RepoID != ev.RepoID:
-			// Another repository than the one registered under this name, or a replay from
-			// before the name was reused. Which one is not knowable from the push, so it is
-			// not acted on; a re-add or rename event settles it.
-			a.Log.Warn("push ignored: repository id mismatch", "repo", name, "stored", repo.RepoID, "push", ev.RepoID)
-			return nil
+			// Another repository than the one registered under this name, or the same
+			// name recreated (a new id). The push cannot say which, so the host is asked
+			// (once per id per hour); only a host that ties the id to this name replaces
+			// the stored one. Otherwise the push is not acted on.
+			adopted, err := a.Engine.ResolveRepoID(ctx, repo, ev.RepoID)
+			if err != nil {
+				return err
+			}
+			if !adopted {
+				a.Log.Warn("push ignored: repository id mismatch", "repo", name, "stored", repo.RepoID, "push", ev.RepoID)
+				return nil
+			}
+			repo.RepoID = ev.RepoID
 		}
 	}
 	// The payload's default_branch is only a hint that the stored one may be stale (a

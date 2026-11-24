@@ -113,6 +113,12 @@ func (c *CountingPlatform) ReadsLegacyConfig(r model.Repo) bool {
 	return platform.ReadsLegacyConfig(c.Inner, r)
 }
 
+// RepoHasID forwards to Inner and counts the call against repo.
+func (c *CountingPlatform) RepoHasID(ctx context.Context, r model.Repo, id int64) (bool, error) {
+	c.hit(r.FullName)
+	return platform.RepoHasID(ctx, c.Inner, r, id)
+}
+
 // FindIssue, CreateIssue and UpdateIssueBody forward to Inner, or answer
 // platform.ErrNoIssues (without counting a call) when Inner has no issue tracker.
 func (c *CountingPlatform) FindIssue(ctx context.Context, r model.Repo, label, marker string) (platform.Issue, bool, error) {

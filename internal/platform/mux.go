@@ -124,6 +124,16 @@ func (m *Mux) ReadsLegacyConfig(repo model.Repo) bool {
 	return err == nil && ReadsLegacyConfig(p, r)
 }
 
+// RepoHasID routes to the repo's host; a host without the capability answers
+// ErrNoRepoIdentity.
+func (m *Mux) RepoHasID(ctx context.Context, repo model.Repo, id int64) (bool, error) {
+	p, r, err := m.route(repo)
+	if err != nil {
+		return false, err
+	}
+	return RepoHasID(ctx, p, r, id)
+}
+
 // FindIssue, CreateIssue and UpdateIssueBody route to the repo's host and answer
 // ErrNoIssues for a host without the capability.
 func (m *Mux) FindIssue(ctx context.Context, repo model.Repo, label, marker string) (Issue, bool, error) {

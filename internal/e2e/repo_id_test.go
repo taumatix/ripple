@@ -45,12 +45,50 @@ func TestPushStoresRepoIDOnce(t *testing.T) {
 		e.eventually("id adopted", func() bool { return e.storedRepoID("acme/uses-lib") == 11 })
 
 		// A push under the same name with another id is a different repository (or a replay
-		// from before the name was reused): it changes nothing and costs no platform call.
+		// from before the name was reused): it changes nothing. Its only cost is the one
+		// lookup that asks the host whether the id is this repository (the host says no).
 		calls := e.scans("acme/uses-lib")
 		e.pushPayload("acme/uses-lib", "refs/heads/main", "main", 12, []string{"go.mod"}, "")
 		e.eventually("mismatch logged", func() bool { return e.logLines("repository id mismatch", "acme/uses-lib") == 1 })
-		if id := e.storedRepoID("acme/uses-lib"); id != 11 || e.scans("acme/uses-lib") != calls {
-			t.Fatalf("id %d, %d new platform calls after a push with another id", id, e.scans("acme/uses-lib")-calls)
+		if id := e.storedRepoID("acme/uses-lib"); id != 11 || e.scans("acme/uses-lib") != calls+1 || e.gh.RepoIDCalls() != 1 {
+			t.Fatalf("id %d, %d new platform calls after a push with another id, want only the id lookup", id, e.scans("acme/uses-lib")-calls)
+		}
+	})
+}
+
+// The repository was deleted and recreated under the same name, so its id changed and no
+// event reached ripple (roadmap 173). A push with another id is not taken on its word: the
+// host is asked, once an hour per id, and only a host that ties the id to this name makes
+// the stored id replaceable. A push from another repository with the name stays ignored.
+func TestPushWithRecreatedRepoIDIsResolvedByTheHost(t *testing.T) {
+	forEach(t, func(t *testing.T, st store.Store) {
+		e := newEnv(t, st, defaultLimits())
+		baseRepos(e)
+		start(t, e, "acme/uses-lib")
+		e.pushPayload("acme/uses-lib", "refs/heads/feature", "main", 11, []string{"README.md"}, "")
+		e.eventually("id adopted", func() bool { return e.storedRepoID("acme/uses-lib") == 11 })
+
+		// Id 12 is some other repository: asked once, refused, and not asked again.
+		e.gh.SetRepoID(12, "other/repo")
+		e.pushPayload("acme/uses-lib", "refs/heads/main", "main", 12, []string{"go.mod"}, "")
+		e.eventually("mismatch logged", func() bool { return e.logLines("repository id mismatch", "acme/uses-lib") == 1 })
+		e.pushPayload("acme/uses-lib", "refs/heads/main", "main", 12, []string{"go.mod"}, "")
+		e.eventually("second mismatch logged", func() bool { return e.logLines("repository id mismatch", "acme/uses-lib") == 2 })
+		if n := e.gh.RepoIDCalls(); n != 1 || e.storedRepoID("acme/uses-lib") != 11 {
+			t.Fatalf("%d id lookups, stored id %d; want 1 lookup and 11", n, e.storedRepoID("acme/uses-lib"))
+		}
+
+		// Id 13 is this repository recreated: the stored id is replaced and the push scans.
+		e.gh.SetRepoID(13, "acme/uses-lib")
+		calls := e.scans("acme/uses-lib")
+		e.pushPayload("acme/uses-lib", "refs/heads/main", "main", 13, []string{"go.mod"}, "")
+		e.eventually("id replaced", func() bool { return e.storedRepoID("acme/uses-lib") == 13 })
+		e.eventually("push scanned", func() bool { return e.scans("acme/uses-lib") > calls })
+		if v, _ := e.st.GetCursor(context.Background(), "repoid|11"); v != "" {
+			t.Fatalf("the old id still points at %q", v)
+		}
+		if v, _ := e.st.GetCursor(context.Background(), "repoid|13"); v != "acme/uses-lib" {
+			t.Fatalf("the new id points at %q", v)
 		}
 	})
 }

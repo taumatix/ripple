@@ -2,12 +2,14 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/taumatix/ripple/internal/model"
+	"github.com/taumatix/ripple/internal/platform"
 	"github.com/taumatix/ripple/internal/store"
 )
 
@@ -294,6 +296,71 @@ func (e *Engine) AdoptRepoID(ctx context.Context, name string, id int64) error {
 		return err
 	}
 	return e.Store.SetCursor(ctx, repoIDKey(name, id), name)
+}
+
+// staleIDTTL is how long an id the host did not tie to a repo is not asked about again,
+// and maxStaleIDs bounds the table that remembers them. A signed push is genuine, but one
+// from another repository that merely carries this name (or a replay) must not cost a
+// host call each time.
+const (
+	staleIDTTL  = time.Hour
+	maxStaleIDs = 4096
+)
+
+// ResolveRepoID settles a signed push whose repository id is not the one stored for name
+// (the caller found stored != id, both non-zero). It asks the host whether id is this
+// repository: if so, the repository was deleted and recreated under the name, the stored id
+// is stale, and the new one replaces it (the old id's index entry is released). It reports
+// whether the id was adopted. A host that cannot answer, an id the host ties to another
+// repository, and an error all leave the record alone; a "no" is remembered for
+// staleIDTTL.
+func (e *Engine) ResolveRepoID(ctx context.Context, repo model.Repo, id int64) (bool, error) {
+	if id == 0 || repo.RepoID == 0 || repo.RepoID == id {
+		return false, nil
+	}
+	key := repo.FullName + "|" + strconv.FormatInt(id, 10)
+	e.mu.Lock()
+	until, seen := e.staleIDs[key]
+	e.mu.Unlock()
+	if seen && e.now().Before(until) {
+		return false, nil
+	}
+	mine, err := platform.RepoHasID(ctx, e.Platform, repo, id)
+	if errors.Is(err, platform.ErrNoRepoIdentity) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if !mine {
+		e.mu.Lock()
+		if e.staleIDs == nil || len(e.staleIDs) >= maxStaleIDs {
+			e.staleIDs = map[string]time.Time{}
+		}
+		e.staleIDs[key] = e.now().Add(staleIDTTL)
+		e.mu.Unlock()
+		return false, nil
+	}
+	defer e.lockRepo(repo.FullName)()
+	cur, ok, err := e.Store.GetRepo(ctx, repo.FullName)
+	if err != nil || !ok || cur.RepoID == id {
+		return false, err
+	}
+	old := cur.RepoID
+	cur.RepoID = id
+	if err := e.Store.UpsertRepo(ctx, cur); err != nil {
+		return false, err
+	}
+	if err := e.Store.SetCursor(ctx, repoIDKey(cur.FullName, id), cur.FullName); err != nil {
+		return false, err
+	}
+	if v, err := e.Store.GetCursor(ctx, repoIDKey(cur.FullName, old)); err == nil && v == cur.FullName {
+		if err := e.Store.SetCursor(ctx, repoIDKey(cur.FullName, old), ""); err != nil {
+			return false, err
+		}
+	}
+	e.log().Info("repository id replaced: the host ties the pushed id to this repository", "repo", cur.FullName, "old", old, "new", id)
+	return true, nil
 }
 
 func (e *Engine) releaseRepoID(ctx context.Context, hold *repoLease, id int64, name string) error {

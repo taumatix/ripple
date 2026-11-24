@@ -261,9 +261,6 @@ Everything else:
     pre-release handling, non-normalized names, 404, and that every version of four large projects parses). Still open:
     ordering was only checked for antisymmetry, not against `packaging` on a corpus; `releases` is documented as deprecated
     in favour of the PEP 691 index and could be dropped; rate limits and private indexes.
-165. **Docker: Helm values, Kustomize and per-stage ARGs.** Compose files, Kubernetes manifests, `COPY --from` and global
-    `ARG` tags are read (docs/docker.md). Not read: Helm `values.yaml` (`repository:`/`tag:` pairs), Kustomize `images:`,
-    `ARG` declared after a `FROM`, an ARG that is only part of a tag, and `RUN --mount=from=`.
 166. **Docker: credential helpers, identity tokens, per-repo logins.** `RIPPLE_REGISTRY_AUTH_FILE` reads inline `auths` only
     (docs/docker.md). Left: `credsStore`/`credHelpers` (run `docker-credential-*`; needs the sandbox's care, since the helper
     is a program), `identitytoken` (the OAuth2 refresh-token grant against the token endpoint, for Azure and some Docker Hub
@@ -399,3 +396,8 @@ Everything else:
     metadata carries `os`, `cpu` and `hasInstallScript` for every package (the shape check relies on them), and that
     dropping `license`/`funding` changes between versions is harmless. Running npm itself needs a sandbox profile with
     the registry and no repository secrets: a decision for the owner.
+202. **Docker: ARG as part of a tag, Helm single-string images, digest-pinned Kustomize/Helm.** Kustomize `images:`, Helm
+    `repository:`/`tag:` pairs, per-stage `ARG` and `RUN --mount=from=` are read (docs/docker.md). Left: an `ARG` that is only
+    part of a tag (`${V}-alpine`), a Helm `image: repo:tag` single string under a custom key, a Kustomize `newDigest` and a Helm
+    `digest:` (the digest would have to move with the tag), Helm sub-chart `global.imageRegistry` indirection, and a run against
+    real charts and kustomizations.

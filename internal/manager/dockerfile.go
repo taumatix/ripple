@@ -22,7 +22,8 @@ import (
 // alone. `golang` images are the Go-version follow code's (see FollowGoVersion) and
 // are never extracted here, so one line is never moved by two managers.
 //
-// Also read: `COPY --from=image:tag`, `ARG V=1.2` (before the first FROM) used as the
+// Also read: `COPY --from=image:tag` and `RUN --mount=...,from=image:tag`, `ARG V=1.2` (before the first
+// FROM, or inside the stage that uses it in a COPY --from or --mount) used as the
 // whole tag of exactly one image (`FROM image:${V}`; the ARG line moves, and an ARG
 // shared by two different images is left alone), and the `image:` key of Docker
 // Compose files (docker-compose*.yml, compose*.yml, *.compose.yml) and of Kubernetes
@@ -47,7 +48,27 @@ func (d Docker) Matches(p string) bool {
 	if !config.InDirectory(d.Dir, p) {
 		return false
 	}
-	return isDockerfilePath(p) || isComposeFile(p) || isManifestPath(p)
+	return isDockerfilePath(p) || isComposeFile(p) || isManifestPath(p) || isKustomization(p) || isHelmValues(p)
+}
+
+// isKustomization reports a kustomization.yaml, kustomization.yml or Kustomization file.
+func isKustomization(p string) bool {
+	switch path.Base(p) {
+	case "kustomization.yaml", "kustomization.yml", "Kustomization":
+		return true
+	}
+	return false
+}
+
+// isHelmValues reports a Helm values file: values.yaml, values-prod.yaml, values.prod.yml,
+// prod-values.yaml or prod.values.yaml.
+func isHelmValues(p string) bool {
+	if !isYAML(p) {
+		return false
+	}
+	b := strings.TrimSuffix(strings.TrimSuffix(path.Base(p), ".yaml"), ".yml")
+	return b == "values" || strings.HasPrefix(b, "values-") || strings.HasPrefix(b, "values.") ||
+		strings.HasSuffix(b, "-values") || strings.HasSuffix(b, ".values")
 }
 
 func isDockerfilePath(p string) bool {
@@ -140,6 +161,13 @@ func parseImageOpt(tok string, keepGolang bool) (imageRef, bool) {
 // copyFromRE captures: 1 COPY, its flags and "--from=", 2 the source, 3 the rest.
 var copyFromRE = regexp.MustCompile(`(?i)^(\s*COPY\s+(?:--[A-Za-z-]+(?:=\S*)?\s+)*?--from=)(\S+)(.*)$`)
 
+// mountFromRE captures: 1 the RUN line up to "from=" of its first --mount that has one, 2 the
+// source, 3 the rest. The source is an image only when it has a literal tag.
+var mountFromRE = regexp.MustCompile(`(?i)^(\s*RUN\s+(?:\S+\s+)*?--mount=(?:[^\s,]+,)*?from=)([^\s,]+)(.*)$`)
+
+// argRedeclareRE captures the name of a bare `ARG NAME` (no default).
+var argRedeclareRE = regexp.MustCompile(`(?i)^\s*ARG\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:#.*)?$`)
+
 // argRE captures: 1 the prefix up to the value, 2 the name, 3 the value, 4 the rest.
 var argRE = regexp.MustCompile(`(?i)^(\s*ARG\s+([A-Za-z_][A-Za-z0-9_]*)=)([^\s"']+)(\s*(?:#.*)?)$`)
 
@@ -156,6 +184,9 @@ type occurrence struct {
 	// How a literal line is rebuilt around the image token.
 	prefix, quoteOpen, quoteClose, rest string
 	arg                                 string // the ARG the tag comes from, "" for a literal
+	// tagOnly: the edited token is only the tag (a Kustomize newTag, a Helm values tag), and
+	// the image name lives on another line.
+	tagOnly bool
 }
 
 func isManifest(content string) bool {
@@ -164,6 +195,12 @@ func isManifest(content string) bool {
 
 // scan finds the tracked references of a file. golang images are kept when keepGolang.
 func scan(p string, lines []string) []occurrence {
+	if isKustomization(p) {
+		return scanKustomize(lines)
+	}
+	if isHelmValues(p) && !isComposeFile(p) {
+		return scanHelmValues(lines)
+	}
 	if isYAML(p) {
 		if !isComposeFile(p) && !isManifest(strings.Join(lines, "\n")) {
 			return nil
@@ -178,57 +215,80 @@ func scan(p string, lines []string) []occurrence {
 		}
 		return out
 	}
-	args := map[string]string{} // global ARG defaults, before the first FROM
-	argLine := map[string]int{}
+	global := map[string]argDef{} // ARG defaults before the first FROM
+	var stage map[string]argDef   // ARG defaults declared since the last FROM
 	var out []occurrence
 	seenFrom := false
 	for i, line := range lines {
 		if m := fromRE.FindStringSubmatch(line); m != nil {
 			seenFrom = true
-			out = appendRef(out, i, m, args, argLine)
+			stage = map[string]argDef{}
+			out = appendRef(out, i, m, global)
 			continue
 		}
 		if m := copyFromRE.FindStringSubmatch(line); m != nil {
-			out = appendRef(out, i, m, args, argLine)
+			out = appendRef(out, i, m, stage, global)
 			continue
 		}
-		if !seenFrom {
-			if m := argRE.FindStringSubmatch(line); m != nil {
-				args[m[2]], argLine[m[2]] = m[3], i
+		if m := mountFromRE.FindStringSubmatch(line); m != nil {
+			out = appendRef(out, i, m, stage, global)
+			continue
+		}
+		if m := argRE.FindStringSubmatch(line); m != nil {
+			if !seenFrom {
+				global[m[2]] = argDef{m[3], i}
+			} else {
+				stage[m[2]] = argDef{m[3], i}
+			}
+			continue
+		}
+		// `ARG V` inside a stage re-declares the global V with its default.
+		if m := argRedeclareRE.FindStringSubmatch(line); m != nil && seenFrom {
+			if g, ok := global[m[1]]; ok {
+				stage[m[1]] = g
 			}
 		}
 	}
 	// An ARG feeding two different images cannot be moved for one of them.
-	users := map[string]map[string]bool{}
+	users := map[int]map[string]bool{} // ARG line -> images
 	for _, o := range out {
 		if o.arg != "" {
-			if users[o.arg] == nil {
-				users[o.arg] = map[string]bool{}
+			if users[o.line] == nil {
+				users[o.line] = map[string]bool{}
 			}
-			users[o.arg][o.ref.pkg] = true
+			users[o.line][o.ref.pkg] = true
 		}
 	}
 	kept := out[:0]
 	for _, o := range out {
-		if o.arg == "" || len(users[o.arg]) == 1 {
+		if o.arg == "" || len(users[o.line]) == 1 {
 			kept = append(kept, o)
 		}
 	}
 	return kept
 }
 
-func appendRef(out []occurrence, i int, m []string, args map[string]string, argLine map[string]int) []occurrence {
+// argDef is an ARG default and the line that declares it.
+type argDef struct {
+	val  string
+	line int
+}
+
+// appendRef records the image of one FROM, COPY --from or RUN --mount line. A tag taken
+// from an ARG is looked up in the scopes given, innermost first.
+func appendRef(out []occurrence, i int, m []string, scopes ...map[string]argDef) []occurrence {
 	tok := m[2]
 	if v := varTagRE.FindStringSubmatch(tok); v != nil {
-		val, ok := args[v[2]]
-		if !ok {
-			return out
+		for _, sc := range scopes {
+			if def, ok := sc[v[2]]; ok {
+				r, ok := parseImage(v[1] + ":" + def.val)
+				if !ok {
+					return out
+				}
+				return append(out, occurrence{line: def.line, ref: r, arg: v[2]})
+			}
 		}
-		r, ok := parseImage(v[1] + ":" + val)
-		if !ok {
-			return out
-		}
-		return append(out, occurrence{line: argLine[v[2]], ref: r, arg: v[2]})
+		return out
 	}
 	if r, ok := parseImage(tok); ok {
 		return append(out, occurrence{line: i, ref: r, prefix: m[1], rest: m[3]})
@@ -266,6 +326,11 @@ func (d Docker) Apply(content []byte, dep model.Dependency, newPackage, newVersi
 			changed = true
 			continue
 		}
+		if o.tagOnly {
+			lines[o.line] = o.prefix + o.quoteOpen + tag + o.quoteClose + o.rest
+			changed = true
+			continue
+		}
 		tok := o.ref.name + ":" + tag
 		if o.ref.digest != "" {
 			if !haveDigest {
@@ -280,4 +345,140 @@ func (d Docker) Apply(content []byte, dep model.Dependency, newPackage, newVersi
 		return nil, fmt.Errorf("docker: %s:%s not found", dep.Package, dep.Version)
 	}
 	return []byte(strings.Join(lines, "\n")), nil
+}
+
+// yamlKeyRE captures: 1 indent (with a list dash), 2 the key, 3 an opening quote, 4 the value,
+// 5 the closing quote, 6 the rest of the line.
+var yamlKeyRE = regexp.MustCompile(`^(\s*(?:-\s+)?)([A-Za-z][A-Za-z0-9_.-]*):\s*(["']?)([^\s"'#]*)(["']?)(\s*(?:#.*)?)$`)
+
+func indentOf(line string) int { return len(line) - len(strings.TrimLeft(line, " ")) }
+
+func blankOrComment(line string) bool {
+	t := strings.TrimSpace(line)
+	return t == "" || strings.HasPrefix(t, "#")
+}
+
+// scanKustomize reads the `images:` list of a kustomization: `name` (or `newName`) with
+// `newTag`. An entry with a `newDigest`, or without a `newTag`, is left alone.
+func scanKustomize(lines []string) []occurrence {
+	var out []occurrence
+	inImages := false
+	var name, newName string
+	var digest bool
+	var tag []string // the yamlKeyRE match of newTag
+	var tagLine int
+	flush := func() {
+		if tag != nil && !digest {
+			img := name
+			if newName != "" {
+				img = newName
+			}
+			if r, ok := parseImageOpt(img+":"+tag[4], true); ok {
+				out = append(out, occurrence{line: tagLine, ref: r, tagOnly: true,
+					prefix: tag[1] + "newTag: ", quoteOpen: tag[3], quoteClose: tag[5], rest: tag[6]})
+			}
+		}
+		name, newName, digest, tag = "", "", false, nil
+	}
+	for i, line := range lines {
+		if blankOrComment(line) {
+			continue
+		}
+		if indentOf(line) == 0 && !strings.HasPrefix(line, "-") {
+			flush()
+			inImages = strings.HasPrefix(line, "images:")
+			continue
+		}
+		if !inImages {
+			continue
+		}
+		m := yamlKeyRE.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		if strings.Contains(m[1], "-") {
+			flush() // a new list item
+		}
+		switch m[2] {
+		case "name":
+			name = m[4]
+		case "newName":
+			newName = m[4]
+		case "newDigest":
+			digest = m[4] != ""
+		case "newTag":
+			tag, tagLine = m, i
+		}
+	}
+	flush()
+	return out
+}
+
+// scanHelmValues reads `repository:` and `tag:` pairs (with an optional `registry:`) that
+// are siblings under a key whose name contains "image" (image, initImage, ...). A pair with
+// a `digest:`, a templated value or a repository that is a URL is left alone.
+func scanHelmValues(lines []string) []occurrence {
+	var out []occurrence
+	for i, line := range lines {
+		m := yamlKeyRE.FindStringSubmatch(line)
+		if m == nil || m[2] != "repository" || m[4] == "" || strings.Contains(m[1], "-") {
+			continue
+		}
+		n := indentOf(line)
+		parent := -1
+		for j := i - 1; j >= 0; j-- {
+			if blankOrComment(lines[j]) {
+				continue
+			}
+			if indentOf(lines[j]) < n {
+				parent = j
+				break
+			}
+		}
+		if parent < 0 {
+			continue
+		}
+		pm := yamlKeyRE.FindStringSubmatch(lines[parent])
+		if pm == nil || pm[4] != "" || !strings.Contains(strings.ToLower(pm[2]), "image") {
+			continue
+		}
+		var registryHost string
+		var tag []string
+		tagLine, digest := 0, false
+		for j := parent + 1; j < len(lines); j++ {
+			if blankOrComment(lines[j]) {
+				continue
+			}
+			if indentOf(lines[j]) < n {
+				break
+			}
+			if indentOf(lines[j]) != n {
+				continue
+			}
+			km := yamlKeyRE.FindStringSubmatch(lines[j])
+			if km == nil {
+				continue
+			}
+			switch km[2] {
+			case "registry":
+				registryHost = km[4]
+			case "digest":
+				digest = km[4] != ""
+			case "tag":
+				tag, tagLine = km, j
+			}
+		}
+		repo := m[4]
+		if registryHost != "" {
+			repo = registryHost + "/" + repo
+		}
+		if tag == nil || digest || strings.ContainsAny(repo+tag[4], "{}$") || strings.Contains(repo, "://") {
+			continue
+		}
+		if r, ok := parseImageOpt(repo+":"+tag[4], true); ok {
+			out = append(out, occurrence{line: tagLine, ref: r, tagOnly: true,
+				prefix: tag[1] + "tag: ", quoteOpen: tag[3], quoteClose: tag[5], rest: tag[6]})
+		}
+	}
+	return out
 }

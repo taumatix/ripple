@@ -235,3 +235,110 @@ func TestDockerArgTagsAndCopyFrom(t *testing.T) {
 		t.Errorf("%v\n%s", err, out)
 	}
 }
+
+func depList(t *testing.T, p, content string) []string {
+	t.Helper()
+	deps, err := Docker{Dir: "/"}.Extract(p, []byte(content))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, d := range deps {
+		got = append(got, d.Package+"@"+d.Version)
+	}
+	return got
+}
+
+func TestDockerKustomizeImages(t *testing.T) {
+	for name, c := range map[string]struct {
+		file, in string
+		want     []string
+	}{
+		"newName and newTag":     {"kustomization.yaml", "images:\n- name: web\n  newName: ghcr.io/org/web\n  newTag: v1.2.3\n", []string{"ghcr.io/org/web@v1.2.3"}},
+		"name only is the image": {"app/Kustomization", "images:\n  - newTag: '1.25'\n    name: nginx\n", []string{"docker.io/library/nginx@1.25"}},
+		"no newTag":              {"kustomization.yml", "images:\n  - name: nginx\n    newName: other\n", nil},
+		"digest pinned":          {"kustomization.yaml", "images:\n  - name: nginx\n    newTag: 1.25\n    newDigest: sha256:abc\n", nil},
+		"floating tag":           {"kustomization.yaml", "images:\n  - name: nginx\n    newTag: latest\n", nil},
+		"other top level":        {"kustomization.yaml", "resources:\n  - name: nginx\n    newTag: 1.25\n", nil},
+		"two entries":            {"kustomization.yaml", "images:\n  - name: a\n    newTag: 1.0\n  - name: b\n    newTag: 2.0\nnamePrefix: x-\n", []string{"docker.io/library/a@1.0", "docker.io/library/b@2.0"}},
+	} {
+		if got := depList(t, "k/"+c.file, c.in); strings.Join(got, " ") != strings.Join(c.want, " ") {
+			t.Errorf("%s: got %v want %v", name, got, c.want)
+		}
+	}
+}
+
+func TestDockerKustomizeApplyKeepsQuotesCommentAndLayout(t *testing.T) {
+	in := "images:\n  - name: web\n    newName: nginx\n    newTag: \"1.25\"   # pinned\n    # note\n"
+	deps, _ := Docker{Dir: "/"}.Extract("kustomization.yaml", []byte(in))
+	out, err := Docker{}.Apply([]byte(in), deps[0], "", "1.26")
+	if want := strings.Replace(in, `"1.25"`, `"1.26"`, 1); err != nil || string(out) != want {
+		t.Errorf("%v\n%s", err, out)
+	}
+}
+
+func TestDockerHelmValues(t *testing.T) {
+	for name, c := range map[string]struct {
+		file, in string
+		want     []string
+	}{
+		"pair":           {"values.yaml", "image:\n  repository: nginx\n  tag: 1.25\n", []string{"docker.io/library/nginx@1.25"}},
+		"registry":       {"values-prod.yaml", "image:\n  registry: ghcr.io\n  repository: org/app\n  tag: \"v2.0.0\"\n", []string{"ghcr.io/org/app@v2.0.0"}},
+		"nested":         {"prod.values.yml", "redis:\n  image:\n    repository: redis\n    tag: '7.0'\n", []string{"docker.io/library/redis@7.0"}},
+		"init image":     {"values.yaml", "initImage:\n  repository: busybox\n  tag: 1.36\n", []string{"docker.io/library/busybox@1.36"}},
+		"not an image":   {"values.yaml", "git:\n  repository: org/app\n  tag: 1.2.3\n", nil},
+		"url":            {"values.yaml", "image:\n  repository: https://github.com/org/app\n  tag: 1.2.3\n", nil},
+		"digest":         {"values.yaml", "image:\n  repository: nginx\n  tag: 1.25\n  digest: sha256:abc\n", nil},
+		"templated":      {"values.yaml", "image:\n  repository: nginx\n  tag: \"{{ .Chart.AppVersion }}\"\n", nil},
+		"no tag":         {"values.yaml", "image:\n  repository: nginx\n", nil},
+		"empty tag":      {"values.yaml", "image:\n  repository: nginx\n  tag: \"\"\n", nil},
+		"other file":     {"config.yaml", "image:\n  repository: nginx\n  tag: 1.25\n", nil},
+		"sibling blocks": {"values.yaml", "a:\n  image:\n    repository: x\n  tag: 9.9\n", nil},
+	} {
+		if got := depList(t, "chart/"+c.file, c.in); strings.Join(got, " ") != strings.Join(c.want, " ") {
+			t.Errorf("%s: got %v want %v", name, got, c.want)
+		}
+	}
+}
+
+func TestDockerHelmApplyEditsOnlyTheTagLine(t *testing.T) {
+	in := "# values\nimage:\n  repository: nginx # base\n  tag: '1.25' # pin\n  pullPolicy: Always\n"
+	deps, _ := Docker{Dir: "/"}.Extract("values.yaml", []byte(in))
+	out, err := Docker{}.Apply([]byte(in), deps[0], "", "1.26")
+	if want := strings.Replace(in, "'1.25'", "'1.26'", 1); err != nil || string(out) != want {
+		t.Errorf("%v\n%s", err, out)
+	}
+}
+
+func TestDockerStageArgsAndMounts(t *testing.T) {
+	df := "ARG G=1.0\nFROM alpine:3.19 AS a\nARG TOOL=v1.0.0\nCOPY --from=org/tool:${TOOL} /t /t\n" +
+		"FROM alpine:3.19 AS b\nARG TOOL=v2.0.0\nCOPY --from=org/tool2:${TOOL} /t /t\n" +
+		"ARG G\nCOPY --from=org/g:${G} /g /g\n" +
+		"RUN --mount=type=bind,from=org/m:3.1,target=/m true\nRUN --mount=from=a,target=/x true\n" +
+		"FROM alpine:3.19 AS c\nCOPY --from=org/tool:${TOOL} /t /t\n"
+	got := depList(t, "Dockerfile", df)
+	for _, w := range []string{"org/tool@v1.0.0", "org/tool2@v2.0.0", "org/g@1.0", "org/m@3.1"} {
+		if !strings.Contains(strings.Join(got, " "), w) {
+			t.Errorf("missing %s in %v", w, got)
+		}
+	}
+	// A stage's ARG is not visible in a later stage (stage c has no TOOL), and a stage name is no image.
+	if n := strings.Count(strings.Join(got, " "), "org/tool@"); n != 1 {
+		t.Errorf("stage c must not inherit stage a's ARG: %v", got)
+	}
+	deps, _ := Docker{Dir: "/"}.Extract("Dockerfile", []byte(df))
+	for _, d := range deps {
+		if d.Package == "docker.io/org/tool2" {
+			out, err := Docker{}.Apply([]byte(df), d, "", "v2.1.0")
+			if want := strings.Replace(df, "ARG TOOL=v2.0.0", "ARG TOOL=v2.1.0", 1); err != nil || string(out) != want {
+				t.Errorf("only stage b's ARG line moves: %v\n%s", err, out)
+			}
+		}
+		if d.Package == "docker.io/org/m" {
+			out, _ := Docker{}.Apply([]byte(df), d, "", "3.2")
+			if want := strings.Replace(df, "from=org/m:3.1,target", "from=org/m:3.2,target", 1); string(out) != want {
+				t.Errorf("mount edit:\n%s", out)
+			}
+		}
+	}
+}

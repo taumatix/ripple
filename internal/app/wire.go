@@ -83,7 +83,7 @@ func New(ctx context.Context, s *config.Server, log *slog.Logger) (a *App, st st
 		return nil, nil, err
 	}
 	eng := &engine.Engine{Store: st, Platform: mux, Log: log, Workers: s.Workers,
-		MaxFiles: s.MaxFiles, MaxDependencies: s.MaxDependencies, MaxBackfill: s.MaxBackfill,
+		MaxFiles: s.MaxFiles, MaxDependencies: s.MaxDependencies, MaxBackfill: s.MaxBackfill, BackfillMajors: s.BackfillMajors,
 		GoCC: s.GoCC, GoToolchainDir: s.GoToolchainDir, GoImages: s.ContainerGoImages, GoProxyUser: s.GoProxyUser, GoProxyToken: s.GoProxyToken,
 		Limits: rules.Limits{MinimumReleaseAge: s.MinimumReleaseAge, OpenPRLimit: s.OpenPRLimit, AllowAutomerge: s.AllowAutomerge}}
 	eng.Lookup = &feed.GoProxyLookup{BaseURL: s.GoProxy, User: s.GoProxyUser, Token: s.GoProxyToken,

@@ -24,8 +24,17 @@ const DefaultMaxBackfill = 10
 const backfillLookupsPerJob = 10
 
 // backfillMajorProbe is how many majors above the one a dependency is on are looked for on
-// its line: a module that skipped further than this is found by the feed when it releases.
+// its line by default: a module that skipped further than this is found by the feed when it
+// releases, unless Engine.BackfillMajors (RIPPLE_BACKFILL_MAJORS) raises it.
 const backfillMajorProbe = 3
+
+// backfillFarMisses is how many consecutive majors beyond backfillMajorProbe the module
+// proxy may not know before the far probe stops: a skipped major is rare, a run of them is
+// the end of the line.
+const backfillFarMisses = 2
+
+// MaxBackfillMajors is the upper bound of Engine.BackfillMajors.
+const MaxBackfillMajors = 50
 
 // backfillProxyLookups bounds the module proxy requests of one scan.
 const backfillProxyLookups = 20
@@ -145,11 +154,19 @@ func (e *Engine) backfill(ctx context.Context, repo string, cfg *config.Repo, pr
 func (e *Engine) backfillTarget(ctx context.Context, d model.Dependency, lookups, proxy *int) (*model.Release, rules.UpdateType, error) {
 	paths := []string{d.Package}
 	if d.Datasource == model.DatasourceGo && d.Manager == "gomod" {
-		paths = append(paths, majorPaths(d.Package, backfillMajorProbe)...)
+		paths = append(paths, majorPaths(d.Package, e.backfillMajors())...)
 	}
 	var cands []model.Release
 	empty := map[string]bool{}
-	for _, p := range paths {
+	// paths[1:backfillMajorProbe+1] are read from the store and, when the dependency's own
+	// path has nothing stored, asked of the proxy; the far majors beyond are asked of the
+	// proxy only (see below).
+	near := paths
+	if len(near) > backfillMajorProbe+1 {
+		near = near[:backfillMajorProbe+1]
+	}
+	far := paths[len(near):]
+	for _, p := range near {
 		*lookups++
 		rels, err := e.Store.ListReleases(ctx, d.Datasource, p)
 		if err != nil {
@@ -159,7 +176,7 @@ func (e *Engine) backfillTarget(ctx context.Context, d model.Dependency, lookups
 		cands = append(cands, rels...)
 	}
 	if empty[d.Package] && e.Lookup != nil && d.Datasource == model.DatasourceGo {
-		for _, p := range paths {
+		for _, p := range near {
 			if !empty[p] {
 				continue
 			}
@@ -175,6 +192,37 @@ func (e *Engine) backfillTarget(ctx context.Context, d model.Dependency, lookups
 			}
 		}
 	}
+	// Far majors: a module that skipped past the near probe has no stored release on its new
+	// path, so the proxy is asked path by path until it stops knowing them.
+	misses := 0
+	for _, p := range far {
+		if e.Lookup == nil || *proxy >= backfillProxyLookups || misses >= backfillFarMisses {
+			break
+		}
+		*lookups++
+		rels, err := e.Store.ListReleases(ctx, d.Datasource, p)
+		if err != nil {
+			return nil, "", err
+		}
+		if len(rels) > 0 {
+			cands = append(cands, rels...)
+			misses = 0
+			continue
+		}
+		*proxy++
+		r, ok, err := e.Lookup.Latest(ctx, p)
+		if err != nil {
+			e.log().Warn("backfill lookup failed", "package", p, "err", err)
+			break
+		}
+		if !ok {
+			misses++
+			continue
+		}
+		misses = 0
+		r.Package = p
+		cands = append(cands, r)
+	}
 	var best *model.Release
 	var bestTyp rules.UpdateType
 	for i := range cands {
@@ -188,6 +236,13 @@ func (e *Engine) backfillTarget(ctx context.Context, d model.Dependency, lookups
 		}
 	}
 	return best, bestTyp, nil
+}
+
+func (e *Engine) backfillMajors() int {
+	if e.BackfillMajors > 0 {
+		return min(e.BackfillMajors, MaxBackfillMajors)
+	}
+	return backfillMajorProbe
 }
 
 // majorPaths are the module paths of the next n majors above pkg's own, on its line.

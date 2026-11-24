@@ -107,11 +107,34 @@ func (c *Client) base(host string) string {
 
 // Tags returns every tag of pkg ("registry/repo"), following Link headers.
 func (c *Client) Tags(ctx context.Context, pkg string) ([]string, error) {
+	return c.tags(ctx, pkg, "")
+}
+
+// TagsFrom returns the tags of pkg that sort lexically at or after floor (see TagFloor),
+// reading from there with `last=` instead of from the first page, so a repository whose old
+// tags fill many pages is not read through them. A registry that refuses the ranged read is
+// read in full; an empty floor is Tags.
+func (c *Client) TagsFrom(ctx context.Context, pkg, floor string) ([]string, error) {
+	if floor == "" {
+		return c.Tags(ctx, pkg)
+	}
+	out, err := c.tags(ctx, pkg, lastBefore(floor))
+	var le *httpretry.LimitError
+	if err == nil || ctx.Err() != nil || errors.As(err, &le) || errors.Is(err, ErrNotFound) || errors.Is(err, ErrDenied) {
+		return out, err
+	}
+	return c.Tags(ctx, pkg)
+}
+
+func (c *Client) tags(ctx context.Context, pkg, last string) ([]string, error) {
 	ref, ok := ParsePackage(pkg)
 	if !ok {
 		return nil, fmt.Errorf("registry: %q is not a registry/repository name", pkg)
 	}
 	next := c.base(ref.Registry) + "/v2/" + ref.Repo + "/tags/list?n=" + fmt.Sprint(tagsPageSize)
+	if last != "" {
+		next += "&last=" + url.QueryEscape(last)
+	}
 	var out []string
 	for page := 0; next != ""; page++ {
 		if page >= maxPages {

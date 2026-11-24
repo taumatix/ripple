@@ -1,6 +1,8 @@
 package e2e
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -64,6 +66,46 @@ func TestPipWatcherSurvivesA429(t *testing.T) {
 		e.tick()
 		if idx.Refused() != 1 || len(e.gh.PRs("acme/app")) != 1 {
 			t.Fatalf("refused %d, PRs %d", idx.Refused(), len(e.gh.PRs("acme/app")))
+		}
+	})
+}
+
+// A container registry that limits the tag list is waited out, and an image with a long
+// history is read from its floor (`last=`) rather than from the first page, with the same bump.
+func TestDockerWatcherSurvivesA429AndReadsFromTheFloor(t *testing.T) {
+	forEach(t, func(t *testing.T, st store.Store) {
+		e, reg := dockerEnv(t, st)
+		for i := 0; i < 30; i++ {
+			reg.AddTag("library/nginx", fmt.Sprintf("0.%d.0", i))
+		}
+		reg.AddTag("library/nginx", "1.25")
+		reg.PageSize(5)
+		df := "FROM nginx:1.25 AS web\n"
+		e.gh.AddRepo("acme/app", map[string]string{".ripple.yaml": dockerConfig, "Dockerfile": df})
+		start(t, e, "acme/app")
+
+		e.clock.Advance(time.Minute)
+		reg.AddTag("library/nginx", "1.26")
+		reg.Refuse("/tags/list", 1, 429, "0")
+		e.tick()
+
+		head, _ := onePR(t, e, "acme/app", false)
+		if got, _ := e.gh.FileAt("acme/app", head, "Dockerfile"); got != "FROM nginx:1.26 AS web\n" {
+			t.Errorf("Dockerfile:\n%s", got)
+		}
+		if reg.Refused() != 1 {
+			t.Errorf("the 429 was not met: %d", reg.Refused())
+		}
+		// 31 old tags at 5 a page is 7 pages (each asked twice: the 401 challenge, then the
+		// token), so even one full read would be 14 requests; two floored reads are a few.
+		n := 0
+		for _, r := range reg.Requests() {
+			if strings.Contains(r, "tags/list") {
+				n++
+			}
+		}
+		if n == 0 || n > 8 {
+			t.Errorf("%d tag-list requests: the image was read through its old pages", n)
 		}
 	})
 }

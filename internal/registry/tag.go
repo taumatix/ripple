@@ -44,3 +44,34 @@ func NewestOfShape(cur string, tags []string) string {
 	}
 	return best
 }
+
+// TagFloor is the lexically smallest string a tag newer than cur and of cur's shape can
+// have, "" when cur is not tracked. Registries list tags in lexical order, which is not
+// version order: "1.100.0" is newer than "1.25.3" and sorts before it. So the floor is not
+// cur but the smallest string any newer tag of the shape can take, where a component with
+// more digits than cur's ("100" against "25") is the lowest it can sort.
+func TagFloor(cur string) string {
+	m := tagRE.FindStringSubmatch(cur)
+	if m == nil {
+		return ""
+	}
+	floor := cur
+	comps := strings.Split(m[2], ".")
+	for i, c := range comps {
+		cand := m[1] + strings.Join(comps[:i], ".")
+		if i > 0 {
+			cand += "."
+		}
+		cand += "1" + strings.Repeat("0", len(c))
+		if cand < floor {
+			floor = cand
+		}
+	}
+	return floor
+}
+
+// lastBefore is the `last=` value that makes a registry list from floor on, floor included
+// (last is exclusive): the string with floor's final byte lowered by one.
+func lastBefore(floor string) string {
+	return floor[:len(floor)-1] + string(floor[len(floor)-1]-1)
+}

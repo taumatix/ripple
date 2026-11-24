@@ -184,16 +184,10 @@ func (e *Engine) setDashboardCursor(ctx context.Context, repo, val string) error
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	watch := e.cursorSet(ctx, watchCursor)
-	if watch[repo] == (val != "") {
-		return nil
-	}
 	if val != "" {
-		watch[repo] = true
-	} else {
-		delete(watch, repo)
+		return e.addToRepoSet(ctx, watchCursor, repo)
 	}
-	return e.saveCursorSet(ctx, watchCursor, watch)
+	return e.removeFromRepoSet(ctx, watchCursor, repo)
 }
 
 // dashboardClosedCursor holds the number of the dashboard issue ripple itself closed
@@ -213,43 +207,13 @@ func (e *Engine) markDashboard(repo string) {
 		e.dirty = map[string]bool{}
 	}
 	e.dirty[repo] = true
-	ctx := context.Background()
-	set := e.storedDirty(ctx)
-	set[repo] = true
-	e.saveDirty(ctx, set)
-}
-
-func (e *Engine) storedDirty(ctx context.Context) map[string]bool {
-	return e.cursorSet(ctx, dirtyCursor)
-}
-
-func (e *Engine) saveDirty(ctx context.Context, set map[string]bool) {
-	if err := e.saveCursorSet(ctx, dirtyCursor, set); err != nil {
+	if err := e.addToRepoSet(context.Background(), dirtyCursor, repo); err != nil {
 		e.log().Warn("save dashboard refresh set", "err", err)
 	}
 }
 
-// cursorSet reads a set of repo names kept one per line in a cursor.
-func (e *Engine) cursorSet(ctx context.Context, name string) map[string]bool {
-	set := map[string]bool{}
-	v, err := e.Store.GetCursor(ctx, name)
-	if err != nil {
-		e.log().Warn("read dashboard cursor set", "cursor", name, "err", err)
-		return set
-	}
-	for _, r := range strings.Fields(v) {
-		set[r] = true
-	}
-	return set
-}
-
-func (e *Engine) saveCursorSet(ctx context.Context, name string, set map[string]bool) error {
-	repos := make([]string, 0, len(set))
-	for r := range set {
-		repos = append(repos, r)
-	}
-	sort.Strings(repos)
-	return e.Store.SetCursor(ctx, name, strings.Join(repos, "\n"))
+func (e *Engine) storedDirty(ctx context.Context) map[string]bool {
+	return e.repoSet(ctx, dirtyCursor)
 }
 
 // flushDashboards syncs every repo marked since the last flush, by this process or by
@@ -261,10 +225,13 @@ func (e *Engine) flushDashboards(ctx context.Context) {
 		set[r] = true
 	}
 	e.dirty = nil
-	if len(set) > 0 {
-		e.saveDirty(ctx, nil)
+	// Only the repos read are cleared: a mark another replica added since stays for its flush.
+	for r := range set {
+		if err := e.removeFromRepoSet(ctx, dirtyCursor, r); err != nil {
+			e.log().Warn("clear dashboard refresh set", "repo", r, "err", err)
+		}
 	}
-	watch := e.cursorSet(ctx, watchCursor)
+	watch := e.repoSet(ctx, watchCursor)
 	e.mu.Unlock()
 	// A dashboard not read back for a while is looked at too: a person may have edited it.
 	for r := range watch {

@@ -283,13 +283,6 @@ Everything else:
     of Gitea/Forgejo, `archived=ARCHIVED` on Data Center 8+) ran only against fakes; also check that GitLab's
     `simple=true` listing under `archived=true` answers what the doc says, and that a Data Center before 8.0 lists no
     archived repo. Folds into entry 92's real-host run.
-176. **DynamoDB hygiene: measure it, and stop scanning for the package list.** Paging and the server's drift check (entry 145)
-    exist but were only run against the in-process fake, DynamoDB Local and the AWS Emulator (in-memory, so its timings say nothing about AWS); nobody has timed a Scan or a per-package recount
-    on a table with millions of items, or on real AWS with provisioned capacity, so the suggested page and pause are
-    arithmetic, not measurement. The check still finds the packages by Scanning every item for `DEP#` keys: keep the set of
-    packages with dependents in a small index item (or a sparse GSI) so the check reads that instead. The server only
-    reports drift; whether it should recount a package it finds drifted on its own (rate-limited, one replica at a time
-    under the lease) is undecided.
 179. **Supersede on a later run.** Within one run, PRs opened for the same module are now closed by the next one (fixed
     with the live OSV run). A sweep on a later run did not close lower PRs in one observed case after a rerun and a tick;
     reproduce it with a fake and either fix it or explain it in docs/osv.md.
@@ -389,3 +382,4 @@ Everything else:
     different name for the stored id (a rename missed twice), and an implementation for GitLab, Gitea/Forgejo and
     the others, which keep ignoring a mismatch as before. Only the GitHub lookup ran, against the fake host.
 205. **Webhooks: the rest of the streamed-parse cost.** One string value or key is now capped at 16 KiB while the signature is unchecked, so a forged body with one huge `ref` costs 16 KiB, not up to 16 MiB; the whole budget (`maxExtract`, 16 MiB, reachable by many fields each under the cap) is unchanged and unmeasured on a busy receiver. GitLab with a plain secret token (no signing key) still reads its header-authenticated body whole before parsing it; Azure DevOps, Gerrit, SCM-Manager and CodeCommit authenticate from headers and read whole, bounded by their `maxBody`.
+206. **DynamoDB hygiene: measure it, and decide on self-repair.** The hygiene commands and the server's drift check now list packages from the `PKGS` index (one Query; a table from before it is Scanned once, ROADMAP 176) instead of Scanning every item for `DEP#` keys. Still nobody has timed the check or a per-package recount on a table with millions of items or on real AWS with provisioned capacity, so the suggested page and pause are arithmetic, not measurement; every `PKGS` item shares one partition key, which a table with millions of packages would make a hot read partition (shard it by hash if it shows), and a package an older-version replica introduces after the marker is missed until the marker is deleted. The server only reports drift; whether it should recount a package it finds drifted on its own (rate-limited, one replica at a time under the lease) is undecided.

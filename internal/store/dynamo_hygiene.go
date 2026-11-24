@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"math"
-	"sort"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -64,27 +63,6 @@ func (d *Dynamo) pace(ctx context.Context) error {
 	case <-t.C:
 		return nil
 	}
-}
-
-// dependentBases lists every package that has at least one dependent, by scanning the
-// dependency items. A package whose counter was never written is found this way too.
-func (d *Dynamo) dependentBases(ctx context.Context) ([]string, error) {
-	seen := map[string]bool{}
-	err := d.scanItems(ctx, "begins_with(SK, :dep)", "SK", nil,
-		map[string]types.AttributeValue{":dep": s("DEP#")}, func(it map[string]types.AttributeValue) error {
-			if sk, _ := it["SK"].(*types.AttributeValueMemberS); sk != nil {
-				if b := depBaseOf(sk.Value); b != "" {
-					seen[b] = true
-				}
-			}
-			return nil
-		})
-	out := make([]string, 0, len(seen))
-	for b := range seen {
-		out = append(out, b)
-	}
-	sort.Strings(out)
-	return out, err
 }
 
 // indexedDependents counts base's dependents across its shards without reading them.
@@ -149,17 +127,25 @@ func (d *Dynamo) RecountAllDependents(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, wrapD("recount dependents", err)
 	}
+	pruned := 0
 	for i, b := range bases {
 		if i > 0 {
 			if err := d.pace(ctx); err != nil {
 				return i, wrapD("recount dependents", err)
 			}
 		}
-		if _, err := d.recountBase(ctx, b); err != nil {
+		n, err := d.recountBase(ctx, b)
+		if err != nil {
 			return i, wrapD("recount dependents", err)
 		}
+		if n == 0 { // nobody depends on it any more: the index entry has served its turn
+			if err := d.dropPackageIndex(ctx, b); err != nil {
+				return i, wrapD("recount dependents", err)
+			}
+			pruned++
+		}
 	}
-	return len(bases), nil
+	return len(bases) - pruned, nil
 }
 
 // BackfillFailedJobs writes the open-job copy of every failed job that lacks one and

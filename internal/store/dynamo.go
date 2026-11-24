@@ -56,6 +56,8 @@ type Dynamo struct {
 	// pkgShards caches each package's recorded shard count for the write path. It only
 	// grows, and a stale (lower) value is safe to write with; reads never use it.
 	pkgShards sync.Map
+	// pkgIndexed holds the packages this process has already written to the package index.
+	pkgIndexed sync.Map
 	// scanPage and scanPause pace the whole-table Scans of the operator commands (see
 	// WithScanPaging); zero leaves them unpaced.
 	scanPage  int
@@ -489,6 +491,15 @@ func (d *Dynamo) ReplaceDependencies(ctx context.Context, repo string, deps []mo
 			delta[depBaseOf(sk)]--
 			reqs = append(reqs, types.WriteRequest{DeleteRequest: &types.DeleteRequest{Key: key}})
 		}
+	}
+	added := make([]string, 0, len(delta))
+	for b, n := range delta {
+		if n > 0 {
+			added = append(added, b)
+		}
+	}
+	if err := d.indexPackages(ctx, added); err != nil {
+		return wrapD("replace dependencies", err)
 	}
 	if err := d.batch(ctx, reqs); err != nil {
 		return wrapD("replace dependencies", err)

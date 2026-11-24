@@ -29,7 +29,7 @@ tilde~=3
 func TestPipMatches(t *testing.T) {
 	p := Pip{Dir: "/"}
 	for f, want := range map[string]bool{"requirements.txt": true, "a/requirements-dev.txt": true, "requirements/base.txt": true,
-		"pyproject.toml": true, "x/pyproject.toml": true, "constraints.txt": false, "requirements.lock": false,
+		"pyproject.toml": true, "x/pyproject.toml": true, "constraints.txt": true, "requirements.in": true, "constraints-dev.in": true, "Pipfile": true, "other.in": false, "notes.txt": false, "requirements.lock": false,
 		"venv/requirements.txt": false, "node_modules/a/pyproject.toml": false} {
 		if got := p.Matches(f); got != want {
 			t.Errorf("Matches(%q) = %v", f, got)
@@ -52,8 +52,8 @@ func TestPipRequirementsExtract(t *testing.T) {
 		}
 		got = append(got, d.Package+d.Version)
 	}
-	// numpy has a second clause, pandas a wildcard, django a prerelease: not tracked.
-	want := "requests==2.31.0 flask-login~=0.6.2 click>=8.0 legacy==1.0"
+	// numpy is a floor with an upper bound (tracked); pandas has a wildcard, django a prerelease: not tracked.
+	want := "requests==2.31.0 flask-login~=0.6.2 click>=8.0 numpy>=1.20,<2 legacy==1.0"
 	if strings.Join(got, " ") != want {
 		t.Errorf("got  %v\nwant %s", got, want)
 	}
@@ -122,7 +122,7 @@ func TestPipPyprojectExtractAndApply(t *testing.T) {
 	for _, d := range deps {
 		got = append(got, d.Package+d.Version)
 	}
-	if want := "requests==2.31.0 click~=8.1.0 attrs>=23.1 pytest==7.4.0 ruff>=0.1.0"; strings.Join(got, " ") != want {
+	if want := "setuptools>=61 requests==2.31.0 click~=8.1.0 attrs>=23.1 ranged>=1,<2 pytest==7.4.0 ruff>=0.1.0"; strings.Join(got, " ") != want {
 		t.Errorf("got  %v\nwant %s", got, want)
 	}
 	out, err := p.Apply([]byte(pyproject), model.Dependency{File: "pyproject.toml", Package: "requests", Version: "==2.31.0"}, "", "2.32.3")
@@ -172,5 +172,100 @@ func TestPipIndexOverride(t *testing.T) {
 		if got := PipIndexOverride(tc.name, []byte(tc.body)); got != tc.want {
 			t.Errorf("%s %q = %v", tc.name, tc.body, got)
 		}
+	}
+}
+
+func TestPipSpecFloorForms(t *testing.T) {
+	for spec, want := range map[string]string{
+		"==2.31.0": "2.31.0==", "~=8.1": "8.1~=", ">=8.0": "8.0>=", "^1.2.3": "1.2.3^", "~1.2": "1.2~", "1.2.3": "1.2.3",
+		">=1.20,<2": "1.20>=", "<2,>=1.20": "1.20>=", ">=1,<2,!=1.5.*": "1>=",
+		"~=3": "", "==1.*": "", ">=1,==1.2": "", ">=1,>=2": "", "<2": "", "!=1": "", ">=1,<2rc1": "", "^1.*": "", "*": "",
+	} {
+		floor, op := PipSpecFloor(spec)
+		if floor+op != want {
+			t.Errorf("PipSpecFloor(%q) = %q %q, want %q", spec, floor, op, want)
+		}
+	}
+}
+
+func TestPipRangeApplyMovesOnlyTheFloor(t *testing.T) {
+	src := "numpy >= 1.20 , < 2  # bounds\n<2,>=1.20\n"
+	p := Pip{Dir: "/"}
+	deps, _ := p.Extract("requirements.txt", []byte(src))
+	if len(deps) != 1 || deps[0].Version != ">=1.20,<2" || deps[0].Package != "numpy" {
+		t.Fatalf("%+v", deps)
+	}
+	out, err := p.Apply([]byte(src), deps[0], "", "1.26.4")
+	if err != nil || string(out) != "numpy >= 1.26.4 , < 2  # bounds\n<2,>=1.20\n" {
+		t.Errorf("%q, %v", out, err)
+	}
+}
+
+const poetryToml = `[tool.poetry.dependencies]
+python = "^3.9"
+Requests = "^2.31.0"   # http
+click = { version = "~8.0", extras = ["x"] }
+exact = '1.0.0'
+multi = [{version = "^1", python = "<3.9"}, {version = "^2", python = ">=3.9"}]
+local = { path = "../local", version = "^1.0" }
+unbounded = "*"
+caret = "^1"
+
+[tool.poetry.dev-dependencies]
+pytest = "^7.0"
+
+[tool.poetry.group.docs.dependencies]
+sphinx = ">=5.0,<7"
+
+[tool.poetry.group.docs.dependencies.extra]
+version = "~2.1"
+
+[tool.poetry.scripts]
+notme = "^1.0"
+`
+
+func TestPipPoetryExtractAndApply(t *testing.T) {
+	p := Pip{Dir: "/"}
+	deps, _ := p.Extract("pyproject.toml", []byte(poetryToml))
+	var got []string
+	for _, d := range deps {
+		got = append(got, d.Package+d.Version)
+	}
+	want := "requests^2.31.0 click~8.0 exact1.0.0 caret^1 pytest^7.0 sphinx>=5.0,<7 extra~2.1"
+	if strings.Join(got, " ") != want {
+		t.Fatalf("got  %v\nwant %s", got, want)
+	}
+	for _, tc := range []struct{ pkg, ver, to, from, into string }{
+		{"requests", "^2.31.0", "2.32.3", `Requests = "^2.31.0"   # http`, `Requests = "^2.32.3"   # http`},
+		{"click", "~8.0", "8.1.7", `version = "~8.0"`, `version = "~8.1.7"`},
+		{"exact", "1.0.0", "1.0.1", `exact = '1.0.0'`, `exact = '1.0.1'`},
+		{"sphinx", ">=5.0,<7", "6.2.1", `">=5.0,<7"`, `">=6.2.1,<7"`},
+		{"extra", "~2.1", "2.2", `version = "~2.1"`, `version = "~2.2"`},
+	} {
+		out, err := p.Apply([]byte(poetryToml), model.Dependency{File: "pyproject.toml", Package: tc.pkg, Version: tc.ver}, "", tc.to)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.pkg, err)
+		}
+		if want := strings.Replace(poetryToml, tc.from, tc.into, 1); string(out) != want {
+			t.Errorf("%s: only the version moves:\n%s", tc.pkg, out)
+		}
+	}
+}
+
+func TestPipfileExtractAndIndex(t *testing.T) {
+	src := "[[source]]\nurl = \"https://pypi.org/simple\"\nname = \"pypi\"\n\n[packages]\nflask = \"==2.0.0\"\nany = \"*\"\n\n[dev-packages]\nblack = {version = \">=23.1\"}\n\n[requires]\npython_version = \"3.9\"\n"
+	deps, _ := (Pip{Dir: "/"}).Extract("Pipfile", []byte(src))
+	var got []string
+	for _, d := range deps {
+		got = append(got, d.Package+d.Version)
+	}
+	if strings.Join(got, " ") != "flask==2.0.0 black>=23.1" {
+		t.Errorf("%v", got)
+	}
+	if PipIndexOverride("Pipfile", []byte(src)) {
+		t.Error("the default index is not an override")
+	}
+	if !PipIndexOverride("Pipfile", []byte(src+"[[source]]\nurl = \"https://pypi.corp/simple\"\nname = \"corp\"\n")) {
+		t.Error("a second source is")
 	}
 }

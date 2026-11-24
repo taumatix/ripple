@@ -376,3 +376,11 @@ Everything else:
     hold the installation back until the reset. Decide whether those should wait (they run inside a job, where a 30s wait
     holds a worker) or keep deferring, and say why in the code. The 429 and 403 shapes are from GitHub's docs and the
     fake; no real api.github.com limit has been provoked.
+197. **`container-runtimes (docker)`: the reaped container that was still listed.** `TestContainerRuntimeLive` failed once
+    ("the container survived its timeout (Reap left it)", run 45391499375, head 0fd4151) and passed on retry. Two causes fit
+    and the log cannot tell them apart: (a) Docker removes a `--rm` container itself when `kill` stops it, so `rm -f` answers
+    "removal already in progress" and a list taken at once still shows it as "removing" (a test-side race, now polled for
+    15s); (b) the 4s timeout killed the client before the daemon had created the container, so `Reap` found no such
+    container and the daemon then started it (a product race, harmless for a minutes-long job timeout, real for a short
+    one). The live test now logs `inspect` of a container still present after the wait: still running means (b), in which
+    case `Reap` should look again after a short delay, bounded. Act on the next failure's log, not before.

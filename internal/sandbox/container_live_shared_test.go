@@ -123,15 +123,48 @@ func checkContainerBackend(t *testing.T, b Backend, bin string, fl Flavour) {
 		t.Fatalf("no container name in %v", lastWrapped)
 	}
 	t.Cleanup(func() { _ = exec.Command(bin, "rm", "-f", mine).Run() })
-	out, _ := exec.Command(bin, listAll(fl)...).CombinedOutput()
+	// The container may take a moment to go away after Reap: Docker removes a --rm container
+	// itself once it exits, so `rm -f` can answer "removal already in progress" and a list taken
+	// at once still shows it as "removing". Poll for a bound; a container that is still there
+	// after it is a real leak, and its state is logged to say which kind (still running: Reap ran
+	// before the daemon had created it; removing/exited: a slow daemon).
+	reaped := time.Now()
+	var out []byte
+	for {
+		out, _ = exec.Command(bin, listAll(fl)...).CombinedOutput()
+		if !listsContainer(out, mine) || time.Since(reaped) > reapSettle {
+			break
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
 	for _, l := range strings.Split(string(out), "\n") {
 		switch {
 		case strings.HasPrefix(l, mine):
-			t.Errorf("the container survived its timeout (Reap left it): %s\nall containers:\n%s", l, out)
+			state, _ := exec.Command(bin, "inspect", mine).CombinedOutput()
+			if len(state) > 1500 {
+				state = state[:1500]
+			}
+			t.Errorf("the container survived its timeout and %s of waiting (Reap left it): %s\nall containers:\n%s\ninspect:\n%s",
+				reapSettle, l, out, state)
 		case strings.HasPrefix(l, "ripple-"):
 			t.Logf("note: a container from another run is present: %s", l)
 		}
 	}
+	if d := time.Since(reaped); d > time.Second && !listsContainer(out, mine) {
+		t.Logf("note: the reaped container took %s to disappear", d.Round(time.Millisecond))
+	}
+}
+
+// reapSettle bounds how long the live test waits for a reaped container to disappear.
+const reapSettle = 15 * time.Second
+
+func listsContainer(list []byte, name string) bool {
+	for _, l := range strings.Split(string(list), "\n") {
+		if strings.HasPrefix(l, name) {
+			return true
+		}
+	}
+	return false
 }
 
 func slicesIndex(s []string, v string) int {

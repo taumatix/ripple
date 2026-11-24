@@ -271,11 +271,6 @@ Everything else:
     pre-release handling, non-normalized names, 404, and that every version of four large projects parses). Still open:
     ordering was only checked for antisymmetry, not against `packaging` on a corpus; `releases` is documented as deprecated
     in favour of the PEP 691 index and could be dropped; rate limits and private indexes.
-164. **npm: comparators, unions, and other sections.** Partial ranges, x-ranges and the newest target per update type are
-    done (docs/npm.md). Still left alone: comparators (`>=1.2.3`), unions (`1.2 || 2`), hyphen ranges, a current
-    prerelease, `peerDependencies`, `overrides`/`resolutions`, `npm:` aliases and workspace specs. Also npm classifies by
-    number position, so `0.2.3` -> `0.3.0` is "minor" (Cargo has used the leftmost-nonzero rule since 154); do the same
-    here once a repo reports it.
 165. **Docker: Helm values, Kustomize and per-stage ARGs.** Compose files, Kubernetes manifests, `COPY --from` and global
     `ARG` tags are read (docs/docker.md). Not read: Helm `values.yaml` (`repository:`/`tag:` pairs), Kustomize `images:`,
     `ARG` declared after a `FROM`, an ARG that is only part of a tag, and `RUN --mount=from=`.
@@ -391,3 +386,9 @@ Everything else:
     sections. The TOML scanner (`internal/manager/toml.go`) was checked against a handful of real manifests and the
     unit tables, not a corpus of crates.io manifests, and it skips a file it cannot parse with a warning. The same
     newest-only target still applies to npm (see 147).
+199. **npm: compound ranges, hyphen ranges and the other sections.** Partial ranges, x-ranges, `>=` floors and `||` unions
+    are done (docs/npm.md). Still left alone: compound ranges (`>=1.2.3 <2`; the floor can move only while the new version
+    stays under the bound), hyphen ranges, `>` and `<=`, a current prerelease, `peerDependencies`, `overrides`/`resolutions`,
+    `npm:` aliases and workspace specs. The union rule (move only the newest alternative) was reasoned, not checked
+    against a corpus of real package.json files. npm still classifies by number position, so `0.2.3` -> `0.3.0` is
+    "minor" (Cargo uses the leftmost-nonzero rule); do the same here once a repo reports it.

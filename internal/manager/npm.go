@@ -54,16 +54,18 @@ func (n Npm) Matches(p string) bool {
 
 var npmSections = map[string]bool{"dependencies": true, "devDependencies": true, "optionalDependencies": true}
 
-var npmRangeRE = regexp.MustCompile(`^([\^~=]?)(\d+)((?:\.\d+){0,2})((?:\.[xX*]){0,2})$`)
+var npmRangeRE = regexp.MustCompile(`^(>=[ \t]*|[\^~=]?)(\d+)((?:\.\d+){0,2})((?:\.[xX*]){0,2})$`)
 
-// NpmRange is a single-comparator range ripple moves: an optional `^`, `~` or `=`, one
-// to three numeric parts, and for a partial one optionally the wildcard tail it was
-// written with ("1.2", "^1.2", "1.x", "1.2.x", "~1.*"). `*`, comparators, unions and
-// hyphen ranges are not NpmRanges.
+// NpmRange is a single-comparator range ripple moves: an optional `^`, `~`, `=` or
+// `>=` (with the spacing it was written with), one to three numeric parts, and for a
+// partial one optionally the wildcard tail it was written with ("1.2", "^1.2", "1.x",
+// "1.2.x", "~1.*", ">= 1.2"). `*`, the upper-bound and exclusive comparators, compound
+// ranges (">=1 <2") and hyphen ranges are not NpmRanges; a `||` union is an NpmSpec.
 type NpmRange struct {
 	Op     string
 	Parts  []int  // the numbers, as written
 	Suffix string // the wildcard tail as written (".x", ".x.x", ".*"), or ""
+	text   string // the whole range as written
 }
 
 // ParseNpmRange reads spec as an NpmRange; false when it is something else.
@@ -72,7 +74,7 @@ func ParseNpmRange(spec string) (NpmRange, bool) {
 	if m == nil {
 		return NpmRange{}, false
 	}
-	r := NpmRange{Op: m[1], Suffix: m[4]}
+	r := NpmRange{Op: m[1], Suffix: m[4], text: spec}
 	nums := m[2] + m[3]
 	for _, p := range strings.Split(nums, ".") {
 		n, err := strconv.Atoi(p)
@@ -83,6 +85,10 @@ func ParseNpmRange(spec string) (NpmRange, bool) {
 	}
 	// "1.2.3.x" has no wildcard room: the tail only fills missing parts.
 	if len(r.Parts)+strings.Count(r.Suffix, ".") > 3 || (r.Suffix != "" && len(r.Parts) == 3) {
+		return NpmRange{}, false
+	}
+	// ">=1.x" is legal but says nothing a floor does not: not read.
+	if strings.HasPrefix(r.Op, ">") && r.Suffix != "" {
 		return NpmRange{}, false
 	}
 	return r, true
@@ -105,14 +111,82 @@ func (r NpmRange) Text(version string) string {
 	return r.Op + strings.Join(parts, ".") + r.Suffix
 }
 
-// NpmRangeFloor is the version a trackable range names and its operator; both "" when
-// the range is not one ripple moves.
+// NpmSpec is a dependency's whole range string: one NpmRange, or a `||` union of
+// them (`^1.2.3 || ^2.0.0`). A union is read only when every alternative is an
+// NpmRange. Only its newest alternative (highest floor, the last on a tie) moves;
+// the others are kept as written, because an older alternative states a range the
+// owner still wants to allow.
+type NpmSpec struct {
+	Alts []NpmRange
+	lead []string // whitespace before each alternative
+	tail []string // whitespace after each alternative
+}
+
+// ParseNpmSpec reads spec as an NpmSpec; false when any part is something else.
+func ParseNpmSpec(spec string) (NpmSpec, bool) {
+	var s NpmSpec
+	for _, alt := range strings.Split(spec, "||") {
+		t := strings.TrimSpace(alt)
+		r, ok := ParseNpmRange(t)
+		if !ok {
+			return NpmSpec{}, false
+		}
+		i := strings.Index(alt, t)
+		s.Alts = append(s.Alts, r)
+		s.lead = append(s.lead, alt[:i])
+		s.tail = append(s.tail, alt[i+len(t):])
+	}
+	return s, true
+}
+
+// target is the index of the alternative that moves.
+func (s NpmSpec) target() int {
+	best := 0
+	for i, a := range s.Alts {
+		if semver.Compare("v"+a.Floor(), "v"+s.Alts[best].Floor()) >= 0 {
+			best = i
+		}
+	}
+	return best
+}
+
+// Moving is the alternative that follows a new version.
+func (s NpmSpec) Moving() NpmRange { return s.Alts[s.target()] }
+
+// Floor is the floor of the moving alternative.
+func (s NpmSpec) Floor() string { return s.Moving().Floor() }
+
+// Text is the spec that follows version: the moving alternative is rewritten, every
+// other byte of the spec is kept.
+func (s NpmSpec) Text(version string) string {
+	t := s.target()
+	var b strings.Builder
+	for i, a := range s.Alts {
+		if i > 0 {
+			b.WriteString("||")
+		}
+		b.WriteString(s.lead[i])
+		if i == t {
+			b.WriteString(a.Text(version))
+		} else {
+			b.WriteString(a.raw())
+		}
+		b.WriteString(s.tail[i])
+	}
+	return b.String()
+}
+
+// raw is the range as it was written.
+func (r NpmRange) raw() string { return r.text }
+
+// NpmRangeFloor is the version a trackable spec names (the moving alternative's) and
+// that alternative's operator; both "" when the spec is not one ripple moves.
 func NpmRangeFloor(spec string) (string, string) {
-	r, ok := ParseNpmRange(spec)
+	s, ok := ParseNpmSpec(spec)
 	if !ok {
 		return "", ""
 	}
-	return r.Floor(), r.Op
+	return s.Floor(), s.Moving().Op
 }
 
 // npmEntry is one `"name": "range"` member of a dependency section.
@@ -206,7 +280,7 @@ func (n Npm) Apply(content []byte, dep model.Dependency, newPackage, newVersion 
 	if err != nil {
 		return nil, fmt.Errorf("parse %s: %w", dep.File, err)
 	}
-	rng, ok := ParseNpmRange(dep.Version)
+	rng, ok := ParseNpmSpec(dep.Version)
 	if !ok {
 		return nil, fmt.Errorf("%w: %q is not a range ripple moves", ErrUnsupported, dep.Version)
 	}

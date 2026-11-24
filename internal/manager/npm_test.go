@@ -137,7 +137,7 @@ func TestNpmApplyEscapedKey(t *testing.T) {
 }
 
 func TestNpmRangeFloor(t *testing.T) {
-	for in, want := range map[string]string{"^1.2.3": "1.2.3", "~0.1.0": "0.1.0", "1.0.0": "1.0.0", "=1.0.0": "1.0.0", "^1.2": "1.2.0", "1": "1.0.0", "1.x": "1.0.0", "1.2.*": "1.2.0", "1.x.x": "1.0.0", "1.2.3.x": "", "1.x.3": "", "x": "", "1.2.x.x": "", ">=1.0.0": "", "*": "", "^1.0.0-rc.1": "", "v1.0.0": ""} {
+	for in, want := range map[string]string{"^1.2.3": "1.2.3", "~0.1.0": "0.1.0", "1.0.0": "1.0.0", "=1.0.0": "1.0.0", "^1.2": "1.2.0", "1": "1.0.0", "1.x": "1.0.0", "1.2.*": "1.2.0", "1.x.x": "1.0.0", "1.2.3.x": "", "1.x.3": "", "x": "", "1.2.x.x": "", ">=1.0.0": "1.0.0", ">= 1.2": "1.2.0", ">=1.x": "", ">1.0.0": "", "<=1.0.0": "", ">=1.0.0 <2": "", "1 - 2": "", "^1.0.0 || ^2.1.0": "2.1.0", "^2.1.0 || ^1.0.0": "2.1.0", "^1.0.0 || *": "", "^1.0.0 ||": "", "*": "", "^1.0.0-rc.1": "", "v1.0.0": ""} {
 		if got, _ := NpmRangeFloor(in); got != want {
 			t.Errorf("NpmRangeFloor(%q) = %q, want %q", in, got, want)
 		}
@@ -165,6 +165,33 @@ func TestNpmApplyKeepsPartialPrecision(t *testing.T) {
 		}
 		if want := `{"dependencies": {"foo": "` + tc.want + `"}}`; string(out) != want {
 			t.Errorf("%s -> %s: got %s, want %s", tc.spec, tc.to, out, want)
+		}
+	}
+}
+
+func TestNpmApplyComparatorsAndUnions(t *testing.T) {
+	for _, tc := range []struct{ spec, to, want string }{
+		{">=1.2.3", "1.5.0", ">=1.5.0"},
+		{">= 1.2", "1.5.3", ">= 1.5"},
+		{"^1.4.0 || ^2.0.0", "2.3.0", "^1.4.0 || ^2.3.0"},
+		{"^2.0.0 || ^1.4.0", "2.3.0", "^2.3.0 || ^1.4.0"},
+		{" ^1.04.0  ||~2.0.0 ", "2.1.0", " ^1.04.0  ||~2.1.0 "}, // untouched alternatives keep their bytes
+		{"^1.0.0 || ^2.0.0", "3.0.0", "^1.0.0 || ^3.0.0"},
+		{"1 || 2", "3.1.0", "1 || 3"},
+	} {
+		in := `{"dependencies": {"foo": "` + tc.spec + `"}}`
+		out, err := Npm{Dir: "/"}.Apply([]byte(in), model.Dependency{File: "package.json", Package: "foo", Version: tc.spec}, "", tc.to)
+		if err != nil {
+			t.Fatalf("%q: %v", tc.spec, err)
+		}
+		if want := `{"dependencies": {"foo": "` + tc.want + `"}}`; string(out) != want {
+			t.Errorf("%q -> %s: got %s, want %s", tc.spec, tc.to, out, want)
+		}
+	}
+	for _, spec := range []string{"^1.0.0 || >=2 <3", "<2", ">1.0.0", "1 - 2"} {
+		_, err := Npm{}.Apply([]byte(`{"dependencies": {"foo": "`+spec+`"}}`), model.Dependency{File: "package.json", Package: "foo", Version: spec}, "", "3.0.0")
+		if !errors.Is(err, ErrUnsupported) {
+			t.Errorf("%q: err = %v, want ErrUnsupported", spec, err)
 		}
 	}
 }

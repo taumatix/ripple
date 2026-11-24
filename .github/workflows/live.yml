@@ -17,5 +17,5 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: go proxy, go index and OSV (anonymous, a handful of requests per test)
-        run: go test -tags live -count=1 -v ./internal/livetest ./internal/feed ./internal/advisory ./internal/e2e -run 'Live'
+      - name: go proxy, go index, OSV, npm, PyPI and crates.io (anonymous, a handful of requests per test)
+        run: go test -tags live -count=1 -v ./internal/livetest ./internal/feed ./internal/advisory ./internal/e2e ./internal/npmreg ./internal/pypi ./internal/cratesindex -run 'Live'

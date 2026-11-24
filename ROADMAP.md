@@ -225,11 +225,11 @@ Everything else:
     `dist.integrity` and `dist.tarball` per version, so a package-lock v2/v3 entry for a leaf package whose own dependencies did
     not change could be rewritten without running npm; start there, and say what is still left to the owner. `npmreg` parses
     neither `dist` nor per-version `dependencies` yet (nor does the fake publish them): add both first.
-149. **npm: private registries, and verify against the real one.** A package whose `.npmrc` names another registry is skipped
-    (guard against dependency confusion); supporting it needs credentials and a registry setting per scope. Nothing here has run
-    against registry.npmjs.org: the client and fake come from the vendored excerpts (scoped-name encoding, 404 for private
-    packages, the `deprecated` shape, a `latest` tag that exists are assumed; see UPSTREAM.md). Also: `npm:packages` is one
-    package set kept per package (see 159), versions carry no publication date (the full document has `time` but is much larger).
+149. **npm: private registries.** A package whose `.npmrc` names another registry is skipped (guard against dependency
+    confusion); supporting it needs credentials and a registry setting per scope. The public registry is verified live
+    (2026-11-24, UPSTREAM.md); not verified: private registries and their 401/403 answers, rate limits, and a very large
+    package. Also: `npm:packages` is one package set kept per package (see 159), versions carry no publication date (the
+    full document has `time` but is much larger).
 153. **Actions: verify against real GitHub and a real GHES.** The workflows-permission refusal text, the upstream fallback
     (`RIPPLE_ACTIONS_UPSTREAM_URL`, 404 on the host then the configured upstream) and superseding of stale actions PRs were
     written against the fake; none ran against github.com or a GHES (see 61). The supersede sweep and closing of beaten PRs
@@ -238,11 +238,10 @@ Everything else:
     a lock entry needs the checksum and dependency edges of the new version, which only cargo's resolver knows. The sparse
     index line carries `cksum` and `deps`, so a lock edit for a leaf crate whose dependencies did not change may be
     possible offline; start there and say what remains.
-156. **Cargo: other registries, MSRV, and verify against the real index.** A `registry =` dependency and a repo with
-    `replace-with` are skipped, not read from their own index (needs `.cargo/config.toml` parsing and per-registry
-    credentials). `rust_version` in the index is ignored, so a bump may need a newer compiler than the repo's
-    `rust-version`. Nothing here has run against index.crates.io: the client and fake come from the vendored excerpts
-    (mixed-case names, 404 for a missing crate, large files, conditional requests are assumed; see UPSTREAM.md). Also:
+156. **Cargo: other registries and MSRV.** A `registry =` dependency and a repo with `replace-with` are skipped, not read
+    from their own index (needs `.cargo/config.toml` parsing and per-registry credentials). `rust_version` in the index is
+    ignored, so a bump may need a newer compiler than the repo's `rust-version`. index.crates.io is verified live
+    (2026-11-24); not verified: another registry, the largest crates, conditional requests, rate limits. Also:
     `cargo:packages` is one read-modify-write cursor (see 96), versions carry no publication date, and the PR footer
     still says "module index" (see 99).
 157. **Event numbering: measure the hot counter, and the marker backfill.** The event sequence counter is one item written once
@@ -270,10 +269,10 @@ Everything else:
     pip-compile output are reported, not regenerated (docs/pip.md). `Requires-Python` is ignored, so a bump may need a
     newer interpreter. A dependency on a private index is skipped, not read from its own index (needs per-index
     credentials and a PEP 503/691 client); the guard also skips a file that names `https://pypi.org/simple` explicitly.
-162. **pip: verify against the real index.** Nothing here ran against pypi.org: the client and fake come from the
-    vendored excerpts (redirects for non-normalized names, 404 for a missing project, `releases` being documented as
-    deprecated in favour of the PEP 691 index, large projects). PEP 440 ordering is implemented from the summary; compare
-    it with the `packaging` library on a corpus.
+162. **pip: compare PEP 440 with the `packaging` library.** pypi.org is verified live (2026-11-24: yanked, fileless and
+    pre-release handling, non-normalized names, 404, and that every version of four large projects parses). Still open:
+    ordering was only checked for antisymmetry, not against `packaging` on a corpus; `releases` is documented as deprecated
+    in favour of the PEP 691 index and could be dropped; rate limits and private indexes.
 163. **Cargo: wildcards, comparators, and a real TOML parser.** Partial requirements (`1.2`) and 0.x semantics are done
     (docs/cargo.md). Still left alone: wildcards (`1.*`), comparators (`>=1.2`), multi-part requirements (`>=1, <2`),
     multi-line inline tables and dotted keys (`foo.version = "1"`); the manager is a line scanner, not a TOML parser, so a

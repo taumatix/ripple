@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
-	"strconv"
 	"sync"
 	"time"
 
@@ -207,7 +206,7 @@ func (e *Engine) Scan(ctx context.Context, repo model.Repo) error {
 		err = e.scan(ctx, repo)
 	}
 	if err == nil && repo.RepoID != 0 {
-		err = e.setCursor(ctx, hold, repoIDCursor+strconv.FormatInt(repo.RepoID, 10), repo.FullName)
+		err = e.setCursor(ctx, hold, repoIDKey(repo.FullName, repo.RepoID), repo.FullName)
 	}
 	return err
 }

@@ -602,7 +602,7 @@ func (a *App) pushUnknown(ctx context.Context, name string, ev model.Event) erro
 	}
 	// The record held under another name with this id is this repo before a rename the
 	// rename event has not delivered yet.
-	if old, ok := a.Engine.RepoIDOwner(ctx, ev.RepoID); ok && old != name {
+	if old, ok := a.Engine.RepoIDOwner(ctx, name, ev.RepoID); ok && old != name {
 		if err := a.Engine.Rename(ctx, old, name, ev.InstallationID); err != nil {
 			return err
 		}

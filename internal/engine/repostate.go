@@ -28,6 +28,18 @@ const pauseDefer = time.Hour
 // a hint: it is trusted only while the record it names still carries that id.
 const repoIDCursor = "repoid|"
 
+// repoIDKey is the repoIDCursor key of id for the repo called name. A repository id is
+// only unique within its host, so a repo of a non-default host ("ghes:owner/repo")
+// keeps its ids under that host's own prefix ("repoid|ghes:<id>"); the default host's
+// keys stay what they were.
+func repoIDKey(name string, id int64) string {
+	host := ""
+	if h, _, ok := strings.Cut(name, ":"); ok && !strings.Contains(h, "/") {
+		host = h + ":"
+	}
+	return repoIDCursor + host + strconv.FormatInt(id, 10)
+}
+
 // removedCursor is the tombstone a removal leaves ("removed#<name>" -> "<unix>|<id>", id 0
 // when it was not known). The rule it serves: for removedTTL after a removal, a signed
 // push for that name does not register it again unless it carries a different repository
@@ -169,7 +181,7 @@ func (e *Engine) Rename(ctx context.Context, old, now string, scope int64) error
 		return err
 	}
 	if repo.RepoID != 0 {
-		if err := e.setCursor(ctx, holds[now], repoIDCursor+strconv.FormatInt(repo.RepoID, 10), now); err != nil {
+		if err := e.setCursor(ctx, holds[now], repoIDKey(now, repo.RepoID), now); err != nil {
 			return err
 		}
 	}
@@ -256,15 +268,17 @@ func (e *Engine) RegisterFromPush(ctx context.Context, name string, scope, id in
 }
 
 // RepoIDOwner reports the stored repo that holds host repository id, if any.
-func (e *Engine) RepoIDOwner(ctx context.Context, id int64) (string, bool) {
-	name, err := e.Store.GetCursor(ctx, repoIDCursor+strconv.FormatInt(id, 10))
-	if err != nil || name == "" {
+// name is the repo the id was seen for: ids are only unique within one host, so the
+// owner is looked up among the repos of name's host.
+func (e *Engine) RepoIDOwner(ctx context.Context, name string, id int64) (string, bool) {
+	owner, err := e.Store.GetCursor(ctx, repoIDKey(name, id))
+	if err != nil || owner == "" {
 		return "", false
 	}
-	if repo, ok, err := e.Store.GetRepo(ctx, name); err != nil || !ok || repo.RepoID != id {
+	if repo, ok, err := e.Store.GetRepo(ctx, owner); err != nil || !ok || repo.RepoID != id {
 		return "", false
 	}
-	return name, true
+	return owner, true
 }
 
 // AdoptRepoID stores the host's repository id on a registered repo that has none (one
@@ -279,11 +293,11 @@ func (e *Engine) AdoptRepoID(ctx context.Context, name string, id int64) error {
 	if err := e.Store.UpsertRepo(ctx, repo); err != nil {
 		return err
 	}
-	return e.Store.SetCursor(ctx, repoIDCursor+strconv.FormatInt(id, 10), name)
+	return e.Store.SetCursor(ctx, repoIDKey(name, id), name)
 }
 
 func (e *Engine) releaseRepoID(ctx context.Context, hold *repoLease, id int64, name string) error {
-	key := repoIDCursor + strconv.FormatInt(id, 10)
+	key := repoIDKey(name, id)
 	if v, err := e.Store.GetCursor(ctx, key); err != nil || v != name {
 		return err
 	}

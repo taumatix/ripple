@@ -121,8 +121,12 @@ Everything else:
     licence or a sponsored one): the first release that accepts `2026-03-10`, whether `enablePullRequestAutoMerge` exists
     and what an absent one answers, a disabled GraphQL/REST status, and the webhook payloads; then record the facts in
     `UPSTREAM.md` and `docs/vendor/ghes`.
-63. **Several GitHub hosts.** One GitHub host (github.com or one GHES) per server. Serving github.com and a GHES together
-    needs a second host name in the registry with its own webhook path, App and secret.
+63. **Several GitHub hosts: more than one extra, and github.com as the second.** One extra GitHub is served as
+    the host `ghes` (`RIPPLE_GHES_*`, see docs/platform-github-enterprise.md), with the API, GraphQL and git bases
+    derived from a GHES root. Still open: a third and later GitHub (the registry holds one builder per name, so it
+    needs a name per host, e.g. `RIPPLE_GITHUB_HOSTS=a,b` with `RIPPLE_GITHUB_<NAME>_*`), a second host that is
+    github.com itself (`api.github.com`, not `/api/v3`), and the installation id, which the queue's per-installation
+    limit counts across hosts although two GitHubs can reuse a number.
 67. **Dependency dashboard: a "re-run now" control, and more hosts.** The dashboard (opt-in
     `dependency-dashboard`) is a read-only report. A checkbox that releases a deferred job early needs the
     `issues` webhook, a check of the editor's repository permission (never the issue's text) and an audit

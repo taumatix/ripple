@@ -242,6 +242,10 @@ func checkURL(name, v string) error {
 	return nil
 }
 
+// CheckURL reports whether v is a usable base URL for the setting name: https, or http
+// on loopback, and no credentials in it. Host builders validate their own settings with it.
+func CheckURL(name, v string) error { return checkURL(name, v) }
+
 // LoadServer reads the environment through getenv and validates every problem at once.
 func LoadServer(getenv func(string) string) (*Server, error) {
 	var errs []error

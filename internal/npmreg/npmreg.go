@@ -55,7 +55,18 @@ type Client struct {
 type Version struct {
 	Version    string
 	Deprecated bool
+	// Tarball and Integrity are the version's dist.tarball and dist.integrity ("" when
+	// the registry did not send them).
+	Tarball, Integrity string
+	// Shape is a canonical rendering of the fields that decide how a package installs
+	// (its dependencies of every kind, bin, engines, os, cpu, install scripts): two
+	// versions with the same Shape differ only in their code.
+	Shape string
 }
+
+// shapeKeys are the abbreviated-metadata members that decide how a package installs.
+var shapeKeys = []string{"dependencies", "optionalDependencies", "peerDependencies", "peerDependenciesMeta",
+	"bundleDependencies", "bundledDependencies", "bin", "engines", "os", "cpu", "hasInstallScript", "_hasShrinkwrap"}
 
 // Packument is the part of a package's metadata ripple uses.
 type Packument struct {
@@ -110,16 +121,22 @@ func (c *Client) Packument(ctx context.Context, name string) (Packument, error) 
 		return Packument{}, fmt.Errorf("npm: %s: HTTP %d", name, resp.StatusCode)
 	}
 	var doc struct {
-		DistTags map[string]string                   `json:"dist-tags"`
-		Versions map[string]struct{ Deprecated any } `json:"versions"`
+		DistTags map[string]string                     `json:"dist-tags"`
+		Versions map[string]map[string]json.RawMessage `json:"versions"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, maxBody)).Decode(&doc); err != nil {
 		return Packument{}, fmt.Errorf("npm: %s: %w", name, err)
 	}
 	pv := Packument{Latest: doc.DistTags["latest"]}
 	for v, o := range doc.Versions {
-		s, _ := o.Deprecated.(string)
-		pv.Versions = append(pv.Versions, Version{Version: v, Deprecated: s != ""})
+		var dep any
+		json.Unmarshal(o["deprecated"], &dep)
+		msg, _ := dep.(string)
+		ver := Version{Version: v, Deprecated: msg != "", Shape: shapeOf(o)}
+		var dist struct{ Tarball, Integrity string }
+		json.Unmarshal(o["dist"], &dist)
+		ver.Tarball, ver.Integrity = dist.Tarball, dist.Integrity
+		pv.Versions = append(pv.Versions, ver)
 	}
 	return pv, nil
 }
@@ -159,4 +176,38 @@ func (p Packument) Newest(cur string) string {
 		best, out = sv, v.Version
 	}
 	return out
+}
+
+// shapeOf renders the install-shaping members of a version document in a canonical
+// form: encoding/json sorts map keys, so equal documents give equal strings.
+func shapeOf(o map[string]json.RawMessage) string {
+	m := map[string]any{}
+	for _, k := range shapeKeys {
+		raw, ok := o[k]
+		if !ok {
+			continue
+		}
+		var v any
+		if json.Unmarshal(raw, &v) != nil {
+			continue
+		}
+		if k == "dependencies" || k == "optionalDependencies" || k == "peerDependencies" {
+			if mm, ok := v.(map[string]any); ok && len(mm) == 0 {
+				continue // an empty set is the same as none
+			}
+		}
+		m[k] = v
+	}
+	b, _ := json.Marshal(m)
+	return string(b)
+}
+
+// Lookup returns the entry of version.
+func (p Packument) Lookup(version string) (Version, bool) {
+	for _, v := range p.Versions {
+		if v.Version == version {
+			return v, true
+		}
+	}
+	return Version{}, false
 }

@@ -40,9 +40,21 @@ Only packages some repo uses are read, once per poll, never the registry as a wh
 
 ## Lockfiles
 
-ripple never runs npm, yarn, pnpm or node, so it cannot regenerate a lockfile. When `package-lock.json`,
-`npm-shrinkwrap.json`, `yarn.lock`, `pnpm-lock.yaml` or a bun lockfile sits beside an edited `package.json`, the PR body
-lists it under "Lockfiles not regenerated": the owner refreshes it before merging (a frozen-lockfile CI fails until then).
+ripple never runs npm, yarn, pnpm or node. It rewrites a `package-lock.json` or `npm-shrinkwrap.json` itself only when the
+change cannot differ from what npm would write, and says so in the PR body ("Lockfiles rewritten without npm"):
+
+- `lockfileVersion` 2 or 3, no `workspaces`;
+- the package sits at the top of `node_modules`, is a plain leaf (its entry holds only version, resolved, integrity,
+  dev/optional flags, license, funding, engines and bin), and no other lock entry requires it;
+- the root entry's range for it is the range in `package.json`, and it is not also a peer dependency;
+- the registry's metadata for the locked and the new version agree on dependencies, optional and peer dependencies, bin,
+  engines, os, cpu and install scripts, the locked integrity is the registry's for the locked version, the new version is
+  newer, and both tarballs are on the same host.
+
+Then the entry's version, tarball URL and integrity (from the registry's `dist`) and the root range change, and every
+other byte of the file stays. In every other case, and for `yarn.lock`, `pnpm-lock.yaml` and bun lockfiles, the PR body
+lists the file under "Lockfiles not regenerated" with the reason, and the owner refreshes it before merging (a
+frozen-lockfile CI fails until then). A rewritten file has not been checked with `npm ci`.
 
 ## Private packages and other registries
 

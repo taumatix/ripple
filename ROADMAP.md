@@ -217,11 +217,6 @@ Everything else:
 141. **Publish the runner image.** `docker/runner/Dockerfile` is built in the `container-runtimes` CI job and documented, but
     no image is published: build and push it to GHCR on the release train (public, since it holds only upstream
     images; check the package visibility, there is no API for it) and name the tag in docs/sandbox.md.
-148. **npm: regenerate lockfiles offline.** ripple edits package.json and reports the lockfiles it could not refresh
-    (`package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, `pnpm-lock.yaml`, bun). The abbreviated metadata carries
-    `dist.integrity` and `dist.tarball` per version, so a package-lock v2/v3 entry for a leaf package whose own dependencies did
-    not change could be rewritten without running npm; start there, and say what is still left to the owner. `npmreg` parses
-    neither `dist` nor per-version `dependencies` yet (nor does the fake publish them): add both first.
 153. **Actions: verify against a real GHES and the write paths.** The tag, commit and release reads from github.com were run live
     (2026-11-24, UPSTREAM.md). Still written against the fake only: the workflows-permission refusal text, the upstream fallback against
     a real GHES (`RIPPLE_ACTIONS_UPSTREAM_URL`, 404 on the host then the configured upstream) and superseding of stale actions
@@ -394,3 +389,13 @@ Everything else:
     an allowlist of registry hosts in server config (never from the repo), and where tokens live. `bunfig.toml` scopes and
     `publishConfig` are not read. Not verified: a real private registry's 401/403 answers, rate limits, a very large
     package; `npm:packages` is one package set kept per package (see 159) and versions carry no publication date.
+201. **npm: lockfiles beyond a plain leaf.** `package-lock.json` / `npm-shrinkwrap.json` (lockfileVersion 2 and 3) are rewritten
+    without npm for a hoisted leaf package that nothing else requires, whose new version has the same dependencies and
+    install metadata (docs/npm.md). Not rewritten, and reported with the reason: lockfileVersion 1, workspaces, a package
+    with dependencies or an install script, one another package requires (its range would have to be checked), a nested
+    copy, `yarn.lock`, `pnpm-lock.yaml` and bun. Start with a package that has dependencies (needs the packument of each
+    new transitive version and a resolver) or with `yarn.lock`/`pnpm-lock.yaml` leaf entries. Not verified: that `npm ci`
+    accepts a rewritten file (npm cannot run in the sandbox, which runs only go and git), that the registry's abbreviated
+    metadata carries `os`, `cpu` and `hasInstallScript` for every package (the shape check relies on them), and that
+    dropping `license`/`funding` changes between versions is harmless. Running npm itself needs a sandbox profile with
+    the registry and no repository secrets: a decision for the owner.

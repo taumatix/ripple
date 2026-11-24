@@ -329,3 +329,77 @@ func TestNpmRegistryRoutingFromConfigFiles(t *testing.T) {
 		}
 	})
 }
+
+// npmLockEntry renders a lock entry the way npm writes it, for a package the fake
+// registry published at version.
+func npmLockEntry(base, name, version string, extra string) string {
+	return `    "node_modules/` + name + `": {
+      "version": "` + version + `",
+      "resolved": "` + testutil.NpmTarball(base, name, version) + `",
+      "integrity": "` + testutil.NpmIntegrity(name, version) + `",
+      "license": "MIT"` + extra + `
+    }`
+}
+
+// A package that is a leaf in package-lock.json is rewritten from the registry's metadata
+// without npm, byte for byte apart from the entry; one whose new version changes its
+// dependencies, or that another package requires, is left to the owner with the reason.
+func TestNpmLockfileIsRewrittenOnlyForALeafWhoseShapeDoesNotChange(t *testing.T) {
+	forEach(t, func(t *testing.T, st store.Store) {
+		e, reg := npmEnv(t, st)
+		reg.PublishWith("leaf", "1.2.3", nil)
+		reg.PublishWith("shaped", "1.0.0", nil)
+		reg.PublishWith("shared", "1.0.0", nil)
+		reg.PublishWith("host", "1.0.0", map[string]string{"shared": "^1.0.0"})
+		pj := "{\n  \"dependencies\": {\n    \"leaf\": \"^1.2.3\",\n    \"shaped\": \"^1.0.0\",\n    \"shared\": \"^1.0.0\",\n    \"host\": \"1.0.0\"\n  }\n}\n"
+		lock := "{\n  \"name\": \"app\",\n  \"lockfileVersion\": 3,\n  \"packages\": {\n    \"\": {\n      \"dependencies\": {\n        \"leaf\": \"^1.2.3\",\n        \"shaped\": \"^1.0.0\",\n        \"shared\": \"^1.0.0\",\n        \"host\": \"1.0.0\"\n      }\n    },\n" +
+			npmLockEntry(reg.URL, "host", "1.0.0", ",\n      \"dependencies\": {\n        \"shared\": \"^1.0.0\"\n      }") + ",\n" +
+			npmLockEntry(reg.URL, "leaf", "1.2.3", "") + ",\n" +
+			npmLockEntry(reg.URL, "shaped", "1.0.0", "") + ",\n" +
+			npmLockEntry(reg.URL, "shared", "1.0.0", "") + "\n  }\n}\n"
+		e.gh.AddRepo("acme/app", map[string]string{".ripple.yaml": npmConfig, "package.json": pj, "package-lock.json": lock})
+		start(t, e, "acme/app")
+		e.clock.Advance(time.Minute)
+		reg.PublishWith("leaf", "1.5.0", nil)
+		reg.PublishWith("shaped", "1.1.0", map[string]string{"new-dep": "^1"})
+		reg.PublishWith("shared", "1.1.0", nil)
+		e.tick()
+		e.tick()
+		prs := e.gh.PRs("acme/app")
+		if len(prs) != 3 {
+			t.Fatalf("PRs for leaf, shaped and shared, got %d", len(prs))
+		}
+		for _, pr := range prs {
+			got, _ := e.gh.FileAt("acme/app", pr.Head, "package-lock.json")
+			switch {
+			case strings.Contains(pr.Head, "leaf"):
+				want := lock
+				for from, to := range map[string]string{
+					`"leaf": "^1.2.3"`: `"leaf": "^1.5.0"`, `"version": "1.2.3"`: `"version": "1.5.0"`,
+					testutil.NpmTarball(reg.URL, "leaf", "1.2.3"): testutil.NpmTarball(reg.URL, "leaf", "1.5.0"),
+					testutil.NpmIntegrity("leaf", "1.2.3"):        testutil.NpmIntegrity("leaf", "1.5.0")} {
+					want = strings.Replace(want, from, to, 1)
+				}
+				if got != want {
+					t.Errorf("leaf: the lockfile must change in the entry and the root range only:\n%s", got)
+				}
+				if !strings.Contains(pr.Body, "Lockfiles rewritten without npm") || strings.Contains(pr.Body, "Lockfiles not regenerated") {
+					t.Errorf("leaf: body:\n%s", pr.Body)
+				}
+			case strings.Contains(pr.Head, "shaped"), strings.Contains(pr.Head, "shared"):
+				if got != lock {
+					t.Errorf("%s: the lockfile must stay as it was", pr.Head)
+				}
+				why := "differ in dependencies"
+				if strings.Contains(pr.Head, "shared") {
+					why = "required by node_modules/host"
+				}
+				if !strings.Contains(pr.Body, "Lockfiles not regenerated") || !strings.Contains(pr.Body, why) || strings.Contains(pr.Body, "rewritten without npm") {
+					t.Errorf("%s: body lacks %q:\n%s", pr.Head, why, pr.Body)
+				}
+			default:
+				t.Errorf("unexpected branch %q", pr.Head)
+			}
+		}
+	})
+}

@@ -137,6 +137,10 @@ type runner struct {
 	digests map[string]string
 	// npmLocks holds the lockfiles beside the package.json files this PR edits.
 	npmLocks map[string]bool
+	// npmLockWhy is why ripple left each of those lockfiles to the owner; npmLocksDone
+	// are the lockfiles it rewrote itself.
+	npmLockWhy   map[string]string
+	npmLocksDone map[string]bool
 	// cargoLocks holds the Cargo.lock files that resolve the Cargo.toml files this PR edits.
 	cargoLocks map[string]bool
 	// pipLocks holds the lock files beside or above the Python files this PR edits.
@@ -531,7 +535,7 @@ func (r *runner) openPR(p *prPlan) (*platform.PR, error) {
 	r.skipped = nil
 	r.ambiguous = nil
 	r.followed = nil
-	r.npmLocks = nil
+	r.npmLocks, r.npmLockWhy, r.npmLocksDone = nil, nil, nil
 	r.cargoLocks = nil
 	r.pipLocks = nil
 	var applied []item
@@ -724,7 +728,7 @@ func (r *runner) apply(it item) (bool, error) {
 			return false, err
 		}
 		if d.Datasource == model.DatasourceNpm {
-			r.noteLockfiles(d)
+			r.noteLockfiles(d, version)
 		}
 		if d.Datasource == model.DatasourceCargo {
 			r.noteCargoLock(d)

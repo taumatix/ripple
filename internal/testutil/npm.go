@@ -1,6 +1,8 @@
 package testutil
 
 import (
+	"crypto/sha512"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -29,7 +31,28 @@ type NpmRequest struct{ Path, Accept, Authorization string }
 
 type npmPkg struct {
 	tags     map[string]string
-	versions map[string]string // version -> deprecated message
+	versions map[string]string            // version -> deprecated message
+	deps     map[string]map[string]string // version -> dependencies
+}
+
+// NpmIntegrity is the dist.integrity the fake publishes for a version.
+func NpmIntegrity(name, version string) string {
+	sum := sha512.Sum512([]byte(name + "@" + version))
+	return "sha512-" + base64.StdEncoding.EncodeToString(sum[:])
+}
+
+// NpmTarball is the dist.tarball the fake publishes for a version, rooted at base.
+func NpmTarball(base, name, version string) string {
+	short := name[strings.LastIndex(name, "/")+1:]
+	return base + "/" + name + "/-/" + short + "-" + version + ".tgz"
+}
+
+// PublishWith is Publish for a version that has dependencies.
+func (r *NpmRegistry) PublishWith(name, version string, deps map[string]string) {
+	r.Publish(name, version)
+	r.mu.Lock()
+	r.pkgs[name].deps[version] = deps
+	r.mu.Unlock()
 }
 
 func NewNpmRegistry(t testing.TB) *NpmRegistry {
@@ -49,7 +72,7 @@ func (r *NpmRegistry) Publish(name, version string) {
 	defer r.mu.Unlock()
 	p := r.pkgs[name]
 	if p == nil {
-		p = &npmPkg{tags: map[string]string{}, versions: map[string]string{}}
+		p = &npmPkg{tags: map[string]string{}, versions: map[string]string{}, deps: map[string]map[string]string{}}
 		r.pkgs[name] = p
 	}
 	p.versions[version] = ""
@@ -96,7 +119,10 @@ func (r *NpmRegistry) serve(w http.ResponseWriter, req *http.Request) {
 	if ok {
 		versions := map[string]any{}
 		for v, dep := range p.versions {
-			o := map[string]any{"name": name, "version": v, "dist": map[string]string{"tarball": r.URL + "/" + name + "/-/" + v + ".tgz"}}
+			o := map[string]any{"name": name, "version": v, "dist": map[string]string{"tarball": NpmTarball(r.URL, name, v), "integrity": NpmIntegrity(name, v)}}
+			if d := p.deps[v]; len(d) > 0 {
+				o["dependencies"] = d
+			}
 			if dep != "" {
 				o["deprecated"] = dep
 			}

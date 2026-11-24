@@ -182,10 +182,8 @@ Everything else:
 119. **`tidy: minimal` evidence.** It stays opt-in: no real PR diffs exist to show the default would lose less
     than it risks (a kept requirement with missing go.sum lines opens a draft; the default `go mod tidy` result is
     what a maintainer reproduces by hand). Collect the diffs of repos that opted in and revisit.
-123. **Dashboard: share the sets.** The refresh set
-    (`dashboard-dirty`) and the repo list that drives the hourly read-back (`dashboard-watch`) are
-    read-modify-write cursors, so two replicas marking at once can lose an entry; the loss heals at the repo's
-    next run or write, but a per-item store write would remove it. Read-back finds the issue by its marker, so an
+123. **Dashboard: read-back edge cases against a real host.** The refresh and watch sets are now one cursor per repo, so
+    two replicas marking at once cannot lose an entry. Read-back finds the issue by its marker, so an
     edit that removes the marker is repaired by number and one that deletes the issue is recreated, both
     covered only against the fake.
 125. **OSV: sweep residuals.** The DynamoDB repo index (`REPOS` items) is built by one Scan the first time a listing is asked

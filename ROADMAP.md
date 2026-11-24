@@ -299,11 +299,6 @@ Everything else:
     it in a sandbox job executes repo-chosen tools with network, which is a decision to take (opt-in, and which
     sandbox) before building it. Other generators that take an import path (`protoc-gen-go` options, `wire`, `ent`)
     are still only listed.
-195. **Registry tag lists: order by version, not by name.** `registry.Client.TagsFrom` starts a read at the lexical floor
-    `registry.TagFloor` computes, which is provably safe but low (`1.100` for a current `1.25.3`, since `1.100.0` is newer
-    and sorts first), so it skips only the oldest pages. A registry-specific API that lists newest first (if Docker Hub
-    or ghcr has one) would stop after one page; check what each really offers (`live.yml`) before building it, and keep
-    `TagsFrom` as the fallback.
 197. **`container-runtimes (docker)`: the reaped container that was still listed.** `TestContainerRuntimeLive` failed once
     ("the container survived its timeout (Reap left it)", run 45391499375, head 0fd4151) and passed on retry. Two causes fit
     and the log cannot tell them apart: (a) Docker removes a `--rm` container itself when `kill` stops it, so `rm -f` answers
@@ -381,3 +376,9 @@ Everything else:
     Postgres and DynamoDB) would bound the index query too. Also unmeasured: how large a real install's set gets, and the
     right default. A fold racing a replica still running the old version can leave a package only in the legacy cursor until the
     next read folds it again; cursors named `<group>#<key>` written before per-package keys carry no index attributes on DynamoDB.
+215. **Docker Hub newest-first listing: check it against the real Hub.** `RIPPLE_REGISTRY_HUB_NEWEST` was written from the
+    documented endpoint and a fake, and the docs do not say what `ordering` accepts, the default order or the largest
+    `page_size`. A `live.yml` check should ask hub.docker.com for `library/nginx` with `ordering=-last_updated`, assert the
+    results come back non-increasing and that `page_size=100` is honoured, and fail loudly if Hub changes, since ripple
+    then silently falls back to the lexical list. Until it exists the option stays off by default. ghcr.io has no
+    equivalent listing (OCI tags are lexical only), so `TagFloor` stays its only narrowing.

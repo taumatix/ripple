@@ -484,3 +484,17 @@ func TestServerGoToolchainDownload(t *testing.T) {
 		t.Fatal("a non-boolean must be rejected")
 	}
 }
+
+func TestServerRegistryHubNewest(t *testing.T) {
+	s, err := LoadServer(env(base))
+	if err != nil || s.RegistryHubNewest {
+		t.Fatalf("default: %+v, %v", s, err)
+	}
+	s, err = LoadServer(env(with("RIPPLE_REGISTRY_HUB_NEWEST", "true")))
+	if err != nil || !s.RegistryHubNewest {
+		t.Fatalf("set: %+v, %v", s, err)
+	}
+	if _, err = LoadServer(env(with("RIPPLE_REGISTRY_HUB_NEWEST", "maybe"))); err == nil {
+		t.Fatal("a non-boolean must be rejected")
+	}
+}

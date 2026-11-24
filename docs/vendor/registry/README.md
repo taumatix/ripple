@@ -35,3 +35,17 @@ back as `Authorization: Bearer <token>`.
 - The `Accept` media types needed for `HEAD` to return the index digest: OCI index and image manifest, Docker manifest
   list and manifest v2.
 - Rate limits and their status codes (Docker Hub limits anonymous pulls; ripple treats 429 as "try later").
+
+## Docker Hub tag listing (not the registry API)
+
+Fetched 2026-11-25 (summarising fetch) from <https://docs.docker.com/reference/api/hub/latest/>, read before
+`registry.Client.TagsNewest` was written.
+
+- `GET https://hub.docker.com/v2/namespaces/{namespace}/repositories/{repository}/tags` takes `page`, `page_size` and
+  `ordering`. Official images are namespace `library`. A public repository needs no login.
+- 200 -> `{"count": n, "next": url|null, "previous": url|null, "results": [{"name": "<tag>", "last_updated": "<RFC 3339>",
+  "tag_last_pushed": "<RFC 3339>", ...}]}`.
+- NOT documented in what was fetched: the default ordering and the values `ordering` accepts. `-last_updated` (newest
+  first) is what Hub's own UI is known to send, but nothing here proves it, so the client checks the returned
+  `last_updated` values are non-increasing and falls back to the registry list when they are not. A maximum `page_size` is
+  not documented either; the client asks for 100.

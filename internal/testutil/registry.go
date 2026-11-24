@@ -36,13 +36,15 @@ type Registry struct {
 	basic    *[2]string                   // when set, /v2/ wants HTTP Basic instead of a token
 	tokenReq []string                     // "scope basic=true|false" per token request
 	reqs     []string
+	pushed   map[string]int // "repo:tag" -> push sequence, the fake hub's last_updated
+	pushSeq  int
 }
 
 const registryToken = "anon-token"
 
 func NewRegistry(t testing.TB) *Registry {
 	t.Helper()
-	r := &Registry{repos: map[string]map[string]string{}, denied: map[string]bool{}, created: map[string]time.Time{}, logins: map[string][2]string{}, identity: map[string]string{}}
+	r := &Registry{repos: map[string]map[string]string{}, denied: map[string]bool{}, created: map[string]time.Time{}, logins: map[string][2]string{}, identity: map[string]string{}, pushed: map[string]int{}}
 	r.srv = httptest.NewServer(r.Wrap(http.HandlerFunc(r.serve)))
 	r.URL = r.srv.URL
 	t.Cleanup(r.srv.Close)
@@ -60,6 +62,8 @@ func (r *Registry) AddTag(repo, tag string) string {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%s:%s:%d", repo, tag, len(r.reqs)+len(r.repos[repo]))))
 	d := "sha256:" + hex.EncodeToString(sum[:])
 	r.repos[repo][tag] = d
+	r.pushSeq++
+	r.pushed[repo+":"+tag] = r.pushSeq
 	return d
 }
 
@@ -201,6 +205,10 @@ func (r *Registry) serve(w http.ResponseWriter, req *http.Request) {
 		http.NotFound(w, req)
 		return
 	}
+	if hub, ok := strings.CutPrefix(rest, "namespaces/"); ok {
+		r.serveHubTags(w, req, hub)
+		return
+	}
 	i := strings.LastIndex(strings.TrimSuffix(rest, "/"), "/tags/")
 	j := strings.LastIndex(rest, "/manifests/")
 	k := strings.LastIndex(rest, "/blobs/")
@@ -283,4 +291,68 @@ func (r *Registry) serve(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Link", fmt.Sprintf(`</v2/%s/tags/list?n=%d&last=%s>; rel="next"`, repo, n, names[n-1]))
 	}
 	json.NewEncoder(w).Encode(map[string]any{"name": repo, "tags": names})
+}
+
+// serveHubTags answers Docker Hub's tag listing, GET /v2/namespaces/{ns}/repositories/{repo}/tags
+// with page, page_size and ordering (docs/vendor/registry/README.md), anonymously like the
+// real one for a public repository. Each result carries name and last_updated, which is the
+// order the tags were added in (AddTag again moves a tag to the front). ordering=-last_updated
+// lists newest first and ordering=last_updated oldest first; any other value, and none, lists
+// by name, because the real default is not documented and a client must not rely on it.
+func (r *Registry) serveHubTags(w http.ResponseWriter, req *http.Request, rest string) {
+	parts := strings.Split(rest, "/")
+	if len(parts) != 4 || parts[1] != "repositories" || parts[3] != "tags" {
+		http.NotFound(w, req)
+		return
+	}
+	repo := parts[0] + "/" + parts[2]
+	r.mu.Lock()
+	tags, found := r.repos[repo]
+	seq := map[string]int{}
+	names := make([]string, 0, len(tags))
+	for n := range tags {
+		names = append(names, n)
+		seq[n] = r.pushed[repo+":"+n]
+	}
+	size := r.pageSize
+	r.mu.Unlock()
+	if !found {
+		http.Error(w, `{"message":"httperror 404: object not found"}`, http.StatusNotFound)
+		return
+	}
+	sort.Strings(names)
+	switch req.URL.Query().Get("ordering") {
+	case "-last_updated":
+		sort.SliceStable(names, func(i, j int) bool { return seq[names[i]] > seq[names[j]] })
+	case "last_updated":
+		sort.SliceStable(names, func(i, j int) bool { return seq[names[i]] < seq[names[j]] })
+	}
+	n := 100
+	if q, err := strconv.Atoi(req.URL.Query().Get("page_size")); err == nil && q > 0 && q < n {
+		n = q
+	}
+	if size > 0 && size < n {
+		n = size
+	}
+	page, _ := strconv.Atoi(req.URL.Query().Get("page"))
+	if page < 1 {
+		page = 1
+	}
+	lo := (page - 1) * n
+	if lo > len(names) {
+		lo = len(names)
+	}
+	hi := lo + n
+	var next any
+	if hi < len(names) {
+		next = fmt.Sprintf("%s%s?page=%d&page_size=%d", r.URL, req.URL.Path, page+1, n)
+	} else {
+		hi = len(names)
+	}
+	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	results := make([]map[string]any, 0, hi-lo)
+	for _, name := range names[lo:hi] {
+		results = append(results, map[string]any{"name": name, "last_updated": base.Add(time.Duration(seq[name]) * time.Minute).Format(time.RFC3339Nano)})
+	}
+	json.NewEncoder(w).Encode(map[string]any{"count": len(names), "next": next, "previous": nil, "results": results})
 }

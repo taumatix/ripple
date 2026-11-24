@@ -50,6 +50,12 @@ type Client struct {
 	UserAgent string
 	// Auth holds per-registry logins; nil means anonymous everywhere.
 	Auth *Credentials
+	// HubNewest opts in to TagsNewest: Docker Hub's tag listing, newest push first, instead of the
+	// registry's lexical one.
+	HubNewest bool
+	// HubURL is where Docker Hub's own API (not the registry) is served; empty means
+	// https://hub.docker.com. For tests against a fake.
+	HubURL string
 	// Retry bounds the waiting on a 429 or a 503 with Retry-After, for every request
 	// including the token endpoint; the zero value is three attempts, none of them waited
 	// on longer than 30s. A registry still limiting after that is an error naming the limit.
@@ -426,4 +432,76 @@ func (c *Client) token(ctx context.Context, challenge, repo, user, pass string, 
 		return "", errors.New("registry: token response carries no token")
 	}
 	return tok.Token, nil
+}
+
+const (
+	hubPageSize = 100
+	hubMaxPages = 20
+)
+
+// TagsNewest reads pkg's tags from Docker Hub's own listing, newest push first, and stops one
+// page after the page that holds any of current (the dependencies' tags), so an image with a
+// long history costs a page or two where the lexical listing costs every page above
+// TagFloor. It reports false, and the caller reads the registry as usual, whenever it cannot
+// vouch for the answer: HubNewest is off, pkg is not a Docker Hub repository, none of current
+// is given, the listing is not in newest-first order (its last_updated values are checked, since the
+// ordering parameter is not documented to be honoured), more than hubMaxPages pages are
+// needed, or Hub fails. The tags come back in Hub's order, and a tag pushed before the
+// current one yet versioned above it (a backport released late) is the case the margin page
+// only narrows; see docs/docker.md.
+func (c *Client) TagsNewest(ctx context.Context, pkg string, current []string) ([]string, bool, error) {
+	ref, ok := ParsePackage(pkg)
+	if !ok || !c.HubNewest || ref.Registry != DockerHub || len(current) == 0 || strings.Count(ref.Repo, "/") != 1 {
+		return nil, false, nil
+	}
+	have := map[string]bool{}
+	for _, t := range current {
+		have[t] = true
+	}
+	base := c.HubURL
+	if base == "" {
+		base = "https://hub.docker.com"
+	}
+	var out []string
+	var prev time.Time
+	foundAt := 0
+	for page := 1; page <= hubMaxPages; page++ {
+		ns, name, _ := strings.Cut(ref.Repo, "/")
+		target := fmt.Sprintf("%s/v2/namespaces/%s/repositories/%s/tags?page=%d&page_size=%d&ordering=-last_updated", base, ns, name, page, hubPageSize)
+		resp, err := c.do(ctx, http.MethodGet, target, ref, "application/json")
+		if err != nil {
+			var le *httpretry.LimitError
+			if ctx.Err() != nil || errors.As(err, &le) {
+				return nil, false, err
+			}
+			return nil, false, nil
+		}
+		var body struct {
+			Next    *string `json:"next"`
+			Results []struct {
+				Name        string `json:"name"`
+				LastUpdated string `json:"last_updated"`
+			} `json:"results"`
+		}
+		err = json.NewDecoder(io.LimitReader(resp.Body, maxBody)).Decode(&body)
+		resp.Body.Close()
+		if err != nil {
+			return nil, false, nil
+		}
+		for _, r := range body.Results {
+			at, err := time.Parse(time.RFC3339Nano, r.LastUpdated)
+			if err != nil || r.Name == "" || (!prev.IsZero() && at.After(prev)) {
+				return nil, false, nil
+			}
+			prev = at
+			out = append(out, r.Name)
+			if foundAt == 0 && have[r.Name] {
+				foundAt = page
+			}
+		}
+		if body.Next == nil || *body.Next == "" || len(body.Results) == 0 || foundAt > 0 && page > foundAt {
+			return out, true, nil
+		}
+	}
+	return nil, false, nil
 }

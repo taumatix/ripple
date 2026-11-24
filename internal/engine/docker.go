@@ -31,6 +31,14 @@ type RangedRegistry interface {
 	TagsFrom(ctx context.Context, pkg, floor string) ([]string, error)
 }
 
+// NewestRegistry is the optional part of a TagRegistry that lists a repository newest push
+// first and stops soon after the tags the dependencies are on (registry.Client.TagsNewest, an
+// opt-in for Docker Hub). It reports false when it cannot vouch for the answer, and the
+// registry is then read as usual.
+type NewestRegistry interface {
+	TagsNewest(ctx context.Context, pkg string, current []string) ([]string, bool, error)
+}
+
 // CreatedRegistry is the optional part of a TagRegistry that reads when an image was
 // built (its config's "created"); registry.Client implements it. Without it, or when
 // the image records no time or the read fails, a tag's release time is the first poll
@@ -196,6 +204,16 @@ func (r *runner) imageVersion(pkg, tag string) string {
 // current tags allows, when the registry can read a range, else all of them. The newest tag of
 // a dependency's shape is the same either way (registry.TagFloor says why).
 func (e *Engine) readTags(ctx context.Context, pkg string, deps []model.Dependency) ([]string, error) {
+	if nr, ok := e.Registry.(NewestRegistry); ok {
+		cur := make([]string, 0, len(deps))
+		for _, d := range deps {
+			cur = append(cur, d.Version)
+		}
+		tags, ok, err := nr.TagsNewest(ctx, pkg, cur)
+		if err != nil || ok {
+			return tags, err
+		}
+	}
 	rr, ok := e.Registry.(RangedRegistry)
 	if !ok {
 		return e.Registry.Tags(ctx, pkg)

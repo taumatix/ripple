@@ -62,6 +62,9 @@ type Server struct {
 	// RegistryAuthFile is a Docker config.json holding logins for private container
 	// registries (ecosystem: docker); empty means every registry is read anonymously.
 	RegistryAuthFile string
+	// RegistryHubNewest reads Docker Hub images' tags from Hub's own newest-first listing and stops
+	// a page after the current tag, instead of the registry's lexical list; off by default.
+	RegistryHubNewest bool
 	// GoToolchainDir holds Go releases (go1.25.3/bin/go) that verification uses when a go.mod names one.
 	GoToolchainDir string
 	// GoToolchainDownload installs a release GoToolchainDir lacks from the module proxy
@@ -175,6 +178,7 @@ RIPPLE_GOPROXY_USER           user for RIPPLE_GOPROXY (HTTP basic auth); with RI
 RIPPLE_GOPROXY_TOKEN          password or token for RIPPLE_GOPROXY; needs an https proxy
 RIPPLE_REGISTRY_AUTH_FILE     Docker config.json with logins for private container registries (ecosystem: docker); read once at start
 RIPPLE_GO_TOOLCHAIN_DIR       directory of Go releases (go1.25.3/bin/go) verification runs with when a go.mod names one
+RIPPLE_REGISTRY_HUB_NEWEST    true: read Docker Hub images' tags newest push first from Hub's API and stop a page after the current tag; falls back to the registry list when unsure, default false
 RIPPLE_GO_TOOLCHAIN_DOWNLOAD  true: install a release the directory lacks from RIPPLE_GOPROXY (golang.org/toolchain, checksum-verified); needs RIPPLE_GO_TOOLCHAIN_DIR, default false
 RIPPLE_CONTAINER_GO_IMAGES    minor=image pairs (1.25=runner:1.25,1.26=runner:1.26): the container image that verifies a go.mod naming that Go minor
 RIPPLE_GO_CC                  C compiler for repos with cgo: true (default: go's own, gcc or clang)
@@ -410,6 +414,13 @@ func LoadServer(getenv func(string) string) (*Server, error) {
 			errs = append(errs, errors.New("RIPPLE_WEBHOOK_DEDUPE_SIGNATURE: want true or false"))
 		}
 		s.WebhookDedupeSignature = b
+	}
+	if v := getenv("RIPPLE_REGISTRY_HUB_NEWEST"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			errs = append(errs, errors.New("RIPPLE_REGISTRY_HUB_NEWEST: want true or false"))
+		}
+		s.RegistryHubNewest = b
 	}
 	if v := getenv("RIPPLE_GO_TOOLCHAIN_DOWNLOAD"); v != "" {
 		b, err := strconv.ParseBool(v)

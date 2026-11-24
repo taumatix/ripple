@@ -133,6 +133,7 @@ type opts struct {
 	// registry, when set, is the fake container registry every image host resolves to.
 	registry     *testutil.Registry
 	registryAuth *registry.Credentials
+	hubNewest    bool // registry.Client.HubNewest, served by the fake registry
 	// npm, when set, is the fake npm registry the engine reads package versions from.
 	npm *testutil.NpmRegistry
 	// crates, when set, is the fake Cargo sparse index the engine reads crate versions from.
@@ -188,7 +189,7 @@ func newEnvOpts(t *testing.T, st store.Store, lim rules.Limits, o opts) *env {
 		eng.Npm = &npmreg.Client{BaseURL: o.npm.URL}
 	}
 	if o.registry != nil {
-		eng.Registry = &registry.Client{HTTP: http.DefaultClient, Insecure: true, Auth: o.registryAuth, BaseURL: func(string) string { return o.registry.URL }}
+		eng.Registry = &registry.Client{HTTP: http.DefaultClient, Insecure: true, Auth: o.registryAuth, BaseURL: func(string) string { return o.registry.URL }, HubNewest: o.hubNewest, HubURL: o.registry.URL}
 	}
 	e.newApp = func() *app.App {
 		a := &app.App{Engine: eng, Secret: []byte(secret), Log: slog.New(slog.NewTextHandler(io.MultiWriter(testWriter{t}, e.logs), nil)),

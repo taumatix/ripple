@@ -273,10 +273,6 @@ Everything else:
 172. **OSV: security-bypass by severity.** `security-bypass` (entry 51) is per update entry and all or nothing. A
     `severity: [high, critical]` qualifier (bypass only for those) and a per-advisory cap on PRs opened past the limit were left
     out until real use shows whether a repo wants them.
-173. **Resolve an id mismatch by asking the host.** A repo added by `installation_repositories` or `installation`
-    now stores its id (GitHub carries it in every added-repository object), but a signed push whose id differs from
-    the stored one is still ignored, not resolved with a lookup of the name on the host. A GitHub lookup
-    (`GET /repositories/{id}`) would say which name the id holds now and settle a missed rename or a reused name.
 174. **Archive on the hosts that still do not report it.** GitLab, Gitea/Forgejo and Bitbucket Data Center now read an
     archive from their listing (entry 107); the Lister hosts SCM-Manager and Gerrit still drop an archived repo from
     the listing, which forgets it with its jobs. SCM-Manager's repository object has an archived flag in its source
@@ -398,3 +394,8 @@ Everything else:
     `.ripple.yaml` (today one login serves every repo the server reads, so a repo can make ripple present it to a registry
     only by naming that registry's images), reloading the file without a restart, and a real private registry run (see 130),
     which is also the only check of the refresh-token grant against Azure or Docker Hub.
+204. **Repository ids on the other hosts, and a missed rename by id.** A signed push whose repository id differs from
+    the stored one is now settled by asking the host (`platform.RepoIdentifier`, GitHub's `GET /repositories/{id}`),
+    but only when the id names this repo's own name (a recreated repo). Not done: the host answering with a
+    different name for the stored id (a rename missed twice), and an implementation for GitLab, Gitea/Forgejo and
+    the others, which keep ignoring a mismatch as before. Only the GitHub lookup ran, against the fake host.

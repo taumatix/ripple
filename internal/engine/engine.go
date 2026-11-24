@@ -134,6 +134,8 @@ type Engine struct {
 	dashOff   map[string]time.Time
 	// falseClaims remembers default-branch claims the host contradicted (HealDefaultBranch).
 	falseClaims map[string]time.Time
+	// staleIDs remembers repository ids the host did not tie to a repo (ResolveRepoID).
+	staleIDs map[string]time.Time
 }
 
 func (e *Engine) now() time.Time {

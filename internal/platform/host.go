@@ -113,6 +113,27 @@ func ReadsLegacyConfig(p Platform, repo model.Repo) bool {
 	return ok && lc.ReadsLegacyConfig(repo)
 }
 
+// RepoIdentifier is the optional capability of asking the host whether an immutable
+// repository id currently belongs to repo. The app uses it on a signed push whose id is
+// not the one stored for the name: a repository deleted and recreated under the same
+// name has a new id, and only the host can say so. found is false (with a nil error)
+// when the host does not know the id or it names another repository.
+type RepoIdentifier interface {
+	RepoHasID(ctx context.Context, repo model.Repo, id int64) (found bool, err error)
+}
+
+// ErrNoRepoIdentity is what RepoHasID answers for a host without the capability.
+var ErrNoRepoIdentity = errors.New("platform: host cannot resolve repository ids")
+
+// RepoHasID asks p whether id names repo, or ErrNoRepoIdentity when p cannot say.
+func RepoHasID(ctx context.Context, p Platform, repo model.Repo, id int64) (bool, error) {
+	ri, ok := p.(RepoIdentifier)
+	if !ok {
+		return false, ErrNoRepoIdentity
+	}
+	return ri.RepoHasID(ctx, repo, id)
+}
+
 // EventKind is what a host told ripple about a repository.
 type EventKind string
 

@@ -111,7 +111,7 @@ host that sends `ReposRemoved` for archive still has the repo forgotten, as befo
 event implements `platform.ArchivedLister` as well (the repos `ListRepos` leaves out because they are archived), and
 the app turns a repo moving between the two listings into these events; the suite's `ReportsArchives` holds it to that. A push event may carry
 `RepoID`, the host's immutable repository id; a host that sets it vouches for the repo, and ripple registers a
-repo it does not know from a verified push carrying one. A fixture that can deliver a rename implements the suite's
+repo it does not know from a verified push carrying one. A push whose id differs from the stored one is ignored unless the platform also implements `platform.RepoIdentifier` (`RepoHasID(ctx, repo, id)`: does the host say this id is this repo?), in which case a yes replaces the stored id (a repo deleted and recreated under the same name). A fixture that can deliver a rename implements the suite's
 `ReportsRenames` marker and is then held to it; others skip it.
 
 The receiver is served at `POST /webhook/<host>`.

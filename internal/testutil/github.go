@@ -80,6 +80,10 @@ type GitHub struct {
 	RateLimitOnce bool
 	// FailPath makes every request whose path ends with it answer 500.
 	FailPath string
+	// repoIDs maps a repository id to its current full name (SetRepoID), served at
+	// GET /repositories/{id}.
+	repoIDs       map[int64]string
+	repoIDLookups int
 	// FailClose makes closing a pull request (PATCH /pulls/{n}) answer 500.
 	FailClose bool
 }
@@ -365,6 +369,8 @@ func (g *GitHub) serve(w http.ResponseWriter, r *http.Request) {
 		g.handleGraphQL(w, r)
 	case strings.HasPrefix(path, "/repos/"):
 		g.handleRepo(w, r)
+	case strings.HasPrefix(path, "/repositories/") && r.Method == http.MethodGet:
+		g.handleRepoByID(w, path)
 	default:
 		g.fail(w, http.StatusNotFound, "unknown route %s %s", r.Method, path)
 	}
@@ -415,6 +421,38 @@ func (g *GitHub) handleGraphQL(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	_, _ = w.Write([]byte(`{"errors":[{"message":"Could not resolve to a node"}]}`))
+}
+
+// SetRepoID makes GET /repositories/{id} answer that the repository with this id is
+// called name (an id never set, or whose repo was never created, is a 404). Setting the
+// same name under another id models a repository deleted and recreated.
+func (g *GitHub) SetRepoID(id int64, name string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.repoIDs == nil {
+		g.repoIDs = map[int64]string{}
+	}
+	g.repoIDs[id] = name
+}
+
+// RepoIDCalls is how many GET /repositories/{id} requests were served.
+func (g *GitHub) RepoIDCalls() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.repoIDLookups
+}
+
+func (g *GitHub) handleRepoByID(w http.ResponseWriter, path string) {
+	id, err := strconv.ParseInt(strings.TrimPrefix(path, "/repositories/"), 10, 64)
+	g.mu.Lock()
+	g.repoIDLookups++
+	name, ok := g.repoIDs[id]
+	g.mu.Unlock()
+	if err != nil || !ok {
+		g.fail(w, http.StatusNotFound, "no repository with id %s", path)
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"id": id, "full_name": name})
 }
 
 func (g *GitHub) handleRepo(w http.ResponseWriter, r *http.Request) {

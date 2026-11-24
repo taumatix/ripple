@@ -290,11 +290,6 @@ Everything else:
     `webhook-id` where signed). Removal tombstones moved to `removed#<name>` and the Dynamo sweep is a Query; the
     legacy `removed|` read path and the `tombstones-legacy` marker can be deleted a release after every replica runs
     this version. The Query of `removed#` on a very large table is unmeasured.
-168. **Webhook bodies: stream the parse for Gitea, Bitbucket, Bitbucket Server and GitLab.** GitHub's delivery is
-    parsed as it streams (`ReadVerifiedStream`, `extract.go`); the other four receivers still use `ReadVerified`, which
-    holds a signed body whole (disk above 64 KiB, or memory) and unmarshals it. Each needs its payload's field tree in
-    the extractor. The extractor keeps at most 16 MiB of values while the signature is unchecked, so a forged body
-    can cost that much per inflight request where it used to cost 64 KiB; lower it or spill to disk if that is too much.
 169. **Backfill lookup: far majors.** A module that skipped more than three majors is found only by the feed, and the
     lookup was spot-checked against proxy.golang.org only for a stable module, an unknown one and a missing path;
     a prerelease-only or retracted real module has not been tried. Probe the proxy's own listing for higher majors
@@ -371,3 +366,9 @@ Everything else:
     install. A fold racing a replica still running the old version can leave a package only in the legacy cursor until the
     next read folds it again. Cursors named `<group>#<key>` written before per-package keys carry no index attributes on
     DynamoDB and are not listed by group; none existed.
+191. **Webhooks: what the streamed parse still costs.** Every receiver now parses a signed body as it streams
+    (`webhook.Extractor`), so none holds one whole. Left: the extractor keeps up to 16 MiB of values while the signature is
+    unchecked, so a forged body with one huge field it reads (a `ref`) costs that much per inflight request, up from
+    64 KiB; measure on a busy receiver and lower `maxExtract` or cap per-field length if it matters. GitLab with a plain
+    secret token (no signing key) still reads its header-authenticated body whole before parsing it; Azure DevOps,
+    Gerrit, SCM-Manager and CodeCommit authenticate from headers and read whole, bounded by their `maxBody`.

@@ -5,8 +5,8 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -95,30 +95,49 @@ func (h *Receiver) init() {
 	})
 }
 
-type pushRef struct {
-	Type   string `json:"type"`
-	Name   string `json:"name"`
-	Target struct {
-		Hash string `json:"hash"`
-	} `json:"target"`
+type pushChange struct {
+	// HasNew is whether "new" was an object: a deleted branch has a null one.
+	HasNew           bool
+	NewType, NewName string
+	Created, Forced  bool
+	Truncated        bool
+	Hashes           []string
 }
 
 type pushPayload struct {
-	Push struct {
-		Changes []struct {
-			New       *pushRef `json:"new"`
-			Old       *pushRef `json:"old"`
-			Created   bool     `json:"created"`
-			Forced    bool     `json:"forced"`
-			Truncated bool     `json:"truncated"`
-			Commits   []struct {
-				Hash string `json:"hash"`
-			} `json:"commits"`
-		} `json:"changes"`
-	} `json:"push"`
-	Repository struct {
-		FullName string `json:"full_name"`
-	} `json:"repository"`
+	Changes  []pushChange
+	FullName string
+}
+
+// parsePush reads the fields of a repo:push payload as the body streams.
+func parsePush(r io.Reader) (pushPayload, error) {
+	var p pushPayload
+	x := &webhook.Extractor{}
+	cur := func() *pushChange { return &p.Changes[len(p.Changes)-1] }
+	var nStr = func(f func(c *pushChange) *string) *webhook.Node {
+		return x.StrAt(func() *string { return f(cur()) })
+	}
+	change := webhook.Obj(map[string]*webhook.Node{
+		"new": webhook.Obj(map[string]*webhook.Node{
+			"type": nStr(func(c *pushChange) *string { return &c.NewType }),
+			"name": nStr(func(c *pushChange) *string { return &c.NewName }),
+		}).OnObject(func() { cur().HasNew = true }),
+		"created":   x.BoolAt(func() *bool { return &cur().Created }),
+		"forced":    x.BoolAt(func() *bool { return &cur().Forced }),
+		"truncated": x.BoolAt(func() *bool { return &cur().Truncated }),
+		"commits": webhook.Array(webhook.Obj(map[string]*webhook.Node{
+			"hash": x.StrAt(func() *string {
+				c := cur()
+				c.Hashes = append(c.Hashes, "")
+				return &c.Hashes[len(c.Hashes)-1]
+			}),
+		})),
+	}).OnObject(func() { p.Changes = append(p.Changes, pushChange{}) })
+	err := webhook.Extract(r, webhook.Obj(map[string]*webhook.Node{
+		"push":       webhook.Obj(map[string]*webhook.Node{"changes": webhook.Array(change)}),
+		"repository": webhook.Obj(map[string]*webhook.Node{"full_name": x.Str(&p.FullName)}),
+	}))
+	return p, err
 }
 
 func (h *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -136,7 +155,16 @@ func (h *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	want, _ := hex.DecodeString(strings.TrimPrefix(sig, "sha256="))
-	body, res := h.guard.ReadVerified(w, r, maxBody, h.Secret, nil, func(got []byte) bool { return hmac.Equal(got, want) })
+	// The body is parsed as it streams and never held; the parse of a forgery is
+	// discarded with the 401. Other events are only hashed.
+	push := r.Header.Get("X-Event-Key") == "repo:push"
+	var p pushPayload
+	var perr error
+	var consume func(io.Reader) error
+	if push {
+		consume = func(rd io.Reader) error { p, perr = parsePush(rd); return nil }
+	}
+	_, res := h.guard.ReadVerifiedStream(w, r, maxBody, h.Secret, nil, func(got []byte) bool { return hmac.Equal(got, want) }, consume)
 	switch res {
 	case webhook.ReadAnswered:
 		return
@@ -145,16 +173,15 @@ func (h *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid signature", http.StatusUnauthorized)
 		return
 	}
-	if r.Header.Get("X-Event-Key") != "repo:push" {
+	if !push {
 		w.WriteHeader(http.StatusAccepted)
 		return
 	}
-	var p pushPayload
-	if err := json.Unmarshal(body, &p); err != nil {
+	if perr != nil {
 		http.Error(w, "bad push payload", http.StatusBadRequest)
 		return
 	}
-	repo := p.Repository.FullName
+	repo := p.FullName
 	if checkRepo(model.Repo{FullName: repo}) != nil {
 		http.Error(w, "bad repository name", http.StatusBadRequest)
 		return
@@ -165,21 +192,18 @@ func (h *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusAccepted)
 		return
 	}
-	for i, ch := range p.Push.Changes {
+	for i, ch := range p.Changes {
 		// Only branch updates matter; a deleted branch or a tag cannot move the default branch.
-		if ch.New == nil || ch.New.Type != "branch" || ch.New.Name == "" {
+		if !ch.HasNew || ch.NewType != "branch" || ch.NewName == "" {
 			continue
 		}
 		var files []string
 		// A new branch, a force push or a truncated commit list cannot be diffed from
 		// the payload; leaving Files empty forces a re-scan, which is always correct.
-		if h.Files != nil && !ch.Created && !ch.Forced && !ch.Truncated && len(ch.Commits) > 0 {
-			var hashes []string
-			for _, c := range ch.Commits {
-				hashes = append(hashes, c.Hash)
-			}
+		if h.Files != nil && !ch.Created && !ch.Forced && !ch.Truncated && len(ch.Hashes) > 0 {
+			hashes := ch.Hashes
 			var err error
-			if files, err = h.Files.PushFiles(r.Context(), repo, ch.New.Name, hashes); err != nil {
+			if files, err = h.Files.PushFiles(r.Context(), repo, ch.NewName, hashes); err != nil {
 				h.Log.Warn("bitbucket push files unavailable; re-scanning", "repo", repo, "err", err)
 				files = nil
 			}
@@ -189,7 +213,7 @@ func (h *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			delivery = fmt.Sprintf("%s-%d", request, i)
 		}
 		ev := platform.Event{Kind: platform.Push, Delivery: delivery, Repos: []string{repo},
-			Ref: "refs/heads/" + ch.New.Name, Files: files}
+			Ref: "refs/heads/" + ch.NewName, Files: files}
 		if err := h.Sink.HandleEvent(r.Context(), ev); err != nil {
 			h.dedupe.Release(keys...)
 			h.Log.Error("bitbucket webhook sink", "repo", repo, "err", err)

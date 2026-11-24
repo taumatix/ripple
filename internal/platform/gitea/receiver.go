@@ -4,7 +4,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -82,14 +82,26 @@ func (h *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	delivery := header(r.Header, "X-Forgejo-Delivery", "X-Gitea-Delivery", "X-GitHub-Delivery")
-	sig, ok := signature(r.Header)
-	if len(h.Secret) == 0 || !ok {
+	sig, sigOK := signature(r.Header)
+	if len(h.Secret) == 0 || !sigOK {
 		h.Log.Warn("webhook signature rejected", "delivery", delivery)
 		http.Error(w, "invalid signature", http.StatusUnauthorized)
 		return
 	}
 	want, _ := hex.DecodeString(sig)
-	body, res := h.guard.ReadVerified(w, r, maxBody, h.Secret, nil, func(got []byte) bool { return hmac.Equal(got, want) })
+	// The body is parsed as it streams and never held; the parse of a forgery is
+	// discarded with the 401. Events ripple does not act on are only hashed.
+	name := header(r.Header, "X-Forgejo-Event", "X-Gitea-Event", "X-GitHub-Event")
+	var (
+		ev  platform.Event
+		ok  bool
+		err error
+	)
+	var consume func(io.Reader) error
+	if name == "push" || name == "repository" {
+		consume = func(rd io.Reader) error { ev, ok, err = parse(name, rd); return nil }
+	}
+	_, res := h.guard.ReadVerifiedStream(w, r, maxBody, h.Secret, nil, func(got []byte) bool { return hmac.Equal(got, want) }, consume)
 	switch res {
 	case webhook.ReadAnswered:
 		return
@@ -98,7 +110,6 @@ func (h *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid signature", http.StatusUnauthorized)
 		return
 	}
-	ev, ok, err := parse(header(r.Header, "X-Forgejo-Event", "X-Gitea-Event", "X-GitHub-Event"), body)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -122,31 +133,42 @@ func (h *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusAccepted)
 }
 
-// parse turns a delivery into an Event; ok=false for events ripple ignores.
-func parse(name string, body []byte) (platform.Event, bool, error) {
+// parse turns a delivery into an Event as it streams, keeping only the fields ripple acts
+// on; ok=false for events ripple ignores.
+func parse(name string, r io.Reader) (platform.Event, bool, error) {
+	x := &webhook.Extractor{}
 	switch name {
 	case "push":
 		var p struct {
-			Ref          string `json:"ref"`
-			TotalCommits *int   `json:"total_commits"`
-			Repository   struct {
-				FullName      string `json:"full_name"`
-				DefaultBranch string `json:"default_branch"`
-			} `json:"repository"`
-			Commits []struct {
-				Added, Modified, Removed []string
-			} `json:"commits"`
+			Ref, FullName, DefaultBranch string
+			TotalCommits                 *int64
 		}
-		if err := json.Unmarshal(body, &p); err != nil {
+		type commit struct{ added, modified, removed []string }
+		var commits []commit
+		c := webhook.Obj(map[string]*webhook.Node{
+			"added":    x.StrsInto(func() *[]string { return &commits[len(commits)-1].added }),
+			"modified": x.StrsInto(func() *[]string { return &commits[len(commits)-1].modified }),
+			"removed":  x.StrsInto(func() *[]string { return &commits[len(commits)-1].removed }),
+		}).OnObject(func() { commits = append(commits, commit{}) })
+		err := webhook.Extract(r, webhook.Obj(map[string]*webhook.Node{
+			"ref":           x.Str(&p.Ref),
+			"total_commits": x.I64Ptr(&p.TotalCommits),
+			"repository": webhook.Obj(map[string]*webhook.Node{
+				"full_name":      x.Str(&p.FullName),
+				"default_branch": x.Str(&p.DefaultBranch),
+			}),
+			"commits": webhook.Array(c),
+		}))
+		if err != nil {
 			return platform.Event{}, false, err
 		}
 		var files []string
 		// A payload that lists fewer commits than were pushed is truncated, and
 		// then its file lists are incomplete: leave Files empty to force a re-scan.
-		if p.TotalCommits == nil || *p.TotalCommits <= len(p.Commits) {
+		if p.TotalCommits == nil || *p.TotalCommits <= int64(len(commits)) {
 			seen := map[string]bool{}
-			for _, c := range p.Commits {
-				for _, l := range [][]string{c.Added, c.Modified, c.Removed} {
+			for _, c := range commits {
+				for _, l := range [][]string{c.added, c.modified, c.removed} {
 					for _, f := range l {
 						if !seen[f] {
 							seen[f] = true
@@ -156,23 +178,22 @@ func parse(name string, body []byte) (platform.Event, bool, error) {
 				}
 			}
 		}
-		return platform.Event{Kind: platform.Push, Repos: []string{p.Repository.FullName}, Ref: p.Ref,
-			DefaultBranch: p.Repository.DefaultBranch, Files: files}, true, nil
+		return platform.Event{Kind: platform.Push, Repos: []string{p.FullName}, Ref: p.Ref,
+			DefaultBranch: p.DefaultBranch, Files: files}, true, nil
 	case "repository":
-		var p struct {
-			Action     string `json:"action"`
-			Repository struct {
-				FullName string `json:"full_name"`
-			} `json:"repository"`
-		}
-		if err := json.Unmarshal(body, &p); err != nil {
+		var p struct{ Action, FullName string }
+		err := webhook.Extract(r, webhook.Obj(map[string]*webhook.Node{
+			"action":     x.Str(&p.Action),
+			"repository": webhook.Obj(map[string]*webhook.Node{"full_name": x.Str(&p.FullName)}),
+		}))
+		if err != nil {
 			return platform.Event{}, false, err
 		}
 		switch p.Action {
 		case "created":
-			return platform.Event{Kind: platform.ReposAdded, Repos: []string{p.Repository.FullName}}, true, nil
+			return platform.Event{Kind: platform.ReposAdded, Repos: []string{p.FullName}}, true, nil
 		case "deleted":
-			return platform.Event{Kind: platform.ReposRemoved, Repos: []string{p.Repository.FullName}}, true, nil
+			return platform.Event{Kind: platform.ReposRemoved, Repos: []string{p.FullName}}, true, nil
 		}
 	}
 	return platform.Event{}, false, nil

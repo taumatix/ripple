@@ -376,11 +376,6 @@ Everything else:
     metadata carries `os`, `cpu` and `hasInstallScript` for every package (the shape check relies on them), and that
     dropping `license`/`funding` changes between versions is harmless. Running npm itself needs a sandbox profile with
     the registry and no repository secrets: a decision for the owner.
-202. **Docker: ARG as part of a tag, Helm single-string images, digest-pinned Kustomize/Helm.** Kustomize `images:`, Helm
-    `repository:`/`tag:` pairs, per-stage `ARG` and `RUN --mount=from=` are read (docs/docker.md). Left: an `ARG` that is only
-    part of a tag (`${V}-alpine`), a Helm `image: repo:tag` single string under a custom key, a Kustomize `newDigest` and a Helm
-    `digest:` (the digest would have to move with the tag), Helm sub-chart `global.imageRegistry` indirection, and a run against
-    real charts and kustomizations.
 203. **Docker: credential helpers, per-repo logins, reload.** `RIPPLE_REGISTRY_AUTH_FILE` reads inline `auths` (user and
     password, `auth`, `identitytoken`; docs/docker.md). Left: `credsStore`/`credHelpers` (run `docker-credential-*`, a program
     that would need the sandbox's care and a human decision on running it), a login limited to the repos that name it in
@@ -406,3 +401,8 @@ Everything else:
     (a floor moves only inside its upper bounds) were reasoned and tested against the fake, not checked against a corpus
     of real package.json files. npm still classifies by number position, so `0.2.3` -> `0.3.0` is "minor" (Cargo uses
     the leftmost-nonzero rule); do the same here once a repo reports it.
+209. **Docker: what the YAML and ARG readers still skip.** A prefix before an ARG in a tag (`v${V}`), Helm sub-chart
+    `global.imageRegistry` indirection, a Helm single string whose key does not contain `image`, and templated values are
+    not read. The digest-pair, single-string and ARG-suffix readers were exercised against the fake registry and hand-made
+    files, not real charts or kustomizations: run them over a sample and record what a real values.yaml does that they
+    mis-read (a `digest:` that is not the image's own, say).

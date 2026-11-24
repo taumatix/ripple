@@ -171,8 +171,9 @@ var argRedeclareRE = regexp.MustCompile(`(?i)^\s*ARG\s+([A-Za-z_][A-Za-z0-9_]*)\
 // argRE captures: 1 the prefix up to the value, 2 the name, 3 the value, 4 the rest.
 var argRE = regexp.MustCompile(`(?i)^(\s*ARG\s+([A-Za-z_][A-Za-z0-9_]*)=)([^\s"']+)(\s*(?:#.*)?)$`)
 
-// varTagRE splits "name:${V}" and "name:$V".
-var varTagRE = regexp.MustCompile(`^([^$@:]+(?::[0-9]+)?(?:/[^$@:]+)*):\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?$`)
+// varTagRE splits "name:${V}" and "name:$V", and "name:${V}-alpine" (group 3 is the literal
+// text after the variable).
+var varTagRE = regexp.MustCompile(`^([^$@:]+(?::[0-9]+)?(?:/[^$@:]+)*):\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?([^$@:/{}\s]*)$`)
 
 // yamlImageRE captures: 1 the key, 2 an opening quote, 3 the image, 4 the closing quote, 5 the rest.
 var yamlImageRE = regexp.MustCompile(`^(\s*(?:-\s+)?image:\s*)(["']?)([^\s"'#]+)(["']?)(\s*(?:#.*)?)$`)
@@ -187,6 +188,22 @@ type occurrence struct {
 	// tagOnly: the edited token is only the tag (a Kustomize newTag, a Helm values tag), and
 	// the image name lives on another line.
 	tagOnly bool
+	// dig is the `newDigest:` / `digest:` line of a tag-only reference pinned by tag and
+	// digest together; nil when there is none. The digest moves with the tag.
+	dig *digestLine
+	// argSuffix is the literal text after `${V}` in a tag (`-alpine` in `image:${V}-alpine`);
+	// the ARG holds the tag without it.
+	argSuffix string
+}
+
+// digestLine is a YAML line holding the digest that goes with a tag on another line.
+type digestLine struct {
+	line                                int
+	prefix, quoteOpen, quoteClose, rest string
+}
+
+func newDigestLine(i int, key string, m []string) *digestLine {
+	return &digestLine{line: i, prefix: m[1] + key + ": ", quoteOpen: m[3], quoteClose: m[5], rest: m[6]}
 }
 
 func isManifest(content string) bool {
@@ -281,11 +298,11 @@ func appendRef(out []occurrence, i int, m []string, scopes ...map[string]argDef)
 	if v := varTagRE.FindStringSubmatch(tok); v != nil {
 		for _, sc := range scopes {
 			if def, ok := sc[v[2]]; ok {
-				r, ok := parseImage(v[1] + ":" + def.val)
+				r, ok := parseImage(v[1] + ":" + def.val + v[3])
 				if !ok {
 					return out
 				}
-				return append(out, occurrence{line: def.line, ref: r, arg: v[2]})
+				return append(out, occurrence{line: def.line, ref: r, arg: v[2], argSuffix: v[3]})
 			}
 		}
 		return out
@@ -321,12 +338,21 @@ func (d Docker) Apply(content []byte, dep model.Dependency, newPackage, newVersi
 			continue
 		}
 		if o.arg != "" {
+			if !strings.HasSuffix(tag, o.argSuffix) {
+				return nil, fmt.Errorf("%w: %s does not end in %q, which the Dockerfile adds after ${%s}", ErrUnsupported, tag, o.argSuffix, o.arg)
+			}
 			m := argRE.FindStringSubmatch(lines[o.line])
-			lines[o.line] = m[1] + tag + m[4]
+			lines[o.line] = m[1] + strings.TrimSuffix(tag, o.argSuffix) + m[4]
 			changed = true
 			continue
 		}
 		if o.tagOnly {
+			if o.dig != nil {
+				if !haveDigest {
+					return nil, fmt.Errorf("docker: %s:%s is pinned to a digest and none was resolved for %s", dep.Package, dep.Version, tag)
+				}
+				lines[o.dig.line] = o.dig.prefix + o.dig.quoteOpen + digest + o.dig.quoteClose + o.dig.rest
+			}
 			lines[o.line] = o.prefix + o.quoteOpen + tag + o.quoteClose + o.rest
 			changed = true
 			continue
@@ -359,26 +385,35 @@ func blankOrComment(line string) bool {
 }
 
 // scanKustomize reads the `images:` list of a kustomization: `name` (or `newName`) with
-// `newTag`. An entry with a `newDigest`, or without a `newTag`, is left alone.
+// `newTag`. An entry without a `newTag` is left alone; one with a `newDigest` as well is
+// moved as a pair, the digest line following the tag.
 func scanKustomize(lines []string) []occurrence {
 	var out []occurrence
 	inImages := false
 	var name, newName string
-	var digest bool
+	var dig []string // the yamlKeyRE match of a non-empty newDigest
+	var digLine int
 	var tag []string // the yamlKeyRE match of newTag
 	var tagLine int
 	flush := func() {
-		if tag != nil && !digest {
+		if tag != nil {
 			img := name
 			if newName != "" {
 				img = newName
 			}
 			if r, ok := parseImageOpt(img+":"+tag[4], true); ok {
-				out = append(out, occurrence{line: tagLine, ref: r, tagOnly: true,
-					prefix: tag[1] + "newTag: ", quoteOpen: tag[3], quoteClose: tag[5], rest: tag[6]})
+				o := occurrence{line: tagLine, ref: r, tagOnly: true,
+					prefix: tag[1] + "newTag: ", quoteOpen: tag[3], quoteClose: tag[5], rest: tag[6]}
+				switch {
+				case dig == nil:
+					out = append(out, o)
+				case strings.HasPrefix(dig[4], "sha256:"):
+					o.dig = newDigestLine(digLine, "newDigest", dig)
+					out = append(out, o)
+				}
 			}
 		}
-		name, newName, digest, tag = "", "", false, nil
+		name, newName, dig, tag = "", "", nil, nil
 	}
 	for i, line := range lines {
 		if blankOrComment(line) {
@@ -405,7 +440,9 @@ func scanKustomize(lines []string) []occurrence {
 		case "newName":
 			newName = m[4]
 		case "newDigest":
-			digest = m[4] != ""
+			if m[4] != "" {
+				dig, digLine = m, i
+			}
 		case "newTag":
 			tag, tagLine = m, i
 		}
@@ -414,13 +451,22 @@ func scanKustomize(lines []string) []occurrence {
 	return out
 }
 
-// scanHelmValues reads `repository:` and `tag:` pairs (with an optional `registry:`) that
+// scanHelmValues reads, besides a single-string `image: repo:tag` under any key containing
+// "image", `repository:` and `tag:` pairs (with an optional `registry:`) that
 // are siblings under a key whose name contains "image" (image, initImage, ...). A pair with
 // a `digest:`, a templated value or a repository that is a URL is left alone.
 func scanHelmValues(lines []string) []occurrence {
 	var out []occurrence
 	for i, line := range lines {
 		m := yamlKeyRE.FindStringSubmatch(line)
+		if m != nil && m[2] != "repository" && strings.Contains(strings.ToLower(m[2]), "image") && m[4] != "" && !strings.ContainsAny(m[4], "{}") && !strings.Contains(m[4], "://") {
+			// `image: repo:tag` (or `initImage: ...`): the whole reference on one line.
+			if r, ok := parseImageOpt(m[4], true); ok {
+				out = append(out, occurrence{line: i, ref: r, prefix: line[:len(line)-len(m[3]+m[4]+m[5]+m[6])],
+					quoteOpen: m[3], quoteClose: m[5], rest: m[6]})
+			}
+			continue
+		}
 		if m == nil || m[2] != "repository" || m[4] == "" || strings.Contains(m[1], "-") {
 			continue
 		}
@@ -444,7 +490,9 @@ func scanHelmValues(lines []string) []occurrence {
 		}
 		var registryHost string
 		var tag []string
-		tagLine, digest := 0, false
+		tagLine := 0
+		var dig []string
+		digLine := 0
 		for j := parent + 1; j < len(lines); j++ {
 			if blankOrComment(lines[j]) {
 				continue
@@ -463,7 +511,9 @@ func scanHelmValues(lines []string) []occurrence {
 			case "registry":
 				registryHost = km[4]
 			case "digest":
-				digest = km[4] != ""
+				if km[4] != "" {
+					dig, digLine = km, j
+				}
 			case "tag":
 				tag, tagLine = km, j
 			}
@@ -472,12 +522,19 @@ func scanHelmValues(lines []string) []occurrence {
 		if registryHost != "" {
 			repo = registryHost + "/" + repo
 		}
-		if tag == nil || digest || strings.ContainsAny(repo+tag[4], "{}$") || strings.Contains(repo, "://") {
+		if tag == nil || strings.ContainsAny(repo+tag[4], "{}$") || strings.Contains(repo, "://") {
+			continue
+		}
+		if dig != nil && !strings.HasPrefix(dig[4], "sha256:") {
 			continue
 		}
 		if r, ok := parseImageOpt(repo+":"+tag[4], true); ok {
-			out = append(out, occurrence{line: tagLine, ref: r, tagOnly: true,
-				prefix: tag[1] + "tag: ", quoteOpen: tag[3], quoteClose: tag[5], rest: tag[6]})
+			o := occurrence{line: tagLine, ref: r, tagOnly: true,
+				prefix: tag[1] + "tag: ", quoteOpen: tag[3], quoteClose: tag[5], rest: tag[6]}
+			if dig != nil {
+				o.dig = newDigestLine(digLine, "digest", dig)
+			}
+			out = append(out, o)
 		}
 	}
 	return out

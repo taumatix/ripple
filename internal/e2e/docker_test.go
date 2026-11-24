@@ -347,3 +347,50 @@ func TestDockerPrivateImageMovesWithAnIdentityTokenFromAConfigFile(t *testing.T)
 		}
 	})
 }
+
+// A Kustomize newTag/newDigest pair and a Helm tag/digest pair move together to the digest the
+// registry reports for the new tag; a Helm `image: repo:tag` single string and an ARG that is
+// only the front of a tag (`${V}-slim`) move through a real run.
+func TestDockerDigestPairsSingleStringsAndArgSuffixMove(t *testing.T) {
+	forEach(t, func(t *testing.T, st store.Store) {
+		e, reg := dockerEnv(t, st)
+		oldK := reg.AddTag("library/nginx", "1.25")
+		oldH := reg.AddTag("corp/api", "v1.0.0")
+		reg.AddTag("org/side", "v1.4.0")
+		reg.AddTag("library/alpine", "3.19-slim")
+		kust := "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nimages:\n  - name: nginx\n    newTag: \"1.25\"\n    newDigest: " + oldK + "\n"
+		values := "image:\n  repository: corp/api\n  registry: ghcr.io\n  tag: v1.0.0\n  digest: " + oldH + "\nsidecar:\n  image: ghcr.io/org/side:v1.4.0 # pin\n"
+		df := "ARG V=3.19\nFROM alpine:${V}-slim\n"
+		e.gh.AddRepo("acme/app", map[string]string{".ripple.yaml": dockerConfig,
+			"deploy/kustomization.yaml": kust, "chart/values.yaml": values, "Dockerfile": df})
+		start(t, e, "acme/app")
+		e.clock.Advance(time.Minute)
+		newK := reg.AddTag("library/nginx", "1.26")
+		newH := reg.AddTag("corp/api", "v1.1.0")
+		reg.AddTag("org/side", "v1.5.0")
+		reg.AddTag("library/alpine", "3.20-slim")
+		e.tick()
+		e.tick()
+
+		values2 := strings.Replace(strings.Replace(values, "v1.0.0", "v1.1.0", 1), oldH, newH, 1)
+		want := map[string][2]string{
+			"kustomize": {"deploy/kustomization.yaml", strings.Replace(strings.Replace(kust, `"1.25"`, `"1.26"`, 1), oldK, newK, 1)},
+			"helm-pair": {"chart/values.yaml", values2},
+			"helm-side": {"chart/values.yaml", strings.Replace(values, "side:v1.4.0", "side:v1.5.0", 1)},
+			"arg":       {"Dockerfile", strings.Replace(df, "V=3.19", "V=3.20", 1)},
+		}
+		seen := map[string]bool{}
+		for _, pr := range e.gh.PRs("acme/app") {
+			for k, w := range want {
+				if got, _ := e.gh.FileAt("acme/app", pr.Head, w[0]); got == w[1] {
+					seen[k] = true
+				}
+			}
+		}
+		for k := range want {
+			if !seen[k] {
+				t.Errorf("no PR made exactly the %s edit", k)
+			}
+		}
+	})
+}

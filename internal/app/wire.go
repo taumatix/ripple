@@ -127,7 +127,7 @@ func New(ctx context.Context, s *config.Server, log *slog.Logger) (a *App, st st
 		eng.Advisories = true
 		osvClient := &advisory.Client{APIURL: s.OSVURL, DumpURL: s.OSVDumpURL, HTTP: &http.Client{Timeout: 20 * time.Second}}
 		eng.AdvisoryHistory = osvClient
-		a.Advisories = &engine.AdvisoryWatcher{Engine: eng, MaxFetch: s.OSVMaxFetch, SweepBatch: s.OSVSweepBatch, Source: osvClient}
+		a.Advisories = &engine.AdvisoryWatcher{Engine: eng, MaxFetch: s.OSVMaxFetch, SweepBatch: s.OSVSweepBatch, BackfillOpenPRs: s.OSVBackfillOpenPRs, Source: osvClient}
 		a.AdvisoryEvery = s.OSVInterval
 	}
 	a.DriftCheckEvery = s.DynamoDriftCheck

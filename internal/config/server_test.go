@@ -498,3 +498,16 @@ func TestServerRegistryHubNewest(t *testing.T) {
 		t.Fatal("a non-boolean must be rejected")
 	}
 }
+
+func TestServerOSVBackfillOpenPRs(t *testing.T) {
+	s, err := LoadServer(env(base))
+	if err != nil || s.OSVBackfillOpenPRs {
+		t.Fatalf("default: %v %v", s.OSVBackfillOpenPRs, err)
+	}
+	if s, err = LoadServer(env(with("RIPPLE_OSV_BACKFILL_OPEN_PRS", "true"))); err != nil || !s.OSVBackfillOpenPRs {
+		t.Fatalf("set: %v %v", s.OSVBackfillOpenPRs, err)
+	}
+	if _, err = LoadServer(env(with("RIPPLE_OSV_BACKFILL_OPEN_PRS", "maybe"))); err == nil {
+		t.Fatal("maybe accepted")
+	}
+}

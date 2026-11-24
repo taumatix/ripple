@@ -45,7 +45,7 @@ If the release feed already queued the same bump behind its cooldown, the adviso
   it), ripple finishes the job that was waiting for it as skipped, closes the PR it opened for it with a comment saying
   why, and drops its dashboard entry. A PR a person touched stays open, and so does every PR when
   `close-superseded-pull-requests: false`. A dependency that already reached the fix is not "corrected": that work was
-  done. Pending jobs made before the per-advisory indexes are indexed once by a backfill that walks the repos after an upgrade (cursor `osv-jobs-backfill`); a done job from before them is not found, and a PR body is not rewritten. A repo that another run holds
+  done. Pending jobs made before the per-advisory indexes are indexed once by a backfill that walks the repos after an upgrade (cursor `osv-jobs-backfill`); a done job from before them is found only with `RIPPLE_OSV_BACKFILL_OPEN_PRS=true` (default off): a second one-time pass (cursor `osv-jobs-backfill-prs`) lists each repo's open ripple PRs once (one host call per repo), reads the module and version from the `ripple/go/...` branch, and indexes the job when it is done, opened that PR and carries an advisory note. Only open PRs of go jobs are reached, since the branch is what names the job; a repo whose listing fails is skipped, a rate limit is retried. A PR body is not rewritten. A repo that another run holds
 for more than two seconds keeps its job and PR for now: the record is remembered (cursor `osv-reconcile-retry`) and applied
 again, fetched fresh, at the start of the next polls until the repo is free. A record whose fix was raised is
   handled by the superseded-PR flow, which replaces the old PR when the new one opens.

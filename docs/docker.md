@@ -72,11 +72,15 @@ config blob); when the registry cannot say, it counts from when ripple first saw
 It is read once at start; an unreadable file stops the server. A login is sent only to the registry it is saved for:
 to its Basic challenge, or to the token endpoint a Bearer challenge names (Docker Hub's `auths` key
 `https://index.docker.io/v1/` is `docker.io`). A host without an entry stays anonymous, so a Dockerfile naming another
-registry never receives one. Not read: `credsStore` and `credHelpers` (external helper programs) and
-`identitytoken` (OAuth refresh tokens); the server logs a warning and those registries stay anonymous. The logins are
+registry never receives one. An `identitytoken` entry (an OAuth2 refresh token, what `az acr login` and some Docker Hub
+setups write) is used for a Bearer challenge only: ripple POSTs the refresh-token grant (`grant_type=refresh_token`,
+the challenge's `service` and `scope`, `client_id=ripple`) to the realm the challenge names, never follows a redirect
+from it, and uses the access token it returns; a Basic challenge cannot be answered with one, and an entry that also has
+a user and password uses the password. Not read: `credsStore` and `credHelpers` (external helper programs); the server
+logs a warning and those registries stay anonymous. The logins are
 never logged, never put in a PR body and never printed (`registry.Credentials` redacts itself); a refused login is
 reported as "denied" with the registry's name, not its value. One login serves every repo the server reads, so use
-a token with read-only pull scope. Verified against a fake registry (token and Basic challenges); no real private
+a token with read-only pull scope. Verified against a fake registry (token, Basic and refresh-token grants); no real private
 registry has been tried (ROADMAP 130).
 
 Only images some repo uses are polled, once per poll, never a whole registry. Branches are `ripple/docker/...`.

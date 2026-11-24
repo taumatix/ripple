@@ -15,10 +15,10 @@ import (
 // `.dockerconfigjson`). A login is sent only to the registry (and the token endpoint
 // it names) it was saved for, never to another host a Dockerfile happens to mention.
 //
-// Read: `auths` entries with `auth` (base64 "user:password") or `username` and
-// `password`. Not read: `credsStore` and `credHelpers` (external helper programs) and
-// `identitytoken` (OAuth refresh tokens); a registry that only has those stays
-// anonymous, and Warnings says so. The value never prints: String, GoString and
+// Read: `auths` entries with `auth` (base64 "user:password"), `username` and `password`,
+// or `identitytoken` (an OAuth2 refresh token, presented only to a Bearer token endpoint).
+// Not read: `credsStore` and `credHelpers` (external helper programs); a registry that only
+// has those stays anonymous, and Warnings says so. The value never prints: String, GoString and
 // LogValue are all redacted.
 type Credentials struct {
 	byHost map[string]login
@@ -27,7 +27,7 @@ type Credentials struct {
 	Warnings []string
 }
 
-type login struct{ user, pass string }
+type login struct{ user, pass, identity string }
 
 func (*Credentials) String() string   { return "registry.Credentials{redacted}" }
 func (*Credentials) GoString() string { return "registry.Credentials{redacted}" }
@@ -55,7 +55,24 @@ func (c *Credentials) For(host string) (user, pass string, ok bool) {
 		return "", "", false
 	}
 	l, ok := c.byHost[host]
+	if l.user == "" && l.pass == "" {
+		return "", "", false
+	}
 	return l.user, l.pass, ok
+}
+
+// IdentityToken returns the OAuth2 refresh token saved for a registry host (an
+// `identitytoken` entry), which only a Bearer token endpoint can be given. A registry with a
+// user and password as well uses the password.
+func (c *Credentials) IdentityToken(host string) (string, bool) {
+	if c == nil {
+		return "", false
+	}
+	l, ok := c.byHost[host]
+	if !ok || l.identity == "" || l.user != "" || l.pass != "" {
+		return "", false
+	}
+	return l.identity, true
 }
 
 // LoadDockerConfig reads a Docker config.json from path.
@@ -85,7 +102,7 @@ func ParseDockerConfig(data []byte) (*Credentials, error) {
 	c := &Credentials{byHost: map[string]login{}}
 	for key, e := range f.Auths {
 		host := configHost(key)
-		l := login{e.Username, e.Password}
+		l := login{user: e.Username, pass: e.Password}
 		if e.Auth != "" {
 			raw, err := base64.StdEncoding.DecodeString(e.Auth)
 			user, pass, ok := strings.Cut(string(raw), ":")
@@ -93,12 +110,10 @@ func ParseDockerConfig(data []byte) (*Credentials, error) {
 				c.Warnings = append(c.Warnings, fmt.Sprintf("the auth entry for %s is not base64 user:password and was ignored", host))
 				continue
 			}
-			l = login{user, pass}
+			l = login{user: user, pass: pass}
 		}
-		if l.user == "" && l.pass == "" {
-			if e.IdentityToken != "" {
-				c.Warnings = append(c.Warnings, fmt.Sprintf("%s has only an identity token, which is not supported; it stays anonymous", host))
-			}
+		l.identity = e.IdentityToken
+		if l.user == "" && l.pass == "" && l.identity == "" {
 			continue
 		}
 		c.byHost[host] = l

@@ -307,3 +307,43 @@ func TestDockerKustomizeHelmStageArgAndMountMove(t *testing.T) {
 		}
 	})
 }
+
+func TestDockerPrivateImageMovesWithAnIdentityTokenFromAConfigFile(t *testing.T) {
+	forEach(t, func(t *testing.T, st store.Store) {
+		reg := testutil.NewRegistry(t)
+		reg.AddTag("corp/secret", "1.0")
+		reg.RequireIdentityToken("corp/secret", "refresh-s3cret")
+		reg.AddTag("corp/other", "1.0")
+		reg.RequireIdentityToken("corp/other", "someone-elses")
+
+		cfgPath := filepath.Join(t.TempDir(), "config.json")
+		if err := os.WriteFile(cfgPath, []byte(`{"auths":{"ghcr.io":{"identitytoken":"refresh-s3cret"}}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		creds, err := registry.LoadDockerConfig(cfgPath)
+		if err != nil || len(creds.Warnings) != 0 {
+			t.Fatalf("%v %v", err, creds.Warnings)
+		}
+		e := newEnvOpts(t, st, defaultLimits(), opts{registry: reg, registryAuth: creds})
+		e.gh.AddRepo("acme/app", map[string]string{".ripple.yaml": dockerConfig,
+			"Dockerfile": "FROM ghcr.io/corp/secret:1.0\nFROM ghcr.io/corp/other:1.0\n"})
+		start(t, e, "acme/app")
+		e.clock.Advance(time.Minute)
+		reg.AddTag("corp/secret", "1.1")
+		reg.AddTag("corp/other", "1.1")
+		e.tick()
+		e.tick()
+
+		prs := e.gh.PRs("acme/app")
+		if len(prs) != 1 {
+			t.Fatalf("only the image the token opens moves, got %d PRs", len(prs))
+		}
+		got, _ := e.gh.FileAt("acme/app", prs[0].Head, "Dockerfile")
+		if got != "FROM ghcr.io/corp/secret:1.1\nFROM ghcr.io/corp/other:1.0\n" {
+			t.Errorf("%s", got)
+		}
+		if strings.Contains(got+prs[0].Body+prs[0].Title, "refresh-s3cret") {
+			t.Errorf("the token reached a PR: %+v", prs[0])
+		}
+	})
+}

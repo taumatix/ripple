@@ -32,6 +32,7 @@ type Registry struct {
 	denied   map[string]bool              // repos whose token request is refused
 	created  map[string]time.Time         // "repo:tag" -> image config creation time
 	logins   map[string][2]string         // repo -> user, password the token endpoint demands
+	identity map[string]string            // repo -> refresh token the token endpoint demands via POST
 	basic    *[2]string                   // when set, /v2/ wants HTTP Basic instead of a token
 	tokenReq []string                     // "scope basic=true|false" per token request
 	reqs     []string
@@ -41,7 +42,7 @@ const registryToken = "anon-token"
 
 func NewRegistry(t testing.TB) *Registry {
 	t.Helper()
-	r := &Registry{repos: map[string]map[string]string{}, denied: map[string]bool{}, created: map[string]time.Time{}, logins: map[string][2]string{}}
+	r := &Registry{repos: map[string]map[string]string{}, denied: map[string]bool{}, created: map[string]time.Time{}, logins: map[string][2]string{}, identity: map[string]string{}}
 	r.srv = httptest.NewServer(r.Wrap(http.HandlerFunc(r.serve)))
 	r.URL = r.srv.URL
 	t.Cleanup(r.srv.Close)
@@ -124,6 +125,15 @@ func (r *Registry) RequireLogin(repo, user, pass string) {
 	r.mu.Unlock()
 }
 
+// RequireIdentityToken makes the token endpoint answer 401 for repo unless the request is
+// the OAuth2 refresh-token grant (POST, grant_type=refresh_token, refresh_token=token, the
+// challenge's service and scope, a client_id). A GET with Basic credentials does not do.
+func (r *Registry) RequireIdentityToken(repo, token string) {
+	r.mu.Lock()
+	r.identity[repo] = token
+	r.mu.Unlock()
+}
+
 // RequireBasic makes every /v2/ request need HTTP Basic credentials for user and
 // password, challenged with `WWW-Authenticate: Basic`, like a registry without a token
 // service.
@@ -155,11 +165,26 @@ func (r *Registry) serve(w http.ResponseWriter, req *http.Request) {
 	r.mu.Unlock()
 	if req.URL.Path == "/token" {
 		scope := req.URL.Query().Get("scope") // repository:<repo>:pull
+		grant, refresh := "", ""
+		if req.Method == http.MethodPost {
+			req.ParseForm()
+			scope, grant, refresh = req.PostForm.Get("scope"), req.PostForm.Get("grant_type"), req.PostForm.Get("refresh_token")
+			if req.PostForm.Get("service") != "fake.registry" || req.PostForm.Get("client_id") == "" {
+				grant = "" // a malformed grant is refused below
+			}
+		}
 		parts := strings.Split(scope, ":")
 		u, p, hasBasic := req.BasicAuth()
 		r.mu.Lock()
-		r.tokenReq = append(r.tokenReq, fmt.Sprintf("%s basic=%v", scope, hasBasic))
+		line := fmt.Sprintf("%s basic=%v", scope, hasBasic)
+		if req.Method == http.MethodPost {
+			line += fmt.Sprintf(" grant=%v", grant == "refresh_token")
+		}
+		r.tokenReq = append(r.tokenReq, line)
 		deny := len(parts) == 3 && r.denied[parts[1]]
+		if want, ok := r.identity[strings.Join(parts[1:len(parts)-1], ":")]; ok && len(parts) == 3 {
+			deny = deny || grant != "refresh_token" || refresh != want
+		}
 		if want, ok := r.logins[strings.Join(parts[1:len(parts)-1], ":")]; ok && len(parts) == 3 {
 			deny = deny || !hasBasic || u != want[0] || p != want[1]
 		}

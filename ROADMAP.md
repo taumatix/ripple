@@ -261,12 +261,6 @@ Everything else:
     pre-release handling, non-normalized names, 404, and that every version of four large projects parses). Still open:
     ordering was only checked for antisymmetry, not against `packaging` on a corpus; `releases` is documented as deprecated
     in favour of the PEP 691 index and could be dropped; rate limits and private indexes.
-166. **Docker: credential helpers, identity tokens, per-repo logins.** `RIPPLE_REGISTRY_AUTH_FILE` reads inline `auths` only
-    (docs/docker.md). Left: `credsStore`/`credHelpers` (run `docker-credential-*`; needs the sandbox's care, since the helper
-    is a program), `identitytoken` (the OAuth2 refresh-token grant against the token endpoint, for Azure and some Docker Hub
-    setups), a login limited to the repos that name it in `.ripple.yaml` (today one login serves every repo the server reads, so
-    a repo can make ripple present it to a registry only by naming that registry's images), reloading the file without a restart,
-    and a real private registry run (see 130).
 167. **Delivery dedupe: SCM-Manager without changeset ids, and retiring the legacy tombstone name.** GitLab now keys
     its delivery on `webhook-id` (else `Idempotency-Key`), so a signed redelivery is dropped by any replica; an
     SCM-Manager payload with no changeset ids still lacks a safe key. Removal tombstones moved to `removed#<name>` and
@@ -401,3 +395,9 @@ Everything else:
     part of a tag (`${V}-alpine`), a Helm `image: repo:tag` single string under a custom key, a Kustomize `newDigest` and a Helm
     `digest:` (the digest would have to move with the tag), Helm sub-chart `global.imageRegistry` indirection, and a run against
     real charts and kustomizations.
+203. **Docker: credential helpers, per-repo logins, reload.** `RIPPLE_REGISTRY_AUTH_FILE` reads inline `auths` (user and
+    password, `auth`, `identitytoken`; docs/docker.md). Left: `credsStore`/`credHelpers` (run `docker-credential-*`, a program
+    that would need the sandbox's care and a human decision on running it), a login limited to the repos that name it in
+    `.ripple.yaml` (today one login serves every repo the server reads, so a repo can make ripple present it to a registry
+    only by naming that registry's images), reloading the file without a restart, and a real private registry run (see 130),
+    which is also the only check of the refresh-token grant against Azure or Docker Hub.

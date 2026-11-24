@@ -323,7 +323,8 @@ func (c *Client) do(ctx context.Context, method, target string, ref Ref, accept 
 				basic = true
 				continue
 			}
-			if token, err = c.token(ctx, challenge, repo, user, pass, haveLogin); err != nil {
+			identity, _ := c.Auth.IdentityToken(ref.Registry)
+			if token, err = c.token(ctx, challenge, repo, user, pass, haveLogin, identity); err != nil {
 				return nil, err
 			}
 			continue
@@ -342,7 +343,9 @@ func (c *Client) do(ctx context.Context, method, target string, ref Ref, accept 
 var paramRE = regexp.MustCompile(`(\w+)="([^"]*)"`)
 
 // token answers a `Bearer realm=...,service=...,scope=...` challenge without credentials.
-func (c *Client) token(ctx context.Context, challenge, repo, user, pass string, haveLogin bool) (string, error) {
+// With an identity token it is the OAuth2 refresh-token grant instead: a POST of the form to
+// the realm, which is never redirected, so the token cannot be re-sent to another host.
+func (c *Client) token(ctx context.Context, challenge, repo, user, pass string, haveLogin bool, identity string) (string, error) {
 	scheme, params, _ := strings.Cut(strings.TrimSpace(challenge), " ")
 	if !strings.EqualFold(scheme, "bearer") {
 		return "", fmt.Errorf("%w: the registry asks for %q authentication", ErrDenied, scheme)
@@ -364,9 +367,27 @@ func (c *Client) token(ctx context.Context, challenge, repo, user, pass string, 
 		scope = "repository:" + repo + ":pull"
 	}
 	q.Set("scope", scope)
+	hc := c.http()
+	method, body := http.MethodGet, ""
+	if identity != "" {
+		form := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {identity}, "scope": {scope}, "client_id": {"ripple"}}
+		if p["service"] != "" {
+			form.Set("service", p["service"])
+		}
+		method, body = http.MethodPost, form.Encode()
+		q.Del("scope")
+		q.Del("service")
+		noRedirect := *hc
+		noRedirect.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+		hc = &noRedirect
+		haveLogin = false
+	}
 	realm.RawQuery = q.Encode()
-	resp, err := c.Retry.Do(ctx, c.http(), func() (*http.Request, error) {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, realm.String(), nil)
+	resp, err := c.Retry.Do(ctx, hc, func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, method, realm.String(), strings.NewReader(body))
+		if err == nil && identity != "" {
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -383,7 +404,7 @@ func (c *Client) token(ctx context.Context, challenge, repo, user, pass string, 
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		if haveLogin {
+		if haveLogin || identity != "" {
 			return "", fmt.Errorf("%w: token for %s (the configured login was refused)", ErrDenied, repo)
 		}
 		return "", fmt.Errorf("%w: token for %s", ErrDenied, repo)
@@ -391,18 +412,18 @@ func (c *Client) token(ctx context.Context, challenge, repo, user, pass string, 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("registry: token endpoint: %s", resp.Status)
 	}
-	var body struct {
+	var tok struct {
 		Token       string `json:"token"`
 		AccessToken string `json:"access_token"`
 	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, maxBody)).Decode(&body); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxBody)).Decode(&tok); err != nil {
 		return "", fmt.Errorf("registry: token response: %w", err)
 	}
-	if body.Token == "" {
-		body.Token = body.AccessToken
+	if tok.Token == "" {
+		tok.Token = tok.AccessToken
 	}
-	if body.Token == "" {
+	if tok.Token == "" {
 		return "", errors.New("registry: token response carries no token")
 	}
-	return body.Token, nil
+	return tok.Token, nil
 }

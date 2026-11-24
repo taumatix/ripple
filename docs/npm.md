@@ -46,8 +46,14 @@ lists it under "Lockfiles not regenerated": the owner refreshes it before mergin
 
 ## Private packages and other registries
 
-The client never sends a credential. A package that answers 401, 403 or 404 is logged and left alone. A package whose
-`.npmrc` (beside the `package.json` or at the repo root) sets `registry=` to another host, or `@scope:registry=` for the
-package's scope, is skipped with that reason, because a public package of the same name would be a different package.
+The client never sends a credential. A package that answers 401, 403 or 404 is logged and left alone.
+
+Registry routing is read from `.npmrc`, `.yarnrc.yml` (`npmRegistryServer`, `npmScopes`) and `.yarnrc` (`registry`,
+`@scope:registry`) in the `package.json`'s directory and every parent up to the repo root; for each key the nearest file
+that sets it wins. A package whose registry (its scope's, else the default) is not the public one is skipped with that
+reason, because a public package of the same name would be a different package. "Public" means an https URL whose host is
+exactly `registry.npmjs.org` (or yarn's mirror `registry.yarnpkg.com`): a URL that only mentions it in its path, or holds
+an unexpanded `${VAR}`, is not. Credential keys in these files are never kept. ripple does not read from a registry a
+repository names, so private registries stay unsupported (ROADMAP 200).
 
 See [UPSTREAM.md](../UPSTREAM.md) for what was not verified against the real registry.

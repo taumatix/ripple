@@ -2,7 +2,7 @@
 // (crates.io's index.crates.io), anonymously.
 //
 // It is written from docs/vendor/cargo: one file per crate at a path derived from the
-// lowercased name, each line a JSON object with "vers" and "yanked" (and more ripple
+// lowercased name, each line a JSON object with "vers", "yanked" and "rust_version" (and more ripple
 // does not use).
 package cratesindex
 
@@ -71,6 +71,9 @@ type Client struct {
 type Version struct {
 	Version string
 	Yanked  bool
+	// RustVersion is the oldest compiler the version declares it builds with
+	// ("1.70", or "1.70.0"); empty when it declares none.
+	RustVersion string
 }
 
 // Crate is the part of a crate's index file ripple uses.
@@ -129,14 +132,15 @@ func (c *Client) Crate(ctx context.Context, name string) (Crate, error) {
 			continue
 		}
 		var v struct {
-			Name   string `json:"name"`
-			Vers   string `json:"vers"`
-			Yanked bool   `json:"yanked"`
+			Name        string `json:"name"`
+			Vers        string `json:"vers"`
+			Yanked      bool   `json:"yanked"`
+			RustVersion string `json:"rust_version"`
 		}
 		if json.Unmarshal([]byte(line), &v) != nil || v.Vers == "" {
 			continue // one bad line must not hide the others
 		}
-		out.Versions = append(out.Versions, Version{Version: v.Vers, Yanked: v.Yanked})
+		out.Versions = append(out.Versions, Version{Version: v.Vers, Yanked: v.Yanked, RustVersion: v.RustVersion})
 	}
 	if err := sc.Err(); err != nil {
 		return Crate{}, fmt.Errorf("cargo: %s: %w", name, err)

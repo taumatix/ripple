@@ -49,6 +49,11 @@ above the requirement's version that is a release (no prerelease) and is not yan
 follow the version, so `ignore`, cooldown and automerge rules apply as for Go modules. The index has no publication
 dates, so the cooldown runs from when ripple first saw the version.
 
+**MSRV.** The index carries each release's `rust_version`. When the manifest declares a `rust-version` (its own
+`[package] rust-version`, or the workspace's `[workspace.package]` for a member that says `rust-version.workspace = true`)
+and the target release declares a newer one, the job is recorded as skipped with that reason. ripple does not fall back
+to an older release that would build. A manifest with no `rust-version` is not checked.
+
 Only crates some repo uses are read, once per poll, never the index as a whole.
 
 ## Cargo.lock

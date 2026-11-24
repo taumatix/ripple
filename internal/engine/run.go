@@ -699,7 +699,7 @@ func (r *runner) apply(it item) (bool, error) {
 			}
 		}
 		if d.Datasource == model.DatasourceCargo {
-			if why := r.cargoGuard(d); why != "" {
+			if why := r.cargoGuard(d, it.job.Version); why != "" {
 				if r.skipReasons == nil {
 					r.skipReasons = map[string]string{}
 				}

@@ -401,3 +401,55 @@ func (c Cargo) Apply(content []byte, dep model.Dependency, newPackage, newVersio
 	}
 	return out, nil
 }
+
+// CargoRustVersion reads the compiler a manifest declares it supports: `[package]
+// rust-version`, or `[workspace.package] rust-version` in the same file. inherits is
+// true when the package says `rust-version.workspace = true`, so the value lives in a
+// parent manifest. ver is "" when the file declares none.
+func CargoRustVersion(content []byte) (ver string, inherits bool, err error) {
+	leaves, err := tomlScan(string(content))
+	if err != nil {
+		return "", false, err
+	}
+	for _, l := range leaves {
+		switch strings.Join(l.path, ".") {
+		case "package.rust-version":
+			if l.isStr {
+				return l.str, false, nil
+			}
+		case "package.rust-version.workspace":
+			inherits = true
+		case "workspace.package.rust-version":
+			if l.isStr && ver == "" {
+				ver = l.str
+			}
+		}
+	}
+	if inherits {
+		return "", true, nil
+	}
+	return ver, false, nil
+}
+
+// RustVersionNewer reports whether the compiler need ("1.80", "1.80.1") is newer than
+// the one have declares. A value that is not a rust version never counts as newer.
+func RustVersionNewer(need, have string) bool {
+	pad := func(s string) ([3]int, bool) {
+		var v [3]int
+		parts := strings.Split(s, ".")
+		if len(parts) == 0 || len(parts) > 3 {
+			return v, false
+		}
+		for i, p := range parts {
+			n, err := strconv.Atoi(p)
+			if err != nil {
+				return v, false
+			}
+			v[i] = n
+		}
+		return v, true
+	}
+	n, ok1 := pad(need)
+	h, ok2 := pad(have)
+	return ok1 && ok2 && cargoCompare(n[:], h[:]) > 0
+}

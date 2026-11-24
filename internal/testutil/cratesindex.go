@@ -30,8 +30,8 @@ type CratesIndex struct {
 type CratesRequest struct{ Path, Authorization string }
 
 type crateVers struct {
-	name, vers string
-	yanked     bool
+	name, vers, rustVersion string
+	yanked                  bool
 }
 
 func NewCratesIndex(t testing.TB) *CratesIndex {
@@ -62,6 +62,15 @@ func (c *CratesIndex) Publish(name, version string) {
 	defer c.mu.Unlock()
 	p := cratesIndexPath(name)
 	c.crates[p] = append(c.crates[p], crateVers{name: name, vers: version})
+}
+
+// PublishMSRV appends a version of name that declares rust_version (the oldest compiler
+// it builds with), as the index's optional field of that name.
+func (c *CratesIndex) PublishMSRV(name, version, rustVersion string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	p := cratesIndexPath(name)
+	c.crates[p] = append(c.crates[p], crateVers{name: name, vers: version, rustVersion: rustVersion})
 }
 
 // Yank marks a published version yanked (the only field the index lets change).
@@ -106,8 +115,12 @@ func (c *CratesIndex) serve(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		enc := json.NewEncoder(w) // one JSON object per line
 		for _, v := range vs {
-			enc.Encode(map[string]any{"name": v.name, "vers": v.vers, "deps": []any{}, "cksum": strings.Repeat("0", 64),
-				"features": map[string]any{}, "yanked": v.yanked})
+			line := map[string]any{"name": v.name, "vers": v.vers, "deps": []any{}, "cksum": strings.Repeat("0", 64),
+				"features": map[string]any{}, "yanked": v.yanked}
+			if v.rustVersion != "" {
+				line["rust_version"] = v.rustVersion
+			}
+			enc.Encode(line)
 		}
 	}
 }

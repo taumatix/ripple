@@ -60,3 +60,16 @@ func TestCrateErrors(t *testing.T) {
 		t.Error("a path-like name must be refused")
 	}
 }
+
+func TestCrateReadsRustVersion(t *testing.T) {
+	idx := testutil.NewCratesIndex(t)
+	idx.Publish("serde", "1.0.1")
+	idx.PublishMSRV("serde", "1.0.2", "1.70")
+	cr, err := (&cratesindex.Client{BaseURL: idx.URL}).Crate(context.Background(), "serde")
+	if err != nil || len(cr.Versions) != 2 {
+		t.Fatalf("Crate = %+v, %v", cr, err)
+	}
+	if cr.Versions[0].RustVersion != "" || cr.Versions[1].RustVersion != "1.70" {
+		t.Errorf("rust_version = %q, %q", cr.Versions[0].RustVersion, cr.Versions[1].RustVersion)
+	}
+}

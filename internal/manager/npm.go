@@ -22,7 +22,8 @@ import (
 // Only a range ripple can read with certainty is tracked: one to three numeric parts
 // with no operator, `=`, `^` or `~`, and for a partial one an x-range tail (`1.2`,
 // `^1.2`, `1.x`, `1.2.x`). A partial range keeps its precision when it moves (`1.2`
-// follows 1.5.3 to `1.5`). A bare `*`, comparators, unions, hyphen ranges,
+// follows 1.5.3 to `1.5`). A `>=` floor with `<`/`<=` upper bounds (`>=1.2.3 <2`) moves
+// only to a version under them. A bare `*`, other comparators, hyphen ranges,
 // prereleases, dist-tags, git/file/URL specs, `npm:` aliases and `workspace:` specs
 // are left alone. A full range that is bumped is raised to the new version even when
 // it already allowed it, because without a lockfile refresh that is the only change a
@@ -59,22 +60,101 @@ var npmRangeRE = regexp.MustCompile(`^(>=[ \t]*|[\^~=]?)(\d+)((?:\.\d+){0,2})((?
 // NpmRange is a single-comparator range ripple moves: an optional `^`, `~`, `=` or
 // `>=` (with the spacing it was written with), one to three numeric parts, and for a
 // partial one optionally the wildcard tail it was written with ("1.2", "^1.2", "1.x",
-// "1.2.x", "~1.*", ">= 1.2"). `*`, the upper-bound and exclusive comparators, compound
-// ranges (">=1 <2") and hyphen ranges are not NpmRanges; a `||` union is an NpmSpec.
+// "1.2.x", "~1.*", ">= 1.2"), and a `>=` floor may be followed by upper bounds
+// (">=1.2.3 <2", ">=1 <=1.5"), which only limit the versions it moves to. `*`, a lone
+// `<`, `<=` or `>`, other compound ranges and hyphen ranges are not NpmRanges; a `||`
+// union is an NpmSpec.
 type NpmRange struct {
 	Op     string
 	Parts  []int  // the numbers, as written
 	Suffix string // the wildcard tail as written (".x", ".x.x", ".*"), or ""
 	text   string // the whole range as written
+	// rest is what follows a `>=` floor in a compound range, as written (" <2"); upper
+	// are its bounds. Both are empty for a single comparator.
+	rest  string
+	upper []npmBound
+}
+
+// npmBound is an upper bound of a compound range: `<parts` or `<=parts`.
+type npmBound struct {
+	orEqual bool
+	parts   []int
+}
+
+// npmUpperRE is the tail of a compound range: one or more `<` / `<=` comparators, each
+// after whitespace, on a numeric version of one to three parts.
+var npmUpperRE = regexp.MustCompile(`^(?:[ \t]+(<=?)[ \t]*(\d+(?:\.\d+){0,2}))+$`)
+var npmUpperOneRE = regexp.MustCompile(`[ \t]+(<=?)[ \t]*(\d+(?:\.\d+){0,2})`)
+
+// allows says whether v (x.y.z) is inside the bound.
+func (b npmBound) allows(v [3]int) bool {
+	cmp := func(a, c []int) int {
+		for i := range a {
+			if a[i] != c[i] {
+				if a[i] < c[i] {
+					return -1
+				}
+				return 1
+			}
+		}
+		return 0
+	}
+	if b.orEqual {
+		return cmp(v[:len(b.parts)], b.parts) <= 0 // `<=1.5` takes all of 1.5.x
+	}
+	padded := append(append([]int(nil), b.parts...), make([]int, 3-len(b.parts))...)
+	return cmp(v[:], padded) < 0
+}
+
+// Allows says whether version (a release, x.y.z) is inside the upper bounds of a
+// compound range; a single comparator has none and allows every version.
+func (r NpmRange) Allows(version string) bool {
+	var v [3]int
+	parts := strings.Split(version, ".")
+	if len(parts) != 3 {
+		return false
+	}
+	for i, p := range parts {
+		n, err := strconv.Atoi(p)
+		if err != nil {
+			return false
+		}
+		v[i] = n
+	}
+	for _, b := range r.upper {
+		if !b.allows(v) {
+			return false
+		}
+	}
+	return true
 }
 
 // ParseNpmRange reads spec as an NpmRange; false when it is something else.
 func ParseNpmRange(spec string) (NpmRange, bool) {
-	m := npmRangeRE.FindStringSubmatch(spec)
+	head, rest := spec, ""
+	// A space inside `>= 1.2` belongs to the floor; one before a `<` starts the bounds.
+	if j := npmUpperStart(spec); j >= 0 {
+		head, rest = spec[:j], spec[j:]
+	}
+	m := npmRangeRE.FindStringSubmatch(head)
 	if m == nil {
 		return NpmRange{}, false
 	}
-	r := NpmRange{Op: m[1], Suffix: m[4], text: spec}
+	r := NpmRange{Op: m[1], Suffix: m[4], text: spec, rest: rest}
+	if rest != "" {
+		// Only a `>=` floor takes upper bounds: `^1.2 <1.5` and `1.2.3 <2` say something else.
+		if !strings.HasPrefix(m[1], ">=") || !npmUpperRE.MatchString(rest) {
+			return NpmRange{}, false
+		}
+		for _, bm := range npmUpperOneRE.FindAllStringSubmatch(rest, -1) {
+			var nums []int
+			for _, p := range strings.Split(bm[2], ".") {
+				n, _ := strconv.Atoi(p)
+				nums = append(nums, n)
+			}
+			r.upper = append(r.upper, npmBound{orEqual: bm[1] == "<=", parts: nums})
+		}
+	}
 	nums := m[2] + m[3]
 	for _, p := range strings.Split(nums, ".") {
 		n, err := strconv.Atoi(p)
@@ -108,7 +188,23 @@ func (r NpmRange) Text(version string) string {
 	if len(parts) > len(r.Parts) {
 		parts = parts[:len(r.Parts)]
 	}
-	return r.Op + strings.Join(parts, ".") + r.Suffix
+	return r.Op + strings.Join(parts, ".") + r.Suffix + r.rest
+}
+
+// npmUpperStart is the index where the first `<` comparator's leading whitespace begins,
+// or -1 when the spec has none.
+func npmUpperStart(spec string) int {
+	i := strings.IndexByte(spec, '<')
+	if i < 0 {
+		return -1
+	}
+	for i > 0 && (spec[i-1] == ' ' || spec[i-1] == '\t') {
+		i--
+	}
+	if i == 0 {
+		return -1
+	}
+	return i
 }
 
 // NpmSpec is a dependency's whole range string: one NpmRange, or a `||` union of

@@ -34,7 +34,14 @@ func TestApplicableNpm(t *testing.T) {
 		{">=1", "2.0.0", rules.Major, true},
 		{"<=1.0.0", "1.3.0", "", false},
 		{">1.0.0", "1.3.0", "", false},
-		{">=1.0.0 <2", "1.3.0", "", false},
+		{">=1.0.0 <2", "1.3.0", rules.Minor, true},
+		{">=1.0.0 <2", "2.0.0", "", false}, // over the bound
+		{">=1.0.0 <2", "2.1.0", "", false},
+		{">=1.0.0 <=2.0.0", "2.0.0", rules.Major, true},
+		{">=1.0.0 <1.5", "1.5.0", "", false},
+		{">=1.0.0 <1.5", "1.4.9", rules.Minor, true},
+		{">=1.0.0 <2 || >=3.0.0 <4", "3.5.0", rules.Minor, true},
+		{">=1.0.0 <2 || >=3.0.0 <4", "4.0.0", "", false},
 		{"1 - 2", "2.1.0", "", false},
 		{"^1.4.0 || ^2.0.0", "2.3.0", rules.Minor, true},
 		{"^1.4.0 || ^2.0.0", "1.9.0", "", false}, // below the newest alternative

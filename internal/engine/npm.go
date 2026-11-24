@@ -38,6 +38,9 @@ func applicableNpm(d model.Dependency, pkg, version string) (rules.UpdateType, b
 	if !ok {
 		return "", false
 	}
+	if !rng.Moving().Allows(version) {
+		return "", false // over an upper bound of a compound range
+	}
 	typ, ok := rules.Classify("v"+rng.Floor(), "v"+version)
 	if !ok || (rng.Text(version) == d.Version && len(rng.Moving().Parts) < 3) {
 		return "", false

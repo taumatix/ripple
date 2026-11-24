@@ -1,0 +1,18 @@
+next : 14.2.3
+react : ^18.3.1
+react-dom : ^18.3.1
+xr : 1.x
+xr2 : 1.2.x
+tilde-major : ~1
+caret-zero : ^0.2.3
+caret-zero-zero : ^0.0.3
+gte : >=2.1.0
+range : >=1.2.3 <2.0.0
+union : ^1.0.0 || ^2.0.0
+eq : =1.2.3
+space :  ^1.2.3 
+@types/node : ^20.12.12
+typescript : ~5.4.5
+vitest : ^1.6.0
+eslint : ^8.57.0 || ^9.0.0
+fsevents : ~2.3.3

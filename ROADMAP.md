@@ -333,23 +333,14 @@ Everything else:
     the others, which keep ignoring a mismatch as before. Only the GitHub lookup ran, against the fake host.
 205. **Webhooks: the rest of the streamed-parse cost.** One string value or key is now capped at 16 KiB while the signature is unchecked, so a forged body with one huge `ref` costs 16 KiB, not up to 16 MiB; the whole budget (`maxExtract`, 16 MiB, reachable by many fields each under the cap) is unchanged and unmeasured on a busy receiver. GitLab with a plain secret token (no signing key) still reads its header-authenticated body whole before parsing it; Azure DevOps, Gerrit, SCM-Manager and CodeCommit authenticate from headers and read whole, bounded by their `maxBody`.
 206. **DynamoDB hygiene: measure it, and decide on self-repair.** The hygiene commands and the server's drift check now list packages from the `PKGS` index (one Query; a table from before it is Scanned once, ROADMAP 176) instead of Scanning every item for `DEP#` keys. Still nobody has timed the check or a per-package recount on a table with millions of items or on real AWS with provisioned capacity, so the suggested page and pause are arithmetic, not measurement; every `PKGS` item shares one partition key, which a table with millions of packages would make a hot read partition (shard it by hash if it shows), and a package an older-version replica introduces after the marker is missed until the marker is deleted. The server only reports drift; whether it should recount a package it finds drifted on its own (rate-limited, one replica at a time under the lease) is undecided.
-207. **Cargo: the requirements left alone on purpose, and a corpus check.** A bare `*` matches every version (nothing to
-    move), a lone `>` or `<` and several lower bounds have no one floor to raise, so they stay unread; `x`/`X` wildcards
-    and the underscore section spellings are read now. The TOML scanner (`internal/manager/toml.go`) was checked against
-    a handful of real manifests and the unit tables, not a corpus of crates.io manifests, and it skips a file it cannot
-    parse with a warning: run it over a sample of real manifests and record the miss rate. The same newest-only target
-    still applies to npm (see 147).
-208. **npm: ranges still left alone, and a corpus check.** Hyphen ranges (`1 - 2`), a lone `>` or `<=`, a compound range
-    whose floor is not `>=` (`^1.2 <1.5`), a current prerelease, `peerDependencies`, `overrides`/`resolutions`, `npm:`
-    aliases and workspace specs are not read. The union rule (move only the newest alternative) and the compound rule
-    (a floor moves only inside its upper bounds) were reasoned and tested against the fake, not checked against a corpus
-    of real package.json files. npm still classifies by number position, so `0.2.3` -> `0.3.0` is "minor" (Cargo uses
-    the leftmost-nonzero rule); do the same here once a repo reports it.
-209. **Docker: what the YAML and ARG readers still skip.** A prefix before an ARG in a tag (`v${V}`), Helm sub-chart
-    `global.imageRegistry` indirection, a Helm single string whose key does not contain `image`, and templated values are
-    not read. The digest-pair, single-string and ARG-suffix readers were exercised against the fake registry and hand-made
-    files, not real charts or kustomizations: run them over a sample and record what a real values.yaml does that they
-    mis-read (a `digest:` that is not the image's own, say).
+216. **Corpus checks: from a real sample, and what the first one found.** `internal/manager/testdata/corpus` holds manifests written
+    the way ripgrep, tokio, express, bitnami and ingress-nginx write theirs, with reviewed `.want` files (`go test ./internal/manager
+    -run TestCorpus -update-corpus` rewrites them); they were written from memory and the documented formats, not downloaded, so the
+    miss rate over real crates.io, npm and Hub files is still unmeasured. Not read, found by the corpus: an ingress-nginx style values
+    block with `registry:` and `image: path/name` and no `repository` key, and a calendar tag with a leading zero (`ubuntu:22.04`, the
+    registry tag parser needs a semver-shaped number). npm still classifies `0.2.3` -> `0.3.0` as minor (Cargo uses leftmost-nonzero);
+    a Dockerfile `FROM` with a `v${V}` ARG prefix and Helm `global.imageRegistry` indirection stay unread. The Cargo `*`/lone `<`
+    and npm hyphen, lone `>`, peer and `overrides` forms stay unread on purpose.
 210. **pip: `setup.py`, `setup.cfg`, wildcards and multi-constraint dependencies.** Poetry, Pipfile, `.in` files and `>=1,<2`
     floors are read now (docs/pip.md). Still not read: `setup.py` (code), `setup.cfg` `install_requires`, `==1.*` and `<`
     only ranges, Poetry's array-of-constraints form and `*`; a real TOML parser is still the way to widen the line

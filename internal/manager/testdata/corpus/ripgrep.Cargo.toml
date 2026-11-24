@@ -1,0 +1,59 @@
+[package]
+name = "ripgrep"
+version = "14.1.1"  #:version
+authors = ["Andrew Gallant <jamslam@gmail.com>"]
+description = """
+ripgrep is a line-oriented search tool that recursively searches the current
+directory for a regex pattern while respecting gitignore rules.
+"""
+edition = "2021"
+rust-version = "1.72"
+exclude = [
+  "HomebrewFormula",
+]
+build = "build.rs"
+autotests = false
+
+[[bin]]
+bench = false
+path = "crates/core/main.rs"
+name = "rg"
+
+[[test]]
+name = "integration"
+path = "tests/tests.rs"
+
+[workspace]
+members = [
+  "crates/globset",
+  "crates/grep",
+]
+
+[dependencies]
+anyhow = "1.0.75"
+bstr = "1.7.0"
+grep = { version = "0.3.1", path = "crates/grep" }
+ignore = { version = "0.4.22", path = "crates/ignore" }
+lexopt = "0.3.0"
+log = "0.4.5"
+serde_json = "1.0.23"
+termcolor = "1.1.0"
+textwrap = { version = "0.16.0", default-features = false }
+
+[target.'cfg(all(target_env = "musl", target_pointer_width = "64"))'.dependencies.jemallocator]
+version = "0.5.0"
+
+[dev-dependencies]
+serde = "1.0.77"
+serde_derive = "1.0.77"
+walkdir = "2"
+
+[features]
+pcre2 = ["grep/pcre2"]
+
+[profile.release]
+debug = 1
+
+[profile.release-lto]
+inherits = "release"
+opt-level = 3

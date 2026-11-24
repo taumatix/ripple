@@ -1,0 +1,27 @@
+controller:
+  name: controller
+  image:
+    chroot: false
+    registry: registry.k8s.io
+    image: ingress-nginx/controller
+    ## for backwards compatibility consider setting the full image url via the repository value below
+    ## use *either* current default registry/image or repository format or installing chart by providing the values.yaml will fail
+    ## repository:
+    tag: "v1.10.1"
+    digest: sha256:2222222222222222222222222222222222222222222222222222222222222222
+    digestChroot: sha256:3333333333333333333333333333333333333333333333333333333333333333
+    pullPolicy: IfNotPresent
+  admissionWebhooks:
+    patch:
+      enabled: true
+      image:
+        registry: registry.k8s.io
+        image: ingress-nginx/kube-webhook-certgen
+        tag: v1.4.1
+        digest: sha256:4444444444444444444444444444444444444444444444444444444444444444
+defaultBackend:
+  enabled: false
+  image:
+    registry: registry.k8s.io
+    image: defaultbackend-amd64
+    tag: "1.5"

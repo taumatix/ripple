@@ -1,0 +1,14 @@
+pin-project-lite : 0.2.11
+bytes : 1.0.0
+mio : 0.8.9
+parking_lot : 0.12.0
+socket2 : 0.5.5
+tracing : 0.1.25
+libc : 0.2.149
+signal-hook-registry : 1.1.1
+nix : 0.29.0
+windows-sys : 0.48
+futures : 0.3.0
+mockall : 0.11.1
+async-stream : 0.3
+rand : 0.8.0

@@ -1,0 +1,80 @@
+name: emulator
+# The AWS-dependent code run against the public AWS Emulator (https://github.com/aws/aws-emulator),
+# tracked in UPSTREAM.md. It is an emulator: it says nothing about throttling, latency, index lag or IAM
+# (docs/aws-emulator.md). Telemetry is switched off; no AWS account or credentials are involved.
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+env:
+  # The major version the job accepts. The versioned package URLs in the user guide answer 403 (checked
+  # 2026-11-24), so the job installs the `latest` package and records the version that actually ran;
+  # UPSTREAM.md holds the last version this was checked against. A new major fails the job.
+  EMULATOR_MAJOR: "1"
+  EMULATOR_TELEMETRY: "off"
+jobs:
+  dynamodb:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      RIPPLE_TEST_DYNAMODB_ENDPOINT: https://127.0.0.1:9297
+      RIPPLE_TEST_DYNAMODB_BACKEND: emulator
+      AWS_CA_BUNDLE: /home/runner/.aws/emulator/9297/ca.pem
+      AWS_REGION: us-east-1
+      AWS_EC2_METADATA_DISABLED: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: install the AWS Emulator (latest of the accepted major)
+        run: |
+          set -euo pipefail
+          base=https://downloads.aws.com/aws-emulator/packages/aws-emulator/LTS
+          pkg=aws-emulator_amd64.deb
+          curl -fsSLO "$base/latest/$pkg"
+          curl -fsSLO "$base/latest/$pkg.sig"
+          curl -fsSLo aws-publishing.asc https://downloads.aws.com/keys/gpg/current.asc
+          gpg --import aws-publishing.asc
+          # The fingerprint the user guide documents; a different key means do not install.
+          gpg --fingerprint ssm-publishing@amazon.com | tr -d ' ' | grep -q 98BCF336A3BE53B734E967C52E5BF49BD940F624
+          gpg --verify "$pkg.sig" "$pkg"
+          sudo apt-get install -y "./$pkg"
+          aws-emulator -v | tee emulator-version.txt
+          grep -qE "(^|[^0-9.])${EMULATOR_MAJOR}\.[0-9]+\.[0-9]+" emulator-version.txt
+          { echo '### AWS Emulator'; echo '```'; cat emulator-version.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - name: start the emulator
+        run: |
+          # --auth off: ripple's store tests sign with fixed test keys, and request signing is not
+          # what this job checks. Resources live in memory and vanish with the process.
+          aws-emulator --telemetry off --auth off -p 9297 > emulator.log 2>&1 &
+          for i in $(seq 60); do
+            curl -sf --cacert "$AWS_CA_BUNDLE" https://127.0.0.1:9297/__admin/health && break
+            sleep 1
+          done
+          curl -sf --cacert "$AWS_CA_BUNDLE" https://127.0.0.1:9297/__admin/health
+      - name: store suite, e2e and admin commands against the emulator
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -count=1 -v -timeout 40m ./internal/store/... ./internal/e2e/... ./internal/app/... 2>&1 | tee emulator-test.log
+      - name: no DynamoDB test was skipped
+        run: |
+          if grep -E -- '--- SKIP' emulator-test.log | grep -iE 'dynamo|emulator'; then echo "DynamoDB tests were skipped"; exit 1; fi
+      - name: dynamofake agrees with the emulator
+        run: |
+          scripts/check-dynamo-parity.sh --self-test
+          scripts/check-dynamo-parity.sh --backend emulator emulator-test.log
+      - name: emulator log
+        if: always()
+        run: tail -n 100 emulator.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: emulator-dynamodb-logs
+          path: |
+            emulator-test.log
+            emulator.log
+            emulator-version.txt

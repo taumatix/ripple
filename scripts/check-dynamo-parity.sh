@@ -5,18 +5,28 @@
 # fake accepts something the service rejects, or behaves differently from it.
 #
 #   scripts/check-dynamo-parity.sh test.log     compare, exit 1 on any difference
+#   scripts/check-dynamo-parity.sh --backend emulator test.log
+#                                               compare the fake with another backend's subtests
+#                                               (RIPPLE_TEST_DYNAMODB_BACKEND names the subtest; the
+#                                               AWS Emulator job uses "emulator")
 #   scripts/check-dynamo-parity.sh --self-test  check the comparison against sample logs
 set -euo pipefail
 
+backend=dynamodb-local
+if [ "${1:-}" = "--backend" ]; then
+  backend=${2:?--backend needs a name}
+  shift 2
+fi
+
 compare() {
-  awk '
+  awk -v backend="$backend" '
     match($0, /--- (PASS|FAIL|SKIP): [^ ]+/) {
       split(substr($0, RSTART+4, RLENGTH-4), f, ": ")
       status = f[1]; name = f[2]
       n = split(name, parts, "/")
       side = ""; norm = ""
       for (i = 1; i <= n; i++) {
-        if (side == "" && (parts[i] == "fake" || parts[i] == "dynamodb-local")) { side = parts[i]; parts[i] = "@" }
+        if (side == "" && (parts[i] == "fake" || parts[i] == backend)) { side = parts[i]; parts[i] = "@" }
         norm = norm (i > 1 ? "/" : "") parts[i]
       }
       if (side == "") next
@@ -24,13 +34,13 @@ compare() {
     }
     END {
       for (t in seen) {
-        a = st["fake" SUBSEP t]; b = st["dynamodb-local" SUBSEP t]
-        if (a == "" || b == "") { printf "%s: only run on %s\n", t, (a == "" ? "dynamodb-local" : "fake"); bad = 1 }
-        else if (a != b) { printf "%s: fake %s, dynamodb-local %s\n", t, a, b; bad = 1 }
+        a = st["fake" SUBSEP t]; b = st[backend SUBSEP t]
+        if (a == "" || b == "") { printf "%s: only run on %s\n", t, (a == "" ? backend : "fake"); bad = 1 }
+        else if (a != b) { printf "%s: fake %s, %s %s\n", t, a, backend, b; bad = 1 }
         else checked++
       }
-      if (!checked && !bad) { print "no fake/dynamodb-local subtests found in the log"; bad = 1 }
-      if (!bad) printf "dynamo parity ok: %d test(s) agree between the fake and DynamoDB Local\n", checked
+      if (!checked && !bad) { print "no fake/" backend " subtests found in the log"; bad = 1 }
+      if (!bad) printf "dynamo parity ok: %d test(s) agree between the fake and %s\n", checked, backend
       exit bad
     }' "$1" | sort
   return "${PIPESTATUS[0]}"
@@ -57,9 +67,13 @@ LOG
   out=$(compare "$tmp/missing.log") && { echo "self-test: missing side accepted" >&2; exit 1; }
   grep -q 'only run on fake' <<<"$out" || { echo "self-test: wrong report: $out" >&2; exit 1; }
   echo "SKIP only" | compare /dev/stdin >/dev/null && { echo "self-test: empty log accepted" >&2; exit 1; }
+  # Another backend's subtests are compared under the name it was given.
+  sed 's#dynamodb-local#emulator#' "$tmp/ok.log" >"$tmp/emu.log"
+  backend=emulator compare "$tmp/emu.log" >/dev/null || { echo "self-test: emulator log rejected" >&2; exit 1; }
+  backend=dynamodb-local compare "$tmp/emu.log" >/dev/null && { echo "self-test: emulator log accepted as DynamoDB Local" >&2; exit 1; }
   echo "parity self-test ok"
   exit 0
 fi
 
-[ $# -eq 1 ] || { echo "usage: $0 test.log | --self-test" >&2; exit 2; }
+[ $# -eq 1 ] || { echo "usage: $0 [--backend NAME] test.log | --self-test" >&2; exit 2; }
 compare "$1"

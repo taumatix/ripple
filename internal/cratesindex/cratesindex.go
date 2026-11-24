@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/taumatix/ripple/internal/httpretry"
 	"golang.org/x/mod/semver"
 )
 
@@ -61,6 +62,9 @@ type Client struct {
 	BaseURL   string
 	HTTP      *http.Client
 	UserAgent string
+	// Retry bounds the waiting on a 429 or a 503 with Retry-After; the zero value is
+	// three attempts, none of them waited on longer than 30s.
+	Retry httpretry.Policy
 }
 
 // Version is one published version.
@@ -93,16 +97,19 @@ func (c *Client) Crate(ctx context.Context, name string) (Crate, error) {
 	if base == "" {
 		base = DefaultBase
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/"+Path(name), nil)
+	target := base + "/" + Path(name)
+	resp, err := c.Retry.Do(ctx, c.client(), func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+		if err != nil {
+			return nil, err
+		}
+		if c.UserAgent != "" {
+			req.Header.Set("User-Agent", c.UserAgent)
+		}
+		return req, nil
+	})
 	if err != nil {
-		return Crate{}, err
-	}
-	if c.UserAgent != "" {
-		req.Header.Set("User-Agent", c.UserAgent)
-	}
-	resp, err := c.client().Do(req)
-	if err != nil {
-		return Crate{}, err
+		return Crate{}, fmt.Errorf("cratesindex: %s: %w", name, err)
 	}
 	defer resp.Body.Close()
 	switch {

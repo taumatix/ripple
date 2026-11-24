@@ -17,6 +17,7 @@ import (
 // normalize fails against it. A project never published answers 404, a Denied one
 // 401, and every request is recorded.
 type PyPI struct {
+	Throttle
 	URL string
 	srv *httptest.Server
 
@@ -34,7 +35,7 @@ type pypiRelease struct{ files []bool } // one entry per file: yanked
 func NewPyPI(t testing.TB) *PyPI {
 	t.Helper()
 	p := &PyPI{projects: map[string]map[string]*pypiRelease{}, denied: map[string]bool{}}
-	p.srv = httptest.NewServer(http.HandlerFunc(p.serve))
+	p.srv = httptest.NewServer(p.Wrap(http.HandlerFunc(p.serve)))
 	p.URL = p.srv.URL
 	t.Cleanup(p.srv.Close)
 	return p

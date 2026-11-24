@@ -30,7 +30,10 @@ type PyPI struct {
 // PyPIRequest is one request the fake saw.
 type PyPIRequest struct{ Path, Authorization string }
 
-type pypiRelease struct{ files []bool } // one entry per file: yanked
+type pypiRelease struct {
+	files          []bool // one entry per file: yanked
+	requiresPython string // the files' requires_python; "" omits it
+}
 
 func NewPyPI(t testing.TB) *PyPI {
 	t.Helper()
@@ -54,6 +57,15 @@ func (p *PyPI) Publish(name, version string) {
 		p.projects[n] = map[string]*pypiRelease{}
 	}
 	p.projects[n][version] = &pypiRelease{files: []bool{false, false}}
+}
+
+// PublishRequiresPython adds a version whose files all carry requires_python (the
+// Requires-Python metadata, PEP 345/643, as the JSON API reports it per file).
+func (p *PyPI) PublishRequiresPython(name, version, requiresPython string) {
+	p.Publish(name, version)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.projects[pypiNorm(name)][version].requiresPython = requiresPython
 }
 
 // PublishEmpty adds a version with no files (a release nothing can install).
@@ -109,8 +121,12 @@ func (p *PyPI) serve(w http.ResponseWriter, req *http.Request) {
 	for _, v := range versions {
 		files := []map[string]any{}
 		for i, yanked := range rels[v].files {
-			files = append(files, map[string]any{"filename": name + "-" + v + []string{".tar.gz", "-py3-none-any.whl"}[i%2],
-				"packagetype": "sdist", "yanked": yanked, "yanked_reason": nil})
+			f := map[string]any{"filename": name + "-" + v + []string{".tar.gz", "-py3-none-any.whl"}[i%2],
+				"packagetype": "sdist", "yanked": yanked, "yanked_reason": nil, "requires_python": nil}
+			if rp := rels[v].requiresPython; rp != "" {
+				f["requires_python"] = rp
+			}
+			files = append(files, f)
 		}
 		out[v] = files
 	}

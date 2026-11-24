@@ -4,6 +4,8 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-24
+
 ### Added
 - Live tests for the container registries and the GitHub tag reads: `go test -tags live` pulls anonymously from Docker Hub, ghcr.io and quay.io (Bearer token challenge, tag list, manifest digest, image config `created` through an index) and reads tags, lightweight and annotated tag commits and releases from api.github.com without a token, run by `.github/workflows/live.yml` on demand and weekly, never on a pull request. The real services matched the fakes, so no client code changed. Not covered: 429 handling, private images and other registries, a real GHES and the App-token paths (ROADMAP 153, and the two new residuals).
 - Live tests for the npm, PyPI and crates.io providers: `go test -tags live` reads registry.npmjs.org, pypi.org and index.crates.io anonymously and read only (deprecated, yanked, fileless and pre-release versions, scoped and mixed-case names, 404s, and every real version of four large PyPI projects parsing), run by `.github/workflows/live.yml` on demand and weekly, never on a pull request. The real services matched the fakes everywhere tested, so no provider code changed. Not covered: private registries, rate limits, the largest packages, PEP 440 ordering against `packaging` (ROADMAP 149, 156, 162).
@@ -235,6 +237,7 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
 - README section "Known limitations and security model"; ROADMAP entries for an OS sandbox,
   durable per-installation queues, scan bounds, webhook body bounds, per-command tokens and delivery dedupe.
 
-[Unreleased]: https://github.com/taumatix/ripple/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/taumatix/ripple/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/taumatix/ripple/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/taumatix/ripple/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/taumatix/ripple/releases/tag/v0.1.0

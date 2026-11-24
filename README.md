@@ -4,7 +4,7 @@ An event-driven dependency updater for GitHub. ripple watches the Go module feed
 which repositories import the package that just released, and opens a pull request in those
 repositories only.
 
-**Status: v0.2.0.** Go modules only (plus a generic regex manager). See [ROADMAP.md](ROADMAP.md).
+**Status: v0.3.0.** Go modules only (plus a generic regex manager). See [ROADMAP.md](ROADMAP.md).
 
 ## Why it is different
 
@@ -27,11 +27,11 @@ on the roadmap as opt-in extras that can never change a plain file's meaning.
 ## Install
 
 ```sh
-go install github.com/taumatix/ripple/cmd/ripple@v0.2.0   # needs git on PATH
-ripple version                                              # prints: ripple v0.2.0
+go install github.com/taumatix/ripple/cmd/ripple@v0.3.0   # needs git on PATH
+ripple version                                              # prints: ripple v0.3.0
 ```
 
-Or build the container from a checkout: `git clone --branch v0.2.0 https://github.com/taumatix/ripple && docker build -t ripple ripple`.
+Or build the container from a checkout: `git clone --branch v0.3.0 https://github.com/taumatix/ripple && docker build -t ripple ripple`.
 Each release also publishes static binaries (linux, macOS and Windows) on its GitHub release page and a
 multi-arch image, `ghcr.io/taumatix/ripple:<version>`. `go install` is the open install path: the image's GHCR
 package stays private until a maintainer makes it public once in the GitHub UI (there is no API for that), so

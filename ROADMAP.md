@@ -289,13 +289,6 @@ Everything else:
     `HoldIndex`, which freezes the index outright. Nobody has measured real GSI propagation delay (or the cost of the extra
     Query and BatchGetItem on a hot package during a mass install) on AWS; make the window a setting if it proves wrong.
     A dependency a lagging index still lists after the repo dropped it is the mirror case and is not covered.
-190. **Package cursors: bound the listing.** Every poll lists the whole `<cursor>#<package>` set of each datasource (one
-    paginated index Query on DynamoDB) and takes a debug line with the size and elapsed time ("polled packages listed"); the
-    legacy list is folded and deleted on first read and every datasource prunes packages nobody uses. Not done: reading the
-    set in slices across polls so a very large install does not list every package each time, and any measurement on a real
-    install. A fold racing a replica still running the old version can leave a package only in the legacy cursor until the
-    next read folds it again. Cursors named `<group>#<key>` written before per-package keys carry no index attributes on
-    DynamoDB and are not listed by group; none existed.
 192. **Backfill lookup: real proxy spot-checks.** The far-major probe (`RIPPLE_BACKFILL_MAJORS`) and the lookup are
     pinned against the fake proxy only. A prerelease-only real module and a real retraction have not been tried
     against proxy.golang.org, and a raised probe has no measured cost on a repo with hundreds of new dependencies
@@ -383,3 +376,8 @@ Everything else:
     does not change it), that a Gerrit read-only project is absent from the `ACTIVE` listing and present in `READ_ONLY`,
     and whether Gerrit's webhooks plugin or stream events can report the state change so the listing is not the only path.
     Bitbucket Cloud and Azure DevOps document no archive in `docs/vendor`; nothing to build for them.
+214. **Package cursors: slice the listing itself and measure.** `RIPPLE_POLL_PACKAGES_PER_POLL` bounds the packages a poll visits, but the
+    set is still listed whole (`polledPackages`) before it is sliced. A store-level paged `ListCursors` (after-key and limit on Memory,
+    Postgres and DynamoDB) would bound the index query too. Also unmeasured: how large a real install's set gets, and the
+    right default. A fold racing a replica still running the old version can leave a package only in the legacy cursor until the
+    next read folds it again; cursors named `<group>#<key>` written before per-package keys carry no index attributes on DynamoDB.

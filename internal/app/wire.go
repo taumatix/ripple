@@ -84,7 +84,7 @@ func New(ctx context.Context, s *config.Server, log *slog.Logger) (a *App, st st
 		return nil, nil, err
 	}
 	eng := &engine.Engine{Store: st, Platform: mux, Log: log, Workers: s.Workers,
-		MaxFiles: s.MaxFiles, MaxDependencies: s.MaxDependencies, MaxBackfill: s.MaxBackfill, BackfillMajors: s.BackfillMajors,
+		MaxFiles: s.MaxFiles, MaxDependencies: s.MaxDependencies, MaxBackfill: s.MaxBackfill, BackfillMajors: s.BackfillMajors, PollPackagesPerPoll: s.PollPackagesPerPoll,
 		GoCC: s.GoCC, GoToolchainDir: s.GoToolchainDir, GoImages: s.ContainerGoImages, GoProxyUser: s.GoProxyUser, GoProxyToken: s.GoProxyToken,
 		Limits: rules.Limits{MinimumReleaseAge: s.MinimumReleaseAge, OpenPRLimit: s.OpenPRLimit, AllowAutomerge: s.AllowAutomerge}}
 	if s.GoToolchainDownload {

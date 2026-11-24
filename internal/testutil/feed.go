@@ -19,6 +19,7 @@ type indexEntry struct {
 // Index is a fake index.golang.org: GET /index?since=<RFC3339>&limit=<n> answers
 // new-line delimited JSON, oldest first, entries with Timestamp >= since.
 type Index struct {
+	Throttle
 	URL string
 
 	mu       sync.Mutex
@@ -28,7 +29,7 @@ type Index struct {
 
 func NewIndex(t *testing.T) *Index {
 	x := &Index{}
-	srv := httptest.NewServer(http.HandlerFunc(x.serve))
+	srv := httptest.NewServer(x.Wrap(http.HandlerFunc(x.serve)))
 	t.Cleanup(srv.Close)
 	x.URL = srv.URL
 	return x

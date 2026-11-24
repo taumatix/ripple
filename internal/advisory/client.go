@@ -13,6 +13,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/taumatix/ripple/internal/httpretry"
 )
 
 const (
@@ -91,6 +93,9 @@ type Client struct {
 	APIURL   string       // default DefaultAPIURL
 	HTTP     *http.Client // default: 20s timeout
 	MaxLines int          // CSV lines read per Modified call; default 20000
+	// Retry bounds the waiting on a 429 or a 503 with Retry-After; the zero value is
+	// three attempts, none of them waited on longer than 30s.
+	Retry httpretry.Policy
 }
 
 func (c *Client) httpc() *http.Client {
@@ -101,12 +106,14 @@ func (c *Client) httpc() *http.Client {
 }
 
 func (c *Client) get(ctx context.Context, url string) (*http.Response, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("User-Agent", userAgent)
-	return c.httpc().Do(req)
+	return c.Retry.Do(ctx, c.httpc(), func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("User-Agent", userAgent)
+		return req, nil
+	})
 }
 
 // Modified returns the Go-ecosystem records modified after pos, oldest first. The bucket
@@ -267,13 +274,15 @@ func (c *Client) queryChunk(ctx context.Context, qs []Query, out [][]string) err
 		if err != nil {
 			return err
 		}
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(base, "/")+"/v1/querybatch", bytes.NewReader(body))
-		if err != nil {
-			return err
-		}
-		req.Header.Set("User-Agent", userAgent)
-		req.Header.Set("Content-Type", "application/json")
-		resp, err := c.httpc().Do(req)
+		resp, err := c.Retry.Do(ctx, c.httpc(), func() (*http.Request, error) {
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(base, "/")+"/v1/querybatch", bytes.NewReader(body))
+			if err != nil {
+				return nil, err
+			}
+			req.Header.Set("User-Agent", userAgent)
+			req.Header.Set("Content-Type", "application/json")
+			return req, nil
+		})
 		if err != nil {
 			return err
 		}

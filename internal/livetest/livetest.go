@@ -8,10 +8,11 @@ package livetest
 import (
 	"fmt"
 	"net/http"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/taumatix/ripple/internal/httpretry"
 )
 
 // UserAgent names the caller to the services it reads.
@@ -77,22 +78,9 @@ func (t *Transport) pace() {
 }
 
 // RetryAfter reads a Retry-After header (seconds or an HTTP date); ok is false when absent
-// or unreadable.
+// or unreadable. It is httpretry.ParseRetryAfter, kept here for the tests that call it.
 func RetryAfter(h http.Header, now time.Time) (time.Duration, bool) {
-	v := h.Get("Retry-After")
-	if v == "" {
-		return 0, false
-	}
-	if s, err := strconv.Atoi(v); err == nil && s >= 0 {
-		return time.Duration(s) * time.Second, true
-	}
-	if at, err := http.ParseTime(v); err == nil {
-		if d := at.Sub(now); d > 0 {
-			return d, true
-		}
-		return 0, true
-	}
-	return 0, false
+	return httpretry.ParseRetryAfter(h, now)
 }
 
 // RoundTrip implements http.RoundTripper. A request with a body is not retried.

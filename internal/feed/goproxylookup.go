@@ -15,6 +15,7 @@ import (
 	"golang.org/x/mod/module"
 	"golang.org/x/mod/semver"
 
+	"github.com/taumatix/ripple/internal/httpretry"
 	"github.com/taumatix/ripple/internal/model"
 )
 
@@ -35,6 +36,9 @@ type GoProxyLookup struct {
 	User, Token string // HTTP basic auth, when the proxy needs it
 	HTTP        *http.Client
 	UserAgent   string
+	// Retry bounds the waiting on a 429 or a 503 with Retry-After; the zero value is
+	// three attempts, none of them waited on longer than 30s.
+	Retry httpretry.Policy
 	// Now is the clock for the cache; nil is time.Now.
 	Now func() time.Time
 
@@ -203,21 +207,23 @@ func decodeInfo(b []byte) (proxyInfo, bool) {
 
 // get fetches one URL; found is false for 404 and 410.
 func (g *GoProxyLookup) get(ctx context.Context, url string, limit int64) ([]byte, bool, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, false, err
-	}
-	if g.UserAgent != "" {
-		req.Header.Set("User-Agent", g.UserAgent)
-	}
-	if g.Token != "" {
-		req.SetBasicAuth(g.User, g.Token)
-	}
 	c := g.HTTP
 	if c == nil {
 		c = &http.Client{Timeout: 20 * time.Second}
 	}
-	resp, err := c.Do(req)
+	resp, err := g.Retry.Do(ctx, c, func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return nil, err
+		}
+		if g.UserAgent != "" {
+			req.Header.Set("User-Agent", g.UserAgent)
+		}
+		if g.Token != "" {
+			req.SetBasicAuth(g.User, g.Token)
+		}
+		return req, nil
+	})
 	if err != nil {
 		return nil, false, err
 	}

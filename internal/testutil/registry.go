@@ -22,6 +22,7 @@ import (
 // pointing at its own /token endpoint. It is written from docs/vendor/registry.
 // One fake serves every registry host a test names; see registry.Client.BaseURL.
 type Registry struct {
+	Throttle
 	URL string
 	srv *httptest.Server
 
@@ -41,7 +42,7 @@ const registryToken = "anon-token"
 func NewRegistry(t testing.TB) *Registry {
 	t.Helper()
 	r := &Registry{repos: map[string]map[string]string{}, denied: map[string]bool{}, created: map[string]time.Time{}, logins: map[string][2]string{}}
-	r.srv = httptest.NewServer(http.HandlerFunc(r.serve))
+	r.srv = httptest.NewServer(r.Wrap(http.HandlerFunc(r.serve)))
 	r.URL = r.srv.URL
 	t.Cleanup(r.srv.Close)
 	return r

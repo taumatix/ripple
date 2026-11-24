@@ -4,6 +4,9 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
 
 ## [Unreleased]
 
+### Added
+- Rate limits: the Go index (`feed.GoIndex`), the Go proxy lookup (`feed.GoProxyLookup`), the OSV client (`advisory.Client`) and the registry client (`registry.Client`, token endpoint included) now wait out a 429, or a 503 that carries `Retry-After`, instead of failing the poll. The wait honours `Retry-After` (seconds or a date; a short growing backoff when absent), is bounded (three attempts, no single wait over 30s, both settable through the new `Retry httpretry.Policy` field of each client), ends with the context, and a client that is still limited gives up with an error naming the status, `Retry-After`, attempts and the limit that stopped it (`*httpretry.LimitError`). A bare 503 still fails fast. Covered end to end against the in-process fakes, which can now refuse or slow requests (`testutil.Throttle`). A module whose `@latest` is retracted, whose versions are all retracted, or with prereleases only is also pinned against the module proxy fake. Not covered: any real service limiting ripple (ROADMAP 52, 184-186).
+
 ## [0.3.0] - 2026-11-24
 
 ### Added

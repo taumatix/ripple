@@ -305,3 +305,40 @@ func TestCargoUnparsableManifestIsSkipped(t *testing.T) {
 		}
 	})
 }
+
+// A release that needs a newer compiler than the repo's rust-version is not proposed:
+// the job is skipped with the reason, and a crate within the repo's compiler still moves.
+func TestCargoRespectsRustVersion(t *testing.T) {
+	forEach(t, func(t *testing.T, st store.Store) {
+		e, idx := cargoEnv(t, st)
+		for _, c := range []string{"new", "ok", "wsnew", "none"} {
+			idx.Publish(c, "1.0.0")
+		}
+		e.gh.AddRepo("acme/app", map[string]string{".ripple.yaml": cargoConfig,
+			"Cargo.toml":          "[workspace]\nmembers = [\"crates/a\"]\n[workspace.package]\nrust-version = \"1.70\"\n",
+			"crates/a/Cargo.toml": "[package]\nname = \"a\"\nrust-version.workspace = true\n[dependencies]\nwsnew = \"1.0.0\"\n",
+			"app/Cargo.toml":      "[package]\nname = \"app\"\nrust-version = \"1.70\"\n[dependencies]\nnew = \"1.0.0\"\nok = \"1.0.0\"\n",
+			"free/Cargo.toml":     "[package]\nname = \"free\"\n[dependencies]\nnone = \"1.0.0\"\n"})
+		start(t, e, "acme/app")
+		e.clock.Advance(time.Minute)
+		idx.PublishMSRV("new", "1.0.1", "1.80")
+		idx.PublishMSRV("ok", "1.0.1", "1.65")
+		idx.PublishMSRV("wsnew", "1.0.1", "1.71")
+		idx.PublishMSRV("none", "1.0.1", "1.99") // no rust-version declared: nothing to compare
+		e.tick()
+		e.tick()
+		var heads []string
+		for _, pr := range e.gh.PRs("acme/app") {
+			heads = append(heads, pr.Head)
+		}
+		if len(heads) != 2 || !strings.Contains(strings.Join(heads, " "), "/ok-") || !strings.Contains(strings.Join(heads, " "), "/none-") {
+			t.Fatalf("want PRs for ok and none only, got %v", heads)
+		}
+		for _, crate := range []string{"new", "wsnew"} {
+			j, ok, err := e.st.GetJob(context.Background(), model.JobKey("acme/app", model.DatasourceCargo, crate, "1.0.1"))
+			if err != nil || !ok || j.State != model.JobSkipped || !strings.Contains(j.Reason, "rust-version") {
+				t.Errorf("%s: job = %+v, %v, %v", crate, j, ok, err)
+			}
+		}
+	})
+}

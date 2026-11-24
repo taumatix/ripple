@@ -277,3 +277,38 @@ func TestCargoInvalidTOMLIsAnError(t *testing.T) {
 		}
 	}
 }
+
+func TestCargoRustVersion(t *testing.T) {
+	for _, tc := range []struct {
+		src, ver string
+		inherits bool
+	}{
+		{"[package]\nname = \"a\"\nrust-version = \"1.70\"\n", "1.70", false},
+		{"[package]\nrust-version.workspace = true\n", "", true},
+		{"[workspace.package]\nrust-version = \"1.65.0\"\n", "1.65.0", false},
+		{"[package]\nname = \"a\"\n", "", false},
+		{"[dependencies]\nrust-version = \"9\"\n", "", false},
+	} {
+		ver, inh, err := CargoRustVersion([]byte(tc.src))
+		if err != nil || ver != tc.ver || inh != tc.inherits {
+			t.Errorf("%q: got %q, %v, %v", tc.src, ver, inh, err)
+		}
+	}
+	if _, _, err := CargoRustVersion([]byte("[package\n")); err == nil {
+		t.Error("invalid TOML must error")
+	}
+}
+
+func TestRustVersionNewer(t *testing.T) {
+	for _, tc := range []struct {
+		need, have string
+		want       bool
+	}{
+		{"1.80", "1.70", true}, {"1.70", "1.70.0", false}, {"1.70.1", "1.70", true},
+		{"1.9", "1.10", false}, {"1.70", "1.80", false}, {"nightly", "1.70", false}, {"1.70", "x", false},
+	} {
+		if got := RustVersionNewer(tc.need, tc.have); got != tc.want {
+			t.Errorf("RustVersionNewer(%q, %q) = %v", tc.need, tc.have, got)
+		}
+	}
+}

@@ -187,7 +187,10 @@ func cargoTargets(cr cratesindex.Crate, d model.Dependency, pkg string) []cargoT
 // replaces a source (`replace-with`, a mirror or a vendored directory) resolves crates
 // somewhere else, and a crates.io crate of the same name is then possibly not the one
 // the repo uses.
-func (r *runner) cargoGuard(d model.Dependency) string {
+func (r *runner) cargoGuard(d model.Dependency, target string) string {
+	if why := r.cargoRustGuard(d, target); why != "" {
+		return why
+	}
 	for dir := path.Dir(d.File); ; dir = path.Dir(dir) {
 		base := dir
 		if base == "." {
@@ -202,6 +205,57 @@ func (r *runner) cargoGuard(d model.Dependency) string {
 		}
 		if dir == "." || dir == "/" {
 			return ""
+		}
+	}
+}
+
+// cargoRustGuard says why target, a release of d's crate, needs a newer compiler than the
+// repo declares: the index's rust_version for it against the manifest's `rust-version`
+// (its own, or the workspace's when it inherits). Nothing is declared on either side, or
+// the index cannot be read, means no objection. The job is skipped, not retargeted to an
+// older release.
+func (r *runner) cargoRustGuard(d model.Dependency, target string) string {
+	have, from := r.cargoRustVersion(d.File)
+	if have == "" || r.e.Crates == nil {
+		return ""
+	}
+	cr, err := r.e.Crates.Crate(r.ctx, d.Package)
+	if err != nil {
+		return ""
+	}
+	for _, v := range cr.Versions {
+		if v.Version == target && manager.RustVersionNewer(v.RustVersion, have) {
+			return fmt.Sprintf("%s %s declares rust-version %s, newer than the rust-version %s in %s; ripple will not propose a release the repo's compiler cannot build", d.Package, target, v.RustVersion, have, from)
+		}
+	}
+	return ""
+}
+
+// cargoRustVersion is the rust-version the manifest p is built with and the file that
+// declares it; "" when none does. A member that inherits it reads the nearest parent
+// manifest's `[workspace.package]`.
+func (r *runner) cargoRustVersion(p string) (string, string) {
+	content, err := r.ws.ReadFile(p)
+	if err != nil {
+		return "", ""
+	}
+	ver, inherits, err := manager.CargoRustVersion(content)
+	if err != nil || ver != "" || !inherits {
+		return ver, p
+	}
+	for dir := path.Dir(path.Dir(p)); ; dir = path.Dir(dir) {
+		base := dir
+		if base == "." {
+			base = ""
+		}
+		pp := path.Join(base, "Cargo.toml")
+		if c, err := r.ws.ReadFile(pp); err == nil {
+			if v, _, err := manager.CargoRustVersion(c); err == nil && v != "" {
+				return v, pp
+			}
+		}
+		if dir == "." || dir == "/" {
+			return "", ""
 		}
 	}
 }

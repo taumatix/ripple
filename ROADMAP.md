@@ -236,11 +236,17 @@ Everything else:
 155. **Cargo: refresh Cargo.lock.** ripple edits Cargo.toml and reports the lock files it left stale (docs/cargo.md);
     a lock entry needs the checksum and dependency edges of the new version, which only cargo's resolver knows. The sparse
     index line carries `cksum` and `deps`, so a lock edit for a leaf crate whose dependencies did not change may be
-    possible offline; start there and say what remains.
-156. **Cargo: other registries and MSRV.** A `registry =` dependency and a repo with `replace-with` are skipped, not read
-    from their own index (needs `.cargo/config.toml` parsing and per-registry credentials). `rust_version` in the index is
-    ignored, so a bump may need a newer compiler than the repo's `rust-version`. index.crates.io is verified live
-    (2026-11-24); not verified: another registry, the largest crates, conditional requests, rate limits. Also:
+    possible offline; start there and say what remains. Looked at 2026-11-24 and left open: `cratesindex.Version` reads
+    neither field yet; the Cargo.lock format is not vendored in docs/vendor/cargo (read it first); a transitive
+    requirement on the crate (`=1.0.100` in another lock entry) cannot be checked without that crate's index line; the
+    sandbox runs `go` and `git`, not cargo, and a `cargo update` needs the index and the crate files, so running it
+    means a cargo image and a crates.io proxy in the confinement; and there is no cargo on the development host, so the
+    result can only be checked by a live test that runs `cargo metadata --locked` on a runner.
+156. **Cargo: other registries, and an MSRV fallback.** A `registry =` dependency and a repo with `replace-with` are skipped, not read
+    from their own index (needs `.cargo/config.toml` parsing and per-registry credentials: a human decision on where those
+    live, so it stays open). A release whose `rust_version` is newer than the repo's `rust-version` is now skipped, but the
+    newest release that does build is not proposed instead. index.crates.io is verified live (2026-11-24); not verified:
+    another registry, the largest crates, conditional requests, rate limits, `rust_version` on the real index. Also:
     `cargo:packages` is one read-modify-write cursor (see 96), versions carry no publication date, and the PR footer
     still says "module index" (see 99).
 157. **Event numbering: measure the hot counter, and the marker backfill.** The event sequence counter is one item written once

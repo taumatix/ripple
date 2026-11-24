@@ -128,12 +128,35 @@ func TestExtractDecodesWhatItKeeps(t *testing.T) {
 func TestExtractRefusesToKeepTooMuch(t *testing.T) {
 	var files strings.Builder
 	files.WriteString(`{"commits":[{"added":[`)
-	for i := 0; i < 5; i++ {
-		files.WriteString(`"` + strings.Repeat("f", 4<<20) + `",`)
+	for i := 0; i < 1200; i++ { // each under the per-value cap, together over the budget
+		files.WriteString(`"` + strings.Repeat("f", 15<<10) + `",`)
 	}
 	files.WriteString(`"z"]}]}`)
 	if _, err := Parse("push", []byte(files.String())); err == nil || !strings.Contains(err.Error(), "MiB") {
 		t.Fatalf("err %v", err)
+	}
+}
+
+func TestOneHugeFieldIsRefusedWithoutBeingHeld(t *testing.T) {
+	rig := newStreamRig(t)
+	const size = 12 << 20
+	body := `{"ref":"` + strings.Repeat("r", size) + `","repository":{"full_name":"acme/app"}}`
+	signed, forged := Sign(rig.secret, []byte(body)), Sign([]byte("other"), []byte(body))
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	if code := rig.post(t, "push", body, signed); code != 400 {
+		t.Fatalf("signed body with a huge ref: status %d, want 400", code)
+	}
+	if code := rig.post(t, "push", body, forged); code != 401 {
+		t.Fatalf("forged body with a huge ref: status %d, want 401", code)
+	}
+	runtime.ReadMemStats(&after)
+	if alloc := after.TotalAlloc - before.TotalAlloc; alloc > size/4 {
+		t.Fatalf("allocated %d MiB for two %d MiB bodies carrying one huge field", alloc>>20, size>>20)
+	}
+	if len(rig.events) != 0 {
+		t.Fatal("a refused delivery reached the sink")
 	}
 }
 

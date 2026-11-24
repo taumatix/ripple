@@ -246,10 +246,15 @@ Everything else:
     may split the sources and one replica may hold all of them; there is no preference for spreading them. `App.Tick`
     (cron-driven) goes through the elections too. `sources_unpolled` names a source nobody polls but cannot say how long
     it has gone unpolled; it is verified on the memory store and the in-process DynamoDB, Postgres columns are CI-only.
-161. **pip: refresh lock files, Requires-Python, and other indexes.** `poetry.lock`, `uv.lock`, `pdm.lock` and a
-    pip-compile output are reported, not regenerated (docs/pip.md). `Requires-Python` is ignored, so a bump may need a
-    newer interpreter. A dependency on a private index is skipped, not read from its own index (needs per-index
-    credentials and a PEP 503/691 client); the guard also skips a file that names `https://pypi.org/simple` explicitly.
+161. **pip: refresh lock files, Requires-Python, and other indexes (narrowed 2026-11-24, nothing built).** Each part
+    waits on something a pass cannot supply. (a) Regenerating `poetry.lock`, `uv.lock`, `pdm.lock` or a pip-compile
+    output needs the tool and an index at run time; ripple runs neither (docs/pip.md) and none is available offline
+    here, so these stay reported under "Lock files not regenerated". Running them in the sandbox needs a human decision
+    on which tools the sandbox image carries. (b) `Requires-Python` is per file in the JSON API, but a stored dependency
+    carries no repo-level Python, and whether a release that needs a newer interpreter is skipped or only reported is a
+    decision for the owner; reporting it takes a note on the job, which `model.Job` does not have. (c) A private index
+    needs per-index credentials and a PEP 503/691 client, and a real index to test against; the guard also skips a file
+    that names `https://pypi.org/simple` explicitly.
 167. **Delivery dedupe: SCM-Manager without changeset ids, and retiring the legacy tombstone name.** GitLab now keys
     its delivery on `webhook-id` (else `Idempotency-Key`), so a signed redelivery is dropped by any replica; an
     SCM-Manager payload with no changeset ids still lacks a safe key. Removal tombstones moved to `removed#<name>` and

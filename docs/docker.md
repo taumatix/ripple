@@ -19,7 +19,22 @@ tag of one image (`FROM image:${V}`; the ARG line moves, and an ARG feeding two 
 and of Kubernetes manifests (a `.yml`/`.yaml` below a `k8s`, `kubernetes`, `kube`, `manifests`, `deploy`, `deployment`
 or `deployments` directory containing `apiVersion:` and `kind:`). YAML is edited line by line, keeping quotes,
 indentation and comments; `image: ${IMG:-nginx:1.25}` is not tracked, and `golang` images in YAML are (the Go-version
-follow code edits Dockerfiles only). Helm values and Kustomize `images:` are not read.
+follow code edits Dockerfiles only).
+
+Also read, each edited on its tag line only (quotes, comments and layout kept):
+
+- **Kustomize** `images:` in `kustomization.yaml`, `kustomization.yml` or `Kustomization`: `newTag` of an entry, with the
+  image `newName` (else `name`). An entry without `newTag`, or with `newDigest`, is left alone.
+- **Helm values** (`values.yaml`, `values-*.yaml`, `values.*.yaml`, `*-values.yaml`, `*.values.yaml`): a `repository:` and
+  `tag:` pair that are siblings under a key whose name contains `image` (`image`, `initImage`, `sidecar.image`), with an
+  optional `registry:` sibling. A pair with a `digest:`, a templated value (`{{ }}`, `$`) or a URL repository is left alone,
+  and so is a `tag` that is empty.
+- **Per-stage `ARG`**: `ARG V=1.2` declared after a `FROM` and used as the whole tag in a later `COPY --from=image:${V}` or
+  `--mount=from=image:${V}` of the same stage (the ARG line moves; a stage's ARG is not seen by the next stage, and a bare
+  `ARG V` in a stage takes the global default).
+- **`RUN --mount=...,from=image:tag`**: the first `--mount` of the line that has a `from=`; a stage name there is no image.
+
+Still not read: an ARG that is only part of a tag (`${V}-alpine`) and Helm charts that set the image as one string.
 
 `FROM [--platform=...] image[:tag][@sha256:...] [AS name]` in files named `Dockerfile` or `Containerfile`, `Dockerfile.*`,
 `Containerfile.*`, `*.Dockerfile` or `*.Containerfile` under `directory` (not `.md`, `.yml` and similar).

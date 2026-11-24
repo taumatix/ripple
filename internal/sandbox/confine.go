@@ -135,13 +135,21 @@ func confine(ctx context.Context, fl Flavour, o ConfineOptions, run runFn) (*Con
 func removeConfinement(ctx context.Context, name string, run runFn) {
 	c, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
+	// Whatever is still attached to the network (job containers of a server killed outright, which
+	// would keep the network alive) goes first; only containers on this network are touched.
+	if out, err := run(c, "ps", "-aq", "--filter", "network="+name); err == nil {
+		if ids := strings.Fields(out); len(ids) > 0 {
+			_, _ = run(c, append([]string{"rm", "-f"}, ids...)...)
+		}
+	}
 	_, _ = run(c, "rm", "-f", name+"-proxy")
 	_, _ = run(c, "network", "rm", name)
 }
 
 // RemoveConfinement removes the sidecar and the network of a confinement named name that
-// an earlier process left behind (a server killed outright never ran Close). Missing
-// pieces are not an error. A network that job containers still use stays until they exit.
+// an earlier process left behind (a server killed outright never ran Close), after removing
+// the containers still attached to that network (its job containers). Missing pieces are not
+// an error.
 func RemoveConfinement(ctx context.Context, fl Flavour, bin, name string) error {
 	if fl != FlavourDocker && fl != FlavourPodman {
 		return fmt.Errorf("sandbox %s: no internal networks; confinement needs docker or podman", fl)

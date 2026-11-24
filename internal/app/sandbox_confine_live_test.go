@@ -92,3 +92,70 @@ func TestServerConfinesContainerNetworkLive(t *testing.T) {
 		t.Errorf("the sidecar survived close:\n%s", out)
 	}
 }
+
+// Entry 142 against a real runtime: a server killed outright leaves a job container on the
+// confined network, which used to keep the network alive and fail the next start; the next
+// start now removes it and recreates the network. Two servers with their own RIPPLE_REPLICA
+// share the runtime, and stopping one leaves the other's network in place.
+func TestServerConfineSurvivesAKilledServerAndSharesTheRuntimeLive(t *testing.T) {
+	fl := os.Getenv("RIPPLE_TEST_CONTAINER_FLAVOUR")
+	if fl != "docker" && fl != "podman" {
+		t.Fatalf("RIPPLE_TEST_CONTAINER_FLAVOUR must be docker or podman, got %q", fl)
+	}
+	bin, err := exec.LookPath(fl)
+	if err != nil {
+		t.Fatalf("%s is not installed: %v", fl, err)
+	}
+	image := os.Getenv("RIPPLE_TEST_CONTAINER_IMAGE")
+	if image == "" {
+		image = "docker.io/library/golang:1.25-alpine"
+	}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	server := func(replica string) *config.Server {
+		return &config.Server{Sandbox: fl, ContainerImage: image, ContainerConfine: true, GoProxy: "https://proxy.golang.org", Replica: replica}
+	}
+	listed := func(args ...string) string {
+		out, err := exec.Command(bin, args...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("%s %v: %v\n%s", fl, args, err, out)
+		}
+		return string(out)
+	}
+	netName := confineNameFor("live-a")
+
+	// Server A starts, runs a job container on its network, and is killed: nothing is closed.
+	if _, _, err := newSandbox(ctx, server("live-a"), log, nil); err != nil {
+		t.Fatalf("server A start: %v", err)
+	}
+	job := strings.TrimSpace(listed("run", "-d", "--label", "ripple.job=1", "--network", netName, image, "sleep", "600"))
+	t.Cleanup(func() { exec.Command(bin, "rm", "-f", job).Run() })
+
+	// Server B has its own name and runs alongside A's leftovers.
+	_, closeB, err := newSandbox(ctx, server("live-b"), log, nil)
+	if err != nil {
+		t.Fatalf("server B start beside A's leftovers: %v", err)
+	}
+	t.Cleanup(closeB)
+	if nets := listed("network", "ls", "--format", "{{.Name}}"); !strings.Contains(nets, netName) || !strings.Contains(nets, confineNameFor("live-b")) {
+		t.Fatalf("both servers' networks should exist:\n%s", nets)
+	}
+
+	// A restarts: its leftover job container is removed and the network recreated.
+	_, closeA, err := newSandbox(ctx, server("live-a"), log, nil)
+	if err != nil {
+		t.Fatalf("server A restart with a job container still on its network: %v", err)
+	}
+	t.Cleanup(closeA)
+	if ps := listed("ps", "-a", "--no-trunc", "--format", "{{.ID}}"); strings.Contains(ps, job) {
+		t.Errorf("A's job container survived its restart:\n%s", ps)
+	}
+
+	// Stopping B leaves A's confinement alone.
+	closeB()
+	nets := listed("network", "ls", "--format", "{{.Name}}")
+	if strings.Contains(nets, confineNameFor("live-b")) || !strings.Contains(nets, netName) {
+		t.Errorf("stopping B should remove only B's network:\n%s", nets)
+	}
+}

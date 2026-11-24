@@ -74,14 +74,15 @@ as the command's `GOPROXY` and `Policy.Proxy`; `Close` removes both. A command o
 nothing else: no other address, no DNS for other names.
 
 `RIPPLE_CONTAINER_CONFINE=true` (with `RIPPLE_SANDBOX=docker` or `podman`) makes the server do this: at start it removes a
-confinement an earlier server left behind (the network `ripple-confine` and the container `ripple-confine-proxy`, fixed
-names, so **one server per container runtime**), creates a fresh one forwarding to `RIPPLE_GOPROXY`, and every command
+confinement an earlier server left behind (the network `ripple-confine-<replica>` and the container `ripple-confine-<replica>-proxy`; the
+name follows `RIPPLE_REPLICA`, so servers with different replica names share one container runtime, and two with the same
+name still replace each other; an unset replica uses `ripple-confine`), creates a fresh one forwarding to `RIPPLE_GOPROXY`, and every command
 that needs the proxy joins that network with `GOPROXY` pointed at the sidecar, whatever `RIPPLE_GOPROXY` is for the
 server itself, which keeps using it directly (the feed, version checks). It is removed on a normal stop (SIGINT, SIGTERM). A start
 fails if the runtime cannot make the network. `RIPPLE_GOPROXY` must be `scheme://host[:port]` with no path or
 credentials, and `RIPPLE_GOPROXY_TOKEN` is refused with it (go sends a credential only over https and the sidecar speaks
-http; a credentialed private proxy is a ROADMAP entry). Job containers left by a server killed outright keep the network
-alive until they exit; the next start then fails to recreate it and says so. `RIPPLE_CONTAINER_NETWORK` can still name a
+http; a credentialed private proxy is a ROADMAP entry). Job containers left by a server killed outright are removed by the next start (every container attached to that
+network) before the network is recreated. `RIPPLE_CONTAINER_NETWORK` can still name a
 network you created yourself.
 
 **Verification status.** The `container-runtimes` CI job runs `internal/sandbox/container_live_shared_test.go` (build,
@@ -90,9 +91,9 @@ reap) against real Docker and real Podman on a hosted Linux runner, and the conf
 sidecar to the real module proxy; `1.1.1.1`, `proxy.golang.org` and `example.com` unreachable from the container). The
 Apple runner runs the same checks on a developer's Mac (`container_live_darwin_test.go`), which CI cannot. The same job builds `docker/runner/Dockerfile`, runs the local git steps (init, add, commit, checkout, clean) and `go version` in
 it, and starts the server's wiring (`newSandbox` with `RIPPLE_CONTAINER_CONFINE`) to fetch a module through the sidecar,
-replace a leftover confinement and clean up. Not verified anywhere: the server process itself running a whole job in a
+replace a leftover confinement and clean up, and the kill-and-restart case with a job container left on the network plus two replicas sharing the runtime (`TestServerConfineSurvivesAKilledServerAndSharesTheRuntimeLive`, CI-only). Not verified anywhere: the server process itself running a whole job in a
 container end to end with a real runtime (the engine's end-to-end test uses the fake CLI), Podman as a non-rootless install,
-SELinux hosts, Docker Desktop, and a server killed outright with job containers still running. The unit tests still use the fake CLI (`internal/testutil/fakecontainer.go`) and the
+SELinux hosts, Docker Desktop, and a very long replica name (the confinement name is truncated and hashed to fit a 63-character DNS label; unit-tested only). The unit tests still use the fake CLI (`internal/testutil/fakecontainer.go`) and the
 cross-flavour engine test (`internal/e2e/container_test.go`). Only `go` and local `git` run in a container; clone,
 fetch, push and the server stay on the host.
 

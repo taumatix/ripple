@@ -21,8 +21,9 @@ Only `directory` applies (and the shared keys such as cooldown and grouping). Wi
 | `1.2.3`, `=1.2.3`, `^1.2.3`, `~1.2.3` | moved to a newer release; the operator is kept (`^1.2.3` -> `^1.5.0`) |
 | `1`, `1.2`, `^1.2`, `~1.2`, `1.x`, `1.2.x`, `~3.4.*` | moved at the precision written, tail kept (`^1.2` and 1.7.4 give `^1.7`, `2.x` and 3.0.1 give `3.x`); not moved when it already names the new version at that precision (`1.x` stays for 1.9.0) |
 | `>=1.2.3`, `>= 1.2` | the floor is raised (`>=1.2.3` -> `>=1.5.0`), spacing and precision kept |
+| `>=1.2.3 <2`, `>=1 <=1.5` | a `>=` floor with `<`/`<=` upper bounds: the floor is raised and the bounds kept, but only to a version inside them (`2.0.0` is no target for `<2`) |
 | `^1.4.0 \|\| ^2.0.0` | a union of the ranges above: only the alternative with the highest floor follows (`^1.4.0 \|\| ^2.3.0`), every other byte, older alternatives and spacing included, is kept; ripple never drops or adds an alternative |
-| `*`, `latest`, `>1.2.3`, `<=1.2.3`, `>=1 <2`, `1 - 2`, `^1.0.0-beta.1`, a union with any alternative not listed above | ignored: not a range ripple reads with certainty |
+| `*`, `latest`, `>1.2.3`, `<=1.2.3`, `^1.2 <1.5`, `1 - 2`, `^1.0.0-beta.1`, a union with any alternative not listed above | ignored: not a range ripple reads with certainty |
 | `github:`, `git+`, `file:`, `http(s):`, `npm:` aliases, `workspace:` | ignored |
 
 A bumped range is raised to the new version even when it already allowed it (`^1.2.3` with 1.2.9 published becomes

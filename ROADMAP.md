@@ -343,6 +343,22 @@ Everything else:
     `npm:` aliases and workspace specs. The union rule (move only the newest alternative) was reasoned, not checked
     against a corpus of real package.json files. npm still classifies by number position, so `0.2.3` -> `0.3.0` is
     "minor" (Cargo uses the leftmost-nonzero rule); do the same here once a repo reports it.
+198. **Cargo: requirements still left alone, and a corpus check.** A bare `*`, a lone `>` or `<`, several lower bounds and
+    the `x`/`X` wildcards are not read; `dev_dependencies` and `build_dependencies` (underscore aliases) are not
+    sections. The TOML scanner (`internal/manager/toml.go`) was checked against a handful of real manifests and the
+    unit tables, not a corpus of crates.io manifests, and it skips a file it cannot parse with a warning. The same
+    newest-only target still applies to npm (see 147).
+199. **npm: compound ranges, hyphen ranges and the other sections.** Partial ranges, x-ranges, `>=` floors and `||` unions
+    are done (docs/npm.md). Still left alone: compound ranges (`>=1.2.3 <2`; the floor can move only while the new version
+    stays under the bound), hyphen ranges, `>` and `<=`, a current prerelease, `peerDependencies`, `overrides`/`resolutions`,
+    `npm:` aliases and workspace specs. The union rule (move only the newest alternative) was reasoned, not checked
+    against a corpus of real package.json files. npm still classifies by number position, so `0.2.3` -> `0.3.0` is
+    "minor" (Cargo uses the leftmost-nonzero rule); do the same here once a repo reports it.
+198. **Cargo: requirements still left alone, and a corpus check.** A bare `*`, a lone `>` or `<`, several lower bounds and
+    the `x`/`X` wildcards are not read; `dev_dependencies` and `build_dependencies` (underscore aliases) are not
+    sections. The TOML scanner (`internal/manager/toml.go`) was checked against a handful of real manifests and the
+    unit tables, not a corpus of crates.io manifests, and it skips a file it cannot parse with a warning. The same
+    newest-only target still applies to npm (see 147).
 200. **npm: reading a private registry.** Registry routing is read from `.npmrc`, `.yarnrc` and `.yarnrc.yml` up the tree and a
     package routed off registry.npmjs.org is skipped (docs/npm.md). Not done, because it is a decision and not code: reading
     from the registry a repository names means ripple's host fetches a URL chosen by repository content (an SSRF and
@@ -384,3 +400,9 @@ Everything else:
     a handful of real manifests and the unit tables, not a corpus of crates.io manifests, and it skips a file it cannot
     parse with a warning: run it over a sample of real manifests and record the miss rate. The same newest-only target
     still applies to npm (see 147).
+208. **npm: ranges still left alone, and a corpus check.** Hyphen ranges (`1 - 2`), a lone `>` or `<=`, a compound range
+    whose floor is not `>=` (`^1.2 <1.5`), a current prerelease, `peerDependencies`, `overrides`/`resolutions`, `npm:`
+    aliases and workspace specs are not read. The union rule (move only the newest alternative) and the compound rule
+    (a floor moves only inside its upper bounds) were reasoned and tested against the fake, not checked against a corpus
+    of real package.json files. npm still classifies by number position, so `0.2.3` -> `0.3.0` is "minor" (Cargo uses
+    the leftmost-nonzero rule); do the same here once a repo reports it.

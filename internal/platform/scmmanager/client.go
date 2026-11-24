@@ -384,6 +384,25 @@ func (c *Client) ListRepos(ctx context.Context) ([]model.Repo, error) {
 	return out, nil
 }
 
+// ListArchivedRepos is the git repositories the listing flags `archived` (the repository
+// object's archived field, docs/vendor/scm-manager/source-excerpts.md "repo-list"). The
+// webhook plugin sends no archive event, so the listing is what tells an archive from a
+// deletion. Only names matter, so no default branch is asked for.
+func (c *Client) ListArchivedRepos(ctx context.Context) ([]model.Repo, error) {
+	repos, err := list[repoJSON](ctx, c, c.apiURL("repositories"), mtRepos, "repositories", nil, 1000)
+	if err != nil {
+		return nil, err
+	}
+	var out []model.Repo
+	for _, r := range repos {
+		full := r.Namespace + "/" + r.Name
+		if r.Type == "git" && r.Archived && checkName(full) == nil {
+			out = append(out, model.Repo{FullName: full})
+		}
+	}
+	return out, nil
+}
+
 type modificationsJSON struct {
 	Added    []string `json:"added"`
 	Modified []string `json:"modified"`

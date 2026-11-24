@@ -38,6 +38,7 @@ type fakeGerrit struct {
 	mu        sync.Mutex
 	calls     map[string]int
 	projects  map[string]bool
+	readOnly  map[string]bool
 	changes   []*fakeChange
 	rateLimit bool
 	requests  []fakeReq
@@ -90,7 +91,7 @@ done
 
 func newFakeGerrit(t *testing.T) *fakeGerrit {
 	t.Helper()
-	f := &fakeGerrit{t: t, root: t.TempDir(), User: "ripple-bot", Token: "tok-123", calls: map[string]int{}, projects: map[string]bool{}}
+	f := &fakeGerrit{t: t, root: t.TempDir(), User: "ripple-bot", Token: "tok-123", calls: map[string]int{}, projects: map[string]bool{}, readOnly: map[string]bool{}}
 	srv := httptest.NewServer(f)
 	t.Cleanup(srv.Close)
 	f.URL = srv.URL
@@ -619,15 +620,27 @@ func (f *fakeGerrit) postChange(w http.ResponseWriter, handle, action string, bo
 	}
 }
 
+// SetReadOnly moves a project between the ACTIVE and READ_ONLY states.
+func (f *fakeGerrit) SetReadOnly(project string, ro bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.readOnly[project] = ro
+}
+
 func (f *fakeGerrit) listProjects(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	if q.Get("type") != "CODE" || q.Get("state") != "ACTIVE" {
+	state := q.Get("state")
+	if q.Get("type") != "CODE" || (state != "ACTIVE" && state != "READ_ONLY") {
 		text(w, 400, "unexpected project filters")
 		return
 	}
 	f.mu.Lock()
 	var names []string
 	for n := range f.projects {
+		// rest-api-projects.md, "State(s)": the projects with the given state.
+		if f.readOnly[n] != (state == "READ_ONLY") {
+			continue
+		}
 		if strings.HasPrefix(n, q.Get("p")) {
 			names = append(names, n)
 		}

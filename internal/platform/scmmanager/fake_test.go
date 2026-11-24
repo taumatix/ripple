@@ -112,6 +112,13 @@ func (f *fakeSCM) AddOther(repo string, svn, archived bool) {
 	f.archived[repo] = archived
 }
 
+// SetArchived flips the archived flag of a listed repository.
+func (f *fakeSCM) SetArchived(repo string, archived bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.archived[repo] = archived
+}
+
 func (f *fakeSCM) Commit(repo string, files map[string]string) {
 	f.t.Helper()
 	f.CommitOn(repo, "main", files)

@@ -59,7 +59,7 @@ once would skip the checks.
 
 ## Archive
 
-Only GitHub reports archive and unarchive today (ripple pauses the repo on `archived`, resumes on `unarchived`). SCM-Manager: ripple consumes only the events listed here; an archive event was not verified (2026-11-23). Nothing pauses on archive.
+Only GitHub reports archive and unarchive today (ripple pauses the repo on `archived`, resumes on `unarchived`). SCM-Manager: ripple consumes only the events listed here; an archive event was not verified (2026-11-23). The repository list carries an `archived` flag (`docs/vendor/scm-manager/source-excerpts.md`, "repo-list"), so the client implements `platform.ArchivedLister` on it: an archived git repository is paused (index and pending jobs kept) and resumed on unarchive instead of forgotten. Verified against the fake only.
 
 ## Superseded pull requests
 

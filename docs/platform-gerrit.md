@@ -60,7 +60,7 @@ changes" refusal; file lists of merge commits; first-parent walking of multi-com
 
 ## Archive
 
-Only GitHub reports archive and unarchive today (ripple pauses the repo on `archived`, resumes on `unarchived`). Gerrit: a project can be set read-only or hidden, but ripple's stream/webhook events were not verified to report that (2026-11-23). Nothing pauses on it.
+Only GitHub reports archive and unarchive today (ripple pauses the repo on `archived`, resumes on `unarchived`). Gerrit sends no event for a project's state (the stream/webhook events were not verified to report it, 2026-11-23), but a project set to `READ_ONLY` is the closest thing to an archive and `GET /projects/?state=READ_ONLY` lists it (`docs/vendor/gerrit/rest-api-projects.md`, "State(s)"). The client implements `platform.ArchivedLister` on that listing, so a project that moves between ACTIVE and READ_ONLY is paused (index and pending jobs kept) and resumed instead of forgotten. A HIDDEN project is in neither listing and is forgotten as before. Verified against the fake only.
 
 ## Superseded pull requests
 

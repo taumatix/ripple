@@ -406,12 +406,25 @@ type projectJSON struct {
 // default branch is left empty: "Get HEAD" is one call per project, and the first scan
 // learns it from the clone (engine.Scan).
 func (c *Client) ListRepos(ctx context.Context) ([]model.Repo, error) {
+	return c.listProjects(ctx, "ACTIVE")
+}
+
+// ListArchivedRepos is the READ_ONLY code projects, the closest Gerrit has to an archive
+// (`GET /projects/?state=READ_ONLY`, docs/vendor/gerrit/rest-api-projects.md "State(s)"; a
+// project in that state accepts no pushes or new changes). Gerrit sends no event for a
+// state change, so the listing is what tells a read-only project from a deleted one, and
+// ripple pauses it rather than forgetting it. HIDDEN projects are in neither listing.
+func (c *Client) ListArchivedRepos(ctx context.Context) ([]model.Repo, error) {
+	return c.listProjects(ctx, "READ_ONLY")
+}
+
+func (c *Client) listProjects(ctx context.Context, state string) ([]model.Repo, error) {
 	var names []string
 	for skip, pages := 0, 0; ; pages++ {
 		if pages >= 100 {
 			return nil, fmt.Errorf("more than %d projects", 100*pageSize)
 		}
-		q := url.Values{"type": {"CODE"}, "state": {"ACTIVE"}, "n": {strconv.Itoa(pageSize)}, "S": {strconv.Itoa(skip)}}
+		q := url.Values{"type": {"CODE"}, "state": {state}, "n": {strconv.Itoa(pageSize)}, "S": {strconv.Itoa(skip)}}
 		if c.ProjectPrefix != "" {
 			q.Set("p", c.ProjectPrefix)
 		}

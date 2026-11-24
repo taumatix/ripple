@@ -97,23 +97,28 @@ type CredentialFunc func(ctx context.Context) (platform.Credential, error)
 // (see scan.go); if the host will not do that, the usual checkout is made instead.
 func Checkout(ctx context.Context, o Options, cloneURL, branch string, cred CredentialFunc) (platform.Workspace, error) {
 	if platform.ScanOnly(ctx) {
-		if ws, err := checkout(ctx, o, cloneURL, branch, cred, true, true); err == nil {
+		if ws, err := checkout(ctx, o, cloneURL, branch, cred, true, true, true); err == nil {
 			return ws, nil
 		} else if ctx.Err() != nil {
 			return nil, err
 		}
 	}
-	ws, err := checkout(ctx, o, cloneURL, branch, cred, false, true)
+	ws, err := checkout(ctx, o, cloneURL, branch, cred, false, true, true)
 	if err != nil && ctx.Err() == nil {
 		// A host that filters a clone but refuses the checkout's fetch of the omitted
 		// blobs by object id (protocol v0 without allowAnySHA1InWant) fails here; a
 		// whole clone needs neither.
-		ws, err = checkout(ctx, o, cloneURL, branch, cred, false, false)
+		ws, err = checkout(ctx, o, cloneURL, branch, cred, false, false, true)
+	}
+	if err != nil && ctx.Err() == nil {
+		// A host that refuses shallow clients (an older or dumb git server, an emulator)
+		// fails every attempt above; a whole clone needs no shallow support.
+		ws, err = checkout(ctx, o, cloneURL, branch, cred, false, false, false)
 	}
 	return ws, err
 }
 
-func checkout(ctx context.Context, o Options, cloneURL, branch string, cred CredentialFunc, light, filtered bool) (platform.Workspace, error) {
+func checkout(ctx context.Context, o Options, cloneURL, branch string, cred CredentialFunc, light, filtered, shallow bool) (platform.Workspace, error) {
 	gb, err := url.Parse(o.GitBase)
 	if err != nil || gb.Scheme == "" {
 		return nil, fmt.Errorf("invalid git base URL")
@@ -146,6 +151,9 @@ func checkout(ctx context.Context, o Options, cloneURL, branch string, cred Cred
 	}
 	if light {
 		args = []string{"clone", "--depth", "1", "--filter=blob:none", "--no-checkout", "--no-tags", "--single-branch", "--no-recurse-submodules"}
+	}
+	if !shallow {
+		args = slices.DeleteFunc(args, func(a string) bool { return a == "--depth" || a == "1" })
 	}
 	if branch != "" {
 		args = append(args, "--branch", branch)

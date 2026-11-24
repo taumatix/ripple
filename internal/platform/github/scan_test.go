@@ -183,3 +183,19 @@ func TestScanOnlyPrefetchIsOneFetchByObjectID(t *testing.T) {
 		t.Errorf("server sent %d bytes; the 2 MiB file nothing reads must not be downloaded", n)
 	}
 }
+
+// A host that refuses shallow clients still gets a checkout: Checkout falls back to a
+// whole clone after the shallow attempts fail.
+func TestCheckoutFallsBackToFullCloneWhenShallowRefused(t *testing.T) {
+	remote, c := scanRepo(t, map[string]string{"go.mod": "module x\n\ngo 1.22\n", "a.txt": "a"}, nil)
+	remote.RefuseShallow()
+	ws, err := c.Checkout(context.Background(), model.Repo{FullName: "acme/r", InstallationID: 1, DefaultBranch: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ws.Close()
+	b, err := ws.ReadFile("a.txt")
+	if err != nil || string(b) != "a" {
+		t.Fatalf("read a.txt: %q %v", b, err)
+	}
+}

@@ -761,6 +761,11 @@ func (c *CodeCommit) Head(path string) string {
 	return strings.TrimSpace(git(c.t, c.bare(c.name(path)), "rev-parse", "refs/heads/main"))
 }
 
+// BranchHead is the commit branch points at in path.
+func (c *CodeCommit) BranchHead(path, branch string) string {
+	return strings.TrimSpace(git(c.t, c.bare(c.name(path)), "rev-parse", "refs/heads/"+branch))
+}
+
 func (c *CodeCommit) getDifferences(w http.ResponseWriter, in map[string]any) {
 	name, _ := in["repositoryName"].(string)
 	if !c.repo(w, name) {

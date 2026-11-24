@@ -5,7 +5,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -106,7 +106,16 @@ func (h *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid signature", http.StatusUnauthorized)
 		return
 	}
-	body, res := h.guard.ReadVerified(w, r, maxBody, h.Secret, nil, func(got []byte) bool { return hmac.Equal(got, want) })
+	// The body is parsed as it streams and never held; the parse of a forgery is
+	// discarded with the 401. Only refs_changed is parsed, other events are only hashed.
+	key := r.Header.Get("X-Event-Key")
+	var p refsChanged
+	var perr error
+	var consume func(io.Reader) error
+	if key == "repo:refs_changed" {
+		consume = func(rd io.Reader) error { p, perr = parseRefsChanged(rd); return nil }
+	}
+	_, res := h.guard.ReadVerifiedStream(w, r, maxBody, h.Secret, nil, func(got []byte) bool { return hmac.Equal(got, want) }, consume)
 	switch res {
 	case webhook.ReadAnswered:
 		return
@@ -115,7 +124,6 @@ func (h *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid signature", http.StatusUnauthorized)
 		return
 	}
-	key := r.Header.Get("X-Event-Key")
 	if key == "diagnostics:ping" {
 		w.WriteHeader(http.StatusOK)
 		return
@@ -129,7 +137,10 @@ func (h *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusAccepted)
 		return
 	}
-	evs, err := h.push(r.Context(), body)
+	if perr != nil { // malformed payloads are dropped, not retried
+		p = refsChanged{}
+	}
+	evs, err := h.push(r.Context(), p)
 	if err != nil {
 		h.dedupe.Release(keys...)
 		h.Log.Error("webhook lookup", "delivery", delivery, "err", err)
@@ -148,31 +159,45 @@ func (h *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusAccepted)
 }
 
+// refsChanged is the part of a repo:refs_changed payload ripple reads.
+type refsChanged struct {
+	Slug, ProjectKey string
+	Changes          []refChange
+}
+
+type refChange struct{ RefID, FromHash, ToHash, Type string }
+
+// parseRefsChanged reads the payload as the body streams.
+func parseRefsChanged(r io.Reader) (refsChanged, error) {
+	var p refsChanged
+	x := &webhook.Extractor{}
+	field := func(f func(c *refChange) *string) *webhook.Node {
+		return x.StrAt(func() *string { return f(&p.Changes[len(p.Changes)-1]) })
+	}
+	change := webhook.Obj(map[string]*webhook.Node{
+		"refId":    field(func(c *refChange) *string { return &c.RefID }),
+		"fromHash": field(func(c *refChange) *string { return &c.FromHash }),
+		"toHash":   field(func(c *refChange) *string { return &c.ToHash }),
+		"type":     field(func(c *refChange) *string { return &c.Type }),
+	}).OnObject(func() { p.Changes = append(p.Changes, refChange{}) })
+	err := webhook.Extract(r, webhook.Obj(map[string]*webhook.Node{
+		"repository": webhook.Obj(map[string]*webhook.Node{
+			"slug":    x.Str(&p.Slug),
+			"project": webhook.Obj(map[string]*webhook.Node{"key": x.Str(&p.ProjectKey)}),
+		}),
+		"changes": webhook.Array(change),
+	}))
+	return p, err
+}
+
 // push turns a repo:refs_changed payload into at most one Push event: for the change
 // to the default branch, if the push has one. A branch creation, or a lookup of
 // the changed files that fails, leaves Files empty, which forces a re-scan.
-func (h *Receiver) push(ctx context.Context, body []byte) ([]platform.Event, error) {
-	var p struct {
-		Repository struct {
-			Slug    string `json:"slug"`
-			Project struct {
-				Key string `json:"key"`
-			} `json:"project"`
-		} `json:"repository"`
-		Changes []struct {
-			RefID    string `json:"refId"`
-			FromHash string `json:"fromHash"`
-			ToHash   string `json:"toHash"`
-			Type     string `json:"type"`
-		} `json:"changes"`
-	}
-	if err := json.Unmarshal(body, &p); err != nil {
-		return nil, nil // malformed payloads are dropped, not retried
-	}
-	if p.Repository.Slug == "" || p.Repository.Project.Key == "" || len(p.Changes) == 0 {
+func (h *Receiver) push(ctx context.Context, p refsChanged) ([]platform.Event, error) {
+	if p.Slug == "" || p.ProjectKey == "" || len(p.Changes) == 0 {
 		return nil, nil
 	}
-	repo := model.Repo{FullName: p.Repository.Project.Key + "/" + p.Repository.Slug}
+	repo := model.Repo{FullName: p.ProjectKey + "/" + p.Slug}
 	def, err := h.defaultBranch(ctx, repo)
 	if err != nil {
 		return nil, err

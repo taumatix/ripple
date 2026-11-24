@@ -41,6 +41,12 @@ func (e *Engine) dueBatch() int {
 // BranchPrefix marks every branch ripple owns.
 const BranchPrefix = "ripple/"
 
+// GoInstaller finds, or installs into the toolchain directory, the go binary for the
+// release a go.mod's go and toolchain lines name. release is the version without "go".
+type GoInstaller interface {
+	Ensure(ctx context.Context, goLine, toolchainLine string) (bin, release string, err error)
+}
+
 type Engine struct {
 	Store    store.Store
 	Platform platform.Platform
@@ -102,6 +108,10 @@ type Engine struct {
 	// one, instead of the server's own Go. Empty, or no matching release, keeps the
 	// server's Go. Nothing is downloaded.
 	GoToolchainDir string
+	// GoInstaller, when set (with GoToolchainDir), fetches a release the directory lacks, so
+	// a go.mod naming a Go nobody installed is still checked by that Go. A failure is
+	// logged and verification keeps the server's Go. See gotool.Installer.
+	GoInstaller GoInstaller
 	// GoImages maps a Go minor ("1.26") to the container image that carries it. With a
 	// container sandbox, verification of a go.mod naming that minor runs in that image.
 	GoImages map[string]string

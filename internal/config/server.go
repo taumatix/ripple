@@ -64,7 +64,10 @@ type Server struct {
 	RegistryAuthFile string
 	// GoToolchainDir holds Go releases (go1.25.3/bin/go) that verification uses when a go.mod names one.
 	GoToolchainDir string
-	Sandbox        string // none, auto, bwrap, seatbelt, container, docker, podman
+	// GoToolchainDownload installs a release GoToolchainDir lacks from the module proxy
+	// (golang.org/toolchain), checked against the checksum database. Off by default.
+	GoToolchainDownload bool
+	Sandbox             string // none, auto, bwrap, seatbelt, container, docker, podman
 	// Container* configure the container, docker and podman sandboxes (docs/sandbox.md).
 	ContainerImage, ContainerCPUs, ContainerMemory, ContainerPull, ContainerNetwork string
 	// ContainerGoImages maps a Go minor ("1.26") to the image that carries it
@@ -168,7 +171,8 @@ RIPPLE_GOPROXY                module proxy used to verify major bumps (default h
 RIPPLE_GOPROXY_USER           user for RIPPLE_GOPROXY (HTTP basic auth); with RIPPLE_GOPROXY_TOKEN, sent only to repos listing private-modules
 RIPPLE_GOPROXY_TOKEN          password or token for RIPPLE_GOPROXY; needs an https proxy
 RIPPLE_REGISTRY_AUTH_FILE     Docker config.json with logins for private container registries (ecosystem: docker); read once at start
-RIPPLE_GO_TOOLCHAIN_DIR       directory of Go releases (go1.25.3/bin/go) verification runs with when a go.mod names one; never downloaded
+RIPPLE_GO_TOOLCHAIN_DIR       directory of Go releases (go1.25.3/bin/go) verification runs with when a go.mod names one
+RIPPLE_GO_TOOLCHAIN_DOWNLOAD  true: install a release the directory lacks from RIPPLE_GOPROXY (golang.org/toolchain, checksum-verified); needs RIPPLE_GO_TOOLCHAIN_DIR, default false
 RIPPLE_CONTAINER_GO_IMAGES    minor=image pairs (1.25=runner:1.25,1.26=runner:1.26): the container image that verifies a go.mod naming that Go minor
 RIPPLE_GO_CC                  C compiler for repos with cgo: true (default: go's own, gcc or clang)
 RIPPLE_STORE                  memory (default), postgres or dynamodb
@@ -401,6 +405,16 @@ func LoadServer(getenv func(string) string) (*Server, error) {
 			errs = append(errs, errors.New("RIPPLE_WEBHOOK_DEDUPE_SIGNATURE: want true or false"))
 		}
 		s.WebhookDedupeSignature = b
+	}
+	if v := getenv("RIPPLE_GO_TOOLCHAIN_DOWNLOAD"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			errs = append(errs, errors.New("RIPPLE_GO_TOOLCHAIN_DOWNLOAD: want true or false"))
+		}
+		s.GoToolchainDownload = b
+		if b && s.GoToolchainDir == "" {
+			errs = append(errs, errors.New("RIPPLE_GO_TOOLCHAIN_DOWNLOAD: set RIPPLE_GO_TOOLCHAIN_DIR, the directory releases are installed into"))
+		}
 	}
 	if v := getenv("RIPPLE_ALLOW_AUTOMERGE"); v != "" {
 		b, err := strconv.ParseBool(v)

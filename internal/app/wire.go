@@ -16,6 +16,7 @@ import (
 	"github.com/taumatix/ripple/internal/cratesindex"
 	"github.com/taumatix/ripple/internal/engine"
 	"github.com/taumatix/ripple/internal/feed"
+	"github.com/taumatix/ripple/internal/gotool"
 	"github.com/taumatix/ripple/internal/npmreg"
 	"github.com/taumatix/ripple/internal/platform"
 	"github.com/taumatix/ripple/internal/platform/github"
@@ -86,6 +87,11 @@ func New(ctx context.Context, s *config.Server, log *slog.Logger) (a *App, st st
 		MaxFiles: s.MaxFiles, MaxDependencies: s.MaxDependencies, MaxBackfill: s.MaxBackfill, BackfillMajors: s.BackfillMajors,
 		GoCC: s.GoCC, GoToolchainDir: s.GoToolchainDir, GoImages: s.ContainerGoImages, GoProxyUser: s.GoProxyUser, GoProxyToken: s.GoProxyToken,
 		Limits: rules.Limits{MinimumReleaseAge: s.MinimumReleaseAge, OpenPRLimit: s.OpenPRLimit, AllowAutomerge: s.AllowAutomerge}}
+	if s.GoToolchainDownload {
+		// A token is only accepted alongside an explicit RIPPLE_GOPROXY (config checks),
+		// so it never reaches the default public proxy.
+		eng.GoInstaller = &gotool.Installer{Dir: s.GoToolchainDir, Proxy: s.GoProxy, User: s.GoProxyUser, Token: s.GoProxyToken}
+	}
 	eng.Lookup = &feed.GoProxyLookup{BaseURL: s.GoProxy, User: s.GoProxyUser, Token: s.GoProxyToken,
 		UserAgent: "ripple (+https://github.com/taumatix/ripple)"}
 	rc := &registry.Client{UserAgent: "ripple (+https://github.com/taumatix/ripple)"}

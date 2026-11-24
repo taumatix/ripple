@@ -1,6 +1,7 @@
 package manager
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -196,7 +197,7 @@ func TestDockerKubernetesManifest(t *testing.T) {
 }
 
 func TestDockerYAMLWithoutKubernetesShapeIsLeftAlone(t *testing.T) {
-	deps, _ := Docker{Dir: "/"}.Extract("deploy/values.yaml", []byte("image: nginx:1.25\n"))
+	deps, _ := Docker{Dir: "/"}.Extract("deploy/config.yaml", []byte("image: nginx:1.25\n"))
 	if len(deps) != 0 {
 		t.Errorf("a yaml file that is not a manifest or compose file: %+v", deps)
 	}
@@ -221,8 +222,8 @@ func TestDockerArgTagsAndCopyFrom(t *testing.T) {
 	for _, d := range deps {
 		got = append(got, d.Package+"@"+d.Version)
 	}
-	// SHARED feeds two different images, MISSING has no default, OTHER is not the whole tag.
-	want := "docker.io/library/node@20.11 ghcr.io/org/tool@v1.2.3"
+	// SHARED feeds two different images, MISSING has no default; OTHER is part of a tag.
+	want := "docker.io/library/node@20.11 docker.io/library/redis@1.0-alpine ghcr.io/org/tool@v1.2.3"
 	if strings.Join(got, " ") != want {
 		t.Fatalf("got %v", got)
 	}
@@ -230,7 +231,7 @@ func TestDockerArgTagsAndCopyFrom(t *testing.T) {
 	if err != nil || !strings.HasPrefix(string(out), "ARG NODE=22.1\nARG SHARED=3.19\n") || !strings.Contains(string(out), "FROM node:${NODE} AS build\n") {
 		t.Errorf("the ARG line moves, the FROM is untouched: %v\n%s", err, out)
 	}
-	out, err = Docker{}.Apply([]byte(argDockerfile), deps[1], "", "v1.4.0")
+	out, err = Docker{}.Apply([]byte(argDockerfile), deps[2], "", "v1.4.0")
 	if err != nil || !strings.Contains(string(out), "COPY --chown=1:1 --from=ghcr.io/org/tool:v1.4.0 /t /t\n") {
 		t.Errorf("%v\n%s", err, out)
 	}
@@ -257,7 +258,9 @@ func TestDockerKustomizeImages(t *testing.T) {
 		"newName and newTag":     {"kustomization.yaml", "images:\n- name: web\n  newName: ghcr.io/org/web\n  newTag: v1.2.3\n", []string{"ghcr.io/org/web@v1.2.3"}},
 		"name only is the image": {"app/Kustomization", "images:\n  - newTag: '1.25'\n    name: nginx\n", []string{"docker.io/library/nginx@1.25"}},
 		"no newTag":              {"kustomization.yml", "images:\n  - name: nginx\n    newName: other\n", nil},
-		"digest pinned":          {"kustomization.yaml", "images:\n  - name: nginx\n    newTag: 1.25\n    newDigest: sha256:abc\n", nil},
+		"digest pinned":          {"kustomization.yaml", "images:\n  - name: nginx\n    newTag: 1.25\n    newDigest: sha256:abc\n", []string{"docker.io/library/nginx@1.25"}},
+		"digest only":            {"kustomization.yaml", "images:\n  - name: nginx\n    newDigest: sha256:abc\n", nil},
+		"odd digest":             {"kustomization.yaml", "images:\n  - name: nginx\n    newTag: 1.25\n    newDigest: md5:abc\n", nil},
 		"floating tag":           {"kustomization.yaml", "images:\n  - name: nginx\n    newTag: latest\n", nil},
 		"other top level":        {"kustomization.yaml", "resources:\n  - name: nginx\n    newTag: 1.25\n", nil},
 		"two entries":            {"kustomization.yaml", "images:\n  - name: a\n    newTag: 1.0\n  - name: b\n    newTag: 2.0\nnamePrefix: x-\n", []string{"docker.io/library/a@1.0", "docker.io/library/b@2.0"}},
@@ -282,18 +285,21 @@ func TestDockerHelmValues(t *testing.T) {
 		file, in string
 		want     []string
 	}{
-		"pair":           {"values.yaml", "image:\n  repository: nginx\n  tag: 1.25\n", []string{"docker.io/library/nginx@1.25"}},
-		"registry":       {"values-prod.yaml", "image:\n  registry: ghcr.io\n  repository: org/app\n  tag: \"v2.0.0\"\n", []string{"ghcr.io/org/app@v2.0.0"}},
-		"nested":         {"prod.values.yml", "redis:\n  image:\n    repository: redis\n    tag: '7.0'\n", []string{"docker.io/library/redis@7.0"}},
-		"init image":     {"values.yaml", "initImage:\n  repository: busybox\n  tag: 1.36\n", []string{"docker.io/library/busybox@1.36"}},
-		"not an image":   {"values.yaml", "git:\n  repository: org/app\n  tag: 1.2.3\n", nil},
-		"url":            {"values.yaml", "image:\n  repository: https://github.com/org/app\n  tag: 1.2.3\n", nil},
-		"digest":         {"values.yaml", "image:\n  repository: nginx\n  tag: 1.25\n  digest: sha256:abc\n", nil},
-		"templated":      {"values.yaml", "image:\n  repository: nginx\n  tag: \"{{ .Chart.AppVersion }}\"\n", nil},
-		"no tag":         {"values.yaml", "image:\n  repository: nginx\n", nil},
-		"empty tag":      {"values.yaml", "image:\n  repository: nginx\n  tag: \"\"\n", nil},
-		"other file":     {"config.yaml", "image:\n  repository: nginx\n  tag: 1.25\n", nil},
-		"sibling blocks": {"values.yaml", "a:\n  image:\n    repository: x\n  tag: 9.9\n", nil},
+		"pair":             {"values.yaml", "image:\n  repository: nginx\n  tag: 1.25\n", []string{"docker.io/library/nginx@1.25"}},
+		"registry":         {"values-prod.yaml", "image:\n  registry: ghcr.io\n  repository: org/app\n  tag: \"v2.0.0\"\n", []string{"ghcr.io/org/app@v2.0.0"}},
+		"nested":           {"prod.values.yml", "redis:\n  image:\n    repository: redis\n    tag: '7.0'\n", []string{"docker.io/library/redis@7.0"}},
+		"init image":       {"values.yaml", "initImage:\n  repository: busybox\n  tag: 1.36\n", []string{"docker.io/library/busybox@1.36"}},
+		"not an image":     {"values.yaml", "git:\n  repository: org/app\n  tag: 1.2.3\n", nil},
+		"url":              {"values.yaml", "image:\n  repository: https://github.com/org/app\n  tag: 1.2.3\n", nil},
+		"digest":           {"values.yaml", "image:\n  repository: nginx\n  tag: 1.25\n  digest: sha256:abc\n", []string{"docker.io/library/nginx@1.25"}},
+		"odd digest":       {"values.yaml", "image:\n  repository: nginx\n  tag: 1.25\n  digest: md5:abc\n", nil},
+		"single string":    {"values.yaml", "sidecar:\n  image: ghcr.io/org/side:v1.4.0\ninitImage: \"busybox:1.36\"\nname: x:1.2.3\n", []string{"ghcr.io/org/side@v1.4.0", "docker.io/library/busybox@1.36"}},
+		"single templated": {"values.yaml", "image: \"{{ .Values.reg }}/app:1.2.3\"\nimage2: app\nimageName: app:latest\n", nil},
+		"templated":        {"values.yaml", "image:\n  repository: nginx\n  tag: \"{{ .Chart.AppVersion }}\"\n", nil},
+		"no tag":           {"values.yaml", "image:\n  repository: nginx\n", nil},
+		"empty tag":        {"values.yaml", "image:\n  repository: nginx\n  tag: \"\"\n", nil},
+		"other file":       {"config.yaml", "image:\n  repository: nginx\n  tag: 1.25\n", nil},
+		"sibling blocks":   {"values.yaml", "a:\n  image:\n    repository: x\n  tag: 9.9\n", nil},
 	} {
 		if got := depList(t, "chart/"+c.file, c.in); strings.Join(got, " ") != strings.Join(c.want, " ") {
 			t.Errorf("%s: got %v want %v", name, got, c.want)
@@ -340,5 +346,49 @@ func TestDockerStageArgsAndMounts(t *testing.T) {
 				t.Errorf("mount edit:\n%s", out)
 			}
 		}
+	}
+}
+
+func TestDockerArgThatIsPartOfATag(t *testing.T) {
+	df := "ARG V=3.19\nFROM alpine:${V}-slim\nFROM alpine:3.18\n"
+	if got := depList(t, "Dockerfile", df); strings.Join(got, " ") != "docker.io/library/alpine@3.19-slim docker.io/library/alpine@3.18" {
+		t.Fatalf("got %v", got)
+	}
+	deps, _ := Docker{Dir: "/"}.Extract("Dockerfile", []byte(df))
+	out, err := Docker{}.Apply([]byte(df), deps[0], "", "3.20-slim")
+	if want := strings.Replace(df, "ARG V=3.19", "ARG V=3.20", 1); err != nil || string(out) != want {
+		t.Errorf("%v\n%s", err, out)
+	}
+	if _, err := (Docker{}).Apply([]byte(df), deps[0], "", "3.20"); !errors.Is(err, ErrUnsupported) {
+		t.Errorf("a tag without the suffix cannot be written into the ARG: %v", err)
+	}
+}
+
+func TestDockerDigestPairsMoveTogether(t *testing.T) {
+	for file, in := range map[string]string{
+		"k/kustomization.yaml": "images:\n  - name: nginx\n    newTag: \"1.25\" # t\n    newDigest: sha256:old # d\n",
+		"chart/values.yaml":    "image:\n  repository: nginx\n  tag: 1.25 # t\n  digest: \"sha256:old\" # d\n",
+	} {
+		deps, _ := Docker{Dir: "/"}.Extract(file, []byte(in))
+		if len(deps) != 1 {
+			t.Fatalf("%s: %v", file, deps)
+		}
+		if _, err := (Docker{}).Apply([]byte(in), deps[0], "", "1.26"); err == nil {
+			t.Errorf("%s: a digest pair must never be left stale", file)
+		}
+		out, err := Docker{}.Apply([]byte(in), deps[0], "", "1.26@"+dsha)
+		want := strings.Replace(strings.Replace(in, "1.25", "1.26", 1), "sha256:old", dsha, 1)
+		if err != nil || string(out) != want {
+			t.Errorf("%s: %v\n%s", file, err, out)
+		}
+	}
+}
+
+func TestDockerHelmSingleStringApplyKeepsTheLine(t *testing.T) {
+	in := "sidecar:\n  image:   'ghcr.io/org/side:v1.4.0'   # pin\n"
+	deps, _ := Docker{Dir: "/"}.Extract("values.yaml", []byte(in))
+	out, err := Docker{}.Apply([]byte(in), deps[0], "", "v1.5.0")
+	if want := strings.Replace(in, "v1.4.0", "v1.5.0", 1); err != nil || string(out) != want {
+		t.Errorf("%v\n%s", err, out)
 	}
 }

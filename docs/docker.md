@@ -24,17 +24,21 @@ follow code edits Dockerfiles only).
 Also read, each edited on its tag line only (quotes, comments and layout kept):
 
 - **Kustomize** `images:` in `kustomization.yaml`, `kustomization.yml` or `Kustomization`: `newTag` of an entry, with the
-  image `newName` (else `name`). An entry without `newTag`, or with `newDigest`, is left alone.
+  image `newName` (else `name`). An entry without `newTag` is left alone. With a `newDigest: sha256:...` too, the pair moves together: the digest line
+  takes the digest the registry reports for the new tag, and the edit is refused if none can be read.
 - **Helm values** (`values.yaml`, `values-*.yaml`, `values.*.yaml`, `*-values.yaml`, `*.values.yaml`): a `repository:` and
   `tag:` pair that are siblings under a key whose name contains `image` (`image`, `initImage`, `sidecar.image`), with an
-  optional `registry:` sibling. A pair with a `digest:`, a templated value (`{{ }}`, `$`) or a URL repository is left alone,
-  and so is a `tag` that is empty.
+  optional `registry:` sibling. A pair with a `digest: sha256:...` moves with it, like Kustomize's; a templated value (`{{ }}`, `$`) or a URL
+  repository is left alone, and so is a `tag` that is empty. A single-string `image: repo:tag` under any key whose name
+  contains `image` (`image`, `initImage`, `sidecar.image`) is read too, quotes and comment kept.
 - **Per-stage `ARG`**: `ARG V=1.2` declared after a `FROM` and used as the whole tag in a later `COPY --from=image:${V}` or
   `--mount=from=image:${V}` of the same stage (the ARG line moves; a stage's ARG is not seen by the next stage, and a bare
   `ARG V` in a stage takes the global default).
 - **`RUN --mount=...,from=image:tag`**: the first `--mount` of the line that has a `from=`; a stage name there is no image.
 
-Still not read: an ARG that is only part of a tag (`${V}-alpine`) and Helm charts that set the image as one string.
+An ARG that is the front of a tag (`FROM alpine:${V}-slim`, `ARG V=3.19`) is read: the dependency's tag is `3.19-slim`,
+and the ARG takes the new tag without its literal suffix (a new tag that does not end in it is refused). A prefix
+before the variable (`v${V}`) is not read.
 
 `FROM [--platform=...] image[:tag][@sha256:...] [AS name]` in files named `Dockerfile` or `Containerfile`, `Dockerfile.*`,
 `Containerfile.*`, `*.Dockerfile` or `*.Containerfile` under `directory` (not `.md`, `.yml` and similar).

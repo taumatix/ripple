@@ -33,9 +33,8 @@ ripple version                                              # prints: ripple v0.
 
 Or build the container from a checkout: `git clone --branch v0.3.0 https://github.com/taumatix/ripple && docker build -t ripple ripple`.
 Each release also publishes static binaries (linux, macOS and Windows) on its GitHub release page and a
-multi-arch image, `ghcr.io/taumatix/ripple:<version>`. `go install` is the open install path: the image's GHCR
-package stays private until a maintainer makes it public once in the GitHub UI (there is no API for that), so
-`docker pull` needs a login until then. The binary also needs the `go` toolchain on `PATH` at runtime to verify
+multi-arch image, `ghcr.io/taumatix/ripple:<version>`. The image's GHCR package answered an anonymous `docker pull` for v0.3.0; `go install` needs only a tag.
+The binary also needs the `go` toolchain on `PATH` at runtime to verify
 major-version updates; the Dockerfile includes it.
 
 ## Run

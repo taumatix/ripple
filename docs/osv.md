@@ -87,5 +87,10 @@ in a row is skipped so it cannot hold up the ones behind it. A record OSV answer
 Every request is bounded: a 20s timeout, a 1 MiB cap on a record, a 4 MiB and 20000-line cap on the list (the Go list was about 10000 lines on 2026-11-23). At most one
 list request and `RIPPLE_OSV_MAX_FETCH` record requests per interval; `RIPPLE_OSV_SWEEP_BATCH` sets the repos a sweep re-checks per poll.
 
+The client, the list and a whole ripple run were also run against the real service on 2026-11-24 (`go test -tags live`,
+run weekly by `.github/workflows/live.yml`): records parse, querybatch agrees with ripple's own matching, the list is newest
+first and the early stop reads only its head, an unknown id is a 404, and a module with advisories fixed in several releases
+ends with one open PR for the highest fix. No Go query returned a `next_page_token`, so pagination stays covered by the fake only.
+
 What this has not been verified against, and the pinned contract, are in [UPSTREAM.md](../UPSTREAM.md); OSV's own
 documentation and recorded answers are in [vendor/osv](vendor/osv/).

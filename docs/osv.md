@@ -23,6 +23,10 @@ Off by default. `RIPPLE_OSV=true` turns it on; it never changes what happens whe
    when the repo is at its cap (it is planned before ordinary updates, which still wait for a free slot, and one advisory
    that affects many modules can open that many PRs), and `security-bypass: [schedule]` opens it outside the schedule
    window. The default, no list, is the behaviour above.
+   `security-bypass-severity: [high, critical]` (any of `low`, `moderate`, `high`, `critical`; it needs `security-bypass`)
+   restricts both bypasses to advisories with that GitHub rating (`database_specific.severity`); an advisory with no
+   rating (Go-database records carry none; ripple keeps the rated twin's note when both arrive) never bypasses while
+   it is set.
 
 If the release feed already queued the same bump behind its cooldown, the advisory makes that job due.
 

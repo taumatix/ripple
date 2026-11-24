@@ -96,3 +96,25 @@ func TestSecurityBypassIsGomodOnlyValidatedAndOffByDefault(t *testing.T) {
 		t.Errorf("with regex: %v", err)
 	}
 }
+
+func TestSecurityBypassSeverityIsValidatedAndNeedsABypass(t *testing.T) {
+	c, err := Parse([]byte("updates:\n  - ecosystem: gomod\n    security-bypass: [schedule]\n    security-bypass-severity: [High, critical]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	u := c.Updates[0]
+	if !u.BypassesSeverity(BypassSchedule, "HIGH") || u.BypassesSeverity(BypassSchedule, "MODERATE") || u.BypassesSeverity(BypassSchedule, "") || u.BypassesSeverity(BypassLimit, "HIGH") {
+		t.Errorf("filter: %+v", u)
+	}
+	for _, bad := range []string{
+		"security-bypass: [schedule]\n    security-bypass-severity: [urgent]\n",
+		"security-bypass-severity: [high]\n",
+	} {
+		if _, err := Parse([]byte("updates:\n  - ecosystem: gomod\n    " + bad)); err == nil || !strings.Contains(err.Error(), "security-bypass-severity") {
+			t.Errorf("%q: %v", bad, err)
+		}
+	}
+	if _, err := Parse([]byte("updates:\n  - ecosystem: docker\n    security-bypass-severity: [high]\n")); err == nil || !strings.Contains(err.Error(), "security-bypass-severity") {
+		t.Errorf("with docker: %v", err)
+	}
+}

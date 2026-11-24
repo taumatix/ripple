@@ -193,7 +193,7 @@ func (e *Engine) applyAdvisory(ctx context.Context, v *advisory.Vuln, note advis
 		if !ok {
 			continue
 		}
-		dec := rules.EvaluateSecurity(e.Limits, u, d.Package, typ, e.now())
+		dec := rules.EvaluateSecuritySeverity(e.Limits, u, d.Package, typ, e.now(), note.Severity)
 		if !dec.Enabled {
 			continue
 		}

@@ -267,9 +267,6 @@ Everything else:
     runtime has run a ripple verification in a per-minor image. Host toolchain downloads shipped
     (`RIPPLE_GO_TOOLCHAIN_DOWNLOAD`); left from them: a downloaded release is never pruned, and a pre-release
     (`go1.27rc1`) is not fetched.
-172. **OSV: security-bypass by severity.** `security-bypass` (entry 51) is per update entry and all or nothing. A
-    `severity: [high, critical]` qualifier (bypass only for those) and a per-advisory cap on PRs opened past the limit were left
-    out until real use shows whether a repo wants them.
 174. **Archive on the hosts that still do not report it.** GitLab, Gitea/Forgejo and Bitbucket Data Center now read an
     archive from their listing (entry 107); the Lister hosts SCM-Manager and Gerrit still drop an archived repo from
     the listing, which forgets it with its jobs. SCM-Manager's repository object has an archived flag in its source
@@ -383,3 +380,6 @@ Everything else:
     matching now agree with `packaging` on a recorded vector table (internal/pypi/testdata/pep440.json, regenerate with
     scripts/gen-pep440-vectors.py). Still open: `releases` is documented as deprecated in favour of the PEP 691 index and
     could be dropped, 429 handling for PyPI, and a private index (needs credentials, so a human decision).
+212. **OSV: cap the PRs a security bypass opens.** `security-bypass: [open-pull-requests-limit]` (with the optional
+    `security-bypass-severity`) still opens one PR per advisory past the limit, so one advisory that affects many modules
+    opens that many. A per-advisory cap was left out until real use shows a repo wants it.

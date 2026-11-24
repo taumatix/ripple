@@ -327,13 +327,13 @@ func (r *runner) plan(jobs []model.Job, deps []model.Dependency) []*prPlan {
 			}
 			dec := rules.Evaluate(r.e.Limits, u, d.Package, typ, j.ReleasedAt, now)
 			if it.advisory != nil {
-				dec = rules.EvaluateSecurity(r.e.Limits, u, d.Package, typ, now)
+				dec = rules.EvaluateSecuritySeverity(r.e.Limits, u, d.Package, typ, now, it.advisory.Severity)
 			}
 			if !dec.Enabled {
 				ignored = true
 				continue
 			}
-			if it.advisory != nil && u.Bypasses(config.BypassLimit) {
+			if it.advisory != nil && u.BypassesSeverity(config.BypassLimit, it.advisory.Severity) {
 				it.bypassLimit = true
 			}
 			if dec.NotBefore.After(notBefore) {

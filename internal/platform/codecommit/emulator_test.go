@@ -222,4 +222,32 @@ func TestEmulatorCodeCommitHost(t *testing.T) {
 			t.Fatalf("README.md = %q, %v", got, err)
 		}
 	})
+	t.Run("checkout, commit, push a ripple branch and open the pull request", func(t *testing.T) {
+		// ROADMAP 188: the whole clone is served (the fallback subtest above asserts the files), so
+		// drive the rest of ripple's write path: edit, push a ripple/ branch through the
+		// SigV4 git password, and open and list the pull request through the host.
+		ws, err := c.Checkout(ctx, repo)
+		if err != nil {
+			t.Fatalf("checkout: %v", err)
+		}
+		defer ws.Close()
+		if err := ws.WriteFile("PUSHED.txt", []byte("pushed\n")); err != nil {
+			t.Fatal(err)
+		}
+		pushed, err := ws.CommitAndPush(ctx, "ripple/pushed", "add PUSHED.txt")
+		if err != nil || !pushed {
+			t.Fatalf("CommitAndPush = %v, %v", pushed, err)
+		}
+		pr, err := c.CreatePR(ctx, repo, platform.PRSpec{Head: "ripple/pushed", Base: "main", Title: "pushed", Body: "b"})
+		if err != nil {
+			t.Fatalf("CreatePR on a pushed branch: %v", err)
+		}
+		open, err := c.ListOpenPRs(ctx, repo, "ripple/")
+		if err != nil || len(open) != 1 || open[0].Number != pr.Number || open[0].Head != "ripple/pushed" {
+			t.Fatalf("open %+v, %v, want %d on ripple/pushed", open, err, pr.Number)
+		}
+		if open[0].HeadSHA == "" {
+			t.Errorf("the listed pull request carries no head commit: %+v", open[0])
+		}
+	})
 }

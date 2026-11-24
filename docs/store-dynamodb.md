@@ -53,11 +53,15 @@ Billing is on-demand. `Store.EnsureTable` creates both.
   starves the others.
 
 - **Eventual consistency.** A GSI is always eventually consistent; `ConsistentRead` is
-  not available on it. A dependency written a moment before a release lands may be missed
-  by that release's fan-out, and a job marked done may appear in one more due-jobs query.
-  The first is closed by the repo re-scan on push and by the roadmap's backfill entry; the
-  second is harmless because the job key is idempotent and a finished job is re-read with a
-  strongly consistent GetItem before it runs.
+  not available on it. A job marked done may appear in one more due-jobs query: harmless,
+  because the job key is idempotent and a finished job is re-read with a strongly consistent
+  GetItem before it runs. A dependency written a moment before a release lands is not missed:
+  `ReplaceDependencies` writes a registration item (`PK=FRESH#<package>`, `SK=<repo>\x1f<dependency key>`,
+  with the time) beside every dependency row new to the repo, and `ListDependents` adds the rows
+  those items from the last five minutes name, read with strongly consistent `BatchGetItem`, to what
+  the index returns. The row is the truth: a dependency dropped or re-versioned since is reported as
+  it now is. Items older than the window are deleted by the read that finds them. A rescan that adds
+  no row writes none.
 - **Hot partitions are sharded.** Two index partitions concentrate traffic: the pending-job queue
   and a very popular package's dependents. Both are spread over shards chosen by a stable hash
   (FNV-1a): a job by its key, a dependency by its repo.

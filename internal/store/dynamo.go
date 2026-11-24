@@ -448,6 +448,7 @@ func (d *Dynamo) ReplaceDependencies(ctx context.Context, repo string, deps []mo
 	deps = append([]model.Dependency(nil), deps...)
 	SortDependencies(deps)
 	rows := map[string]bool{}
+	now := time.Now()
 	for _, dep := range deps {
 		dep.Repo = repo
 		base := pkgBase(dep.Datasource, dep.Package)
@@ -471,6 +472,11 @@ func (d *Dynamo) ReplaceDependencies(ctx context.Context, repo string, deps []mo
 		seen[k.SK] = true
 		if _, had := have[k.SK]; !had {
 			delta[base]++
+			m, err := attributevalue.MarshalMap(freshItem(base, repo, k.SK, now))
+			if err != nil {
+				return err
+			}
+			reqs = append(reqs, types.WriteRequest{PutRequest: &types.PutRequest{Item: m}})
 		}
 		m, err := attributevalue.MarshalMap(depAttrs{item: k, Repo: repo, File: dep.File, Manager: dep.Manager, Datasource: dep.Datasource, Package: dep.Package, Version: dep.Version})
 		if err != nil {
@@ -513,7 +519,8 @@ func (d *Dynamo) ListRepoDependencies(ctx context.Context, repo string) ([]model
 	return out, wrapD("list repo dependencies", err)
 }
 
-// ListDependents reads gsi1, which is eventually consistent. It issues one Query per
+// ListDependents reads gsi1, which is eventually consistent, and adds the registrations of the
+// last few minutes from the table itself (dynamo_fresh.go). It issues one Query per
 // dependent shard of the package (at most MaxShards, default one), concurrently up to the
 // configured bound; the merged result is sorted, so it does not depend on completion order.
 func (d *Dynamo) ListDependents(ctx context.Context, ds, pkg string) ([]model.Dependency, error) {
@@ -533,8 +540,39 @@ func (d *Dynamo) ListDependents(ctx context.Context, ds, pkg string) ([]model.De
 		return nil, wrapD("list dependents", err)
 	}
 	var out []model.Dependency
+	have := map[model.Dependency]bool{}
 	for _, p := range parts {
+		for _, dep := range p {
+			have[dep] = true
+		}
 		out = append(out, p...)
+	}
+	fresh, err := d.freshDependents(ctx, base)
+	if err != nil {
+		return nil, wrapD("list dependents", err)
+	}
+	if len(fresh) > 0 {
+		// The row read from the table is current; an index row for the same dependency
+		// (same repo, file and package) may carry an older version, so it gives way.
+		type ident struct{ repo, file, ds, pkg string }
+		id := func(x model.Dependency) ident { return ident{x.Repo, x.File, x.Datasource, x.Package} }
+		now := map[ident][]model.Dependency{}
+		for _, a := range fresh {
+			dep := model.Dependency{Repo: a.Repo, File: a.File, Manager: a.Manager, Datasource: a.Datasource, Package: a.Package, Version: a.Version}
+			if pkgBase(dep.Datasource, dep.Package) == base && !have[dep] {
+				now[id(dep)] = append(now[id(dep)], dep)
+			}
+		}
+		kept := out[:0]
+		for _, dep := range out {
+			if _, replaced := now[id(dep)]; !replaced {
+				kept = append(kept, dep)
+			}
+		}
+		out = kept
+		for _, deps := range now {
+			out = append(out, deps...)
+		}
 	}
 	SortDependencies(out)
 	return out, nil

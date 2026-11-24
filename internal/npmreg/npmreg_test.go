@@ -89,3 +89,29 @@ func TestNewest(t *testing.T) {
 		t.Errorf("no latest tag: %q", got)
 	}
 }
+
+func TestPackumentReadsDistAndShape(t *testing.T) {
+	c := serve(t, 200, `{"dist-tags":{"latest":"1.1.0"},"versions":{
+	  "1.0.0":{"dist":{"tarball":"https://r/x/-/x-1.0.0.tgz","integrity":"sha512-AAA"},"dependencies":{"a":"^1"},"engines":{"node":">=4"}},
+	  "1.1.0":{"dist":{"tarball":"https://r/x/-/x-1.1.0.tgz","integrity":"sha512-BBB"},"engines":{"node":">=4"},"dependencies":{"a":"^1"},"optionalDependencies":{}},
+	  "1.2.0":{"dependencies":{"a":"^1","b":"^2"}}}}`, nil)
+	pv, err := c.Packument(context.Background(), "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, _ := pv.Lookup("1.0.0")
+	b, _ := pv.Lookup("1.1.0")
+	n, _ := pv.Lookup("1.2.0")
+	if a.Tarball != "https://r/x/-/x-1.0.0.tgz" || a.Integrity != "sha512-AAA" || b.Integrity != "sha512-BBB" || n.Integrity != "" {
+		t.Errorf("dist: %+v %+v %+v", a, b, n)
+	}
+	if a.Shape != b.Shape {
+		t.Errorf("key order and an empty optionalDependencies do not change the shape:\n%s\n%s", a.Shape, b.Shape)
+	}
+	if a.Shape == n.Shape {
+		t.Error("a new dependency changes the shape")
+	}
+	if _, ok := pv.Lookup("9.9.9"); ok {
+		t.Error("lookup of an unknown version")
+	}
+}

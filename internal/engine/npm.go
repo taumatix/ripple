@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"path"
 	"sort"
+	"strings"
 
 	"github.com/taumatix/ripple/internal/manager"
 	"github.com/taumatix/ripple/internal/model"
@@ -189,33 +191,120 @@ func (r *runner) npmGuard(d model.Dependency) string {
 	return ""
 }
 
-// noteLockfiles records the lockfiles beside a package.json that ripple changed.
-func (r *runner) noteLockfiles(d model.Dependency) {
+// noteLockfiles handles the lockfiles beside a package.json that ripple changed: a
+// package-lock.json or npm-shrinkwrap.json that can be moved without npm is rewritten,
+// every other one is recorded for the PR body.
+func (r *runner) noteLockfiles(d model.Dependency, version string) {
 	dir := path.Dir(d.File)
 	for _, name := range lockfiles {
 		p := path.Join(dir, name)
-		if _, err := r.ws.ReadFile(p); err == nil {
-			if r.npmLocks == nil {
-				r.npmLocks = map[string]bool{}
+		if _, err := r.ws.ReadFile(p); err != nil {
+			continue
+		}
+		why := "ripple rewrites only package-lock.json and npm-shrinkwrap.json"
+		if name == "package-lock.json" || name == "npm-shrinkwrap.json" {
+			var err error
+			if why, err = r.refreshNpmLock(p, d, version); err != nil {
+				r.e.log().Warn("npm lockfile not rewritten", "file", p, "err", err)
+				why = "the file could not be written: " + err.Error()
 			}
-			r.npmLocks[p] = true
+		}
+		if why == "" {
+			if r.npmLocksDone == nil {
+				r.npmLocksDone = map[string]bool{}
+			}
+			r.npmLocksDone[p] = true
+			continue
+		}
+		if r.npmLocks == nil {
+			r.npmLocks, r.npmLockWhy = map[string]bool{}, map[string]string{}
+		}
+		r.npmLocks[p] = true
+		if r.npmLockWhy[p] == "" {
+			r.npmLockWhy[p] = d.Package + ": " + why
 		}
 	}
 }
 
-// npmNotes is the PR body section for lockfiles ripple could not regenerate.
+// refreshNpmLock rewrites the locked entry of d.Package in the lockfile at p to
+// version, from the registry's metadata, when that is exactly what npm would do: a
+// leaf package (see manager.PlanNpmLock) whose new version has the same dependencies,
+// bin, engines and install shape as the locked one, comes from the same registry host
+// and is newer. It returns "" when it rewrote the file, else the reason it did not.
+func (r *runner) refreshNpmLock(p string, d model.Dependency, version string) (string, error) {
+	content, err := r.ws.ReadFile(p)
+	if err != nil {
+		return "", err
+	}
+	plan, err := manager.PlanNpmLock(content, d.Package, d.Version)
+	if err != nil {
+		return strings.TrimPrefix(err.Error(), manager.ErrLockDeclined.Error()+": "), nil
+	}
+	if r.e.Npm == nil {
+		return "no registry client to read the package's metadata from", nil
+	}
+	pv, err := r.e.Npm.Packument(r.ctx, d.Package)
+	if err != nil {
+		return "the registry's metadata could not be read: " + err.Error(), nil
+	}
+	old, okOld := pv.Lookup(plan.Version)
+	nw, okNew := pv.Lookup(version)
+	switch {
+	case !okOld || !okNew:
+		return fmt.Sprintf("the registry does not list both %s and %s", plan.Version, version), nil
+	case semver.Compare("v"+version, "v"+plan.Version) <= 0:
+		return fmt.Sprintf("the lockfile already holds %s", plan.Version), nil
+	case old.Integrity != "" && old.Integrity != plan.Integrity:
+		return "the locked integrity is not the registry's for " + plan.Version, nil
+	case nw.Integrity == "" || nw.Tarball == "":
+		return "the registry gave no tarball and integrity for " + version, nil
+	case old.Shape != nw.Shape:
+		return fmt.Sprintf("%s and %s differ in dependencies or install metadata", plan.Version, version), nil
+	case !sameOrigin(plan.Resolved, nw.Tarball):
+		return "the locked tarball and the registry's are on different hosts", nil
+	}
+	newSpec := d.Version
+	if spec, ok := manager.ParseNpmSpec(d.Version); ok {
+		newSpec = spec.Text(version)
+	}
+	out, err := plan.Apply(d.Package, newSpec, version, nw.Tarball, nw.Integrity)
+	if err != nil {
+		return strings.TrimPrefix(err.Error(), manager.ErrLockDeclined.Error()+": "), nil
+	}
+	return "", r.ws.WriteFile(p, out)
+}
+
+func sameOrigin(a, b string) bool {
+	ua, ea := url.Parse(a)
+	ub, eb := url.Parse(b)
+	return ea == nil && eb == nil && ua.Scheme != "" && ua.Scheme == ub.Scheme && strings.EqualFold(ua.Host, ub.Host)
+}
+
+// npmNotes is the PR body for the lockfiles: those ripple rewrote, and those it could
+// not regenerate.
 func (r *runner) npmNotes() string {
-	if len(r.npmLocks) == 0 {
-		return ""
+	list := func(m map[string]bool, why map[string]string) string {
+		var files []string
+		for f := range m {
+			files = append(files, f)
+		}
+		sort.Strings(files)
+		s := ""
+		for _, f := range files {
+			s += "- `" + f + "`"
+			if why != nil && why[f] != "" {
+				s += ": " + why[f]
+			}
+			s += "\n"
+		}
+		return s
 	}
-	var files []string
-	for f := range r.npmLocks {
-		files = append(files, f)
+	s := ""
+	if len(r.npmLocksDone) > 0 {
+		s += "\n## Lockfiles rewritten without npm\n\nripple never runs npm. For these lockfiles it changed only the moved package's own entry (version, tarball URL and integrity from the registry's metadata) and the project's range, because the new version has the same dependencies and install metadata as the locked one. License and funding fields of the entry were kept as they were. Run `npm ci` or your package manager's install to confirm before merging:\n\n" + list(r.npmLocksDone, nil)
 	}
-	sort.Strings(files)
-	s := "\n## Lockfiles not regenerated\n\nripple edits package.json only: it never runs npm, yarn or pnpm. These lockfiles still hold the old resolution, so run your package manager's install to refresh them before merging (CI with a frozen lockfile will fail until you do):\n\n"
-	for _, f := range files {
-		s += "- `" + f + "`\n"
+	if len(r.npmLocks) > 0 {
+		s += "\n## Lockfiles not regenerated\n\nripple edits package.json only: it never runs npm, yarn or pnpm. These lockfiles still hold the old resolution, so run your package manager's install to refresh them before merging (CI with a frozen lockfile will fail until you do):\n\n" + list(r.npmLocks, r.npmLockWhy)
 	}
 	return s
 }

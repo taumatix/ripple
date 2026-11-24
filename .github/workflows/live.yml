@@ -1,0 +1,21 @@
+name: live
+# Read-only tests against the real public services (proxy.golang.org, index.golang.org, api.osv.dev, ...).
+# Not run on pull requests: a third party's outage must not block a merge. Run it by hand on a branch
+# that changes a provider or a feed, and weekly to notice an upstream that moved.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 5 * * 1"
+permissions:
+  contents: read
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: go proxy, go index and OSV (anonymous, a handful of requests per test)
+        run: go test -tags live -count=1 -v ./internal/livetest ./internal/feed ./internal/advisory ./internal/e2e -run 'Live'

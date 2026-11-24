@@ -11,7 +11,9 @@ upstream:
     format: "GET /index?since=<RFC3339>&limit=<n>; new-line delimited JSON, oldest first, one object per line with Path, Version, Timestamp; entries with Timestamp >= since"
     docs: https://go.dev/ref/mod#module-proxy
     verified-against: "a real response from index.golang.org, copied into internal/feed/goindex_test.go"
-    checked: 2026-11-22
+    verified-live: "2026-11-24 (go test -tags live ./internal/feed, .github/workflows/live.yml): since is inclusive (the first entry is golang.org/x/text v0.3.0 at 2019-04-10T19:08:52Z), pages are oldest first, a recent window holds fresh releases"
+    unverified: "behaviour at the rate limit; a feed gap or a rewritten past"
+    checked: 2026-11-24
   - name: github-rest-api
     kind: http-api
     reference: https://docs.github.com/en/rest
@@ -76,8 +78,10 @@ upstream:
     format: "GOPROXY protocol, used only by the go command that verifies a major bump (go mod tidy, build, vet); ripple itself does not call it"
     major-versions: https://go.dev/ref/mod#major-version-suffixes
     rules: "/vN suffix required from v2, /v1 not allowed, gopkg.in paths always .vN, +incompatible marks pre-module v2+ versions"
-    verified-against: "the go command in internal/e2e against a fake proxy (internal/testutil/goproxy.go); not recorded from proxy.golang.org"
-    checked: 2026-11-22
+    verified-against: "the go command in internal/e2e against a fake proxy (internal/testutil/goproxy.go)"
+    verified-live: "2026-11-24 (go test -tags live ./internal/feed): feed.GoProxyLookup against proxy.golang.org: @latest for pkg/errors, Masterminds/semver (upper-case path escaped as !masterminds) and go-redis/redis/v8; an unknown module answers 404 with a text body and is not an error; @v/list is unsorted; go.mongodb.org/mongo-driver's go.mod retracts versions the list still shows"
+    unverified: "a module whose @latest is retracted (the lookup does not read retractions); the pre-release-only fallback; Retry-After and 429 (ripple's clients do not honour them: ROADMAP entry below)"
+    checked: 2026-11-24
   - name: container-runtimes
     kind: cli
     reference: https://github.com/apple/container
@@ -193,8 +197,9 @@ upstream:
     unused: [POST /v1/query, all.zip]
     rate-limits: "none documented; ripple makes one list request and at most RIPPLE_OSV_MAX_FETCH record requests per RIPPLE_OSV_INTERVAL"
     verified-live: "2026-11-23, four read-only requests (one querybatch of five queries, one record, the list size, the list): querybatch accepts the version with and without a v prefix for Go and answers alike; stdlib and toolchain are both queryable names (stdlib 1.21.0: 90 ids; toolchain 1.21.0: 28); a stdlib record carries introduced 1.21.0-0 events (GO-2023-2041); modified_id.csv was 453940 bytes and 9989 lines; two more single-query querybatch requests (stdlib and toolchain 1.21.0) gave 90 and 28 ids with no next_page_token and the two id sets were disjoint, so a stdlib record was not also listed under toolchain for that version"
-    unverified: "tested against a fake (querybatch included, whose matching is ripple's own code, not OSV's), never against a running ripple pointed at real OSV; that real querybatch ever returns next_page_token for Go (90 ids in one result did not, and the page size is not documented as below 1000); querybatch limits beyond the documented 1000 queries; stdlib and toolchain records overlapping for versions other than 1.21.0; any rate limit or abuse blocking of api.osv.dev; whether modified_id.csv is ever rewritten out of order; the delay between an id appearing in the CSV and /v1/vulns/{id} serving it (a 404 is skipped, so an advisory could be missed); database_specific.severity is a GitHub field outside the OSV schema; an 'introduced' only range that carries a 'limit'; SEMVER ranges of records that mix ecosystems"
-    checked: 2026-11-23
+    verified-live-2: "2026-11-24 (go test -tags live ./internal/advisory ./internal/e2e): GO-2021-0113 and GO-2022-0969 parse and assess; GET /v1/vulns/GO-1900-0000 is 404 (ErrNotFound); querybatch gives the same affected set as ripple's own evaluator for pinned versions, with and without the v prefix, an unaffected version gives an empty result; stdlib 1.21.0 gave about 90 ids and unversioned stdlib 182, neither with next_page_token; modified_id.csv is newest first with nanosecond timestamps (about 457 KB, 10074 lines) and the early stop reads only the head; a ripple run (history check) pointed at real OSV for golang.org/x/text v0.3.6 opened security PRs and left one open, for the highest fix, in 7 requests"
+    unverified: "that real querybatch ever returns next_page_token for Go (neither stdlib query did, so pagination is not testable live); querybatch limits beyond the documented 1000 queries; stdlib and toolchain records overlapping for versions other than 1.21.0; any rate limit or abuse blocking of api.osv.dev; whether modified_id.csv is ever rewritten out of order; withdrawn records; the delay between an id appearing in the CSV and /v1/vulns/{id} serving it (a 404 is skipped, so an advisory could be missed); database_specific.severity is a GitHub field outside the OSV schema; an 'introduced' only range that carries a 'limit'; SEMVER ranges of records that mix ecosystems"
+    checked: 2026-11-24
 ```
 
 Not pinned, because they are not wire contracts: `git` (any version with `GIT_CONFIG_COUNT`,

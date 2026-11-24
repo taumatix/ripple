@@ -101,11 +101,10 @@ Everything else:
     Kubernetes Jobs backend, and publish an updater image per ecosystem so a repo's build never runs next to the
     App key. Later, behind the plugin mechanism (entry 33): a dependency collector as an isolated container with the
     same limits.
-52. **OSV: finish the live run.** Four read-only requests on 2026-11-23 settled the querybatch version
-    format and the stdlib and toolchain names (UPSTREAM.md `verified-live`). Two more
-    requests (2026-11-23): stdlib and toolchain 1.21.0 gave disjoint id sets and no next_page_token. Still open: a
-    ripple run pointed at real OSV end to end, a querybatch result large enough to paginate, rate limits, CSV
-    ordering, and the 404 delay.
+52. **OSV: what a live run still cannot show.** On 2026-11-24 a ripple run pointed at real OSV, the record parser, querybatch
+    against ripple's own evaluator, the CSV order and the 404 were all run live (`live.yml`, UPSTREAM.md `verified-live`).
+    Still open: a querybatch result large enough to paginate (no Go query returned `next_page_token`), rate limits and
+    abuse blocking, the delay between an id in the CSV and its record, and withdrawn records.
 58. **Prove the credentialed container path live.** `RIPPLE_GOPROXY_TOKEN` under a container backend (GOPROXY
     userinfo over https) is covered by argv and refusal tests only, not run against a real container and an
     https proxy. Also offer an image with a C toolchain and headers, and a preflight that checks it for `cgo: true`.
@@ -349,3 +348,11 @@ Everything else:
     and no test. Make the GitLab and Gitea fakes report it and add the supersede e2e for each; Bitbucket Cloud
     (`source.commit.hash`), Data Center (`fromRef.latestCommit`) and Azure DevOps (`lastMergeSourceCommit`) still
     report none, so a touched PR there stays touched until it closes.
+178. **Honour Retry-After and 429 in the feed and advisory clients.** `feed.GoIndex`, `feed.GoProxyLookup` and
+    `advisory.Client` treat a 429 or 503 as a plain error and retry on the next poll; only the live-test transport
+    (`internal/livetest`) waits out `Retry-After`. Add it (capped, bounded attempts) with a fake that answers 429 first.
+179. **Supersede on a later run.** Within one run, PRs opened for the same module are now closed by the next one (fixed
+    with the live OSV run). A sweep on a later run did not close lower PRs in one observed case after a rerun and a tick;
+    reproduce it with a fake and either fix it or explain it in docs/osv.md.
+180. **Live: a module whose `@latest` is retracted.** `feed.GoProxyLookup` reads `@latest` and the list but not
+    retractions; pin a module whose latest is retracted and a pre-release-only module, and decide what ripple proposes.

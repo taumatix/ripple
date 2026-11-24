@@ -83,7 +83,7 @@ own fidelity tests, not ripple's behaviour, so they say where to look, not that 
 - **`git clone --depth 1` fails** ("Server does not support shallow clients"); `gitws.Checkout` now falls back to a
   whole clone. Whether the emulator serves that is only known from the workflow's run: the test asserts the
   checkout's files when it does and logs the refusal when it does not (ROADMAP 182). Push is not driven.
-  Not covered either: The SNS/EventBridge receiver is not driven: the receiver only trusts AWS
+  Not covered either: the SNS/EventBridge receiver is not driven: the receiver only trusts AWS
   certificate URLs.
 - The job installs the emulator's CA into the runner's system store because ripple's git runs with a clean
   environment and no CA override.

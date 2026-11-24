@@ -342,11 +342,6 @@ Everything else:
     and sorts first), so it skips only the oldest pages. A registry-specific API that lists newest first (if Docker Hub
     or ghcr has one) would stop after one page; check what each really offers (`live.yml`) before building it, and keep
     `TagsFrom` as the fallback.
-196. **GitHub: wait out a rate limit on the other reads too.** Only the tag, commit and release reads wait
-    (`Client.Retry`); `ListOpenPRs`, the PR-touched checks and the issue reads still return the `RateLimitError` at once and
-    hold the installation back until the reset. Decide whether those should wait (they run inside a job, where a 30s wait
-    holds a worker) or keep deferring, and say why in the code. The 429 and 403 shapes are from GitHub's docs and the
-    fake; no real api.github.com limit has been provoked.
 197. **`container-runtimes (docker)`: the reaped container that was still listed.** `TestContainerRuntimeLive` failed once
     ("the container survived its timeout (Reap left it)", run 45391499375, head 0fd4151) and passed on retry. Two causes fit
     and the log cannot tell them apart: (a) Docker removes a `--rm` container itself when `kill` stops it, so `rm -f` answers

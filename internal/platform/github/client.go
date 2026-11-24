@@ -70,7 +70,7 @@ type Client struct {
 	Sandbox sandbox.Backend
 	// Now is the clock a Retry-After is counted from; nil means time.Now.
 	Now func() time.Time
-	// Retry bounds the waiting on a rate-limited read of a tag, commit or release (a 429,
+	// Retry bounds the waiting on a rate-limited read (a tag, commit, release, PR list, PR check or issue search; a 429,
 	// or a 403 carrying Retry-After or an exhausted X-RateLimit-Remaining, waited until
 	// Retry-After or X-RateLimit-Reset). The zero value is three attempts, none waited on
 	// longer than 30s. Writes are never retried.
@@ -139,8 +139,12 @@ func checkRepo(r model.Repo) error {
 	return nil
 }
 
+// do sends one request. A GET is a read and waits out a rate limit per c.Retry: it runs inside a job
+// (a PR list, an issue search, a PR check), c.Retry caps the wait so a worker is held for a bounded
+// time, and giving up still holds the installation back via RateLimitError. A write is never repeated
+// blindly and returns the limit at once.
 func (c *Client) do(ctx context.Context, repo model.Repo, method, rawURL string, in, out any) (int, error) {
-	return c.doWith(ctx, repo, method, rawURL, in, out, false)
+	return c.doWith(ctx, repo, method, rawURL, in, out, method == http.MethodGet)
 }
 
 // isRateLimited reports a primary or secondary rate-limit answer.

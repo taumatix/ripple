@@ -152,7 +152,7 @@ func TestCargoReqBreaking(t *testing.T) {
 			t.Errorf("%s: breaking position %d (parsed %v), want %d", spec, r.Breaking(), ok, want)
 		}
 	}
-	for _, spec := range []string{"*", ">1.2", "<2", "<=1.2", ">=1, >=2", "1.*, <2", "1.2.3-rc.1", "1.2.3.4", "", ">=1,", "1.x"} {
+	for _, spec := range []string{"*", ">1.2", "<2", "<=1.2", ">=1, >=2", "1.*, <2", "1.2.3-rc.1", "1.2.3.4", "", ">=1,", "1.x.x", "x"} {
 		if _, ok := ParseCargoReq(spec); ok {
 			t.Errorf("%q must not parse", spec)
 		}
@@ -309,6 +309,41 @@ func TestRustVersionNewer(t *testing.T) {
 	} {
 		if got := RustVersionNewer(tc.need, tc.have); got != tc.want {
 			t.Errorf("RustVersionNewer(%q, %q) = %v", tc.need, tc.have, got)
+		}
+	}
+}
+
+// `1.x` and `1.2.X` are cargo's other spellings of a wildcard; the letter written is kept.
+func TestCargoXWildcardsAndUnderscoreSections(t *testing.T) {
+	in := "[dependencies]\na = \"1.x\"\nb = { version = \"1.2.X\" }\n\n[dev_dependencies]\nc = \"1.0.0\"\n\n[build_dependencies.d]\nversion = \"2.0.0\"\n\n[target.'cfg(unix)'.dev_dependencies]\ne = \"3.0.0\"\n"
+	deps, err := Cargo{Dir: "/"}.Extract("Cargo.toml", []byte(in))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, d := range deps {
+		got[d.Package] = d.Version
+	}
+	want := map[string]string{"a": "1.x", "b": "1.2.X", "c": "1.0.0", "d": "2.0.0", "e": "3.0.0"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v", got)
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Fatalf("got %v", got)
+		}
+	}
+	for _, tc := range []struct{ pkg, ver, to, from, into string }{
+		{"a", "1.x", "2.3.4", `"1.x"`, `"2.x"`},
+		{"b", "1.2.X", "1.4.0", `"1.2.X"`, `"1.4.X"`},
+		{"c", "1.0.0", "1.5.0", `c = "1.0.0"`, `c = "1.5.0"`},
+	} {
+		out, err := Cargo{Dir: "/"}.Apply([]byte(in), model.Dependency{File: "Cargo.toml", Package: tc.pkg, Version: tc.ver}, "", tc.to)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.pkg, err)
+		}
+		if w := strings.Replace(in, tc.from, tc.into, 1); string(out) != w {
+			t.Errorf("%s:\n%s", tc.pkg, out)
 		}
 	}
 }

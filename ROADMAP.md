@@ -337,11 +337,6 @@ Everything else:
     container and the daemon then started it (a product race, harmless for a minutes-long job timeout, real for a short
     one). The live test now logs `inspect` of a container still present after the wait: still running means (b), in which
     case `Reap` should look again after a short delay, bounded. Act on the next failure's log, not before.
-198. **Cargo: requirements still left alone, and a corpus check.** A bare `*`, a lone `>` or `<`, several lower bounds and
-    the `x`/`X` wildcards are not read; `dev_dependencies` and `build_dependencies` (underscore aliases) are not
-    sections. The TOML scanner (`internal/manager/toml.go`) was checked against a handful of real manifests and the
-    unit tables, not a corpus of crates.io manifests, and it skips a file it cannot parse with a warning. The same
-    newest-only target still applies to npm (see 147).
 199. **npm: compound ranges, hyphen ranges and the other sections.** Partial ranges, x-ranges, `>=` floors and `||` unions
     are done (docs/npm.md). Still left alone: compound ranges (`>=1.2.3 <2`; the floor can move only while the new version
     stays under the bound), hyphen ranges, `>` and `<=`, a current prerelease, `peerDependencies`, `overrides`/`resolutions`,
@@ -383,3 +378,9 @@ Everything else:
     the others, which keep ignoring a mismatch as before. Only the GitHub lookup ran, against the fake host.
 205. **Webhooks: the rest of the streamed-parse cost.** One string value or key is now capped at 16 KiB while the signature is unchecked, so a forged body with one huge `ref` costs 16 KiB, not up to 16 MiB; the whole budget (`maxExtract`, 16 MiB, reachable by many fields each under the cap) is unchanged and unmeasured on a busy receiver. GitLab with a plain secret token (no signing key) still reads its header-authenticated body whole before parsing it; Azure DevOps, Gerrit, SCM-Manager and CodeCommit authenticate from headers and read whole, bounded by their `maxBody`.
 206. **DynamoDB hygiene: measure it, and decide on self-repair.** The hygiene commands and the server's drift check now list packages from the `PKGS` index (one Query; a table from before it is Scanned once, ROADMAP 176) instead of Scanning every item for `DEP#` keys. Still nobody has timed the check or a per-package recount on a table with millions of items or on real AWS with provisioned capacity, so the suggested page and pause are arithmetic, not measurement; every `PKGS` item shares one partition key, which a table with millions of packages would make a hot read partition (shard it by hash if it shows), and a package an older-version replica introduces after the marker is missed until the marker is deleted. The server only reports drift; whether it should recount a package it finds drifted on its own (rate-limited, one replica at a time under the lease) is undecided.
+207. **Cargo: the requirements left alone on purpose, and a corpus check.** A bare `*` matches every version (nothing to
+    move), a lone `>` or `<` and several lower bounds have no one floor to raise, so they stay unread; `x`/`X` wildcards
+    and the underscore section spellings are read now. The TOML scanner (`internal/manager/toml.go`) was checked against
+    a handful of real manifests and the unit tables, not a corpus of crates.io manifests, and it skips a file it cannot
+    parse with a warning: run it over a sample of real manifests and record the miss rate. The same newest-only target
+    still applies to npm (see 147).

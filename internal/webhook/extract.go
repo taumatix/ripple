@@ -22,6 +22,10 @@ import (
 const (
 	// maxExtract caps the bytes of values held while the signature is unchecked.
 	maxExtract = 16 << 20
+	// maxValue caps one string value (or key) the extractor decodes, so one forged field cannot
+	// take the whole maxExtract budget before the signature is checked. Far above any ref,
+	// repository name or path a host sends.
+	maxValue = 16 << 10
 	// maxDepth bounds nesting so a forged body cannot exhaust the stack.
 	maxDepth = 64
 )
@@ -327,6 +331,9 @@ func (s *scanner) skipString() error {
 // readString reads a string whose opening quote is already read and returns it decoded.
 func (s *scanner) readString(dst []byte) ([]byte, error) {
 	for {
+		if len(dst) > maxValue {
+			return nil, fmt.Errorf("a string longer than %d KiB", maxValue>>10)
+		}
 		c, err := s.r.ReadByte()
 		if err != nil {
 			return nil, unexpected(err)

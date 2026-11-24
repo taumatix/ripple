@@ -321,12 +321,6 @@ Everything else:
     install. A fold racing a replica still running the old version can leave a package only in the legacy cursor until the
     next read folds it again. Cursors named `<group>#<key>` written before per-package keys carry no index attributes on
     DynamoDB and are not listed by group; none existed.
-191. **Webhooks: what the streamed parse still costs.** Every receiver now parses a signed body as it streams
-    (`webhook.Extractor`), so none holds one whole. Left: the extractor keeps up to 16 MiB of values while the signature is
-    unchecked, so a forged body with one huge field it reads (a `ref`) costs that much per inflight request, up from
-    64 KiB; measure on a busy receiver and lower `maxExtract` or cap per-field length if it matters. GitLab with a plain
-    secret token (no signing key) still reads its header-authenticated body whole before parsing it; Azure DevOps,
-    Gerrit, SCM-Manager and CodeCommit authenticate from headers and read whole, bounded by their `maxBody`.
 192. **Backfill lookup: real proxy spot-checks.** The far-major probe (`RIPPLE_BACKFILL_MAJORS`) and the lookup are
     pinned against the fake proxy only. A prerelease-only real module and a real retraction have not been tried
     against proxy.golang.org, and a raised probe has no measured cost on a repo with hundreds of new dependencies
@@ -394,3 +388,4 @@ Everything else:
     but only when the id names this repo's own name (a recreated repo). Not done: the host answering with a
     different name for the stored id (a rename missed twice), and an implementation for GitLab, Gitea/Forgejo and
     the others, which keep ignoring a mismatch as before. Only the GitHub lookup ran, against the fake host.
+205. **Webhooks: the rest of the streamed-parse cost.** One string value or key is now capped at 16 KiB while the signature is unchecked, so a forged body with one huge `ref` costs 16 KiB, not up to 16 MiB; the whole budget (`maxExtract`, 16 MiB, reachable by many fields each under the cap) is unchanged and unmeasured on a busy receiver. GitLab with a plain secret token (no signing key) still reads its header-authenticated body whole before parsing it; Azure DevOps, Gerrit, SCM-Manager and CodeCommit authenticate from headers and read whole, bounded by their `maxBody`.

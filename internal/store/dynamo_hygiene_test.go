@@ -164,6 +164,13 @@ func TestDynamoHygieneScansArePaced(t *testing.T) {
 		seedLegacy(t, db, table, 12)
 		const pause = 40 * time.Millisecond
 		paced := newDynamoTable(t, db, table, store.WithScanPaging(5, pause))
+		// The scan that builds the package index is paced too, and a cancelled one leaves no
+		// marker, so the next check scans again.
+		cctx, cancel := context.WithTimeout(ctx, pause/2)
+		defer cancel()
+		if _, err := paced.CheckDependentCounts(cctx); err == nil {
+			t.Fatal("a cancelled context did not end a paced scan")
+		}
 		var before int
 		if fake != nil {
 			before = fake.Calls("Scan")
@@ -181,14 +188,6 @@ func TestDynamoHygieneScansArePaced(t *testing.T) {
 			if pages := fake.Calls("Scan") - before; pages < 3 {
 				t.Fatalf("scan pages = %d, want at least 3 of 5 items", pages)
 			}
-		}
-		cctx, cancel := context.WithTimeout(ctx, pause/2)
-		defer cancel()
-		if _, err := paced.CheckDependentCounts(cctx); err == nil {
-			t.Fatal("a cancelled context did not end a paced scan")
-		}
-		if _, err := paced.CheckDependentCounts(ctx); err != nil {
-			t.Fatalf("the check after a cancelled one: %v", err)
 		}
 	})
 }

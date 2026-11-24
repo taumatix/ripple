@@ -19,6 +19,8 @@ Billing is on-demand. `Store.EnsureTable` creates both.
 | lease | `LEASE#<name>` | `META` | | |
 | repo listing | `REPOS` | `<repo>` | | |
 | repo listing built | `REPOSMETA` | `BUILT` | | |
+| package index | `PKGS` | `<PKG#datasource#package>` | | |
+| package index built | `PKGSMETA` | `BUILT` | | |
 
 ## Queries
 
@@ -108,10 +110,13 @@ Billing is on-demand. `Store.EnsureTable` creates both.
       then. The index is eventually consistent, so a recount straight after a write can miss that write; the
       next recount fixes it. `ripple dynamodb check-counts` lists the packages whose counter disagrees with the
       index (`(*Dynamo).CheckDependentCounts`, read only) and `ripple dynamodb recount` recounts every package
-      (`RecountAllDependents`, needs the option). Both Scan the table to find the packages, so they are
+      (`RecountAllDependents`, needs the option). Both list the packages from the package index (`PKGS`, one item per package that has had a dependent,
+      written the first time a process adds one; a superset, which `recount` prunes) with one Query. A table from before
+      the index is Scanned once to build it, then a marker (`PKGSMETA`/`BUILT`) is written; delete that item to rebuild
+      (needed only if a replica of an older version added packages after the marker). They are
       operator commands; the server only reads (below), and never recounts on its own.
       `RIPPLE_DYNAMODB_SCAN_PAGE=<items>` and `RIPPLE_DYNAMODB_SCAN_PAUSE_MS=<ms>` (both default 0, unpaced) pace
-      every such Scan, in the commands and in the server's check: a page reads at most that many items (before the
+      every such Scan (now only the one-off index build; the per-package Queries are paced by the pause), in the commands and in the server's check: a page reads at most that many items (before the
       filter, which is what consumes read capacity) and the next is requested the pause later; a recount or check
       also waits the pause between packages. Pick them from the table's provisioned read capacity: a page of
       100 items every 100ms is about 1000 items a second. `RIPPLE_DYNAMODB_DRIFT_CHECK_INTERVAL=<duration>`

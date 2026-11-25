@@ -65,12 +65,17 @@ PyPI reports `requires_python` per file. A repo's Python is the lowest version i
 `>=3.9,<4`, `~=3.9`, `^3.9`, `==3.11.*` and `3.11` is 3.9, 3.9, 3.9, 3.11 and 3.11 (of Poetry's `||` alternatives, the lowest).
 
 A release whose files all state a `Requires-Python` that excludes that floor is **skipped**, the job recorded as skipped
-with the reason, and no PR is opened, as for a Cargo `rust-version` that the repo's compiler cannot build. A file that
+with the reason, as for a Cargo `rust-version` that the repo's compiler cannot build. A file that
 states none admits the release; so does a repo that declares no Python, a floor ripple cannot read (an upper bound only,
 `pypy3.10`), or a `Requires-Python` clause it does not understand (`===`). The decision is deliberately the safe one:
-the floor is tested, not the whole supported range, so `>=3.9` against a release that needs `>=3.9.1` is skipped. The
-job is skipped, not retargeted to the newest release the Python can run: that wants the watcher to know each repo's
-Python, which it does not read (ROADMAP 217).
+the floor is tested, not the whole supported range, so `>=3.9` against a release that needs `>=3.9.1` is skipped.
+
+When it skips a release, ripple then looks for the newest **older** release that the repo's Python can run, that the
+dependency's specifier allows and that is still an update for it, and queues a job for that release if the repo's
+`ignore`, `schedule` and cooldown rules allow it (the skipped job's reason ends "retargeted to X"). The retargeted job
+is a normal job, so it opens its own PR on the next run. The watcher itself stays unaware of a repo's Python: the
+retarget happens when the repo is cloned, at the point the guard already reads the files. A repo that is already at
+that release gets nothing.
 
 ## Lock files
 

@@ -721,6 +721,7 @@ func (r *runner) apply(it item) (bool, error) {
 		}
 		if d.Datasource == model.DatasourcePip {
 			if why := r.pipGuard(d, it.job.Version); why != "" {
+				why += r.pipRetarget(it.job, d)
 				if r.skipReasons == nil {
 					r.skipReasons = map[string]string{}
 				}

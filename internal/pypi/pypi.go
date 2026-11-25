@@ -169,6 +169,15 @@ func (p Project) Newest(cur string) string { return p.NewestWhere(cur, nil) }
 
 // NewestWhere is Newest restricted to versions allow accepts (nil accepts all).
 func (p Project) NewestWhere(cur string, allow func(Version) bool) string {
+	if allow == nil {
+		return p.NewestRelease(cur, nil)
+	}
+	return p.NewestRelease(cur, func(_ Release, v Version) bool { return allow(v) })
+}
+
+// NewestRelease is Newest restricted to releases allow accepts (nil accepts all); allow
+// sees the release (its Requires-Python) with its parsed version.
+func (p Project) NewestRelease(cur string, allow func(Release, Version) bool) string {
 	best, ok := Parse(cur)
 	if !ok {
 		return ""
@@ -176,7 +185,7 @@ func (p Project) NewestWhere(cur string, allow func(Version) bool) string {
 	out := ""
 	for _, r := range p.Releases {
 		v, ok := Parse(r.Version)
-		if !ok || r.Yanked || r.Files == 0 || !v.IsRelease() || Compare(v, best) <= 0 || (allow != nil && !allow(v)) {
+		if !ok || r.Yanked || r.Files == 0 || !v.IsRelease() || Compare(v, best) <= 0 || (allow != nil && !allow(r, v)) {
 			continue
 		}
 		best, out = v, r.Version

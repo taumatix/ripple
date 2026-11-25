@@ -85,6 +85,19 @@ own. The wording of system notes is from GitLab's source, not its API documentat
 close less, never more. All of this is verified only against the fake GitLab; the excerpts it relies on are in
 `docs/vendor/gitlab/supersede-excerpts.md`.
 
+## Head polling
+
+The client implements `app.HeadLister`, so a project whose default branch moved is re-scanned at the next discovery
+even when its push webhook never arrived. The project listing carries no commit, so this is **one extra read per
+project** each discovery, one at a time: the listing without `simple` (it carries `default_branch`,
+`docs/vendor/gitlab/api_projects.md`) then `GET /projects/:id/repository/branches/:branch` (`commit.id`,
+`docs/vendor/gitlab/api_branches.md`). A 429 ends the listing and the app keeps what it remembered; another failure
+leaves that project out for the round, and an empty project (no default branch) is left out. The first discovery
+after a start already reports every head, so a head that moved while ripple was down is re-scanned on the first
+round. The branch reads are not counted as scan cost by the conformance suite. The project's `last_activity_at` is
+deliberately not used as a stand-in: it moves on issues, comments and merge requests, including ripple's own, which
+would re-scan every project it touched. Verified against the fake only.
+
 ## What is unverified
 
 No GitLab instance was available when this was written. Everything below is from the vendored docs and is

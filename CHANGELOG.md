@@ -10,6 +10,8 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
 
 - Head polling (Gerrit, CodeCommit) catches a head that moved while ripple was down on the first discovery after a start instead of the second: the default branch each host reports is used in the same round, and CodeCommit reads unknown default branches 100 at a time with `BatchGetRepositories`. Verified against the fakes only.
 
+- GitLab implements `app.HeadLister`: a member project whose default-branch head moved is re-scanned at the next discovery even if its push webhook never arrived, at one extra read per project per discovery (see `docs/platform-gitlab.md`); verified against the fake only. The other webhook hosts are still push-only.
+
 ## [0.4.0] - 2026-11-25
 
 Additive release: no public API was removed or changed. Opt-in ecosystems: Helm, Bundler, Composer, NuGet, Maven and Terraform

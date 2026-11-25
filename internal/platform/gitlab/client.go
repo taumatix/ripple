@@ -136,6 +136,9 @@ type Client struct {
 
 	mu      sync.Mutex
 	limited map[string]time.Time
+	// defaults is each project's default branch as ListRepoHeads last read it; ListRepos reports
+	// it, so a moved head can be re-scanned on the right branch.
+	defaults map[string]string
 }
 
 var (
@@ -144,6 +147,9 @@ var (
 	_ platform.PRCloser    = (*Client)(nil)
 	_ platform.RateLimiter = (*Client)(nil)
 	_ platform.Lister      = (*Client)(nil)
+	_ interface {
+		ListRepoHeads(context.Context) (map[string]string, error)
+	} = (*Client)(nil) // app.HeadLister
 )
 
 func (c *Client) now() time.Time {
@@ -466,7 +472,69 @@ func ownSystemNote(body string) bool {
 // A project or group access token's bot is a member of its project or group, so it
 // lists exactly what it was issued for. An error leaves the previous listing in place.
 func (c *Client) ListRepos(ctx context.Context) ([]model.Repo, error) {
-	return c.listProjects(ctx, false)
+	repos, err := c.listProjects(ctx, false)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for i := range repos {
+		repos[i].DefaultBranch = c.defaults[repos[i].FullName]
+	}
+	return repos, err
+}
+
+// ListRepoHeads is the commit each member project's default branch points at, for the app's head
+// comparison (app.HeadLister). The project listing without `simple` carries `default_branch`
+// (docs/vendor/gitlab/api_projects.md) but no commit, so a project costs one
+// GET /projects/:id/repository/branches/:branch (`commit.id`, api_branches.md) per discovery, one at
+// a time, on top of the listing pages. A 429 ends the listing with the rate-limit error (the app
+// then keeps what it remembered); another failure leaves that project out for the round, and a
+// project with no default branch (empty) is left out. The branches read are remembered for
+// ListRepos, which the app lists again for in the same round.
+func (c *Client) ListRepoHeads(ctx context.Context) (map[string]string, error) {
+	heads := map[string]string{}
+	seen := map[string]bool{}
+	for key, secret := range c.Tokens.all() {
+		for page := 1; page <= maxPages; page++ {
+			var ps []struct {
+				Path    string `json:"path_with_namespace"`
+				Default string `json:"default_branch"`
+			}
+			u := fmt.Sprintf("%s/projects?membership=true&archived=false&per_page=%d&page=%d", c.api(), perPage, page)
+			if _, err := c.do(ctx, key, secret, http.MethodGet, u, nil, &ps); err != nil {
+				return nil, err
+			}
+			for _, p := range ps {
+				if CheckPath(p.Path) != nil || seen[p.Path] || p.Default == "" {
+					continue
+				}
+				seen[p.Path] = true
+				var br struct {
+					Commit struct {
+						ID string `json:"id"`
+					} `json:"commit"`
+				}
+				if _, err := c.do(ctx, key, secret, http.MethodGet, c.projectURL(p.Path, "/repository/branches/"+url.PathEscape(p.Default)), nil, &br); err != nil {
+					var rl *platform.RateLimitError
+					if errors.As(err, &rl) {
+						return nil, err
+					}
+					continue
+				}
+				c.mu.Lock()
+				if c.defaults == nil {
+					c.defaults = map[string]string{}
+				}
+				c.defaults[p.Path] = p.Default
+				c.mu.Unlock()
+				if br.Commit.ID != "" {
+					heads[p.Path] = br.Commit.ID
+				}
+			}
+			if len(ps) < perPage {
+				break
+			}
+		}
+	}
+	return heads, nil
 }
 
 // ListArchivedRepos is the member projects that are archived (`archived=true`, a

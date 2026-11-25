@@ -64,6 +64,9 @@ type App struct {
 	// Maven polls the versions of the packages the repos use (ecosystem: maven); nil
 	// polls nothing.
 	Maven *engine.MavenWatcher
+	// Terraform polls the versions of the packages the repos use (ecosystem: terraform); nil
+	// polls nothing.
+	Terraform *engine.TerraformWatcher
 	// metrics and httpLatency are set by EnableMetrics; nil leaves /metrics out.
 	metrics     *metrics.Registry
 	httpLatency *metrics.Histogram
@@ -358,6 +361,7 @@ func (a *App) Tick(ctx context.Context) {
 	a.pollPackagist(ctx)
 	a.pollNuget(ctx)
 	a.pollMaven(ctx)
+	a.pollTerraform(ctx)
 	a.pollAdvisories(ctx)
 	a.housekeep(ctx)
 	if _, err := a.Engine.RunDue(ctx); err != nil && ctx.Err() == nil {
@@ -436,6 +440,9 @@ func (a *App) sources() map[string]electedSource {
 	}
 	if a.Maven != nil {
 		m["maven"] = a.Maven
+	}
+	if a.Terraform != nil {
+		m["terraform"] = a.Terraform
 	}
 	if a.Advisories != nil {
 		m["osv"] = a.Advisories
@@ -576,6 +583,9 @@ func (a *App) pollLoop(ctx context.Context) {
 			a.jobs.Wake()
 		}
 		if a.pollMaven(ctx) > 0 {
+			a.jobs.Wake()
+		}
+		if a.pollTerraform(ctx) > 0 {
 			a.jobs.Wake()
 		}
 		a.housekeep(ctx)
@@ -865,6 +875,21 @@ func (a *App) pollMaven(ctx context.Context) int {
 		a.Log.Error("maven poll", "err", err)
 	case n > 0:
 		a.Log.Info("maven poll enqueued jobs", "jobs", n)
+	}
+	return n
+}
+
+// pollTerraform polls the versions of the gems in use and returns how many jobs it enqueued.
+func (a *App) pollTerraform(ctx context.Context) int {
+	if a.Terraform == nil {
+		return 0
+	}
+	n, err := a.pollSource(ctx, a.Terraform)
+	switch {
+	case err != nil && ctx.Err() == nil:
+		a.Log.Error("terraform poll", "err", err)
+	case n > 0:
+		a.Log.Info("terraform poll enqueued jobs", "jobs", n)
 	}
 	return n
 }

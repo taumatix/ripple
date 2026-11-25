@@ -44,6 +44,8 @@ func Build(cfg *config.Repo) ([]Manager, error) {
 			out = append(out, Nuget{Dir: u.Directory})
 		case "maven":
 			out = append(out, Maven{Dir: u.Directory})
+		case "terraform":
+			out = append(out, Terraform{Dir: u.Directory})
 		case "pip":
 			out = append(out, Pip{Dir: u.Directory})
 		case "regex":

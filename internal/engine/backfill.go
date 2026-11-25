@@ -67,7 +67,7 @@ func (e *Engine) backfill(ctx context.Context, repo string, cfg *config.Repo, pr
 	}
 	key := func(d model.Dependency) string { return d.Datasource + "|" + d.Package }
 	skip := func(d model.Dependency) bool {
-		return d.Datasource == model.DatasourceGoToolchain || d.Datasource == model.DatasourceGitHubTags || d.Datasource == model.DatasourceDocker || d.Datasource == model.DatasourceNpm || d.Datasource == model.DatasourceCargo || d.Datasource == model.DatasourcePip || d.Datasource == model.DatasourceHelm || d.Datasource == model.DatasourceRubygems || d.Datasource == model.DatasourcePackagist || d.Datasource == model.DatasourceNuget || d.Datasource == model.DatasourceMaven
+		return d.Datasource == model.DatasourceGoToolchain || d.Datasource == model.DatasourceGitHubTags || d.Datasource == model.DatasourceDocker || d.Datasource == model.DatasourceNpm || d.Datasource == model.DatasourceCargo || d.Datasource == model.DatasourcePip || d.Datasource == model.DatasourceHelm || d.Datasource == model.DatasourceRubygems || d.Datasource == model.DatasourcePackagist || d.Datasource == model.DatasourceNuget || d.Datasource == model.DatasourceMaven || d.Datasource == model.DatasourceTerraform
 	}
 	known := map[string]bool{}
 	for _, d := range prev {

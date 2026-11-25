@@ -84,6 +84,7 @@ const (
 	packagistPollName = "packagist"
 	nugetPollName     = "nuget"
 	mavenPollName     = "maven"
+	terraformPollName = "terraform"
 	helmPollName      = "helm"
 )
 
@@ -222,3 +223,14 @@ func (w *MavenWatcher) Elected() bool { return w.elect.isHeld() }
 
 // StepDown gives the claim up; call it when stopping.
 func (w *MavenWatcher) StepDown(ctx context.Context) { w.elect.stepDown(ctx, w.Engine) }
+
+// PollElected is Poll for replicas sharing a store; see Watcher.PollElected.
+func (w *TerraformWatcher) PollElected(ctx context.Context, ttl time.Duration) (int, bool, error) {
+	return w.elect.poll(ctx, w.Engine, feedLease(terraformPollName), ttl, w.Poll)
+}
+
+// Elected reports whether this replica held the claim at its last PollElected.
+func (w *TerraformWatcher) Elected() bool { return w.elect.isHeld() }
+
+// StepDown gives the claim up; call it when stopping.
+func (w *TerraformWatcher) StepDown(ctx context.Context) { w.elect.stepDown(ctx, w.Engine) }

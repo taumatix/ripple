@@ -81,7 +81,7 @@ a histogram of the time to serve a request by route (`webhook`, `healthz`, `repl
 the webhook acknowledgement, not the work an event queues. Without the setting the path answers 404.
 
 `GET /replica` on the webhook port answers one replica as JSON:
-`replica` (its name), `feed_poller` (whether it holds the feed election), `pollers` (every source it polls now: `feed`, `go-toolchain`, `github-actions`, `docker`, `npm`, `cargo`, `pip`, `helm`, `rubygems`, `packagist`, `nuget`, `maven`, `osv`; only configured ones), `lease_takeovers` (leases this
+`replica` (its name), `feed_poller` (whether it holds the feed election), `pollers` (every source it polls now: `feed`, `go-toolchain`, `github-actions`, `docker`, `npm`, `cargo`, `pip`, `helm`, `rubygems`, `packagist`, `nuget`, `maven`, `terraform`, `osv`; only configured ones), `lease_takeovers` (leases this
 process took over from a holder that died or stalled since it started; also logged as `lease taken over`) and
 `lease_ttl_seconds`; and the dead letters: `events_dead_lettered` (events this process gave up on since it started, a counter to alert a rise of; also logged as `event failed; dead-lettered`) and `events_dead` (how many dead events the store holds now, every replica's, falling when one is requeued or purged; left out when listing them fails, and it lists them, so scrape it at minutes, not seconds).
 

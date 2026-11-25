@@ -45,4 +45,4 @@ jobs:
         with:
           go-version-file: go.mod
       - name: every datasource, anonymous, read only
-        run: go test -tags live -count=1 -v ./internal/livetest ./internal/feed ./internal/advisory ./internal/e2e ./internal/npmreg ./internal/pypi ./internal/cratesindex ./internal/rubygems ./internal/packagist ./internal/nuget ./internal/maven ./internal/terraform ./internal/helmrepo ./internal/registry ./internal/platform/github -run 'Live'
+        run: go test -tags live -count=1 -timeout 25m -v ./internal/livetest ./internal/feed ./internal/advisory ./internal/e2e ./internal/npmreg ./internal/pypi ./internal/cratesindex ./internal/rubygems ./internal/packagist ./internal/nuget ./internal/maven ./internal/terraform ./internal/helmrepo ./internal/registry ./internal/platform/github -run 'Live'

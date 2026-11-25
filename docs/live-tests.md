@@ -16,7 +16,10 @@ They send no credential, make a handful of requests per test, wait between reque
 in the User-Agent (`internal/livetest`), honour `Retry-After`, and retry a 429 or a transient 5xx a
 bounded number of times. A service that still refuses fails the test with the HTTP status. A test
 never skips: CI fails on a skipped test. GitHub's anonymous API allows 60 requests an hour per
-address, and `internal/platform/github` uses about a dozen of them.
+address, and `internal/platform/github` uses about a dozen of them. A GitHub-hosted runner shares
+its address, so that package waits out an exhausted quota (up to about eight minutes) instead of
+failing on it, and Maven Central, which answers 429 without `Retry-After` to a busy address, gets a
+longer backoff; use `-timeout 25m` as the workflow does.
 
 CI runs them in `.github/workflows/live.yml` daily, on `workflow_dispatch`, and on pull requests that
 change a datasource package. That job is not a required check.

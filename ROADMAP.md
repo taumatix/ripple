@@ -215,7 +215,7 @@ Everything else:
     from their own index (needs `.cargo/config.toml` parsing and per-registry credentials: a human decision on where those
     live, so it stays open). A release whose `rust_version` is newer than the repo's `rust-version` is skipped and the
     newest older release that does build is proposed instead (the retargeted job keeps the refused release's ReleasedAt, so
-    the cooldown is measured against it: see 227). index.crates.io is verified live (2026-11-24); not verified:
+    the cooldown is measured against it: see 228). index.crates.io is verified live (2026-11-24); not verified:
     another registry, the largest crates, conditional requests, rate limits, `rust_version` on the real index. Also:
     `cargo:packages` is one read-modify-write cursor (see 96), versions carry no publication date, and the PR footer
     still says "module index" (see 99).
@@ -373,4 +373,4 @@ Everything else:
     one repo through the `osv-jobs` index (at most 100 jobs per advisory), so an advisory with more indexed jobs than that
     counts only the first 100 and an open PR whose job is not indexed does not count. It caps open PRs, not only the ones a
     bypass opened, and covers the repo, not the installation. Covered against the fake host only; no real repo asked for it yet.
-227. **pip: retarget residuals.** A release the repo's Python cannot run now retargets to the newest older runnable one when the repo is cloned (docs/pip.md). Left: the retargeted job takes the skipped release's `ReleasedAt`, so its cooldown counts from the newer release (no upload times are read); only the floor of the repo's Python is tested, so a repo supporting `>=3.9` is not retargeted away from a release needing `>=3.9.1`; Cargo's MSRV skip has no such fallback (ROADMAP 156); not run against the real PyPI index.
+228. **pip: retarget residuals.** A release the repo's Python cannot run now retargets to the newest older runnable one when the repo is cloned (docs/pip.md). Left: the retargeted job takes the skipped release's `ReleasedAt`, so its cooldown counts from the newer release (no upload times are read); only the floor of the repo's Python is tested, so a repo supporting `>=3.9` is not retargeted away from a release needing `>=3.9.1`; Cargo's MSRV skip has no such fallback (ROADMAP 156); not run against the real PyPI index.

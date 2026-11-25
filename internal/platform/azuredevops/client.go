@@ -41,10 +41,17 @@ const APIVersion = "7.1"
 // (the web UI documents 4000 characters).
 const maxDescription = 4000
 
-// segment is one of organization, project, repository. Azure DevOps allows spaces
-// in project and repository names; they are refused here (a residual in ROADMAP.md)
-// so every segment is safe in a URL path and a git clone URL without escaping.
+// segment is an organization name: letters, digits, . _ - and no space.
 var segment = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9._-]*$`)
+
+// nameSegment is a project or repository name. Azure DevOps allows spaces in these,
+// so a single space between other characters is accepted (not leading, trailing or
+// doubled); every other character stays refused. A name goes into a URL only through
+// esc, which escapes the space.
+var nameSegment = regexp.MustCompile(`^[A-Za-z0-9_](?:[A-Za-z0-9._-]| [A-Za-z0-9._-])*$`)
+
+// esc escapes one name for a URL path.
+func esc(name string) string { return url.PathEscape(name) }
 
 // Client is the Azure DevOps platform.Platform. It also implements AutoMerger
 // (auto-complete), RateLimiter and Lister.
@@ -119,8 +126,12 @@ func split(full string) (org, project, repo string, err error) {
 	if len(parts) != 3 {
 		return "", "", "", fmt.Errorf("azure devops repository %q is not organization/project/repository", full)
 	}
-	for _, p := range parts {
-		if !segment.MatchString(p) || p == "." || p == ".." || strings.HasSuffix(p, ".") {
+	for i, p := range parts {
+		ok := nameSegment.MatchString(p)
+		if i == 0 {
+			ok = segment.MatchString(p)
+		}
+		if !ok || p == "." || p == ".." || strings.HasSuffix(p, ".") {
 			return "", "", "", fmt.Errorf("refusing unsafe azure devops repository name %q", full)
 		}
 	}
@@ -147,7 +158,12 @@ func (c *Client) do(ctx context.Context, repo model.Repo, method, rawURL string,
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "ripple")
 	// use-personal-access-tokens.md: a PAT is the password of HTTP Basic, user name empty.
-	req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(":"+cred.Secret)))
+	// entra-oauth.md: a Microsoft Entra access token is sent as a bearer token.
+	if cred.Scheme == platform.SchemeBearer {
+		req.Header.Set("Authorization", "Bearer "+cred.Secret)
+	} else {
+		req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(":"+cred.Secret)))
+	}
 	if in != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -212,7 +228,7 @@ type prJSON struct {
 }
 
 func (c *Client) webURL(org, project, repo string, id int) string {
-	return fmt.Sprintf("%s/%s/%s/_git/%s/pullrequest/%d", c.base(), org, project, repo, id)
+	return fmt.Sprintf("%s/%s/%s/_git/%s/pullrequest/%d", c.base(), esc(org), esc(project), esc(repo), id)
 }
 
 func (p prJSON) pr(webURL string) platform.PR {
@@ -220,7 +236,7 @@ func (p prJSON) pr(webURL string) platform.PR {
 }
 
 func (c *Client) prsURL(org, project, repo string) string {
-	return fmt.Sprintf("%s/%s/%s/_apis/git/repositories/%s/pullrequests", c.base(), org, project, repo)
+	return fmt.Sprintf("%s/%s/%s/_apis/git/repositories/%s/pullrequests", c.base(), esc(org), esc(project), esc(repo))
 }
 
 // ListOpenPRs lists active pull requests (rest-pull-requests-get-list.md,
@@ -337,7 +353,7 @@ func (c *Client) ListRepos(ctx context.Context) ([]model.Repo, error) {
 			return nil, err
 		}
 		for _, p := range ps.Value {
-			if !segment.MatchString(p.Name) {
+			if !nameSegment.MatchString(p.Name) {
 				c.skip("project", p.Name)
 				continue
 			}
@@ -348,7 +364,7 @@ func (c *Client) ListRepos(ctx context.Context) ([]model.Repo, error) {
 					IsDisabled    bool   `json:"isDisabled"`
 				} `json:"value"`
 			}
-			ru := fmt.Sprintf("%s/%s/%s/_apis/git/repositories?api-version=%s", c.base(), c.Org, url.PathEscape(p.Name), APIVersion)
+			ru := fmt.Sprintf("%s/%s/%s/_apis/git/repositories?api-version=%s", c.base(), c.Org, esc(p.Name), APIVersion)
 			if err := c.do(ctx, anon, http.MethodGet, ru, nil, &rs); err != nil {
 				return nil, err
 			}
@@ -356,7 +372,7 @@ func (c *Client) ListRepos(ctx context.Context) ([]model.Repo, error) {
 				if r.IsDisabled || r.DefaultBranch == "" {
 					continue // disabled, or empty: nothing to scan
 				}
-				if !segment.MatchString(r.Name) {
+				if !nameSegment.MatchString(r.Name) {
 					c.skip("repository", r.Name)
 					continue
 				}
@@ -371,7 +387,7 @@ func (c *Client) ListRepos(ctx context.Context) ([]model.Repo, error) {
 
 func (c *Client) skip(kind, name string) {
 	if c.Log != nil {
-		c.Log.Warn("azure devops name skipped: only letters, digits, . _ - are supported", "kind", kind, "name", name)
+		c.Log.Warn("azure devops name skipped: only letters, digits, . _ - and single inner spaces are supported", "kind", kind, "name", name)
 	}
 }
 
@@ -384,7 +400,7 @@ func (c *Client) Checkout(ctx context.Context, repo model.Repo) (platform.Worksp
 	}
 	o := gitws.Options{GitBase: c.GitBase, AuthorName: c.AuthorName, AuthorEmail: c.AuthorEmail, WorkDir: c.WorkDir,
 		GoProxy: c.GoProxy, GoSumDB: c.GoSumDB, GoCacheDir: c.GoCacheDir, Sandbox: c.Sandbox}
-	cloneURL := fmt.Sprintf("%s/%s/%s/_git/%s", strings.TrimRight(c.GitBase, "/"), org, project, name)
+	cloneURL := fmt.Sprintf("%s/%s/%s/_git/%s", strings.TrimRight(c.GitBase, "/"), esc(org), esc(project), esc(name))
 	return gitws.Checkout(ctx, o, cloneURL, repo.DefaultBranch, func(ctx context.Context) (platform.Credential, error) {
 		return c.Credentials.Credential(ctx, repo)
 	})
@@ -424,7 +440,7 @@ func (c *Client) ChangedFiles(ctx context.Context, fullName string, commits []st
 				OriginalPath string `json:"originalPath"`
 			} `json:"changes"`
 		}
-		u := fmt.Sprintf("%s/%s/%s/_apis/git/repositories/%s/commits/%s/changes?api-version=%s", c.base(), org, project, name, id, APIVersion)
+		u := fmt.Sprintf("%s/%s/%s/_apis/git/repositories/%s/commits/%s/changes?api-version=%s", c.base(), esc(org), esc(project), esc(name), id, APIVersion)
 		if err := c.do(ctx, repo, http.MethodGet, u, nil, &res); err != nil {
 			return nil, err
 		}

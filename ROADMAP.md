@@ -40,12 +40,10 @@ auth model, rate limits); the notes below are what I expect, **unverified** unti
     so per-workspace webhook registration is a follow-up.
 14. **Azure DevOps follow-ups** (the host itself shipped, see [docs/platform-azuredevops.md](docs/platform-azuredevops.md)):
     verify it against a real organisation (every wire shape is from the docs and a fake: repo name accepted as
-    `repositoryId`, `autoCompleteSetBy` taken from `createdBy.id`, the exact service-hook headers); Entra ID
-    bearer tokens, which need a `gitws` scheme for sending `Authorization: Bearer` to git as `http.extraHeader`;
-    names with spaces (projects and repos often have them: escape path segments in REST and clone URLs); register
-    a repo on `git.repo.created` and forget it on `git.repo.deleted` / `git.repo.renamed` instead of waiting for
-    the next listing; the commit-changes lookup (merge commits, paging past
-    one page of changes) is unverified against a real organisation.
+    `repositoryId`, `autoCompleteSetBy` taken from `createdBy.id`, the exact service-hook headers, the
+    `git.repo.created`/`deleted`/`renamed` payloads, and spaces in names as `%20` in REST and clone URLs); the
+    commit-changes lookup (merge commits, paging past one page of changes) is unverified against a real
+    organisation.
 15. **Bitbucket Server / Data Center against a real instance.** The host shipped from vendored docs and a
     fake only (docs/platform-bitbucketserver.md "Unverified"). Run the conformance flow against a real
     Data Center (Atlassian's evaluation licence, no containers on the agent host), recording whether a 429
@@ -374,3 +372,10 @@ Everything else:
     reaches the sweep, so a beaten PR beside a security PR waits for the next plan in that repo; the sweep is not run
     from the advisory reconcile, and it only pairs a security toolchain PR with a PR of the same repo, not across a
     fork or a second base branch.
+
+224. **Azure DevOps: mint and refresh Entra tokens.** `platform.Credential{Scheme: platform.SchemeBearer}` is sent as
+    `Authorization: Bearer` on REST and on git (tested against the fake), but nothing in `internal/app` builds one: the host
+    still reads only `RIPPLE_AZUREDEVOPS_PAT`, and an Entra access token lives about an hour. Add a `Credentials` source that
+    gets a token for a service principal (client secret, certificate or workload identity federation) or a managed
+    identity and renews it before expiry, with its settings in `docs/platform-azuredevops.md`; the fake would need a token
+    endpoint. See `docs/vendor/azuredevops/entra-oauth.md`.

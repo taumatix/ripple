@@ -103,3 +103,30 @@ func pushPayload(project, repo, updated, defaultBranch, sha string) map[string]a
 // (service-hooks-events.md), so the receiver asks the commit changes API; see
 // platformtest.FilelessPushes.
 func (f *adoFixture) FilelessPushes() {}
+
+// RenameRepo is platformtest.ReportsRenames: the git.repo.renamed service hook
+// (service-hooks-events.md, "Repository renamed").
+func (f *adoFixture) RenameRepo(t *testing.T, hook, from, to string) {
+	t.Helper()
+	f.az.RenameRepo(from, to)
+	oldName, newName := from[len(org)+len(project)+2:], to[len(org)+len(project)+2:]
+	body, _ := json.Marshal(map[string]any{
+		"id":        fmt.Sprintf("b0b0b0b0-bbbb-cccc-dddd-%012d", atomic.AddInt64(&pushSeq, 1)),
+		"eventType": "git.repo.renamed", "publisherId": "tfs",
+		"resource": map[string]any{
+			"oldName": oldName, "newName": newName,
+			"repository": map[string]any{"id": "f5f5", "name": newName, "defaultBranch": "refs/heads/main",
+				"project": map[string]any{"id": "a6a6", "name": project}},
+		},
+	})
+	req, _ := http.NewRequest(http.MethodPost, hook, bytes.NewReader(body))
+	req.SetBasicAuth(hookUser, hookSecret)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("git.repo.renamed webhook: %d", resp.StatusCode)
+	}
+}

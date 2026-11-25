@@ -235,14 +235,19 @@ func (w *workspace) gitNetIO(ctx context.Context, dir string, gio gitIO, args ..
 			return "", err
 		}
 		if c.Secret != "" {
-			basic := base64.StdEncoding.EncodeToString([]byte(c.Username + ":" + c.Secret))
+			header := "Bearer " + c.Secret
+			secrets := []string{c.Secret}
+			if c.Scheme != platform.SchemeBearer {
+				basic := base64.StdEncoding.EncodeToString([]byte(c.Username + ":" + c.Secret))
+				header, secrets = "Basic "+basic, append(secrets, basic)
+			}
 			w.mu.Lock()
-			w.secrets = append(w.secrets, c.Secret, basic)
+			w.secrets = append(w.secrets, secrets...)
 			w.mu.Unlock()
 			env = append(append([]string(nil), w.env...),
 				"GIT_CONFIG_COUNT=1",
 				"GIT_CONFIG_KEY_0=http."+w.base+"/.extraHeader",
-				"GIT_CONFIG_VALUE_0=Authorization: Basic "+basic,
+				"GIT_CONFIG_VALUE_0=Authorization: "+header,
 			)
 		}
 	}

@@ -71,7 +71,7 @@ func New(ctx context.Context, s *config.Server, log *slog.Logger) (a *App, st st
 		}
 	}()
 	hosts, err := BuildHosts(ctx, HostDeps{Server: s, Getenv: os.Getenv, HTTP: httpc, Log: log,
-		Git: gitws.Options{WorkDir: s.WorkDir, GoProxy: s.GoProxy, Sandbox: sb}})
+		Git: gitws.Options{WorkDir: s.WorkDir, GoProxy: s.GoProxy, GoSumDB: s.GoSumDB, Sandbox: sb}})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -90,7 +90,7 @@ func New(ctx context.Context, s *config.Server, log *slog.Logger) (a *App, st st
 	if s.GoToolchainDownload {
 		// A token is only accepted alongside an explicit RIPPLE_GOPROXY (config checks),
 		// so it never reaches the default public proxy.
-		eng.GoInstaller = &gotool.Installer{Dir: s.GoToolchainDir, Proxy: s.GoProxy, User: s.GoProxyUser, Token: s.GoProxyToken}
+		eng.GoInstaller = &gotool.Installer{Dir: s.GoToolchainDir, Proxy: s.GoProxy, SumDB: s.GoSumDB, User: s.GoProxyUser, Token: s.GoProxyToken}
 	}
 	eng.Lookup = &feed.GoProxyLookup{BaseURL: s.GoProxy, User: s.GoProxyUser, Token: s.GoProxyToken,
 		UserAgent: "ripple (+https://github.com/taumatix/ripple)"}

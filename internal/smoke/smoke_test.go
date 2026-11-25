@@ -61,7 +61,18 @@ func repoHTTP(t *testing.T, root string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := &http.Server{Handler: h}
+	// git sends a push of more than http.postBuffer chunked, and net/http/cgi needs a Content-Length.
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.ContentLength < 0 {
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			r.Body, r.ContentLength, r.TransferEncoding = io.NopCloser(bytes.NewReader(body)), int64(len(body)), nil
+		}
+		h.ServeHTTP(w, r)
+	})}
 	go srv.Serve(ln)
 	t.Cleanup(func() { srv.Close() })
 	return "http://" + ln.Addr().String()
@@ -92,8 +103,17 @@ func TestRippleOpensExactlyOnePR(t *testing.T) {
 
 	gh := testutil.NewGitHub(t)
 	idx := testutil.NewIndex(t)
+	proxy := testutil.NewGoProxy(t)
+	for _, v := range []string{"v1.0.0", "v1.1.0"} {
+		proxy.Publish("example.com/lib", v, map[string]string{"lib.go": "package lib\n"})
+	}
 	const repo = "acme/uses-lib"
-	gh.AddRepo(repo, map[string]string{"go.mod": "module example.com/uses-lib\n\ngo 1.22\n\nrequire (\n\texample.com/lib v1.0.0\n)\n"})
+	gh.AddRepo(repo, map[string]string{
+		"go.mod": "module example.com/uses-lib\n\ngo 1.22\n\nrequire (\n\texample.com/lib v1.0.0\n)\n",
+		// A library, not a main package: `go build ./...` over a single main package writes its binary
+		// into the checkout, and ripple would commit it (ROADMAP, new entry).
+		"uses.go": "package useslib\n\nimport _ \"example.com/lib\"\n",
+	})
 	gitRoot := strings.TrimPrefix(gh.GitBase, "file://")
 	if out, err := exec.Command("chmod", "-R", "a+rwX", gitRoot).CombinedOutput(); err != nil {
 		t.Fatalf("chmod: %v\n%s", err, out)
@@ -122,6 +142,8 @@ func TestRippleOpensExactlyOnePR(t *testing.T) {
 			"RIPPLE_GITHUB_GIT_URL=" + gitURL,
 			"RIPPLE_FEED_URL=" + idx.URL,
 			"RIPPLE_FEED_INTERVAL=1m",
+			// The fake module has no entry in the public checksum database, so `go mod tidy` would drop it.
+			"RIPPLE_GOPROXY=" + proxy.URL, "RIPPLE_GOSUMDB=off",
 			"RIPPLE_MINIMUM_RELEASE_AGE=0",
 		}
 	}
@@ -218,12 +240,12 @@ func TestRippleOpensExactlyOnePR(t *testing.T) {
 	if prs[0].Base != "main" || !strings.HasPrefix(prs[0].Head, "ripple/go/") {
 		t.Errorf("unexpected PR %+v", prs[0])
 	}
-	// The branch carries the repository's go.mod. Its content is not asserted: every Go update runs
-	// `go mod tidy`, which verifies modules against GOSUMDB, and the server has no setting to turn that
-	// off for the fake module here, so the unimported example.com/lib requirement is tidied away. The
-	// go.mod and go.sum contents are covered by internal/e2e, which can set GoSumDB.
-	if got, ok := gh.FileAt(repo, prs[0].Head, "go.mod"); !ok || !strings.Contains(got, "module example.com/uses-lib") {
-		t.Errorf("go.mod missing or wrong on %s:\n%s", prs[0].Head, got)
+	// The branch carries the bump: go.mod requires the new version and go.sum was refreshed for it.
+	if got, ok := gh.FileAt(repo, prs[0].Head, "go.mod"); !ok || !strings.Contains(got, "example.com/lib v1.1.0") {
+		t.Errorf("go.mod missing the bump on %s:\n%s", prs[0].Head, got)
+	}
+	if got, ok := gh.FileAt(repo, prs[0].Head, "go.sum"); !ok || !strings.Contains(got, "example.com/lib v1.1.0 h1:") {
+		t.Errorf("go.sum missing the bumped module on %s:\n%s", prs[0].Head, got)
 	}
 }
 

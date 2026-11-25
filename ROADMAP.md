@@ -213,8 +213,9 @@ Everything else:
     result can only be checked by a live test that runs `cargo metadata --locked` on a runner.
 156. **Cargo: other registries, and an MSRV fallback.** A `registry =` dependency and a repo with `replace-with` are skipped, not read
     from their own index (needs `.cargo/config.toml` parsing and per-registry credentials: a human decision on where those
-    live, so it stays open). A release whose `rust_version` is newer than the repo's `rust-version` is now skipped, but the
-    newest release that does build is not proposed instead. index.crates.io is verified live (2026-11-24); not verified:
+    live, so it stays open). A release whose `rust_version` is newer than the repo's `rust-version` is skipped and the
+    newest older release that does build is proposed instead (the retargeted job keeps the refused release's ReleasedAt, so
+    the cooldown is measured against it: see 227). index.crates.io is verified live (2026-11-24); not verified:
     another registry, the largest crates, conditional requests, rate limits, `rust_version` on the real index. Also:
     `cargo:packages` is one read-modify-write cursor (see 96), versions carry no publication date, and the PR footer
     still says "module index" (see 99).

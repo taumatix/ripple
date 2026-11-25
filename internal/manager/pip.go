@@ -44,7 +44,7 @@ func (p Pip) Matches(f string) bool {
 	}
 	base := path.Base(f)
 	switch {
-	case base == "pyproject.toml" || base == "Pipfile":
+	case base == "pyproject.toml" || base == "Pipfile" || base == "setup.cfg":
 		return true
 	case !strings.HasSuffix(base, ".txt") && !strings.HasSuffix(base, ".in"):
 		return false
@@ -56,6 +56,8 @@ func (p Pip) Matches(f string) bool {
 
 var (
 	pipClauseRE = regexp.MustCompile(`^(==|~=|>=)\s*(\d+(?:\.\d+){0,3})$`)
+	// pipWildRE is the wildcard match `==1.*` / `==1.2.*`: a prefix of the release.
+	pipWildRE = regexp.MustCompile(`^==\s*(\d+(?:\.\d+){0,2})\.\*$`)
 	// pipPoetryRE is Poetry's caret and tilde requirement and its bare exact version.
 	pipPoetryRE = regexp.MustCompile(`^(\^|~|)\s*(\d+(?:\.\d+){0,3})$`)
 	// pipBoundRE is a clause that may accompany a `>=` floor: an upper bound or an exclusion.
@@ -84,6 +86,9 @@ func pipFloorPart(parts []string) (idx int, floor, op string) {
 				return -1, "", ""
 			}
 			return 0, m[2], m[1]
+		}
+		if m := pipWildRE.FindStringSubmatch(parts[0]); m != nil {
+			return 0, m[1], "==*"
 		}
 		if m := pipPoetryRE.FindStringSubmatch(parts[0]); m != nil {
 			return 0, m[2], m[1]
@@ -118,6 +123,12 @@ func PipSpecFloor(spec string) (string, string) {
 // the PR a different change); every other tracked specifier accepts any newer release.
 // nil accepts everything.
 func PipSpecAllows(spec string) func(pypi.Version) bool {
+	if m := pipWildRE.FindStringSubmatch(strings.TrimSpace(spec)); m != nil {
+		// `==1.*` follows only to a release outside the prefix it matches.
+		prefix, _ := pypi.Parse(m[1])
+		n := len(strings.Split(m[1], "."))
+		return func(v pypi.Version) bool { return !pipHasPrefix(v, prefix, n) }
+	}
 	if !strings.Contains(spec, ",") {
 		return nil
 	}
@@ -125,6 +136,32 @@ func PipSpecAllows(spec string) func(pypi.Version) bool {
 		ok, known := pypi.Satisfies(spec, v)
 		return ok && known
 	}
+}
+
+// pipHasPrefix reports whether v's first n release segments equal prefix's.
+func pipHasPrefix(v, prefix pypi.Version, n int) bool {
+	for i := 0; i < n; i++ {
+		var a, b int
+		if i < len(v.Release) {
+			a = v.Release[i]
+		}
+		if i < len(prefix.Release) {
+			b = prefix.Release[i]
+		}
+		if a != b {
+			return false
+		}
+	}
+	return true
+}
+
+// pipWildSegments is the number of segments of a wildcard specifier's prefix
+// ("==1.2.*" is 2), or 0 when spec is not a single wildcard clause.
+func pipWildSegments(spec string) int {
+	if m := pipWildRE.FindStringSubmatch(spec); m != nil {
+		return len(strings.Split(m[1], "."))
+	}
+	return 0
 }
 
 // pipEntry is one tracked requirement.
@@ -149,6 +186,9 @@ func pipSpecEntry(pkg, s string, base int) (pipEntry, bool) {
 	end := rel + off
 	for end < len(s) && (s[end] >= '0' && s[end] <= '9' || s[end] == '.') {
 		end++
+	}
+	if end < len(s) && s[end] == '*' && s[end-1] == '.' {
+		end-- // a wildcard prefix: the dot belongs to the `.*`
 	}
 	return pipEntry{pkg: pkg, spec: strings.Map(func(r rune) rune {
 		if r == ' ' || r == '\t' {
@@ -405,6 +445,8 @@ func pipEntries(file string, content []byte) []pipEntry {
 		return pipPyprojectEntries(string(content))
 	case "Pipfile":
 		return pipTomlEntries(string(content), true)
+	case "setup.cfg":
+		return pipSetupCfgEntries(string(content))
 	}
 	return pipRequirementsEntries(string(content))
 }
@@ -437,13 +479,27 @@ func (p Pip) Apply(content []byte, dep model.Dependency, newPackage, newVersion 
 		if e.pkg != dep.Package || e.spec != dep.Version {
 			continue
 		}
-		out = append(out[:e.start], append([]byte(newVersion), out[e.end:]...)...)
+		out = append(out[:e.start], append([]byte(pipWildPrefix(e.spec, newVersion)), out[e.end:]...)...)
 		changed = true
 	}
 	if !changed {
 		return nil, fmt.Errorf("%s: %s%s no longer present: %w", dep.File, dep.Package, dep.Version, ErrStale)
 	}
 	return out, nil
+}
+
+// pipWildPrefix is the text that replaces a specifier's version: the new version, cut
+// (or zero-padded) to the segments of a wildcard prefix, so `==1.2.*` follows 1.3.4 to `1.3`.
+func pipWildPrefix(spec, version string) string {
+	n := pipWildSegments(spec)
+	if n == 0 {
+		return version
+	}
+	segs := strings.Split(version, ".")
+	for len(segs) < n {
+		segs = append(segs, "0")
+	}
+	return strings.Join(segs[:n], ".")
 }
 
 var (
@@ -494,4 +550,77 @@ func pipIsPyPIURL(u string) bool {
 	u = strings.TrimRight(strings.ToLower(strings.TrimSpace(u)), "/")
 	u = strings.TrimPrefix(strings.TrimPrefix(u, "https://"), "http://")
 	return u == "pypi.org/simple" || u == "pypi.org" || u == "pypi.python.org/simple"
+}
+
+var (
+	pipCfgSectionRE = regexp.MustCompile(`^\[\s*([^\]]+?)\s*\]`)
+	pipCfgKeyRE     = regexp.MustCompile(`^([^\s=:#;][^=:]*?)\s*[=:]\s*(.*)$`)
+	pipExtraKeyRE   = regexp.MustCompile(`^([^\s=#;][^=]*?)\s*=\s*(.*)$`)
+)
+
+// pipSetupCfgEntries reads a setup.cfg statically (setup.py is code and is never run):
+// `[options]` install_requires, setup_requires and tests_require, and every key of
+// `[options.extras_require]`. The value is one requirement per line, on the key's line
+// or on the indented lines after it. `file:` and `attr:` values and comment lines are
+// not requirements.
+func pipSetupCfgEntries(src string) []pipEntry {
+	var out []pipEntry
+	section, inList := "", false
+	for off := 0; off < len(src); {
+		end := len(src)
+		if nl := strings.IndexByte(src[off:], '\n'); nl >= 0 {
+			end = off + nl
+		}
+		line := strings.TrimSuffix(src[off:end], "\r")
+		lineStart := off
+		off = end + 1
+		trim := strings.TrimSpace(line)
+		if trim == "" || strings.HasPrefix(trim, "#") || strings.HasPrefix(trim, ";") {
+			continue
+		}
+		indented := line[0] == ' ' || line[0] == '\t'
+		if !indented {
+			inList = false
+			if m := pipCfgSectionRE.FindStringSubmatch(line); m != nil {
+				section = strings.ToLower(m[1])
+				continue
+			}
+			var value string
+			var valueAt int
+			switch section {
+			case "options":
+				m := pipCfgKeyRE.FindStringSubmatchIndex(line)
+				if m == nil {
+					continue
+				}
+				switch strings.ToLower(line[m[2]:m[3]]) {
+				case "install_requires", "setup_requires", "tests_require":
+					inList, value, valueAt = true, line[m[4]:m[5]], m[4]
+				}
+			case "options.extras_require":
+				if m := pipExtraKeyRE.FindStringSubmatchIndex(line); m != nil {
+					inList, value, valueAt = true, line[m[4]:m[5]], m[4]
+				}
+			}
+			if inList && value != "" {
+				out = pipCfgRequirement(out, value, lineStart+valueAt)
+			}
+			continue
+		}
+		if inList {
+			out = pipCfgRequirement(out, line, lineStart)
+		}
+	}
+	return out
+}
+
+func pipCfgRequirement(out []pipEntry, text string, base int) []pipEntry {
+	text = stripRequirementsComment(text)
+	if t := strings.TrimSpace(text); strings.HasPrefix(t, "file:") || strings.HasPrefix(t, "attr:") || strings.HasPrefix(t, "-") {
+		return out
+	}
+	if e, ok := parsePipReq(text, base); ok {
+		out = append(out, e)
+	}
+	return out
 }

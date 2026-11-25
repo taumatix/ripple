@@ -44,8 +44,8 @@ func TestPipRequirementAndPyprojectBump(t *testing.T) {
 			"svc/pyproject.toml": pipPyproject, "poetry.lock": "# lock\n"})
 		e.gh.AddRepo("acme/optout", map[string]string{"requirements.txt": pipReqs})
 		start(t, e, "acme/app", "acme/optout")
-		if n := len(e.deps("acme/app")); n != 4 {
-			t.Fatalf("requests (twice), flask-login and click are tracked, not wild or hashed: got %+v", e.deps("acme/app"))
+		if n := len(e.deps("acme/app")); n != 5 {
+			t.Fatalf("requests (twice), flask-login, click and wild are tracked, not hashed: got %+v", e.deps("acme/app"))
 		}
 
 		e.clock.Advance(time.Minute)
@@ -61,8 +61,8 @@ func TestPipRequirementAndPyprojectBump(t *testing.T) {
 		e.tick() // a replay must not open a second PR
 
 		prs := e.gh.PRs("acme/app")
-		if len(prs) != 3 {
-			t.Fatalf("one PR per project (requests, flask-login, click), got %d", len(prs))
+		if len(prs) != 4 {
+			t.Fatalf("one PR per project (requests, flask-login, click, wild), got %d", len(prs))
 		}
 		for _, pr := range prs {
 			if !strings.HasPrefix(pr.Head, "ripple/pip/") {
@@ -79,6 +79,8 @@ func TestPipRequirementAndPyprojectBump(t *testing.T) {
 				wantReqs = strings.Replace(pipReqs, "~=0.6.2", "~=0.6.10", 1)
 			case strings.Contains(pr.Head, "click"):
 				wantPyp = strings.Replace(pipPyproject, "click>=8.0", "click>=8.1.7", 1)
+			case strings.Contains(pr.Head, "wild"):
+				wantReqs = strings.Replace(pipReqs, "wild==1.*", "wild==2.*", 1)
 			default:
 				t.Fatalf("unexpected branch %q", pr.Head)
 			}
@@ -98,7 +100,7 @@ func TestPipRequirementAndPyprojectBump(t *testing.T) {
 			}
 		}
 		for _, r := range idx.Requests() {
-			if r.Authorization != "" || strings.Contains(r.Path, "hashed") || strings.Contains(r.Path, "wild") {
+			if r.Authorization != "" || strings.Contains(r.Path, "hashed") {
 				t.Errorf("request %+v: anonymous", r)
 			}
 		}

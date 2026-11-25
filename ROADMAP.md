@@ -341,10 +341,6 @@ Everything else:
     registry tag parser needs a semver-shaped number). npm still classifies `0.2.3` -> `0.3.0` as minor (Cargo uses leftmost-nonzero);
     a Dockerfile `FROM` with a `v${V}` ARG prefix and Helm `global.imageRegistry` indirection stay unread. The Cargo `*`/lone `<`
     and npm hyphen, lone `>`, peer and `overrides` forms stay unread on purpose.
-210. **pip: `setup.py`, `setup.cfg`, wildcards and multi-constraint dependencies.** Poetry, Pipfile, `.in` files and `>=1,<2`
-    floors are read now (docs/pip.md). Still not read: `setup.py` (code), `setup.cfg` `install_requires`, `==1.*` and `<`
-    only ranges, Poetry's array-of-constraints form and `*`; a real TOML parser is still the way to widen the line
-    scanner (Pipfile and Poetry inline tables are matched on one line only).
 211. **pip: drop `releases` for the PEP 691 index; rate limits; private indexes.** PEP 440 ordering and specifier
     matching now agree with `packaging` on a recorded vector table (internal/pypi/testdata/pep440.json, regenerate with
     scripts/gen-pep440-vectors.py). Still open: `releases` is documented as deprecated in favour of the PEP 691 index and
@@ -380,3 +376,10 @@ Everything else:
     must know each dependent's Python (read at scan time and stored on the dependency, or read through the workspace in
     the poll) and pass it to `NewestWhere`. Also unmeasured: only the floor is tested, so a repo supporting `>=3.9` is
     skipped for a release needing `>=3.9.1`; whether that is too strict is for a real repo to say.
+218. **pip: what is still left unread on purpose.** `setup.cfg` (`install_requires`, `setup_requires`, `tests_require`,
+    `extras_require`) and `==1.*`/`==1.2.*` are read now (docs/pip.md). `setup.py` is never read or run, a lone `<`/`<=`,
+    `!=`, a bare `*` and Poetry's array-of-constraints form (one entry per Python or platform) have no single floor to
+    raise and stay unread; an array could move each entry whose `python` marker the repo's Python matches. A
+    `setup.cfg`'s `python_requires` does not yet feed the Requires-Python guard (only `pyproject.toml`, `Pipfile` and
+    `.python-version` do). The setup.cfg reader is line-based and was checked against hand-written files, not a sample of
+    real projects (see the corpus entry for pip once one is run).

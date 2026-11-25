@@ -22,7 +22,10 @@ func TestApplicablePip(t *testing.T) {
 		t.Error("another project")
 	}
 	d.Version = "==2.*"
-	if _, ok := applicablePip(d, "requests", "3.0.0"); ok {
-		t.Error("a wildcard is not moved")
+	if typ, ok := applicablePip(d, "requests", "3.0.0"); !ok || typ != "major" {
+		t.Errorf("a wildcard follows a release outside its prefix: %v %v", typ, ok)
+	}
+	if _, ok := applicablePip(d, "requests", "2.9.0"); ok {
+		t.Error("a release the wildcard still matches is not a move")
 	}
 }

@@ -58,6 +58,11 @@ func applicablePip(d model.Dependency, pkg, version string) (rules.UpdateType, b
 	if floor == "" {
 		return "", false
 	}
+	if allow := manager.PipSpecAllows(d.Version); allow != nil {
+		if v, ok := pypi.Parse(version); !ok || !allow(v) {
+			return "", false
+		}
+	}
 	return pipClassify(floor, version)
 }
 

@@ -98,6 +98,9 @@ type Engine struct {
 	// Helm reads chart versions from chart repositories for ecosystem: helm. Nil leaves
 	// Helm dependencies without updates (see HelmWatcher).
 	Helm HelmRepos
+	// Rubygems reads gem versions from rubygems.org for ecosystem: bundler. Nil leaves
+	// Gemfile dependencies without updates (see RubygemsWatcher).
+	Rubygems RubygemsRegistry
 	// PyPI reads project versions from the PyPI JSON API for ecosystem: pip. Nil leaves
 	// pip dependencies without updates (see PipWatcher).
 	PyPI PyPIIndex
@@ -395,6 +398,9 @@ func (e *Engine) scan(ctx context.Context, repo model.Repo) error {
 		return err
 	}
 	if err := e.notePackages(ctx, model.DatasourceHelm, helmPackagesCursor, deps); err != nil {
+		return err
+	}
+	if err := e.notePackages(ctx, model.DatasourceRubygems, rubygemsPackagesCursor, deps); err != nil {
 		return err
 	}
 	if err := e.Store.ReplaceDependencies(ctx, repo.FullName, deps); err != nil {

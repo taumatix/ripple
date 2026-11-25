@@ -59,6 +59,14 @@ upstream:
     verified-against: "docs/vendor/helm pages fetched 2026-11-25; tests use internal/testutil/helmrepo.go, a fake written from them"
     unverified: "everything against a real repository: large indexes, redirects, authentication, the semantics of created; oci:// and @alias repositories and constraint ranges are skipped, not read"
     checked: 2026-11-25
+  - name: rubygems-api
+    kind: http-api
+    reference: https://guides.rubygems.org/rubygems-org-api/
+    docs: https://guides.rubygems.org/gemfile-and-gemspec/
+    format: "GET https://rubygems.org/api/v1/versions/{gem}.json, anonymous; array of {number, platform, prerelease, ...}; Gemfile gem lines"
+    verified-against: "docs/vendor/rubygems guides fetched 2026-11-25; tests use internal/testutil/rubygems.go, a fake written from them"
+    unverified: "everything against the real service: rate limits, very large gems, whether yanked versions are listed; the Bundler Gemfile man page was not vendored, so the Gemfile grammar is read from the guides only"
+    checked: 2026-11-25
   - name: pypi-json-api
     kind: http-api
     reference: https://docs.pypi.org/api/json/

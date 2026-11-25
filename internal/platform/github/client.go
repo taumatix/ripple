@@ -433,26 +433,8 @@ func (c *Client) CloseUntouchedPR(ctx context.Context, repo model.Repo, pr platf
 	if cur.NodeID == "" {
 		return false, errors.New("pull request has no node id to read its description edits")
 	}
-	var edits struct {
-		Errors []struct {
-			Message string `json:"message"`
-		} `json:"errors"`
-		Data struct {
-			Node struct {
-				UserContentEdits struct {
-					TotalCount int `json:"totalCount"`
-				} `json:"userContentEdits"`
-			} `json:"node"`
-		} `json:"data"`
-	}
-	if _, err := c.do(ctx, repo, http.MethodPost, c.graphQLURL(), map[string]any{"query": editsQuery, "variables": map[string]string{"id": cur.NodeID}}, &edits); err != nil {
+	if person, err := c.editedByPerson(ctx, repo, cur.NodeID); err != nil || person {
 		return false, err
-	}
-	if len(edits.Errors) > 0 {
-		return false, fmt.Errorf("read description edits: %s", edits.Errors[0].Message)
-	}
-	if edits.Data.Node.UserContentEdits.TotalCount > 0 {
-		return false, nil
 	}
 	if _, err := c.do(ctx, repo, http.MethodPatch, fmt.Sprintf("%s/pulls/%d", base, pr.Number), map[string]string{"state": "closed"}, nil); err != nil {
 		return false, err
@@ -463,7 +445,55 @@ func (c *Client) CloseUntouchedPR(ctx context.Context, repo model.Repo, pr platf
 	return true, nil
 }
 
-const editsQuery = `query($id: ID!) { node(id: $id) { ... on PullRequest { userContentEdits(first: 1) { totalCount } } } }`
+// editsQuery reads the description's edit history and the login the token acts as, so a
+// rewrite ripple made itself (EditPRBody) is told from a person's.
+const editsQuery = `query($id: ID!) { viewer { login } node(id: $id) { ... on PullRequest { userContentEdits(first: 100) { totalCount nodes { editor { login } } } } } }`
+
+// editedByPerson reports whether anyone but the token's own identity edited the
+// description of the pull request with that node id. It answers yes on doubt: an
+// unreadable identity or a history longer than one page counts as a person's edit.
+func (c *Client) editedByPerson(ctx context.Context, repo model.Repo, nodeID string) (bool, error) {
+	var edits struct {
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+		Data struct {
+			Viewer struct {
+				Login string `json:"login"`
+			} `json:"viewer"`
+			Node struct {
+				UserContentEdits struct {
+					TotalCount int `json:"totalCount"`
+					Nodes      []struct {
+						Editor *struct {
+							Login string `json:"login"`
+						} `json:"editor"`
+					} `json:"nodes"`
+				} `json:"userContentEdits"`
+			} `json:"node"`
+		} `json:"data"`
+	}
+	if _, err := c.do(ctx, repo, http.MethodPost, c.graphQLURL(), map[string]any{"query": editsQuery, "variables": map[string]string{"id": nodeID}}, &edits); err != nil {
+		return false, err
+	}
+	if len(edits.Errors) > 0 {
+		return false, fmt.Errorf("read description edits: %s", edits.Errors[0].Message)
+	}
+	h := edits.Data.Node.UserContentEdits
+	if h.TotalCount == 0 {
+		return false, nil
+	}
+	me := edits.Data.Viewer.Login
+	if me == "" || h.TotalCount > len(h.Nodes) {
+		return true, nil
+	}
+	for _, n := range h.Nodes {
+		if n.Editor == nil || !strings.EqualFold(n.Editor.Login, me) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
 
 const automergeMutation = `mutation($id: ID!) { enablePullRequestAutoMerge(input: {pullRequestId: $id, mergeMethod: SQUASH}) { pullRequest { number } } }`
 

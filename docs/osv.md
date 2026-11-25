@@ -51,10 +51,16 @@ If the release feed already queued the same bump behind its cooldown, the adviso
   it), ripple finishes the job that was waiting for it as skipped, closes the PR it opened for it with a comment saying
   why, and drops its dashboard entry. A PR a person touched stays open, and so does every PR when
   `close-superseded-pull-requests: false`. A dependency that already reached the fix is not "corrected": that work was
-  done. Pending jobs made before the per-advisory indexes are indexed once by a backfill that walks the repos after an upgrade (cursor `osv-jobs-backfill`); a done job from before them is found only with `RIPPLE_OSV_BACKFILL_OPEN_PRS=true` (default off): a second one-time pass (cursor `osv-jobs-backfill-prs`) lists each repo's open ripple PRs once (one host call per repo), reads the module and version from the `ripple/go/...` branch, and indexes the job when it is done, opened that PR and carries an advisory note. Only open PRs of go jobs are reached, since the branch is what names the job; a repo whose listing fails is skipped, a rate limit is retried. A PR body is not rewritten. A repo that another run holds
+  done. Pending jobs made before the per-advisory indexes are indexed once by a backfill that walks the repos after an upgrade (cursor `osv-jobs-backfill`); a done job from before them is found only with `RIPPLE_OSV_BACKFILL_OPEN_PRS=true` (default off): a second one-time pass (cursor `osv-jobs-backfill-prs`) lists each repo's open ripple PRs once (one host call per repo), reads the module and version from the `ripple/go/...` branch, and indexes the job when it is done, opened that PR and carries an advisory note. Only open PRs of go jobs are reached, since the branch is what names the job; a repo whose listing fails is skipped, a rate limit is retried. A repo that another run holds
 for more than two seconds keeps its job and PR for now: the record is remembered (cursor `osv-reconcile-retry`) and applied
 again, fetched fresh, at the start of the next polls until the repo is free. A record whose fix was raised is
   handled by the superseded-PR flow, which replaces the old PR when the new one opens.
+- **Amended records.** When OSV amends a record that still affects the version in use (a new summary, severity or CVSS),
+  ripple rewrites that advisory's line in the open PR's description, found by its start (the id, link, module and fixed
+  version ripple wrote). A description a person edited (GitHub's edit history names every editor, and only the token's
+  own login is ignored), a line a person rewrote, a closed PR and a host that cannot edit descriptions (every host but
+  GitHub today) are left as they are. Ripple's own rewrite does not count as a person's edit, so the PR can still be closed
+  by a later correction or a superseding PR. The fixed version in the line is the one the PR moves to and does not change here.
 - **Toolchain precedence.** A security `toolchain` job and a `go` directive job both rewrite the toolchain line of one
   go.mod. The security job goes first (the higher fixed version first); the other waits, with a reason naming the PR,
   until it is merged or closed. A directive or toolchain PR of ripple's that is already open and does not fix an advisory is closed, untouched and with a

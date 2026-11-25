@@ -184,11 +184,6 @@ Everything else:
     for; that Scan and the listing are verified on the in-process fake (including that the build runs once and reruns after a failed one), and DynamoDB Local runs them only in CI. A scan
     (not the sweep) still runs one history round, so a repo with over 500 pairs or 100 records is completed only by a sweep
     or a go.mod change; consider a few rounds per scan once real repo sizes are known. Postgres `ListRepos` is CI-only.
-126. **OSV: reconcile older cases.** A pending job made before the `osv-jobs` index is now indexed by a one-time backfill; a
-    done job (and so its open PR) from before the index is found by the opt-in `RIPPLE_OSV_BACKFILL_OPEN_PRS` pass, only for a go job whose
-    PR is still open (the branch names the job) and never verified against a real host; a PR body is not rewritten when a record is corrected (the fix version or
-    summary in it can be stale), and a record shared by twin GHSA and GO notes is reconciled per note. The busy-repo retry
-    list holds at most 100 ids.
 127. **OSV: conflict and pseudo-version residuals.** The beaten-PR close covers a non-security PR when a security
     toolchain PR opens (a lower security toolchain PR beside a higher one is closed by the supersede flow, pinned by an e2e
     test), and a toolchain PR opened by an older run than the security job is only held, never closed, unless the security PR opens in a later run with it open.
@@ -377,3 +372,4 @@ Everything else:
     `.python-version` do). The setup.cfg reader is line-based and was checked against hand-written files, not a sample of
     real projects (see the corpus entry for pip once one is run).
 221. **Implement `app.HeadLister` in the Lister hosts.** `App.Discover` re-scans a listed repo whose default-branch head moved once its host reports heads (`ListRepoHeads`), but no host does. Add it to the hosts with no push events (Gerrit, SCM-Manager, CodeCommit and any other `platform.Lister`) from the listing call if it carries the head, else one extra read per repo, bounded by the host's rate limit.
+222. **OSV: reconcile residuals.** The one-time `RIPPLE_OSV_BACKFILL_OPEN_PRS` pass (which finds a done job's open PR from before the `osv-jobs` index) has never run against a real host; a record shared by twin GHSA and GO notes is reconciled per note; the busy-repo retry list holds at most 100 ids. An amended record's line in a PR description is now rewritten (GitHub only, verified against the fake: that the real GraphQL `viewer { login }` of an installation token equals the editor login of the app's own description edit is assumed, and if it does not the PR is just treated as touched and left alone); the other hosts have no `PRBodyEditor` and no way yet to tell ripple's description edit from a person's.

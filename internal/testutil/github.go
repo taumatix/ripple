@@ -44,7 +44,13 @@ type PR struct {
 	// BodyEdited records a description edit by a human; ForcePushed a force-push of
 	// the head branch (the issue events and GraphQL report them, nothing else does).
 	BodyEdited, ForcePushed bool
+	// AppBodyEdits counts description edits made through the API by the app itself; the
+	// GraphQL edit history lists each with the app's login as editor, as GitHub does.
+	AppBodyEdits int
 }
+
+// FakeAppLogin is the login the fake GitHub reports for the app's own token.
+const FakeAppLogin = "ripple-test[bot]"
 
 // GitHub is a fake GitHub: the REST API for apps, pulls and GraphQL over HTTP, and
 // bare git repositories served from the local disk (GitBase is a file:// URL).
@@ -391,11 +397,14 @@ func (g *GitHub) handleGraphQL(w http.ResponseWriter, r *http.Request) {
 		g.calls[repo]++
 		for _, p := range g.prs[repo] {
 			if p.Number == n {
-				edits := 0
+				var nodes []string
 				if p.BodyEdited {
-					edits = 1
+					nodes = append(nodes, `{"editor":{"login":"someone"}}`)
 				}
-				_, _ = fmt.Fprintf(w, `{"data":{"node":{"userContentEdits":{"totalCount":%d}}}}`, edits)
+				for i := 0; i < p.AppBodyEdits; i++ {
+					nodes = append(nodes, `{"editor":{"login":"`+FakeAppLogin+`"}}`)
+				}
+				_, _ = fmt.Fprintf(w, `{"data":{"viewer":{"login":%q},"node":{"userContentEdits":{"totalCount":%d,"nodes":[%s]}}}}`, FakeAppLogin, len(nodes), strings.Join(nodes, ","))
 				return
 			}
 		}
@@ -575,12 +584,21 @@ func (g *GitHub) handleSub(w http.ResponseWriter, r *http.Request, repo string, 
 	case sub[0] == "pulls" && what == "" && r.Method == http.MethodPatch && g.FailClose:
 		g.fail(w, http.StatusInternalServerError, "injected close failure")
 	case sub[0] == "pulls" && what == "" && r.Method == http.MethodPatch:
-		var in struct{ State string }
-		if json.NewDecoder(r.Body).Decode(&in) != nil || in.State != "closed" {
+		var in struct {
+			State string
+			Body  *string
+		}
+		if json.NewDecoder(r.Body).Decode(&in) != nil || (in.State != "closed" && in.Body == nil) {
 			g.fail(w, http.StatusUnprocessableEntity, "bad pull request update")
 			return
 		}
-		pr.Closed = true
+		if in.State == "closed" {
+			pr.Closed = true
+		}
+		if in.Body != nil {
+			pr.Body = *in.Body
+			pr.AppBodyEdits++
+		}
 		_ = json.NewEncoder(w).Encode(prJSON(repo, pr))
 	case sub[0] == "pulls" && what == "commits" && r.Method == http.MethodGet:
 		var items []any
@@ -773,7 +791,7 @@ func prJSON(repo string, p *PR) map[string]any {
 	return map[string]any{
 		"number": p.Number, "html_url": fmt.Sprintf("https://github.example/%s/pull/%d", repo, p.Number),
 		"node_id": fmt.Sprintf("PR_%s#%d", repo, p.Number), "state": map[bool]string{false: "open", true: "closed"}[p.Closed],
-		"title": p.Title, "draft": p.Draft,
+		"title": p.Title, "draft": p.Draft, "body": p.Body,
 		"head": map[string]any{"ref": p.Head, "repo": map[string]any{"full_name": repo}}, "base": map[string]any{"ref": p.Base},
 	}
 }

@@ -68,13 +68,19 @@ type Client struct {
 
 	mu      sync.Mutex
 	limited time.Time
+	// defaults is each project's default branch as ListRepoHeads last read it; ListRepos
+	// reports it, so a moved head can be re-scanned on the right branch.
+	defaults map[string]string
 }
 
 var (
 	_ platform.Platform    = (*Client)(nil)
 	_ platform.RateLimiter = (*Client)(nil)
 	_ platform.Lister      = (*Client)(nil)
-	_ platform.PRCloser    = (*Client)(nil)
+	_ interface {
+		ListRepoHeads(context.Context) (map[string]string, error)
+	} = (*Client)(nil) // app.HeadLister
+	_ platform.PRCloser = (*Client)(nil)
 )
 
 func (c *Client) client() *http.Client {
@@ -406,7 +412,62 @@ type projectJSON struct {
 // default branch is left empty: "Get HEAD" is one call per project, and the first scan
 // learns it from the clone (engine.Scan).
 func (c *Client) ListRepos(ctx context.Context) ([]model.Repo, error) {
-	return c.listProjects(ctx, "ACTIVE")
+	repos, err := c.listProjects(ctx, "ACTIVE")
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for i := range repos {
+		repos[i].DefaultBranch = c.defaults[repos[i].FullName]
+	}
+	return repos, err
+}
+
+// ListRepoHeads is the commit each active project's default branch points at, for the app's
+// head comparison (app.HeadLister). The project listing carries no commit, so it costs two reads
+// per project: "Get HEAD" for the branch name and "Get Branch" for its commit
+// (docs/vendor/gerrit/rest-api-projects.md), one project at a time. A 429 ends the listing with
+// the rate-limit error (the app then keeps what it remembered); any other failure leaves that
+// project out of the map. A project is reported only once ListRepos can name its default branch,
+// which this call learns, so the first listing after a start reports none and the next all.
+func (c *Client) ListRepoHeads(ctx context.Context) (map[string]string, error) {
+	repos, err := c.ListRepos(ctx)
+	if err != nil {
+		return nil, err
+	}
+	heads := map[string]string{}
+	for _, r := range repos {
+		var head string
+		if err := c.do(ctx, http.MethodGet, c.apiURL("projects", url.PathEscape(r.FullName), "HEAD"), nil, &head); err != nil {
+			var rl *platform.RateLimitError
+			if asRateLimit(err, &rl) {
+				return nil, err
+			}
+			continue
+		}
+		branch := strings.TrimPrefix(head, "refs/heads/")
+		if !refPart.MatchString(branch) {
+			continue
+		}
+		var bi struct {
+			Revision string `json:"revision"`
+		}
+		if err := c.do(ctx, http.MethodGet, c.apiURL("projects", url.PathEscape(r.FullName), "branches", url.PathEscape("refs/heads/"+branch)), nil, &bi); err != nil {
+			var rl *platform.RateLimitError
+			if asRateLimit(err, &rl) {
+				return nil, err
+			}
+			continue
+		}
+		c.mu.Lock()
+		if c.defaults == nil {
+			c.defaults = map[string]string{}
+		}
+		c.defaults[r.FullName] = branch
+		c.mu.Unlock()
+		if r.DefaultBranch == branch && commitSHA.MatchString(bi.Revision) {
+			heads[r.FullName] = bi.Revision
+		}
+	}
+	return heads, nil
 }
 
 // ListArchivedRepos is the READ_ONLY code projects, the closest Gerrit has to an archive

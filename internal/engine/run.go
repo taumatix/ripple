@@ -53,6 +53,8 @@ type item struct {
 	// bypassLimit is set when the job fixes an advisory and the update entry says its
 	// security PRs skip the open pull request limit (security-bypass).
 	bypassLimit bool
+	// bypassCap is the update entry's security-bypass-limit-per-advisory (0: none).
+	bypassCap int
 }
 
 // migrates reports whether the update renames the package (a Go major bump).
@@ -342,6 +344,9 @@ func (r *runner) plan(jobs []model.Job, deps []model.Dependency) []*prPlan {
 			}
 			if it.advisory != nil && u.BypassesSeverity(config.BypassLimit, it.advisory.Severity) {
 				it.bypassLimit = true
+				if u.SecurityBypassLimitPerAdvisory > 0 && (it.bypassCap == 0 || u.SecurityBypassLimitPerAdvisory < it.bypassCap) {
+					it.bypassCap = u.SecurityBypassLimitPerAdvisory
+				}
 			}
 			if dec.NotBefore.After(notBefore) {
 				notBefore = dec.NotBefore
@@ -480,7 +485,7 @@ func (r *runner) execute(plans []*prPlan, deps []model.Dependency) {
 			closed := r.closeStale(supersededBy{ds: j.Datasource, pkg: j.Package, version: j.Version}, p.branch, open)
 			open, count = without(open, closed), count-len(closed)
 		}
-		if count >= limit && !p.bypassesLimit() {
+		if count >= limit && !(p.bypassesLimit() && !r.overAdvisoryCap(p, open)) {
 			for _, it := range p.items {
 				r.deferJob(it.job, e.now().Add(deferBy), fmt.Sprintf("open pull request limit (%d) reached", limit))
 			}

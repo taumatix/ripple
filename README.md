@@ -75,6 +75,7 @@ updates:
     from-pseudo-versions: false           # optional: move a pseudo-version dependency to the first release after its commit (docs/osv.md)
     security-bypass: []            # optional: [open-pull-requests-limit, schedule] let a security PR skip them too (docs/osv.md)
     security-bypass-severity: []   # optional: [high, critical] bypass only for advisories with these ratings (docs/osv.md)
+    security-bypass-limit-per-advisory: 0  # optional: most open PRs one advisory may bypass the limit with; 0 is no cap (docs/osv.md)
     cooldown: 7d                   # wait this long after a release (never less than the server minimum)
     schedule:
       days: [mon, tue]

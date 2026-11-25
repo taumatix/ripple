@@ -95,6 +95,9 @@ type Engine struct {
 	// Crates reads crate versions from the Cargo sparse index for ecosystem: cargo. Nil
 	// leaves Cargo dependencies without updates (see CargoWatcher).
 	Crates CratesIndex
+	// Helm reads chart versions from chart repositories for ecosystem: helm. Nil leaves
+	// Helm dependencies without updates (see HelmWatcher).
+	Helm HelmRepos
 	// PyPI reads project versions from the PyPI JSON API for ecosystem: pip. Nil leaves
 	// pip dependencies without updates (see PipWatcher).
 	PyPI PyPIIndex
@@ -389,6 +392,9 @@ func (e *Engine) scan(ctx context.Context, repo model.Repo) error {
 		return err
 	}
 	if err := e.notePackages(ctx, model.DatasourcePip, pipPackagesCursor, deps); err != nil {
+		return err
+	}
+	if err := e.notePackages(ctx, model.DatasourceHelm, helmPackagesCursor, deps); err != nil {
 		return err
 	}
 	if err := e.Store.ReplaceDependencies(ctx, repo.FullName, deps); err != nil {

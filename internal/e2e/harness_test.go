@@ -22,6 +22,7 @@ import (
 	"github.com/taumatix/ripple/internal/cratesindex"
 	"github.com/taumatix/ripple/internal/engine"
 	"github.com/taumatix/ripple/internal/feed"
+	"github.com/taumatix/ripple/internal/helmrepo"
 	"github.com/taumatix/ripple/internal/model"
 	"github.com/taumatix/ripple/internal/npmreg"
 	"github.com/taumatix/ripple/internal/platform/github"
@@ -138,6 +139,8 @@ type opts struct {
 	npm *testutil.NpmRegistry
 	// crates, when set, is the fake Cargo sparse index the engine reads crate versions from.
 	crates *testutil.CratesIndex
+	// helm, when set, is the fake Helm chart repository the engine reads chart versions from.
+	helm *testutil.HelmRepo
 	// pypi, when set, is the fake PyPI the engine reads project versions from.
 	pypi *testutil.PyPI
 	// engine adjusts the engine before it runs (server-side go settings).
@@ -182,6 +185,9 @@ func newEnvOpts(t *testing.T, st store.Store, lim rules.Limits, o opts) *env {
 	if o.pypi != nil {
 		eng.PyPI = &pypi.Client{BaseURL: o.pypi.URL}
 	}
+	if o.helm != nil {
+		eng.Helm = &helmrepo.Client{HTTP: o.helm.Client()}
+	}
 	if o.crates != nil {
 		eng.Crates = &cratesindex.Client{BaseURL: o.crates.URL}
 	}
@@ -195,7 +201,7 @@ func newEnvOpts(t *testing.T, st store.Store, lim rules.Limits, o opts) *env {
 		a := &app.App{Engine: eng, Secret: []byte(secret), Log: slog.New(slog.NewTextHandler(io.MultiWriter(testWriter{t}, e.logs), nil)),
 			PollEvery: o.pollEvery, Queue: &app.Queue{},
 			Watcher: &engine.Watcher{Engine: eng, Feed: &feed.GoIndex{BaseURL: e.idx.URL}},
-			Actions: &engine.ActionsWatcher{Engine: eng}, Docker: &engine.DockerWatcher{Engine: eng}, Npm: &engine.NpmWatcher{Engine: eng}, Cargo: &engine.CargoWatcher{Engine: eng}, Pip: &engine.PipWatcher{Engine: eng}}
+			Actions: &engine.ActionsWatcher{Engine: eng}, Docker: &engine.DockerWatcher{Engine: eng}, Npm: &engine.NpmWatcher{Engine: eng}, Cargo: &engine.CargoWatcher{Engine: eng}, Pip: &engine.PipWatcher{Engine: eng}, Helm: &engine.HelmWatcher{Engine: eng}}
 		if o.goDL != nil {
 			a.Toolchain = &engine.ToolchainWatcher{Engine: eng, Source: &feed.GoDL{BaseURL: o.goDL.URL}}
 		}

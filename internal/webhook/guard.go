@@ -161,6 +161,49 @@ func (g *Guard) ReadBody(w http.ResponseWriter, r *http.Request, max int64) ([]b
 	return body, ReadOK
 }
 
+// ReadStream is ReadBody for a request already authenticated from its headers, when the
+// receiver can use the body as it arrives: consume reads it directly under the slot and
+// the read deadline, so it is held nowhere. consume may stop early (the rest is drained
+// to enforce max). A failed read is answered here and consume's error is then moot.
+func (g *Guard) ReadStream(w http.ResponseWriter, r *http.Request, max int64, consume func(io.Reader) error) (consumeErr error, res ReadResult) {
+	release, ok := g.Acquire(w, r, max)
+	if !ok {
+		return nil, ReadAnswered
+	}
+	defer release()
+	src := &errReader{r: http.MaxBytesReader(w, r.Body, max)}
+	func() {
+		defer func() {
+			if p := recover(); p != nil {
+				consumeErr = fmt.Errorf("payload parser panicked: %v", p)
+			}
+		}()
+		consumeErr = consume(src)
+	}()
+	if src.err == nil {
+		_, _ = io.Copy(io.Discard, src)
+	}
+	if src.err != nil && src.err != io.EOF {
+		answerReadError(w, src.err)
+		return nil, ReadAnswered
+	}
+	return consumeErr, ReadOK
+}
+
+// errReader remembers the first error its source returned.
+type errReader struct {
+	r   io.Reader
+	err error
+}
+
+func (e *errReader) Read(p []byte) (int, error) {
+	n, err := e.r.Read(p)
+	if err != nil && e.err == nil {
+		e.err = err
+	}
+	return n, err
+}
+
 // ReadVerified reads a body of at most max bytes while computing HMAC-SHA256 over
 // prefix followed by the body, then asks authentic whether the digest is the expected
 // one. A forged body is therefore never held in memory beyond SpoolAbove (plus one

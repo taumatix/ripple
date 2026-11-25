@@ -5,6 +5,7 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
 ## [Unreleased]
 
 ### Added
+- GitLab: a push authenticated by the plain secret token (no signing key) is parsed as it streams, like a signed one, instead of being read whole first (`webhook.Guard.ReadStream`, additive; ROADMAP 205).
 - `from-pseudo-versions: true` on a `gomod` update entry (default off; `config.Update.FromPseudoVersions`, additive) moves a module required at a pseudo-version to the first release above it that was released after the commit, never automerged (docs/osv.md, ROADMAP 127, new 216).
 - DynamoDB: the `REPOS` repo index is pinned as a one-time build by a test (no second Scan, a throttled build is retried); no behaviour change (ROADMAP 125).
 - OSV: `RIPPLE_OSV_BACKFILL_OPEN_PRS=true` (default off; `engine.AdvisoryWatcher.BackfillOpenPRs`, additive) indexes, once, the jobs behind open PRs ripple made before the `osv-jobs` index existed, so a corrected record closes them too (docs/osv.md, ROADMAP 126).

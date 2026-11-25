@@ -184,7 +184,7 @@ func TestListRepos(t *testing.T) {
 	c, got := server(t, func(r *http.Request, w http.ResponseWriter) {
 		switch r.URL.Path {
 		case "/fabrikam/_apis/projects":
-			io.WriteString(w, `{"count":2,"value":[{"name":"Fiber"},{"name":"Has Space"}]}`)
+			io.WriteString(w, `{"count":2,"value":[{"name":"Fiber"},{"name":"Has?Query"}]}`)
 		case "/fabrikam/Fiber/_apis/git/repositories":
 			io.WriteString(w, `{"count":3,"value":[
 				{"name":"web","defaultBranch":"refs/heads/main","isDisabled":false},
@@ -208,7 +208,7 @@ func TestListRepos(t *testing.T) {
 
 func TestUnsafeRepoNamesAreRefusedBeforeAnyRequest(t *testing.T) {
 	c, got := server(t, reply(200, `{}`))
-	for _, name := range []string{"", "a/b", "a/b/c/d", "a/../c", "a/b/..", "a/b/c d", "a/b/c?x=1", "a/b/c#", "a/b/%2e%2e", "a//c", "-x/b/c/"} {
+	for _, name := range []string{"", "a/b", "a/b/c/d", "a/../c", "a/b/..", "a/b/c  d", "a/b/c ", "a/ b/c", "a/b/c?x=1", "a/b/c#", "a/b/%2e%2e", "a//c", "-x/b/c/"} {
 		if _, err := c.ListOpenPRs(context.Background(), model.Repo{FullName: name}, "ripple/"); err == nil {
 			t.Errorf("%q accepted", name)
 		}

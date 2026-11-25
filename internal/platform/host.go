@@ -17,7 +17,14 @@ type Credential struct {
 	// "oauth2" on GitLab, the account name where a host wants one.
 	Username string
 	Secret   string
+	// Scheme is how Secret is sent: "" for HTTP Basic (Username:Secret), SchemeBearer
+	// for "Authorization: Bearer <Secret>" (a Microsoft Entra access token on Azure
+	// DevOps). A host that knows no other scheme ignores it.
+	Scheme string
 }
+
+// SchemeBearer is the Credential.Scheme that sends Secret as a bearer token.
+const SchemeBearer = "bearer"
 
 // Credentials is a host's credential source. It is asked for each request, so a
 // source may mint, cache and rotate short-lived tokens; repo selects the scope on

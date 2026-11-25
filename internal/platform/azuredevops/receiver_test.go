@@ -75,8 +75,8 @@ func TestOtherEventsAndUnsupportedNamesAreAcknowledgedAndIgnored(t *testing.T) {
 	if w := post(h, "ripple", "s3cret", `{"eventType":"git.pullrequest.created"}`); w.Code != http.StatusAccepted {
 		t.Errorf("other event: %d", w.Code)
 	}
-	space := strings.Replace(pushBody, `"name":"Fabrikam"`, `"name":"Has Space"`, 1)
-	if w := post(h, "ripple", "s3cret", space); w.Code != http.StatusAccepted {
+	slash := strings.Replace(pushBody, `"name":"Fabrikam"`, `"name":"Has/Slash"`, 1)
+	if w := post(h, "ripple", "s3cret", slash); w.Code != http.StatusAccepted {
 		t.Errorf("unsupported name: %d", w.Code)
 	}
 	if len(s.events) != 0 {
@@ -160,5 +160,71 @@ func TestBodyReadsShareABoundedNumberOfSlots(t *testing.T) {
 	release()
 	if w := post(h, "ripple", "s3cret", pushBody); w.Code != http.StatusAccepted {
 		t.Fatalf("after release: status %d", w.Code)
+	}
+}
+
+// service-hooks-events.md, "Repository created", trimmed.
+const createdBody = `{"id":"c1","eventType":"git.repo.created","resource":{"repository":{"id":"c2c2","name":"New Repo",
+"defaultBranch":"refs/heads/main","isDisabled":false,"project":{"id":"a6a6","name":"Big Project"}}}}`
+
+// "Repository deleted": the project and the repository are at the top of resource, not under repository.
+const deletedBody = `{"id":"d1","eventType":"git.repo.deleted","resource":{"project":{"id":"a6a6","name":"Big Project"},
+"repositoryId":"c2c2","repositoryName":"Old Repo","isHardDelete":false}}`
+
+// "Repository renamed".
+const renamedBody = `{"id":"r1","eventType":"git.repo.renamed","resource":{"oldName":"Old Name","newName":"New Name",
+"repository":{"id":"c2c2","name":"New Name","defaultBranch":"refs/heads/main","project":{"id":"a6a6","name":"Big Project"}}}}`
+
+func TestRepoLifecycleEvents(t *testing.T) {
+	const p = "fabrikam-fiber-inc/Big Project/"
+	for name, c := range map[string]struct {
+		body string
+		want platform.Event
+	}{
+		"created": {createdBody, platform.Event{Kind: platform.ReposAdded, Repos: []string{p + "New Repo"}, Delivery: "c1"}},
+		"deleted": {deletedBody, platform.Event{Kind: platform.ReposRemoved, Repos: []string{p + "Old Repo"}, Delivery: "d1"}},
+		"renamed": {renamedBody, platform.Event{Kind: platform.RepoRenamed, Repos: []string{p + "Old Name"}, NewRepo: p + "New Name", Delivery: "r1"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := &sink{}
+			if w := post(newReceiver(s), "ripple", "s3cret", c.body); w.Code != http.StatusAccepted {
+				t.Fatalf("status %d", w.Code)
+			}
+			if len(s.events) != 1 {
+				t.Fatalf("events = %+v", s.events)
+			}
+			e := s.events[0]
+			if e.Kind != c.want.Kind || e.NewRepo != c.want.NewRepo || e.Delivery != c.want.Delivery ||
+				len(e.Repos) != 1 || e.Repos[0] != c.want.Repos[0] {
+				t.Errorf("event = %+v, want %+v", e, c.want)
+			}
+		})
+	}
+}
+
+// A new repository is empty (no default branch) and nothing can be cloned from it
+// yet; listing skips it the same way, and its first push is how it becomes watchable.
+func TestCreatedEmptyOrDisabledRepoIsIgnored(t *testing.T) {
+	for name, body := range map[string]string{
+		"empty":    strings.Replace(createdBody, `"defaultBranch":"refs/heads/main"`, `"defaultBranch":""`, 1),
+		"disabled": strings.Replace(createdBody, `"isDisabled":false`, `"isDisabled":true`, 1),
+		"unsafe":   strings.Replace(createdBody, `"New Repo"`, `"a/b"`, 1),
+	} {
+		s := &sink{}
+		if w := post(newReceiver(s), "ripple", "s3cret", body); w.Code != http.StatusAccepted || len(s.events) != 0 {
+			t.Errorf("%s: status %d events %+v", name, w.Code, s.events)
+		}
+	}
+}
+
+func TestRepoLifecycleEventsNeedAuthentication(t *testing.T) {
+	s := &sink{}
+	for _, b := range []string{createdBody, deletedBody, renamedBody} {
+		if w := post(newReceiver(s), "ripple", "wrong", b); w.Code != http.StatusUnauthorized {
+			t.Errorf("status %d", w.Code)
+		}
+	}
+	if len(s.events) != 0 {
+		t.Errorf("events = %+v", s.events)
 	}
 }

@@ -61,7 +61,15 @@ type pushPayload struct {
 	ID        string `json:"id"`
 	EventType string `json:"eventType"`
 	Resource  struct {
-		Commits []struct {
+		// git.repo.deleted names its project and repository at the top of resource,
+		// git.repo.renamed its old and new names.
+		Project struct {
+			Name string `json:"name"`
+		} `json:"project"`
+		RepositoryName string `json:"repositoryName"`
+		OldName        string `json:"oldName"`
+		NewName        string `json:"newName"`
+		Commits        []struct {
 			CommitID string `json:"commitId"`
 		} `json:"commits"`
 		RefUpdates []struct {
@@ -73,6 +81,7 @@ type pushPayload struct {
 				Name string `json:"name"`
 			} `json:"project"`
 			DefaultBranch string `json:"defaultBranch"`
+			IsDisabled    bool   `json:"isDisabled"`
 		} `json:"repository"`
 	} `json:"resource"`
 }
@@ -97,7 +106,12 @@ func (h *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad payload", http.StatusBadRequest)
 		return
 	}
-	if p.EventType != "git.push" {
+	switch p.EventType {
+	case "git.push":
+	case "git.repo.created", "git.repo.deleted", "git.repo.renamed":
+		h.lifecycle(w, r, &p)
+		return
+	default:
 		w.WriteHeader(http.StatusAccepted) // other events are not subscribed to; ignore, do not make the hook retry
 		return
 	}
@@ -138,6 +152,47 @@ func (h *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "unavailable", http.StatusServiceUnavailable)
 			return
 		}
+	}
+	w.WriteHeader(http.StatusAccepted)
+}
+
+// lifecycle turns a repository created, deleted or renamed hook into the matching
+// event (service-hooks-events.md). Names that ripple would not list are ignored, and
+// so is a new repository with no default branch: nothing can be cloned from it yet,
+// and discovery skips an empty repository the same way.
+func (h *Receiver) lifecycle(w http.ResponseWriter, r *http.Request, p *pushPayload) {
+	res := p.Resource
+	project, name := res.Project.Name, res.RepositoryName
+	if p.EventType != "git.repo.deleted" {
+		project, name = res.Repository.Project.Name, res.Repository.Name
+	}
+	full := h.Org + "/" + project + "/"
+	e := platform.Event{Delivery: p.ID, Repos: []string{full + name}}
+	names := []string{name}
+	switch p.EventType {
+	case "git.repo.created":
+		if res.Repository.DefaultBranch == "" || res.Repository.IsDisabled {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		e.Kind = platform.ReposAdded
+	case "git.repo.deleted":
+		e.Kind = platform.ReposRemoved
+	default:
+		e.Kind, e.Repos, e.NewRepo = platform.RepoRenamed, []string{full + res.OldName}, full+res.NewName
+		names = append(names, res.OldName)
+	}
+	for _, n := range names {
+		if _, _, _, err := split(full + n); err != nil {
+			h.log().Warn("azure devops repository event for an unsupported name", "event", p.EventType, "project", project, "repo", n)
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+	}
+	if err := h.Sink.HandleEvent(r.Context(), e); err != nil {
+		h.log().Error("azure devops event not queued", "err", err)
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+		return
 	}
 	w.WriteHeader(http.StatusAccepted)
 }

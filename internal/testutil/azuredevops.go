@@ -21,6 +21,11 @@ import (
 // AzurePAT is the personal access token the fake Azure DevOps accepts.
 const AzurePAT = "azure-test-pat"
 
+// AzureEntraToken is the Microsoft Entra access token the fake also accepts, sent as
+// "Authorization: Bearer" on REST and on git (entra-oauth.md). Real tokens are opaque
+// and short-lived; the fake takes this one fixed value.
+const AzureEntraToken = "azure-test-entra-token"
+
 // AzureCreatorID is the identity every pull request is created by, the way the
 // real service stamps createdBy with the authenticated user.
 const AzureCreatorID = "d6245f20-2af8-44f4-9451-8107cb2767db"
@@ -104,8 +109,38 @@ func NewAzureDevOps(t *testing.T, org string) *AzureDevOps {
 // authorized is the PAT scheme of use-personal-access-tokens.md: HTTP Basic, the
 // user name ignored, the token as the password.
 func (a *AzureDevOps) authorized(r *http.Request) bool {
+	if tok, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok {
+		return tok == AzureEntraToken
+	}
 	_, pass, ok := basicAuth(r)
 	return ok && pass == AzurePAT
+}
+
+// RenameRepo renames the repository from to, both "org/project/repo" in the same
+// organisation (a repository rename keeps its project; a move between projects is
+// the same on disk here). It does not deliver the service hook; the test does.
+func (a *AzureDevOps) RenameRepo(from, to string) {
+	a.t.Helper()
+	dst := a.bare(to)
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		a.t.Fatal(err)
+	}
+	if err := os.Rename(a.bare(from), dst); err != nil {
+		a.t.Fatal(err)
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.prs[to], a.calls[to] = a.prs[from], a.calls[from]
+	delete(a.prs, from)
+	delete(a.calls, from)
+}
+
+// RemoveRepo deletes the repository org/project/repo.
+func (a *AzureDevOps) RemoveRepo(path string) {
+	a.t.Helper()
+	if err := os.RemoveAll(a.bare(path)); err != nil {
+		a.t.Fatal(err)
+	}
 }
 
 func (a *AzureDevOps) bare(path string) string {

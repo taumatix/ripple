@@ -1,7 +1,6 @@
 package gitlab
 
 import (
-	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -103,18 +102,16 @@ func (h *Receiver) headersOK(r *http.Request) bool {
 // read reads the body under the shared guard and hands it to consume (nil to discard
 // it). A signed delivery's signature is computed while the body streams in and consume
 // parses it as it goes, so a forgery is never held and its parse is thrown away; an
-// unsigned one was authenticated from its headers, so its (bounded) body is read first.
+// unsigned one was authenticated from its headers, so it is parsed as it streams too.
 // ok is false once the response has been written.
 func (h *Receiver) read(w http.ResponseWriter, r *http.Request, consume func(io.Reader) error) (ok bool) {
 	if len(h.SigningKey) == 0 { // the secret token was checked from the headers alone
-		body, res := h.guard.ReadBody(w, r, maxBody)
-		if res != webhook.ReadOK {
-			return false
+		if consume == nil {
+			_, res := h.guard.ReadBody(w, r, maxBody)
+			return res == webhook.ReadOK
 		}
-		if consume != nil {
-			consume(bytes.NewReader(body))
-		}
-		return true
+		_, res := h.guard.ReadStream(w, r, maxBody, consume)
+		return res == webhook.ReadOK
 	}
 	id, ts := r.Header.Get("webhook-id"), r.Header.Get("webhook-timestamp")
 	got := strings.Fields(r.Header.Get("webhook-signature"))

@@ -365,8 +365,7 @@ Everything else:
     `extras_require`) and `==1.*`/`==1.2.*` are read now (docs/pip.md). `setup.py` is never read or run, a lone `<`/`<=`,
     `!=`, a bare `*` and Poetry's array-of-constraints form (one entry per Python or platform) have no single floor to
     raise and stay unread; an array could move each entry whose `python` marker the repo's Python matches. A
-    `setup.cfg`'s `python_requires` does not yet feed the Requires-Python guard (only `pyproject.toml`, `Pipfile` and
-    `.python-version` do). The setup.cfg reader is line-based and was checked against hand-written files, not a sample of
+    `setup.cfg`'s `python_requires` feeds the Requires-Python guard now. The setup.cfg reader is line-based and was checked against hand-written files, not a sample of
     real projects (see the corpus entry for pip once one is run).
 221. **Implement `app.HeadLister` in the Lister hosts.** `App.Discover` re-scans a listed repo whose default-branch head moved once its host reports heads (`ListRepoHeads`), but no host does. Add it to the hosts with no push events (Gerrit, SCM-Manager, CodeCommit and any other `platform.Lister`) from the listing call if it carries the head, else one extra read per repo, bounded by the host's rate limit.
 222. **OSV: reconcile residuals.** The one-time `RIPPLE_OSV_BACKFILL_OPEN_PRS` pass (which finds a done job's open PR from before the `osv-jobs` index) has never run against a real host; a record shared by twin GHSA and GO notes is reconciled per note; the busy-repo retry list holds at most 100 ids. An amended record's line in a PR description is now rewritten (GitHub only, verified against the fake: that the real GraphQL `viewer { login }` of an installation token equals the editor login of the app's own description edit is assumed, and if it does not the PR is just treated as touched and left alone); the other hosts have no `PRBodyEditor` and no way yet to tell ripple's description edit from a person's.

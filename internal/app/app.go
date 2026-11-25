@@ -19,6 +19,7 @@ import (
 	"github.com/taumatix/ripple/internal/config"
 	"github.com/taumatix/ripple/internal/engine"
 	"github.com/taumatix/ripple/internal/manager"
+	"github.com/taumatix/ripple/internal/metrics"
 	"github.com/taumatix/ripple/internal/model"
 	"github.com/taumatix/ripple/internal/platform"
 	"github.com/taumatix/ripple/internal/platform/github"
@@ -47,9 +48,12 @@ type App struct {
 	Cargo *engine.CargoWatcher
 	// Pip polls the versions of the Python projects the repos use (ecosystem: pip); nil
 	// leaves the feature out.
-	Pip    *engine.PipWatcher
-	Secret []byte
-	Log    *slog.Logger
+	Pip *engine.PipWatcher
+	// metrics and httpLatency are set by EnableMetrics; nil leaves /metrics out.
+	metrics     *metrics.Registry
+	httpLatency *metrics.Histogram
+	Secret      []byte
+	Log         *slog.Logger
 	// PollEvery is the feed poll and job run period; zero disables the loop (tests call Tick).
 	PollEvery time.Duration
 	// Advisories polls OSV when set (RIPPLE_OSV). It runs on its own loop every
@@ -231,7 +235,8 @@ func (a *App) enqueue(ctx context.Context, host string, ev platform.Event) (retE
 	return a.Queue.Add(ctx, evs...)
 }
 
-// Handler serves POST /webhook, POST /webhook/<host>, GET /healthz and GET /replica.
+// Handler serves POST /webhook, POST /webhook/<host>, GET /healthz and GET /replica, and
+// GET /metrics after EnableMetrics.
 func (a *App) Handler() http.Handler {
 	mux := http.NewServeMux()
 	if a.Hosts == nil {
@@ -249,6 +254,10 @@ func (a *App) Handler() http.Handler {
 	}
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	mux.HandleFunc("/replica", a.replicaStatus)
+	if a.metrics != nil {
+		mux.Handle("/metrics", a.metrics.Handler())
+		return metrics.Instrument(a.httpLatency, metricsRoute, mux)
+	}
 	return mux
 }
 

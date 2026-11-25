@@ -97,7 +97,7 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 		t.pace()
 		t.requests.Add(1)
 		resp, err := base.RoundTrip(req)
-		if err != nil || (resp.StatusCode != http.StatusTooManyRequests && resp.StatusCode != http.StatusServiceUnavailable) {
+		if err != nil || !retryable(resp.StatusCode) {
 			return resp, err
 		}
 		wait, ok := RetryAfter(resp.Header, t.now())
@@ -119,6 +119,16 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 			req.Body = body
 		}
 	}
+}
+
+// retryable is the statuses a public service uses for "try again": 429 and 503 name their
+// wait in Retry-After, 500, 502 and 504 are the transient gateway failures.
+func retryable(code int) bool {
+	switch code {
+	case http.StatusTooManyRequests, http.StatusServiceUnavailable, http.StatusInternalServerError, http.StatusBadGateway, http.StatusGatewayTimeout:
+		return true
+	}
+	return false
 }
 
 // Client returns an http.Client with a 60s timeout over a fresh Transport.

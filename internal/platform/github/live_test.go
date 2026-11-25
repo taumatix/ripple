@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/taumatix/ripple/internal/httpretry"
 	"github.com/taumatix/ripple/internal/livetest"
 	"github.com/taumatix/ripple/internal/model"
 	"github.com/taumatix/ripple/internal/platform/github"
@@ -25,7 +26,10 @@ func liveGitHub(t *testing.T) (*github.Client, model.Repo) {
 	host := testutil.NewGitHub(t)
 	host.AddRepo("acme/app", map[string]string{"go.mod": "module x\n"})
 	hc, _ := livetest.Client()
-	c := &github.Client{APIBase: host.APIURL, GitBase: host.GitBase, Tokens: host.Auth, WorkDir: t.TempDir(), HTTP: hc, UpstreamAPIBase: "https://api.github.com"}
+	c := &github.Client{APIBase: host.APIURL, GitBase: host.GitBase, Tokens: host.Auth, WorkDir: t.TempDir(), HTTP: hc, UpstreamAPIBase: "https://api.github.com",
+		// An anonymous address gets 60 requests an hour and a GitHub-hosted runner shares its address, so a
+		// run can start rate limited: wait for the reset (about eight minutes at worst) rather than fail on it.
+		Retry: httpretry.Policy{MaxAttempts: 3, MaxWait: 12 * time.Minute}}
 	return c, model.Repo{FullName: "acme/app", InstallationID: installation}
 }
 

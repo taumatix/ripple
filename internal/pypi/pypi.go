@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -50,6 +51,38 @@ type Release struct {
 	Yanked bool
 	// Files is the number of files the release has; none means nothing to install.
 	Files int
+	// RequiresPython is the distinct non-empty Requires-Python values of the release's
+	// files (the JSON API reports it per file); empty when no file states one.
+	RequiresPython []string
+	// Unconstrained is true when some file states no Requires-Python, so it runs on
+	// any interpreter.
+	Unconstrained bool
+}
+
+// RunsOn reports whether some file of the release admits the Python version py
+// ("3.9"). It is true when py is unknown or any Requires-Python is not understood:
+// only a stated, understood exclusion counts against the release.
+func (r Release) RunsOn(py string) bool {
+	v, ok := Parse(py)
+	if !ok || r.Unconstrained || len(r.RequiresPython) == 0 {
+		return true
+	}
+	for _, spec := range r.RequiresPython {
+		if sat, known := Satisfies(spec, v); sat || !known {
+			return true
+		}
+	}
+	return false
+}
+
+// Release returns the release with exactly this version string.
+func (p Project) Release(version string) (Release, bool) {
+	for _, r := range p.Releases {
+		if r.Version == version {
+			return r, true
+		}
+	}
+	return Release{}, false
 }
 
 // Project is the part of a project's JSON document ripple uses.
@@ -101,7 +134,8 @@ func (c *Client) Project(ctx context.Context, name string) (Project, error) {
 	}
 	var doc struct {
 		Releases map[string][]struct {
-			Yanked bool `json:"yanked"`
+			Yanked         bool    `json:"yanked"`
+			RequiresPython *string `json:"requires_python"`
 		} `json:"releases"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, maxBody)).Decode(&doc); err != nil {
@@ -110,11 +144,19 @@ func (c *Client) Project(ctx context.Context, name string) (Project, error) {
 	var out Project
 	for v, files := range doc.Releases {
 		r := Release{Version: v, Files: len(files), Yanked: len(files) > 0}
+		seen := map[string]bool{}
 		for _, f := range files {
 			if !f.Yanked {
 				r.Yanked = false
 			}
+			if f.RequiresPython == nil || strings.TrimSpace(*f.RequiresPython) == "" {
+				r.Unconstrained = true
+			} else if rp := strings.TrimSpace(*f.RequiresPython); !seen[rp] {
+				seen[rp] = true
+				r.RequiresPython = append(r.RequiresPython, rp)
+			}
 		}
+		sort.Strings(r.RequiresPython)
 		out.Releases = append(out.Releases, r)
 	}
 	return out, nil

@@ -77,3 +77,19 @@ func TestProjectErrors(t *testing.T) {
 		t.Error("a path-like name must be refused")
 	}
 }
+
+func TestReleaseRunsOn(t *testing.T) {
+	r := pypi.Release{RequiresPython: []string{">=3.10"}}
+	if r.RunsOn("3.9") || !r.RunsOn("3.10") || !r.RunsOn("") || !r.RunsOn("junk") {
+		t.Error(">=3.10 excludes 3.9 only; unknown python is no objection")
+	}
+	if !(pypi.Release{RequiresPython: []string{">=3.10"}, Unconstrained: true}).RunsOn("3.9") {
+		t.Error("a file without Requires-Python runs anywhere")
+	}
+	if !(pypi.Release{RequiresPython: []string{">=3.10", ">=3.8"}}).RunsOn("3.9") {
+		t.Error("one admitting file is enough")
+	}
+	if !(pypi.Release{RequiresPython: []string{"===3.9"}}).RunsOn("3.8") {
+		t.Error("a specifier ripple cannot read is no objection")
+	}
+}

@@ -701,7 +701,7 @@ func (r *runner) apply(it item) (bool, error) {
 			version = r.imageVersion(it.job.Package, version)
 		}
 		if d.Datasource == model.DatasourcePip {
-			if why := r.pipGuard(d); why != "" {
+			if why := r.pipGuard(d, it.job.Version); why != "" {
 				if r.skipReasons == nil {
 					r.skipReasons = map[string]string{}
 				}

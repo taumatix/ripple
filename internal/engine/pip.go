@@ -158,7 +158,10 @@ var pipIndexFiles = []string{"pip.conf", "pip.ini", "uv.toml", "requirements.txt
 // from somewhere else, and a PyPI project of the same name could be a different
 // package: the dependency-confusion step. Environment variables and user-level
 // configuration are not visible to ripple.
-func (r *runner) pipGuard(d model.Dependency) string {
+func (r *runner) pipGuard(d model.Dependency, target string) string {
+	if why := r.pipPythonGuard(d, target); why != "" {
+		return why
+	}
 	check := func(p string) string {
 		content, err := r.ws.ReadFile(p)
 		if err == nil && manager.PipIndexOverride(p, content) {
@@ -236,4 +239,50 @@ func (r *runner) pipNotes() string {
 		s += "- `" + f + "`\n"
 	}
 	return s
+}
+
+// pipPythonGuard says why target, a release of d's project, cannot run on the Python
+// the repo declares: the release's Requires-Python (PyPI reports it per file) against
+// the lowest Python the nearest pyproject.toml, Pipfile or .python-version names. A repo
+// that declares none, a specifier ripple cannot read or an index that cannot be read
+// means no objection. The job is skipped, not retargeted to an older release (as for
+// a Cargo rust-version).
+func (r *runner) pipPythonGuard(d model.Dependency, target string) string {
+	if r.e.PyPI == nil {
+		return ""
+	}
+	have, from := r.pipPython(d.File)
+	if have == "" {
+		return ""
+	}
+	pr, err := r.e.PyPI.Project(r.ctx, d.Package)
+	if err != nil {
+		return ""
+	}
+	rel, ok := pr.Release(target)
+	if !ok || rel.RunsOn(have) {
+		return ""
+	}
+	return fmt.Sprintf("%s %s declares Requires-Python %s, which excludes Python %s declared in %s; ripple will not propose a release the repo's Python cannot install", d.Package, target, strings.Join(rel.RequiresPython, " or "), have, from)
+}
+
+// pipPython is the lowest Python declared for the file p, and the file that declares it.
+func (r *runner) pipPython(p string) (string, string) {
+	for dir := path.Dir(p); ; dir = path.Dir(dir) {
+		base := dir
+		if base == "." {
+			base = ""
+		}
+		for _, name := range manager.PipPythonFiles {
+			pp := path.Join(base, name)
+			if content, err := r.ws.ReadFile(pp); err == nil {
+				if f := manager.PipPythonFloor(pp, content); f != "" {
+					return f, pp
+				}
+			}
+		}
+		if dir == "." || dir == "/" {
+			return "", ""
+		}
+	}
 }

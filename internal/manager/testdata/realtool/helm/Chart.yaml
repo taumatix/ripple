@@ -1,0 +1,10 @@
+apiVersion: v2
+name: realtool
+description: A chart fixture for ripple's real-tool tests
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+dependencies:
+  - name: metrics-server
+    version: 3.11.0
+    repository: https://kubernetes-sigs.github.io/metrics-server/

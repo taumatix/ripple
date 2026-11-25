@@ -22,6 +22,14 @@ Run one locally (from the repository root; `-tags realtool` is added for you):
 | `TestRealtoolCargo` | `cargo metadata`, `cargo check` | cargo |
 | `TestRealtoolNpm` | `npm install --package-lock-only --ignore-scripts`, `npm ls` | npm |
 | `TestRealtoolPip` | `pip download --no-deps` | python3 with pip |
+| `TestRealtoolHelm` | `helm dependency update`, `helm dependency list`, `helm lint` | helm |
+| `TestRealtoolBundler` | `bundle lock` | bundler |
+| `TestRealtoolComposer` | `composer validate`, `composer update --dry-run`, `composer update --no-install` | php, composer |
+| `TestRealtoolNuget` | `dotnet restore`, `dotnet build --no-restore` | dotnet 8 |
+| `TestRealtoolMaven` | `mvn validate`, `dependency:resolve`, `compile` | mvn, JDK 17 |
+| `TestRealtoolTerraform` | `terraform init -backend=false`, `terraform validate` | terraform |
+| `TestRealtoolGitHubActions` | `actionlint`, plus `git ls-remote` that the new tag exists | actionlint, git |
+| `TestRealtoolDocker` | `hadolint` (no daemon), plus a Docker Hub check that the new tag exists | hadolint |
 
 Lock files: ripple edits the manifest and reports the lock file stale (the PR body says which to refresh).
 These tests assert the second half: the tool's own refresh command accepts the edited manifest and writes

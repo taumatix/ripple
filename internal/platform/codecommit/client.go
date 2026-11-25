@@ -628,16 +628,23 @@ func (c *Client) defaultOf(path string) string {
 	return c.defaults[path]
 }
 
+// batchRepos is how many repository names one BatchGetRepositories call accepts
+// (docs/vendor/codecommit/api-API_BatchGetRepositories.md, MaximumRepositoryNamesExceededException).
+const batchRepos = 100
+
 // ListRepoHeads is the commit each listed repository's default branch points at, for the app's
 // head comparison (app.HeadLister). ListRepositories carries no branch or commit, so a repository
 // costs one GetBranch per discovery (docs/vendor/codecommit/api-API_GetBranch.md, `commitId`), one
-// at a time, plus one GetRepository (`defaultBranch`) the first time it is seen. A throttle ends
-// the listing with the rate-limit error; another failure leaves that repository out for the round.
-// A repository is reported only once ListRepos can name its default branch, which this call
-// learns, so the first listing after a start reports none and the next all.
+// at a time. The default branches not yet known are read first, up to 100 repositories a call,
+// with BatchGetRepositories (`defaultBranch`), so the very first listing after a start reports
+// every head. A throttle ends the listing with the rate-limit error; another failure leaves the
+// affected repositories out for the round, and a repository with no branch yet is left out.
 func (c *Client) ListRepoHeads(ctx context.Context) (map[string]string, error) {
 	repos, err := c.ListRepos(ctx)
 	if err != nil {
+		return nil, err
+	}
+	if err := c.learnDefaults(ctx, repos); err != nil {
 		return nil, err
 	}
 	heads := map[string]string{}
@@ -646,30 +653,9 @@ func (c *Client) ListRepoHeads(ctx context.Context) (map[string]string, error) {
 		if err != nil {
 			continue
 		}
-		branch := r.DefaultBranch
+		branch := c.defaultOf(r.FullName)
 		if branch == "" {
-			var md struct {
-				Metadata struct {
-					Default string `json:"defaultBranch"`
-				} `json:"repositoryMetadata"`
-			}
-			if err := c.call(ctx, region, "GetRepository", map[string]any{"repositoryName": name}, &md); err != nil {
-				var rl *platform.RateLimitError
-				if errors.As(err, &rl) {
-					return nil, err
-				}
-				continue
-			}
-			if branch = md.Metadata.Default; branch == "" { // an empty repository
-				continue
-			}
-			c.mu.Lock()
-			if c.defaults == nil {
-				c.defaults = map[string]string{}
-			}
-			c.defaults[r.FullName] = branch
-			c.mu.Unlock()
-			continue // not yet in ListRepos' answer for this round
+			continue
 		}
 		var out struct {
 			Branch struct {
@@ -688,6 +674,55 @@ func (c *Client) ListRepoHeads(ctx context.Context) (map[string]string, error) {
 		}
 	}
 	return heads, nil
+}
+
+// learnDefaults remembers the default branch of every listed repository whose it does not know
+// yet, one BatchGetRepositories per region and batchRepos names. A repository with no default
+// branch (empty) or one the batch names as not found stays unknown. Only a throttle is an error.
+func (c *Client) learnDefaults(ctx context.Context, repos []model.Repo) error {
+	byRegion := map[string][]string{}
+	var regions []string
+	for _, r := range repos {
+		region, name, err := CheckPath(r.FullName)
+		if err != nil || c.defaultOf(r.FullName) != "" {
+			continue
+		}
+		if _, ok := byRegion[region]; !ok {
+			regions = append(regions, region)
+		}
+		byRegion[region] = append(byRegion[region], name)
+	}
+	for _, region := range regions {
+		names := byRegion[region]
+		for len(names) > 0 {
+			n := min(len(names), batchRepos)
+			var out struct {
+				Repositories []struct {
+					Name    string `json:"repositoryName"`
+					Default string `json:"defaultBranch"`
+				} `json:"repositories"`
+			}
+			if err := c.call(ctx, region, "BatchGetRepositories", map[string]any{"repositoryNames": names[:n]}, &out); err != nil {
+				var rl *platform.RateLimitError
+				if errors.As(err, &rl) {
+					return err
+				}
+			} else {
+				c.mu.Lock()
+				if c.defaults == nil {
+					c.defaults = map[string]string{}
+				}
+				for _, m := range out.Repositories {
+					if m.Default != "" {
+						c.defaults[region+"/"+m.Name] = m.Default
+					}
+				}
+				c.mu.Unlock()
+			}
+			names = names[n:]
+		}
+	}
+	return nil
 }
 
 // maxDiffPages bounds ChangedFiles; a push touching more files than this is scanned in full.

@@ -47,9 +47,10 @@ The client implements `app.HeadLister`, so a project whose default branch moved 
 discovery even when its webhook never arrived. The project listing carries no commit, so this is **two extra reads
 per project** each discovery, one project at a time: `GET /projects/<p>/HEAD` (the branch) then
 `GET /projects/<p>/branches/refs%2Fheads%2F<branch>` (its `revision`). A 429 ends the listing and the app keeps
-what it remembered; another failure leaves that project out for the round. A project is reported only once
-`ListRepos` can name its default branch, which the first head listing after a start learns, so the first round
-reports none and the second all (a project already scanned by its add is not re-scanned on first sight anyway).
+what it remembered; another failure leaves that project out for the round. The first head listing after a start
+already reports every head (the app lists once more in that round to get the branches just learned), so a head that
+moved while ripple was down is re-scanned on the first round. Gerrit has no call that names the default branch
+of many projects at once (`GET /projects/?b=<branch>` needs the branch name), so the two reads per project stay.
 The two reads are not counted as scan cost by the conformance suite. Verified against the fake only.
 
 ## Not supported

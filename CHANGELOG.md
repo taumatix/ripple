@@ -8,6 +8,8 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
 
 - Gerrit, SCM-Manager and CodeCommit implement `app.HeadLister`: a listed repository whose default-branch head moved is re-scanned at the next discovery even if its webhook or event never arrived. Costs one to two extra reads per repository per discovery (see each `docs/platform-*.md`); verified against the fakes only.
 
+- Head polling (Gerrit, CodeCommit) catches a head that moved while ripple was down on the first discovery after a start instead of the second: the default branch each host reports is used in the same round, and CodeCommit reads unknown default branches 100 at a time with `BatchGetRepositories`. Verified against the fakes only.
+
 ## [0.4.0] - 2026-11-25
 
 Additive release: no public API was removed or changed. Opt-in ecosystems: Helm, Bundler, Composer, NuGet, Maven and Terraform

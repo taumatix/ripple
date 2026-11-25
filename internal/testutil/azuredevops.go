@@ -381,7 +381,7 @@ func (a *AzureDevOps) prJSON(path, project, repo string, p *AzurePR) map[string]
 		"repository":    map[string]any{"id": "repo-" + repo, "name": repo, "project": map[string]any{"name": project}},
 		"pullRequestId": p.ID, "status": "active", "isDraft": p.IsDraft,
 		"createdBy": map[string]any{"id": AzureCreatorID},
-		"title":     p.Title, "sourceRefName": p.sourceRef, "targetRefName": p.targetRef,
+		"title":     p.Title, "description": p.Description, "sourceRefName": p.sourceRef, "targetRefName": p.targetRef,
 		"url": fmt.Sprintf("%s/%s/_apis/git/repositories/%s/pullRequests/%d", a.URL, a.Org, "repo-"+repo, p.ID),
 	}
 	if sha := branchTip(a.bare(path), strings.TrimPrefix(p.sourceRef, "refs/heads/")); sha != "" {

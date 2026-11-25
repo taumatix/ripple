@@ -345,7 +345,7 @@ func (g *GitLab) mrJSON(project string, p *GitLabPR) map[string]any {
 	if p.Closed {
 		state = "closed"
 	}
-	m := map[string]any{"iid": p.IID, "id": 1000 + p.IID, "state": state, "title": p.Title,
+	m := map[string]any{"iid": p.IID, "id": 1000 + p.IID, "state": state, "title": p.Title, "description": p.Description,
 		"source_branch": p.Head, "target_branch": p.Base, "source_project_id": 7, "target_project_id": 7,
 		"web_url": "https://gitlab.example/" + project + "/-/merge_requests/" + strconv.Itoa(p.IID)}
 	// sha is the head commit of the source branch (api_merge_requests.md), absent here

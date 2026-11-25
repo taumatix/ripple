@@ -92,6 +92,26 @@ func (r *runner) ownedByRipple(ds, pkg, version string, old platform.PR) bool {
 	return ok && j.State == model.JobDone && j.PRURL != "" && j.PRURL == old.URL
 }
 
+// editedSinceOpened reports whether the head commit or the description of old differs
+// from what ripple recorded on the job when it opened the PR, which a person did: the
+// host's own edit and event feeds miss some of these (a description edit on Forgejo,
+// Bitbucket Cloud and CodeCommit, a force-push on Gerrit). A value that was not recorded
+// (a job from before the columns existed, a host that reports none) or that the host does
+// not report now is "not recorded", never "edited".
+func (r *runner) editedSinceOpened(ds, pkg, version string, old platform.PR) bool {
+	if ds == "" {
+		ds = model.DatasourceGo
+	}
+	j, ok, err := r.e.Store.GetJob(r.ctx, model.JobKey(r.repo.FullName, ds, pkg, version))
+	if err != nil || !ok {
+		return false
+	}
+	if j.HeadSHA != "" && old.HeadSHA != "" && j.HeadSHA != old.HeadSHA {
+		return true
+	}
+	return j.BodyHash != "" && old.Body != "" && j.BodyHash != model.BodyHash(old.Body)
+}
+
 // isRipplesReplacement reports whether newest is the PR of a ripple job for pkg at
 // version, though that job may not have recorded the PR yet (a crash between opening
 // the PR and finishing the job): a branch no job was ever created for is not.
@@ -119,6 +139,10 @@ func (r *runner) closeStale(by supersededBy, exceptHead string, open []platform.
 	for _, old := range open {
 		oldVersion, ok := by.staleOf(old.Head)
 		if !ok || old.Head == exceptHead || !r.ownedByRipple(by.ds, by.pkg, oldVersion, old) {
+			continue
+		}
+		if r.editedSinceOpened(by.ds, by.pkg, oldVersion, old) {
+			r.e.log().Info("stale pull request left open: its head or description changed since ripple opened it", "repo", r.repo.FullName, "pr", old.URL)
 			continue
 		}
 		if stillTouched(touched, old) {

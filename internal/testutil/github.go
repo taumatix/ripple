@@ -814,3 +814,9 @@ func (g *GitHub) HeadSHA(repo, branch string) string {
 	}
 	return strings.TrimSpace(string(out))
 }
+
+// HumanEditBodyQuietly rewrites the PR description the way a host with no edit history
+// would: nothing but the new body shows (BodyEdited stays false).
+func (g *GitHub) HumanEditBodyQuietly(repo string, number int, body string) {
+	g.mutatePR(repo, number, func(p *PR) { p.Body = body })
+}

@@ -28,7 +28,7 @@ func openRipplePR(t *testing.T) (*codecommit.Client, *testutil.CodeCommit, platf
 	cc.AddRepo(closePath, map[string]string{"README.md": "x"})
 	cc.PushBranch(closePath, closeHead, ripplesEmail)
 	pr, err := c.CreatePR(context.Background(), model.Repo{FullName: closePath},
-		platform.PRSpec{Title: "bump lib", Head: closeHead, Base: "main"})
+		platform.PRSpec{Title: "bump lib", Head: closeHead, Base: "main", Body: "body"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,5 +227,13 @@ func TestListOpenPRsReportsHeadSHA(t *testing.T) {
 	cc.PushBranch(closePath, closeHead, "person@example.invalid")
 	if got, want := list().HeadSHA, cc.BranchHead(closePath, closeHead); got == first || got != want {
 		t.Fatalf("after a push HeadSHA %q, want %q (not %q)", got, want, first)
+	}
+}
+
+func TestListOpenPRsReportsBody(t *testing.T) {
+	c, _, _ := openRipplePR(t)
+	open, err := c.ListOpenPRs(context.Background(), model.Repo{FullName: closePath}, "ripple/")
+	if err != nil || len(open) != 1 || open[0].Body != "body" {
+		t.Fatalf("%+v %v", open, err)
 	}
 }

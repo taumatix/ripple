@@ -41,3 +41,19 @@ func TestListOpenPRsReportsHeadSHA(t *testing.T) {
 		t.Fatalf("after a push HeadSHA %q, want %q (not %q)", got, want, first)
 	}
 }
+
+func TestListOpenPRsReportsBody(t *testing.T) {
+	az := testutil.NewAzureDevOps(t, org)
+	path := org + "/" + project + "/app"
+	az.AddRepo(path, map[string]string{"go.mod": "module x\n"})
+	az.PushBranch(path, "ripple/go/old", gitws.AuthorEmail(gitws.Options{}))
+	c := &azuredevops.Client{APIBase: az.URL, GitBase: az.URL, Org: org, Credentials: platform.StaticCredential{Secret: testutil.AzurePAT}}
+	repo := model.Repo{FullName: path, DefaultBranch: "main"}
+	if _, err := c.CreatePR(context.Background(), repo, platform.PRSpec{Head: "ripple/go/old", Base: "main", Title: "bump", Body: "b"}); err != nil {
+		t.Fatal(err)
+	}
+	open, err := c.ListOpenPRs(context.Background(), repo, "ripple/")
+	if err != nil || len(open) != 1 || open[0].Body != "b" {
+		t.Fatalf("%+v %v", open, err)
+	}
+}

@@ -292,6 +292,7 @@ type prJSON struct {
 	Number  int    `json:"number"`
 	HTMLURL string `json:"html_url"`
 	NodeID  string `json:"node_id"`
+	Body    string `json:"body"`
 	Head    struct {
 		Ref string `json:"ref"`
 		SHA string `json:"sha"`
@@ -299,7 +300,7 @@ type prJSON struct {
 }
 
 func (p prJSON) pr() platform.PR {
-	return platform.PR{Number: p.Number, URL: p.HTMLURL, ID: p.NodeID, Head: p.Head.Ref, HeadSHA: p.Head.SHA}
+	return platform.PR{Number: p.Number, URL: p.HTMLURL, ID: p.NodeID, Head: p.Head.Ref, HeadSHA: p.Head.SHA, Body: p.Body}
 }
 
 func (c *Client) ListOpenPRs(ctx context.Context, repo model.Repo, prefix string) ([]platform.PR, error) {

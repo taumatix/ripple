@@ -244,6 +244,7 @@ func (c *Client) DetectedFlavour(ctx context.Context) (Flavour, error) {
 type prJSON struct {
 	Number  int    `json:"number"`
 	HTMLURL string `json:"html_url"`
+	Body    string `json:"body"`
 	Head    struct {
 		Ref string `json:"ref"`
 		SHA string `json:"sha"`
@@ -251,7 +252,7 @@ type prJSON struct {
 }
 
 func (p prJSON) pr() platform.PR {
-	return platform.PR{Number: p.Number, URL: p.HTMLURL, Head: p.Head.Ref, HeadSHA: p.Head.SHA}
+	return platform.PR{Number: p.Number, URL: p.HTMLURL, Head: p.Head.Ref, HeadSHA: p.Head.SHA, Body: p.Body}
 }
 
 // paged calls fn with each page of a listing until the server stops saying there

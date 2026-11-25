@@ -20,6 +20,11 @@ type PR struct {
 	// HeadSHA is the commit the head branch points at, when the host's open-PR listing
 	// reports it; empty otherwise. The engine uses it to notice a head that moved.
 	HeadSHA string
+	// Body is the description the host reports for the PR; empty when the host's PR read
+	// does not return one (Gerrit: the change has no description, only messages). An empty
+	// Body means "unknown", never "the person emptied it": the engine compares it with
+	// the hash ripple recorded only when it is not empty.
+	Body string
 	// ID is the host's own handle for the PR when its API needs one beyond Number
 	// (GitHub: the GraphQL node id that auto-merge takes). Only the platform that
 	// returned the PR reads it.

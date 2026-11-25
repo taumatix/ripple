@@ -288,9 +288,10 @@ func (c *Client) call(ctx context.Context, region, op string, in, out any) error
 }
 
 type pullRequest struct {
-	ID      string `json:"pullRequestId"`
-	Status  string `json:"pullRequestStatus"`
-	Targets []struct {
+	ID          string `json:"pullRequestId"`
+	Status      string `json:"pullRequestStatus"`
+	Description string `json:"description"`
+	Targets     []struct {
 		Repository string `json:"repositoryName"`
 		Source     string `json:"sourceReference"`
 		Dest       string `json:"destinationReference"`
@@ -328,7 +329,7 @@ func prURL(region, name, id string) string {
 func (c *Client) pr(region, name string, p pullRequest, head string) platform.PR {
 	n := 0
 	fmt.Sscanf(p.ID, "%d", &n)
-	return platform.PR{Number: n, URL: prURL(region, name, p.ID), Head: head, HeadSHA: p.headSHA(name)}
+	return platform.PR{Number: n, URL: prURL(region, name, p.ID), Head: head, HeadSHA: p.headSHA(name), Body: p.Description}
 }
 
 // ListOpenPRs lists the open pull requests whose source branch starts with prefix.

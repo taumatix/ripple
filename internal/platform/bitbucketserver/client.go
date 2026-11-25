@@ -234,10 +234,11 @@ type refJSON struct {
 }
 
 type prJSON struct {
-	ID      int     `json:"id"`
-	Version int     `json:"version"`
-	FromRef refJSON `json:"fromRef"`
-	Links   struct {
+	ID          int     `json:"id"`
+	Version     int     `json:"version"`
+	Description string  `json:"description"`
+	FromRef     refJSON `json:"fromRef"`
+	Links       struct {
 		Self []struct {
 			Href string `json:"href"`
 		} `json:"self"`
@@ -252,7 +253,7 @@ func (c *Client) pr(key, slug string, p prJSON) platform.PR {
 	if u == "" {
 		u = fmt.Sprintf("%s/projects/%s/repos/%s/pull-requests/%d", strings.TrimRight(c.APIBase, "/"), key, slug, p.ID)
 	}
-	return platform.PR{Number: p.ID, URL: u, Head: strings.TrimPrefix(p.FromRef.ID, branches), HeadSHA: p.FromRef.LatestCommit}
+	return platform.PR{Number: p.ID, URL: u, Head: strings.TrimPrefix(p.FromRef.ID, branches), HeadSHA: p.FromRef.LatestCommit, Body: p.Description}
 }
 
 func (c *Client) ListOpenPRs(ctx context.Context, repo model.Repo, prefix string) ([]platform.PR, error) {

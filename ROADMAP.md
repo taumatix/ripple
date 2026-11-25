@@ -72,11 +72,11 @@ auth model, rate limits); the notes below are what I expect, **unverified** unti
 Everything else:
 
 29. **More datasources and feeds, as many ecosystems as Renovate has.** ~~npm registry~~ (shipped with 30c, polled per package; the replicate feed is not used), ~~PyPI~~ (shipped with 30e, polled per project), ~~crates.io
-   sparse index~~ (shipped with 30d, polled per crate), Maven, NuGet, RubyGems, Packagist, ~~Docker/OCI tags~~ (shipped with 30b, polled per image), GitHub releases/tags, Helm, Terraform
+   sparse index~~ (shipped with 30d, polled per crate), Maven, NuGet, RubyGems, Packagist, ~~Docker/OCI tags~~ (shipped with 30b, polled per image), GitHub releases/tags, ~~Helm~~ (shipped with 30f, polled per repository index), Terraform
    registry. Where a registry has a changes feed, use it; where it has none (OCI registries), fall back to polling
    only the packages the reverse index says someone imports, never every repo. Each datasource says which of the two it is.
 30. **More managers, toward Renovate parity.** ~~GitHub Actions~~ shipped ([docs/github-actions.md](docs/github-actions.md)).
-   ~~30b Dockerfile~~ shipped ([docs/docker.md](docs/docker.md)). ~~30c npm~~ shipped ([docs/npm.md](docs/npm.md)). ~~30d Cargo~~ shipped ([docs/cargo.md](docs/cargo.md)). ~~30e pip~~ shipped ([docs/pip.md](docs/pip.md)). Remaining, by value, each its own entry: 30f Helm, and the long tail.
+   ~~30b Dockerfile~~ shipped ([docs/docker.md](docs/docker.md)). ~~30c npm~~ shipped ([docs/npm.md](docs/npm.md)). ~~30d Cargo~~ shipped ([docs/cargo.md](docs/cargo.md)). ~~30e pip~~ shipped ([docs/pip.md](docs/pip.md)). ~~30f Helm~~ shipped ([docs/helm.md](docs/helm.md)). Remaining: the long tail, each its own entry.
 33. **Plugin mechanism** for out-of-tree managers, datasources and platforms.
 34. **Presets, org-level defaults and packageRules-like matching.** Later and strictly opt-in: a repo
     file must opt into a preset by name, and none of these may ever change the meaning of a plain
@@ -375,3 +375,11 @@ Everything else:
     counts only the first 100 and an open PR whose job is not indexed does not count. It caps open PRs, not only the ones a
     bypass opened, and covers the repo, not the installation. Covered against the fake host only; no real repo asked for it yet.
 228. **pip: retarget residuals.** A release the repo's Python cannot run now retargets to the newest older runnable one when the repo is cloned (docs/pip.md). Left: the retargeted job takes the skipped release's `ReleasedAt`, so its cooldown counts from the newer release (no upload times are read); only the floor of the repo's Python is tested, so a repo supporting `>=3.9` is not retargeted away from a release needing `>=3.9.1`; Cargo's MSRV skip has no such fallback (ROADMAP 156); not run against the real PyPI index.
+229. **Helm: verify against a real repository, and the unread forms.** The datasource, manager and docs are written from
+    the vendored helm-www pages ([docs/vendor/helm](docs/vendor/helm)) and a fake repository; nothing has been run
+    against a real `index.yaml` (a large one, redirects, a 404 chart). Add a `-tags live` check against a public repo,
+    then the forms skipped today: `oci://` dependencies (OCI tags datasource), `@alias` / `alias:` repositories,
+    version ranges, flow-style entries, and `created` dates for the cooldown.
+230. **Helm: refresh `Chart.lock`.** The lock is reported stale in the PR body, not rewritten. Rewriting it needs
+    `helm dependency update` (network, all repositories of the chart) or the digest algorithm reproduced exactly;
+    decide which after 229 shows a real lock.

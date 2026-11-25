@@ -49,6 +49,9 @@ type App struct {
 	// Pip polls the versions of the Python projects the repos use (ecosystem: pip); nil
 	// leaves the feature out.
 	Pip *engine.PipWatcher
+	// Helm polls the versions of the charts the repos depend on (ecosystem: helm); nil
+	// polls nothing.
+	Helm *engine.HelmWatcher
 	// metrics and httpLatency are set by EnableMetrics; nil leaves /metrics out.
 	metrics     *metrics.Registry
 	httpLatency *metrics.Histogram
@@ -338,6 +341,7 @@ func (a *App) Tick(ctx context.Context) {
 	a.pollNpm(ctx)
 	a.pollCargo(ctx)
 	a.pollPip(ctx)
+	a.pollHelm(ctx)
 	a.pollAdvisories(ctx)
 	a.housekeep(ctx)
 	if _, err := a.Engine.RunDue(ctx); err != nil && ctx.Err() == nil {
@@ -401,6 +405,9 @@ func (a *App) sources() map[string]electedSource {
 	}
 	if a.Pip != nil {
 		m["pip"] = a.Pip
+	}
+	if a.Helm != nil {
+		m["helm"] = a.Helm
 	}
 	if a.Advisories != nil {
 		m["osv"] = a.Advisories
@@ -526,6 +533,9 @@ func (a *App) pollLoop(ctx context.Context) {
 			a.jobs.Wake()
 		}
 		if a.pollPip(ctx) > 0 {
+			a.jobs.Wake()
+		}
+		if a.pollHelm(ctx) > 0 {
 			a.jobs.Wake()
 		}
 		a.housekeep(ctx)
@@ -740,6 +750,21 @@ func (a *App) pollPip(ctx context.Context) int {
 		a.Log.Error("pip poll", "err", err)
 	case n > 0:
 		a.Log.Info("pip poll enqueued jobs", "jobs", n)
+	}
+	return n
+}
+
+// pollHelm polls the versions of the Helm charts in use and returns how many jobs it enqueued.
+func (a *App) pollHelm(ctx context.Context) int {
+	if a.Helm == nil {
+		return 0
+	}
+	n, err := a.pollSource(ctx, a.Helm)
+	switch {
+	case err != nil && ctx.Err() == nil:
+		a.Log.Error("helm poll", "err", err)
+	case n > 0:
+		a.Log.Info("helm poll enqueued jobs", "jobs", n)
 	}
 	return n
 }

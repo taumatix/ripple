@@ -51,6 +51,14 @@ upstream:
     verified-live: "2026-11-24 (go test -tags live ./internal/cratesindex): index.crates.io serves the 2, 3 and 4+ letter prefixes (cc, log, rand), a mixed-case name (Serde_Json) is read through the lowercase path, a missing crate is 404, serde 1.0.95 is yanked and serde 0.8.0-rc1 is skipped"
     unverified: "another registry, response size for the largest crates, conditional requests (ETag), rate limits; TOML is read by a line scanner as far as docs/cargo.md says, not parsed"
     checked: 2026-11-24
+  - name: helm-chart-repository
+    kind: http-api
+    reference: https://helm.sh/docs/topics/chart_repository/
+    docs: https://helm.sh/docs/topics/charts/
+    format: "GET {repository}/index.yaml, anonymous; entries.<chart>[] with version, deprecated; Chart.yaml / requirements.yaml dependencies with name, version, repository"
+    verified-against: "docs/vendor/helm pages fetched 2026-11-25; tests use internal/testutil/helmrepo.go, a fake written from them"
+    unverified: "everything against a real repository: large indexes, redirects, authentication, the semantics of created; oci:// and @alias repositories and constraint ranges are skipped, not read"
+    checked: 2026-11-25
   - name: pypi-json-api
     kind: http-api
     reference: https://docs.pypi.org/api/json/

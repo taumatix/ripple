@@ -42,3 +42,11 @@ source of the 573 words `internal/store/dynamofake` rejects unaliased. A test pa
 fake's list, so the two cannot drift. **Assumed, unverified**: that the match ignores case, and in which expression
 clauses the service applies the check (the fake applies it to condition, filter, key-condition, projection and update
 expressions); DynamoDB Local is the check on both.
+
+## helm
+
+`helm/chart_repository.md` and `helm/charts.md` are the helm-www pages (helm.sh/docs/topics/chart_repository,
+helm.sh/docs/topics/charts), fetched 2026-11-25 as raw markdown from the helm-www repository and read before
+`internal/helmrepo` and `manager.Helm` were written: the `index.yaml` shape (`entries`, `version`, `deprecated`) and
+the `dependencies` fields of `Chart.yaml`. Not checked against a live repository, so unverified: index size and
+redirect behaviour of real hosts, how `created` is filled, the full constraint grammar (only exact versions are used).

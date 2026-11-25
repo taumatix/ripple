@@ -147,6 +147,8 @@ type runner struct {
 	npmLocksDone map[string]bool
 	// cargoLocks holds the Cargo.lock files that resolve the Cargo.toml files this PR edits.
 	cargoLocks map[string]bool
+	// helmLocks holds the Chart.lock and requirements.lock files that resolve the files this PR edits.
+	helmLocks map[string]bool
 	// pipLocks holds the lock files beside or above the Python files this PR edits.
 	pipLocks map[string]bool
 	// skipReasons says why a job was skipped when it is not the common "changed since indexed".
@@ -385,6 +387,9 @@ func (r *runner) plan(jobs []model.Job, deps []model.Dependency) []*prPlan {
 		if j.Datasource == model.DatasourceCargo {
 			branch = BranchPrefix + "cargo/" + slug(j.Package) + "-" + slug(j.Version)
 		}
+		if j.Datasource == model.DatasourceHelm {
+			branch = BranchPrefix + "helm/" + slug(j.Package) + "-" + slug(j.Version)
+		}
 		if j.Datasource == model.DatasourceNpm {
 			branch = BranchPrefix + "npm/" + slug(j.Package) + "-" + slug(j.Version)
 		}
@@ -563,6 +568,7 @@ func (r *runner) openPR(p *prPlan) (*platform.PR, error) {
 	r.followed = nil
 	r.npmLocks, r.npmLockWhy, r.npmLocksDone = nil, nil, nil
 	r.cargoLocks = nil
+	r.helmLocks = nil
 	r.pipLocks = nil
 	var applied []item
 	for _, it := range p.items {
@@ -658,6 +664,7 @@ func (r *runner) openPR(p *prPlan) (*platform.PR, error) {
 	body += r.actionNotes(applied)
 	body += r.npmNotes()
 	body += r.cargoNotes()
+	body += r.helmNotes()
 	body += r.pipNotes()
 	changed, err := r.ws.CommitAndPush(r.ctx, p.branch, title)
 	if err != nil {
@@ -770,6 +777,9 @@ func (r *runner) apply(it item) (bool, error) {
 		if d.Datasource == model.DatasourceCargo {
 			r.noteCargoLock(d)
 		}
+		if d.Datasource == model.DatasourceHelm {
+			r.noteHelmLock(d)
+		}
 		if d.Datasource == model.DatasourcePip {
 			r.notePipLocks(d)
 		}
@@ -849,6 +859,8 @@ func datasourceFooter(datasource string) string {
 		return "a new version was published to the npm registry"
 	case model.DatasourcePip:
 		return "a new version was published to PyPI"
+	case model.DatasourceHelm:
+		return "a new version appeared in the chart repository"
 	}
 	return "the new version appeared in the module index"
 }

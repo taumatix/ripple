@@ -187,7 +187,7 @@ Everything else:
     edit that removes the marker is repaired by number and one that deletes the issue is recreated, both
     covered only against the fake.
 125. **OSV: sweep residuals.** The DynamoDB repo index (`REPOS` items) is built by one Scan the first time a listing is asked
-    for; that Scan and the listing are verified on the in-process fake, and DynamoDB Local runs them only in CI. A scan
+    for; that Scan and the listing are verified on the in-process fake (including that the build runs once and reruns after a failed one), and DynamoDB Local runs them only in CI. A scan
     (not the sweep) still runs one history round, so a repo with over 500 pairs or 100 records is completed only by a sweep
     or a go.mod change; consider a few rounds per scan once real repo sizes are known. Postgres `ListRepos` is CI-only.
 126. **OSV: reconcile older cases.** A pending job made before the `osv-jobs` index is now indexed by a one-time backfill; a

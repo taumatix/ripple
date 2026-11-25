@@ -61,3 +61,41 @@ func TestDynamoListsReposThatPredateTheIndex(t *testing.T) {
 		}
 	})
 }
+
+// The index is built once: a second listing reads the index and does not Scan again, and a build
+// that fails part-way leaves no marker, so the next listing builds again instead of serving a
+// partial index. Scan counts need the in-process fake; the other backends check the listing only.
+func TestDynamoRepoIndexIsBuiltOnceAndRetriedAfterAFailedBuild(t *testing.T) {
+	eachDynamo(t, func(t *testing.T, db *dynamodb.Client, f *dynamofake.Fake) {
+		ctx := context.Background()
+		table := "ripple_test_" + suffix()
+		d := newDynamoTable(t, db, table)
+		for _, n := range []string{"acme/b", "acme/a"} {
+			_, err := db.PutItem(ctx, &dynamodb.PutItemInput{TableName: aws.String(table), Item: map[string]types.AttributeValue{
+				"PK": sv("REPO#" + n), "SK": sv("META"), "full_name": sv(n), "default_branch": sv("main")}})
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		if f != nil {
+			f.ThrottleNext("Scan", 100)
+			if _, err := d.ListRepos(ctx, "", 10); err == nil {
+				t.Fatal("a listing whose build was throttled must fail, not serve a partial index")
+			}
+			f.ThrottleNext("Scan", 0)
+		}
+		if got := listAll(t, d, 10); !reflect.DeepEqual(got, []string{"acme/a", "acme/b"}) {
+			t.Fatalf("after a failed build: %v", got)
+		}
+		scans := 0
+		if f != nil {
+			scans = f.Calls("Scan")
+		}
+		if got := listAll(t, d, 1); !reflect.DeepEqual(got, []string{"acme/a", "acme/b"}) {
+			t.Fatalf("second listing: %v", got)
+		}
+		if f != nil && f.Calls("Scan") != scans {
+			t.Fatalf("a built index was scanned again: %d -> %d Scan calls", scans, f.Calls("Scan"))
+		}
+	})
+}

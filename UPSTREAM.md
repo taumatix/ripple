@@ -67,6 +67,14 @@ upstream:
     verified-against: "docs/vendor/rubygems guides fetched 2026-11-25; tests use internal/testutil/rubygems.go, a fake written from them"
     unverified: "everything against the real service: rate limits, very large gems, whether yanked versions are listed; the Bundler Gemfile man page was not vendored, so the Gemfile grammar is read from the guides only"
     checked: 2026-11-25
+  - name: packagist-api
+    kind: http-api
+    reference: https://packagist.org/apidoc
+    docs: https://getcomposer.org/doc/articles/versions.md
+    format: "GET https://repo.packagist.org/p2/{vendor}/{package}.json, anonymous; {packages: {name: [{version, ...}]}, minified: composer/2.0}; composer.json require / require-dev"
+    verified-against: "docs/vendor/packagist pages fetched 2026-11-25; tests use internal/testutil/packagist.go, a fake written from them"
+    unverified: "everything against the real service: rate limits, redirects, the minified encoding of very large packages (only the version key of each entry is read), the exact package-name pattern (taken from memory of Composer's schema, the vendored page says only lowercase words separated by - . _)"
+    checked: 2026-11-25
   - name: pypi-json-api
     kind: http-api
     reference: https://docs.pypi.org/api/json/

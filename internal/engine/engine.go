@@ -101,6 +101,9 @@ type Engine struct {
 	// Rubygems reads gem versions from rubygems.org for ecosystem: bundler. Nil leaves
 	// Gemfile dependencies without updates (see RubygemsWatcher).
 	Rubygems RubygemsRegistry
+	// Packagist reads package versions for ecosystem: composer. Nil leaves those dependencies
+	// without updates (see PackagistWatcher).
+	Packagist PackagistRegistry
 	// PyPI reads project versions from the PyPI JSON API for ecosystem: pip. Nil leaves
 	// pip dependencies without updates (see PipWatcher).
 	PyPI PyPIIndex
@@ -401,6 +404,9 @@ func (e *Engine) scan(ctx context.Context, repo model.Repo) error {
 		return err
 	}
 	if err := e.notePackages(ctx, model.DatasourceRubygems, rubygemsPackagesCursor, deps); err != nil {
+		return err
+	}
+	if err := e.notePackages(ctx, model.DatasourcePackagist, packagistPackagesCursor, deps); err != nil {
 		return err
 	}
 	if err := e.Store.ReplaceDependencies(ctx, repo.FullName, deps); err != nil {

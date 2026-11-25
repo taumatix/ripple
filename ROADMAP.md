@@ -72,7 +72,7 @@ auth model, rate limits); the notes below are what I expect, **unverified** unti
 Everything else:
 
 29. **More datasources and feeds, as many ecosystems as Renovate has.** ~~npm registry~~ (shipped with 30c, polled per package; the replicate feed is not used), ~~PyPI~~ (shipped with 30e, polled per project), ~~crates.io
-   sparse index~~ (shipped with 30d, polled per crate), Maven, NuGet, ~~RubyGems~~ (shipped as the bundler manager, [docs/bundler.md](docs/bundler.md), polled per gem), Packagist, ~~Docker/OCI tags~~ (shipped with 30b, polled per image), GitHub releases/tags, ~~Helm~~ (shipped with 30f, polled per repository index), Terraform
+   sparse index~~ (shipped with 30d, polled per crate), Maven, NuGet, ~~RubyGems~~ (shipped as the bundler manager, [docs/bundler.md](docs/bundler.md), polled per gem), ~~Packagist~~ (shipped as the composer manager, [docs/composer.md](docs/composer.md), polled per package), ~~Docker/OCI tags~~ (shipped with 30b, polled per image), GitHub releases/tags, ~~Helm~~ (shipped with 30f, polled per repository index), Terraform
    registry. Where a registry has a changes feed, use it; where it has none (OCI registries), fall back to polling
    only the packages the reverse index says someone imports, never every repo. Each datasource says which of the two it is.
 30. **More managers, toward Renovate parity.** ~~GitHub Actions~~ shipped ([docs/github-actions.md](docs/github-actions.md)).
@@ -391,3 +391,12 @@ Everything else:
 234. **Bundler: refresh `Gemfile.lock`.** The lock is reported stale in the PR body, not rewritten. Rewriting a lock
     entry without running bundler needs the new version's dependency set from the API; decide after 233 whether that
     is worth doing.
+235. **Composer: verify against the real Packagist, and the unread forms.** The datasource, manager and docs are written
+    from the vendored Composer and Packagist pages ([docs/vendor/packagist](docs/vendor/packagist)) and a fake; nothing
+    has run against the real service (the minified `p2` encoding of large packages, rate limits, redirects, the package
+    name pattern). Add a `-tags live` check, then the forms skipped today: two-segment `^1.2` and other constraints,
+    `||` alternatives, four-segment versions, a private `repositories` entry (credentials in `auth.json`), `published-time`
+    for the cooldown, and the `p2/<name>~dev.json` branches.
+236. **Composer: refresh `composer.lock`.** The lock is reported stale in the PR body, not rewritten. Rewriting an entry
+    without running Composer needs the new version's `require` set and its `dist` hashes from the metadata; decide after
+    235 whether that is worth doing.

@@ -35,6 +35,7 @@ import (
 	"github.com/taumatix/ripple/internal/rules"
 	"github.com/taumatix/ripple/internal/sandbox"
 	"github.com/taumatix/ripple/internal/store"
+	"github.com/taumatix/ripple/internal/terraform"
 	"github.com/taumatix/ripple/internal/testutil"
 )
 
@@ -153,6 +154,8 @@ type opts struct {
 	nuget *testutil.Nuget
 	// maven, when set, is the fake repository the engine reads Maven versions from.
 	maven *testutil.Maven
+	// terraform, when set, is the fake registry the engine reads Terraform versions from.
+	terraform *testutil.Terraform
 	// pypi, when set, is the fake PyPI the engine reads project versions from.
 	pypi *testutil.PyPI
 	// engine adjusts the engine before it runs (server-side go settings).
@@ -212,6 +215,9 @@ func newEnvOpts(t *testing.T, st store.Store, lim rules.Limits, o opts) *env {
 	if o.maven != nil {
 		eng.Maven = &maven.Client{BaseURL: o.maven.URL}
 	}
+	if o.terraform != nil {
+		eng.Terraform = &terraform.Client{BaseURL: o.terraform.URL}
+	}
 	if o.crates != nil {
 		eng.Crates = &cratesindex.Client{BaseURL: o.crates.URL}
 	}
@@ -225,7 +231,7 @@ func newEnvOpts(t *testing.T, st store.Store, lim rules.Limits, o opts) *env {
 		a := &app.App{Engine: eng, Secret: []byte(secret), Log: slog.New(slog.NewTextHandler(io.MultiWriter(testWriter{t}, e.logs), nil)),
 			PollEvery: o.pollEvery, Queue: &app.Queue{},
 			Watcher: &engine.Watcher{Engine: eng, Feed: &feed.GoIndex{BaseURL: e.idx.URL}},
-			Actions: &engine.ActionsWatcher{Engine: eng}, Docker: &engine.DockerWatcher{Engine: eng}, Npm: &engine.NpmWatcher{Engine: eng}, Cargo: &engine.CargoWatcher{Engine: eng}, Pip: &engine.PipWatcher{Engine: eng}, Helm: &engine.HelmWatcher{Engine: eng}, Rubygems: &engine.RubygemsWatcher{Engine: eng}, Packagist: &engine.PackagistWatcher{Engine: eng}, Nuget: &engine.NugetWatcher{Engine: eng}, Maven: &engine.MavenWatcher{Engine: eng}}
+			Actions: &engine.ActionsWatcher{Engine: eng}, Docker: &engine.DockerWatcher{Engine: eng}, Npm: &engine.NpmWatcher{Engine: eng}, Cargo: &engine.CargoWatcher{Engine: eng}, Pip: &engine.PipWatcher{Engine: eng}, Helm: &engine.HelmWatcher{Engine: eng}, Rubygems: &engine.RubygemsWatcher{Engine: eng}, Packagist: &engine.PackagistWatcher{Engine: eng}, Nuget: &engine.NugetWatcher{Engine: eng}, Maven: &engine.MavenWatcher{Engine: eng}, Terraform: &engine.TerraformWatcher{Engine: eng}}
 		if o.goDL != nil {
 			a.Toolchain = &engine.ToolchainWatcher{Engine: eng, Source: &feed.GoDL{BaseURL: o.goDL.URL}}
 		}

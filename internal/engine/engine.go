@@ -110,6 +110,9 @@ type Engine struct {
 	// Maven reads package versions for ecosystem: maven. Nil leaves those dependencies
 	// without updates (see MavenWatcher).
 	Maven MavenRegistry
+	// Terraform reads package versions for ecosystem: terraform. Nil leaves those dependencies
+	// without updates (see TerraformWatcher).
+	Terraform TerraformRegistry
 	// PyPI reads project versions from the PyPI JSON API for ecosystem: pip. Nil leaves
 	// pip dependencies without updates (see PipWatcher).
 	PyPI PyPIIndex
@@ -419,6 +422,9 @@ func (e *Engine) scan(ctx context.Context, repo model.Repo) error {
 		return err
 	}
 	if err := e.notePackages(ctx, model.DatasourceMaven, mavenPackagesCursor, deps); err != nil {
+		return err
+	}
+	if err := e.notePackages(ctx, model.DatasourceTerraform, terraformPackagesCursor, deps); err != nil {
 		return err
 	}
 	if err := e.Store.ReplaceDependencies(ctx, repo.FullName, deps); err != nil {

@@ -72,8 +72,7 @@ auth model, rate limits); the notes below are what I expect, **unverified** unti
 Everything else:
 
 29. **More datasources and feeds, as many ecosystems as Renovate has.** ~~npm registry~~ (shipped with 30c, polled per package; the replicate feed is not used), ~~PyPI~~ (shipped with 30e, polled per project), ~~crates.io
-   sparse index~~ (shipped with 30d, polled per crate), ~~Maven~~ (shipped as the maven manager, [docs/maven.md](docs/maven.md), polled per artifact), ~~NuGet~~ (shipped as the nuget manager, [docs/nuget.md](docs/nuget.md), polled per package id), ~~RubyGems~~ (shipped as the bundler manager, [docs/bundler.md](docs/bundler.md), polled per gem), ~~Packagist~~ (shipped as the composer manager, [docs/composer.md](docs/composer.md), polled per package), ~~Docker/OCI tags~~ (shipped with 30b, polled per image), GitHub releases/tags, ~~Helm~~ (shipped with 30f, polled per repository index), Terraform
-   registry. Where a registry has a changes feed, use it; where it has none (OCI registries), fall back to polling
+   sparse index~~ (shipped with 30d, polled per crate), ~~Maven~~ (shipped as the maven manager, [docs/maven.md](docs/maven.md), polled per artifact), ~~NuGet~~ (shipped as the nuget manager, [docs/nuget.md](docs/nuget.md), polled per package id), ~~RubyGems~~ (shipped as the bundler manager, [docs/bundler.md](docs/bundler.md), polled per gem), ~~Packagist~~ (shipped as the composer manager, [docs/composer.md](docs/composer.md), polled per package), ~~Docker/OCI tags~~ (shipped with 30b, polled per image), GitHub releases/tags, ~~Helm~~ (shipped with 30f, polled per repository index), ~~Terraform registry~~ (shipped as the terraform manager, [docs/terraform.md](docs/terraform.md), polled per module or provider). Only GitHub releases/tags remains. Where a registry has a changes feed, use it; where it has none (OCI registries), fall back to polling
    only the packages the reverse index says someone imports, never every repo. Each datasource says which of the two it is.
 30. **More managers, toward Renovate parity.** ~~GitHub Actions~~ shipped ([docs/github-actions.md](docs/github-actions.md)).
    ~~30b Dockerfile~~ shipped ([docs/docker.md](docs/docker.md)). ~~30c npm~~ shipped ([docs/npm.md](docs/npm.md)). ~~30d Cargo~~ shipped ([docs/cargo.md](docs/cargo.md)). ~~30e pip~~ shipped ([docs/pip.md](docs/pip.md)). ~~30f Helm~~ shipped ([docs/helm.md](docs/helm.md)). Remaining: the long tail, each its own entry.
@@ -415,3 +414,11 @@ Everything else:
     versions (`4.13`, common on Central), qualified versions, properties (`${x.version}`, resolved from `<properties>` and
     the parent), versions managed by a parent or BOM, `<repositories>` and `settings.xml` mirrors, and Gradle
     (`build.gradle`, `libs.versions.toml`) as a sibling manager on this datasource.
+240. **Terraform: verify against the real registry, and the unread forms.** The datasource, manager and docs are written
+    from the vendored HashiCorp pages ([docs/vendor/terraform](docs/vendor/terraform)) and a fake; nothing has run against
+    the real service. Add a `-tags live` check, then the forms skipped today: ranges and other operators (`>= 1.0`,
+    `~> 1.2`), `//subdir` module addresses, the legacy `aws = "~> 4.0"` provider form, hosted registries and
+    `.terraformrc` mirrors, `*.tf.json`, `.terraform-version` and the `required_version` constraint, and OpenTofu's registry.
+241. **Terraform: refresh `.terraform.lock.hcl`.** The lock is reported stale in provider PRs, not rewritten. Rewriting it
+    without running Terraform needs the provider package checksums (`h1:` and `zh:`) per platform from the registry's
+    download metadata; decide after 240 whether that is worth doing.

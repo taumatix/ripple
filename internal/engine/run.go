@@ -155,6 +155,8 @@ type runner struct {
 	packagistLocks map[string]bool
 	// nugetLocks holds the lock files that resolve the files this PR edits.
 	nugetLocks map[string]bool
+	// terraformLocks holds the .terraform.lock.hcl files beside the Terraform files this PR edits.
+	terraformLocks map[string]bool
 	// pipLocks holds the lock files beside or above the Python files this PR edits.
 	pipLocks map[string]bool
 	// skipReasons says why a job was skipped when it is not the common "changed since indexed".
@@ -408,6 +410,9 @@ func (r *runner) plan(jobs []model.Job, deps []model.Dependency) []*prPlan {
 		if j.Datasource == model.DatasourceMaven {
 			branch = BranchPrefix + "maven/" + slug(j.Package) + "-" + slug(j.Version)
 		}
+		if j.Datasource == model.DatasourceTerraform {
+			branch = BranchPrefix + "terraform/" + slug(j.Package) + "-" + slug(j.Version)
+		}
 		if j.Datasource == model.DatasourceNpm {
 			branch = BranchPrefix + "npm/" + slug(j.Package) + "-" + slug(j.Version)
 		}
@@ -590,6 +595,7 @@ func (r *runner) openPR(p *prPlan) (*platform.PR, error) {
 	r.gemLocks = nil
 	r.packagistLocks = nil
 	r.nugetLocks = nil
+	r.terraformLocks = nil
 	r.pipLocks = nil
 	var applied []item
 	for _, it := range p.items {
@@ -689,6 +695,7 @@ func (r *runner) openPR(p *prPlan) (*platform.PR, error) {
 	body += r.gemNotes()
 	body += r.packagistNotes()
 	body += r.nugetNotes()
+	body += r.terraformNotes()
 	body += r.pipNotes()
 	changed, err := r.ws.CommitAndPush(r.ctx, p.branch, title)
 	if err != nil {
@@ -813,6 +820,9 @@ func (r *runner) apply(it item) (bool, error) {
 		if d.Datasource == model.DatasourceNuget {
 			r.noteNugetLock(d)
 		}
+		if d.Datasource == model.DatasourceTerraform {
+			r.noteTerraformLock(d)
+		}
 		if d.Datasource == model.DatasourcePip {
 			r.notePipLocks(d)
 		}
@@ -902,6 +912,8 @@ func datasourceFooter(datasource string) string {
 		return "a new version appeared on nuget.org"
 	case model.DatasourceMaven:
 		return "a new version appeared on Maven Central"
+	case model.DatasourceTerraform:
+		return "a new version appeared on the Terraform registry"
 	}
 	return "the new version appeared in the module index"
 }

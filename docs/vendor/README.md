@@ -79,3 +79,11 @@ against the live service.
 https://maven.apache.org/repositories/layout.html and https://maven.apache.org/ref/3.9.9/maven-repository-metadata/repository-metadata.html
 with the HTML tags stripped; `maven/junit-maven-metadata.xml` is the `maven-metadata.xml` of `junit:junit` on Maven
 Central. All fetched 2026-11-25. Not checked against the live service beyond that one file.
+
+## terraform
+
+`terraform/module-registry-protocol.txt`, `terraform/provider-registry-protocol.txt`, `terraform/version-constraints.txt`
+and `terraform/dependency-lock.txt` are the text of the matching pages on https://developer.hashicorp.com/terraform
+(internals/module-registry-protocol, internals/provider-registry-protocol, language/expressions/version-constraints,
+language/files/dependency-lock) with the HTML tags stripped, fetched 2026-11-25. The raw docs paths on GitHub returned
+404, so they were not used. No real registry answer is vendored; the fake is written from the protocol text alone.

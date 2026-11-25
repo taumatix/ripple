@@ -65,7 +65,7 @@ close-superseded-pull-requests: true  # close ripple's own untouched PR when a n
 backfill-new-dependencies: true    # bring a dependency the repo starts using to the newest release already known (default: true)
 dependency-dashboard: false        # keep one issue listing pending, deferred and failed jobs (default: false)
 updates:
-  - ecosystem: gomod               # gomod, github-actions (docs/github-actions.md), docker (docs/docker.md), npm (docs/npm.md), cargo (docs/cargo.md), pip (docs/pip.md), helm (docs/helm.md), bundler (docs/bundler.md), composer (docs/composer.md), nuget (docs/nuget.md), maven (docs/maven.md), or regex (see README)
+  - ecosystem: gomod               # gomod, github-actions (docs/github-actions.md), docker (docs/docker.md), npm (docs/npm.md), cargo (docs/cargo.md), pip (docs/pip.md), helm (docs/helm.md), bundler (docs/bundler.md), composer (docs/composer.md), nuget (docs/nuget.md), maven (docs/maven.md), terraform (docs/terraform.md), or regex (see README)
     directory: /                   # this directory and everything below it
     go-toolchain: toolchain        # optional, off by default: toolchain | directive (docs/go-toolchain.md)
     directives: extended           # optional, off by default: also rewrite `go run pkg@version` and `go tool pkg` on a major bump

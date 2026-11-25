@@ -45,6 +45,9 @@ func applicable(d model.Dependency, ds, pkg, version string) (rules.UpdateType, 
 	if ds == model.DatasourceMaven {
 		return applicableMaven(d, pkg, version)
 	}
+	if ds == model.DatasourceTerraform {
+		return applicableTerraform(d, pkg, version)
+	}
 	if ds == model.DatasourceNpm {
 		return applicableNpm(d, pkg, version)
 	}

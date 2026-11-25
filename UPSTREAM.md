@@ -260,3 +260,11 @@ upstream:
 
 Not pinned, because they are not wire contracts: `git` (any version with `GIT_CONFIG_COUNT`,
 2.31+), `golang.org/x/mod/modfile` (a Go module dependency, pinned in `go.mod`).
+  - name: terraform-registry
+    kind: http-api
+    reference: https://developer.hashicorp.com/terraform/registry/api-docs
+    docs: https://developer.hashicorp.com/terraform/internals/module-registry-protocol
+    format: "GET https://registry.terraform.io/v1/modules/{ns}/{name}/{provider}/versions and /v1/providers/{ns}/{type}/versions, anonymous; JSON versions[].version; *.tf module source/version and required_providers source/version"
+    verified-against: "docs/vendor/terraform pages (module and provider registry protocols, version constraints, dependency lock file) fetched 2026-11-25 from developer.hashicorp.com; the raw GitHub docs paths returned 404 and were not used; tests use internal/testutil/terraform.go, a fake written from them"
+    unverified: "everything against the real service: response shapes beyond the documented fields, rate limits, redirects, private registries and hosts (not read), mirrors and .terraformrc (not read)"
+    checked: 2026-11-25

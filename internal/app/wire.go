@@ -30,6 +30,7 @@ import (
 	"github.com/taumatix/ripple/internal/rubygems"
 	"github.com/taumatix/ripple/internal/rules"
 	"github.com/taumatix/ripple/internal/store"
+	"github.com/taumatix/ripple/internal/terraform"
 	"github.com/taumatix/ripple/internal/webhook"
 )
 
@@ -116,6 +117,7 @@ func New(ctx context.Context, s *config.Server, log *slog.Logger) (a *App, st st
 	eng.Packagist = &packagist.Client{UserAgent: "ripple (+https://github.com/taumatix/ripple)"}
 	eng.Nuget = &nuget.Client{UserAgent: "ripple (+https://github.com/taumatix/ripple)"}
 	eng.Maven = &maven.Client{UserAgent: "ripple (+https://github.com/taumatix/ripple)"}
+	eng.Terraform = &terraform.Client{UserAgent: "ripple (+https://github.com/taumatix/ripple)"}
 	eng.PyPI = &pypi.Client{UserAgent: "ripple (+https://github.com/taumatix/ripple)"}
 	eng.Npm = &npmreg.Client{UserAgent: "ripple (+https://github.com/taumatix/ripple)"}
 	a = &App{
@@ -134,6 +136,7 @@ func New(ctx context.Context, s *config.Server, log *slog.Logger) (a *App, st st
 		Packagist: &engine.PackagistWatcher{Engine: eng},
 		Nuget:     &engine.NugetWatcher{Engine: eng},
 		Maven:     &engine.MavenWatcher{Engine: eng},
+		Terraform: &engine.TerraformWatcher{Engine: eng},
 		Watcher:   &engine.Watcher{Engine: eng, Feed: &feed.GoIndex{BaseURL: s.FeedURL, UserAgent: "ripple (+https://github.com/taumatix/ripple)"}},
 	}
 	a.closers = append(a.closers, closeSandbox)

@@ -48,6 +48,8 @@ type Gitea struct {
 	prs      map[string][]*PR
 	visible  []string
 	archived map[string]bool
+	ids      map[int64]string // repository id -> current full name (SetRepoID)
+	idLookup int
 	// Merges records the raw merge request bodies, in order.
 	Merges []string
 	// VersionCalls counts GET /api/v1/version.
@@ -70,6 +72,38 @@ func NewGitea(t *testing.T, forgejo bool) *Gitea {
 	g.APIURL = srv.URL
 	g.GitBase = "file://" + g.root
 	return g
+}
+
+// SetRepoID makes GET /api/v1/repositories/{id} answer that the repository with this id is
+// called name (an id never set is a 404; the same name under another id models a
+// repository deleted and recreated).
+func (g *Gitea) SetRepoID(id int64, name string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.ids == nil {
+		g.ids = map[int64]string{}
+	}
+	g.ids[id] = name
+}
+
+// RepoIDCalls is how many GET /api/v1/repositories/{id} requests were served.
+func (g *Gitea) RepoIDCalls() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.idLookup
+}
+
+func (g *Gitea) repoByID(w http.ResponseWriter, idText string) {
+	id, err := strconv.ParseInt(idText, 10, 64)
+	g.mu.Lock()
+	g.idLookup++
+	name, ok := g.ids[id]
+	g.mu.Unlock()
+	if err != nil || !ok {
+		g.fail(w, http.StatusNotFound, "no repository with id %s", idText)
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"id": id, "full_name": name})
 }
 
 func (g *Gitea) bare(repo string) string { return filepath.Join(g.root, repo+".git") }
@@ -189,6 +223,8 @@ func (g *Gitea) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]string{"version": g.version()})
 	case path == "/user/repos" && r.Method == http.MethodGet:
 		g.listRepos(w, r)
+	case strings.HasPrefix(path, "/repositories/") && r.Method == http.MethodGet:
+		g.repoByID(w, strings.TrimPrefix(path, "/repositories/"))
 	case strings.HasPrefix(path, "/repos/"):
 		g.handleRepo(w, r, strings.Split(strings.TrimPrefix(path, "/repos/"), "/"))
 	default:

@@ -461,6 +461,7 @@ func (r *runner) execute(plans []*prPlan, deps []model.Dependency) {
 	limit := rules.EffectivePRLimit(e.Limits, r.cfg)
 	count := len(open)
 	plans = securityFirst(plans)
+	relinked := false
 	for pi, p := range plans {
 		if pr, ok := heads[p.branch]; ok {
 			for _, it := range p.items {
@@ -468,6 +469,7 @@ func (r *runner) execute(plans []*prPlan, deps []model.Dependency) {
 					r.deferJob(it.job, e.now().Add(deferBy), "group PR is open; waiting for it to be merged or closed")
 				} else {
 					r.finish(it.job, model.JobDone, "pull request already open", pr.URL)
+					relinked = true
 				}
 			}
 			continue
@@ -524,6 +526,15 @@ func (r *runner) execute(plans []*prPlan, deps []model.Dependency) {
 			// this run opened a moment ago.
 			open = append(open, *pr)
 		}
+	}
+	if relinked {
+		// A job that found its PR already open recorded it only now (a rerun clears the
+		// record), and the sweeps at the start of the run skip a PR no job owned yet. Judge
+		// the open PRs again so a lower PR is not left until some later run has plans.
+		if closed := r.sweepSuperseded(deps, open); len(closed) > 0 {
+			open = without(open, closed)
+		}
+		r.sweepBeaten(open)
 	}
 }
 

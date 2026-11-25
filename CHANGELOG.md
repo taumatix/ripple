@@ -4,6 +4,9 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
 
 ## [Unreleased]
 
+### Fixed
+- Supersede: a rerun of the lower job, whose recorded PR is cleared, no longer strands its PR beside a higher one: the open PRs are judged again after a job re-finds its PR already open (ROADMAP 179, new 225).
+
 ### Added
 - pip: a `setup.cfg`'s `[options] python_requires` now feeds the Requires-Python guard (after `pyproject.toml`, before `Pipfile`, in the same directory); `manager.PipPythonFiles` gains `setup.cfg` (additive; ROADMAP 218).
 - `app.HeadLister` (optional, additive: `ListRepoHeads(ctx) map[repo]sha`) on a `platform.Lister` host: `App.Discover` remembers each listed repo's default-branch head per repo (`discover-head/<host>#<repo>`) and queues a whole-repo Push when it moved, so a host with no push webhooks is re-scanned. Covered end to end on the memory store through the queue (the processed push re-uses the existing push path). No host implements `HeadLister` yet: that belongs in the platform packages (ROADMAP 221).\n- GitLab: a push authenticated by the plain secret token (no signing key) is parsed as it streams, like a signed one, instead of being read whole first (`webhook.Guard.ReadStream`, additive; ROADMAP 205).

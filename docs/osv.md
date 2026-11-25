@@ -54,7 +54,8 @@ If the release feed already queued the same bump behind its cooldown, the adviso
   done. Pending jobs made before the per-advisory indexes are indexed once by a backfill that walks the repos after an upgrade (cursor `osv-jobs-backfill`); a done job from before them is found only with `RIPPLE_OSV_BACKFILL_OPEN_PRS=true` (default off): a second one-time pass (cursor `osv-jobs-backfill-prs`) lists each repo's open ripple PRs once (one host call per repo), reads the module and version from the `ripple/go/...` branch, and indexes the job when it is done, opened that PR and carries an advisory note. Only open PRs of go jobs are reached, since the branch is what names the job; a repo whose listing fails is skipped, a rate limit is retried. A repo that another run holds
 for more than two seconds keeps its job and PR for now: the record is remembered (cursor `osv-reconcile-retry`) and applied
 again, fetched fresh, at the start of the next polls until the repo is free. A record whose fix was raised is
-  handled by the superseded-PR flow, which replaces the old PR when the new one opens.
+  handled by the superseded-PR flow, which replaces the old PR when the new one opens. A close the host refused is retried by
+  the next run of the repo that has plans, including a run that only re-found a PR already open (a rerun of the lower job).
 - **Amended records.** When OSV amends a record that still affects the version in use (a new summary, severity or CVSS),
   ripple rewrites that advisory's line in the open PR's description, found by its start (the id, link, module and fixed
   version ripple wrote). A description a person edited (GitHub's edit history names every editor, and only the token's

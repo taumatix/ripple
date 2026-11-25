@@ -291,3 +291,50 @@ func (r *runner) pipPython(p string) (string, string) {
 		}
 	}
 }
+
+// pipRetarget runs after the Requires-Python guard refused job's release: it queues a
+// job for the newest older release the repo's Python can run, when that is still an
+// update for d and the repo's rules allow it. It returns text for the skip reason ("" when
+// the refusal was not about Python, or no release fits).
+func (r *runner) pipRetarget(job model.Job, d model.Dependency) string {
+	if r.e.PyPI == nil {
+		return ""
+	}
+	have, _ := r.pipPython(d.File)
+	pr, err := r.e.PyPI.Project(r.ctx, d.Package)
+	if err != nil || have == "" {
+		return ""
+	}
+	if rel, ok := pr.Release(job.Version); !ok || rel.RunsOn(have) {
+		return ""
+	}
+	tooNew, ok := pypi.Parse(job.Version)
+	if !ok {
+		return ""
+	}
+	floor, _ := manager.PipSpecFloor(d.Version)
+	spec := manager.PipSpecAllows(d.Version)
+	alt := pr.NewestRelease(floor, func(rel pypi.Release, v pypi.Version) bool {
+		return pypi.Compare(v, tooNew) < 0 && rel.RunsOn(have) && (spec == nil || spec(v))
+	})
+	if alt == "" {
+		return ""
+	}
+	typ, ok := applicablePip(d, d.Package, alt)
+	if !ok {
+		return ""
+	}
+	dec, ok := r.e.decide(&repoState{found: true, cfg: r.cfg}, d, typ, job.ReleasedAt)
+	if !ok || !dec.Enabled {
+		return ""
+	}
+	if _, err := r.e.Store.EnqueueJob(r.ctx, model.Job{
+		Key: model.JobKey(job.Repo, model.DatasourcePip, job.Package, alt), Repo: job.Repo,
+		Datasource: model.DatasourcePip, Package: job.Package, Version: alt,
+		ReleasedAt: job.ReleasedAt, State: model.JobPending, NotBefore: dec.NotBefore,
+	}); err != nil {
+		r.e.log().Warn("retargeted job not queued", "repo", job.Repo, "package", job.Package, "version", alt, "err", err)
+		return ""
+	}
+	return "; retargeted to " + alt + ", the newest release that Python can run"
+}

@@ -66,3 +66,37 @@ func TestPipRequiresPythonReadsSetupCfg(t *testing.T) {
 		}
 	})
 }
+
+// When the newest release needs a newer Python, the newest older release the repo's
+// Python can run is proposed instead (and that stays an update, so a repo already
+// at it gets nothing).
+func TestPipRequiresPythonRetargetsToNewestRunnableRelease(t *testing.T) {
+	forEach(t, func(t *testing.T, st store.Store) {
+		e, idx := pipEnv(t, st)
+		idx.Publish("requests", "2.31.0")
+		e.gh.AddRepo("acme/old", map[string]string{".ripple.yaml": pipConfig,
+			"pyproject.toml": "[project]\nname = \"a\"\nrequires-python = \">=3.9\"\ndependencies = [\"requests==2.31.0\"]\n"})
+		e.gh.AddRepo("acme/at", map[string]string{".ripple.yaml": pipConfig,
+			"pyproject.toml": "[project]\nname = \"a\"\nrequires-python = \">=3.9\"\ndependencies = [\"requests==2.32.0\"]\n"})
+		start(t, e, "acme/old", "acme/at")
+		e.clock.Advance(time.Minute)
+		idx.PublishRequiresPython("requests", "2.32.0", ">=3.9")
+		idx.PublishRequiresPython("requests", "2.33.0", ">=3.10")
+		idx.PublishRequiresPython("requests", "2.34.0", ">=3.12")
+		for i := 0; i < 4; i++ {
+			e.tick()
+		}
+		head, _ := onePR(t, e, "acme/old", false)
+		got, _ := e.gh.FileAt("acme/old", head, "pyproject.toml")
+		if !strings.Contains(got, "requests==2.32.0") {
+			t.Errorf("not retargeted to 2.32.0:\n%s", got)
+		}
+		j, ok, _ := e.st.GetJob(context.Background(), model.JobKey("acme/old", model.DatasourcePip, "requests", "2.34.0"))
+		if !ok || j.State != model.JobSkipped || !strings.Contains(j.Reason, "retargeted to 2.32.0") {
+			t.Errorf("newest job = %+v, %v", j, ok)
+		}
+		if n := len(e.gh.PRs("acme/at")); n != 0 {
+			t.Errorf("repo already at the newest runnable release got %d PRs", n)
+		}
+	})
+}

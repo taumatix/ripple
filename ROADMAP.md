@@ -77,9 +77,6 @@ Everything else:
 - **Periodic re-scan for hosts without push events.** A host discovered by listing (`platform.Lister`)
   and without push webhooks is scanned when it first appears and never again; re-scan when its default
   branch head moves, compared at each listing.
-- **Listing state outside a single cursor.** `App.Discover` keeps a host's previous listing as one JSON
-  store cursor, which DynamoDB caps at 400 KB (roughly 10k repo names). Store it per repo before a host
-  with larger installations ships.
 29. **More datasources and feeds, as many ecosystems as Renovate has.** ~~npm registry~~ (shipped with 30c, polled per package; the replicate feed is not used), ~~PyPI~~ (shipped with 30e, polled per project), ~~crates.io
    sparse index~~ (shipped with 30d, polled per crate), Maven, NuGet, RubyGems, Packagist, ~~Docker/OCI tags~~ (shipped with 30b, polled per image), GitHub releases/tags, Helm, Terraform
    registry. Where a registry has a changes feed, use it; where it has none (OCI registries), fall back to polling

@@ -9,11 +9,13 @@ import (
 	"net/http"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/taumatix/ripple/internal/config"
 	"github.com/taumatix/ripple/internal/platform"
 	"github.com/taumatix/ripple/internal/platform/gitws"
+	"github.com/taumatix/ripple/internal/store"
 )
 
 // HostDeps is what the server hands every host builder.
@@ -125,14 +127,15 @@ func (a *App) discover(ctx context.Context, host string, l platform.Lister) erro
 
 	key := "discover/" + host
 	archivedKey := "discover-archived/" + host
-	before, err := a.listingCursor(ctx, key)
+	beforeL, err := a.loadListing(ctx, key)
 	if err != nil {
 		return err
 	}
-	archivedBefore, err := a.listingCursor(ctx, archivedKey)
+	archivedBeforeL, err := a.loadListing(ctx, archivedKey)
 	if err != nil {
 		return err
 	}
+	before, archivedBefore := beforeL.names, archivedBeforeL.names
 	// A repo that moved between the listings was archived or unarchived; one in neither
 	// listing any more was deleted (or lost to the credential); one in neither before is new.
 	var archived, unarchived []string
@@ -165,10 +168,12 @@ func (a *App) discover(ctx context.Context, host string, l platform.Lister) erro
 	sort.Strings(removed)
 	removed = slices.Compact(removed)
 	if len(added)+len(removed)+len(archived)+len(unarchived) == 0 {
-		if slices.Equal(archivedBefore, archivedNow) {
-			return nil
+		// No event: the active listing is unchanged, and a changed archived one is only remembered
+		// (first seen archived). A legacy single cursor is still moved to per-repo keys.
+		if err := a.saveListing(ctx, archivedKey, archivedBeforeL, archivedNow); err != nil {
+			return err
 		}
-		return a.setListingCursor(ctx, archivedKey, archivedNow) // first seen archived: only remembered
+		return a.saveListing(ctx, key, beforeL, now)
 	}
 	gen := fmt.Sprintf("list-%x", hashNames(slices.Concat(now, []string{""}, archivedNow)))
 	for _, c := range []struct {
@@ -184,28 +189,99 @@ func (a *App) discover(ctx context.Context, host string, l platform.Lister) erro
 	}
 	// The archived listing first: a crash between the two writes repeats the events (their
 	// delivery ids make that a no-op) instead of losing the archive.
-	if err := a.setListingCursor(ctx, archivedKey, archivedNow); err != nil {
+	if err := a.saveListing(ctx, archivedKey, archivedBeforeL, archivedNow); err != nil {
 		return err
 	}
-	return a.setListingCursor(ctx, key, now)
+	return a.saveListing(ctx, key, beforeL, now)
 }
 
-// listingCursor is a host's stored listing: a sorted JSON list of names, empty when none.
-func (a *App) listingCursor(ctx context.Context, key string) ([]string, error) {
-	raw, err := a.Queue.Store.GetCursor(ctx, key)
-	if err != nil || raw == "" {
-		return nil, err
-	}
-	var names []string
-	if err := json.Unmarshal([]byte(raw), &names); err != nil {
-		return nil, fmt.Errorf("cursor %s: %w", key, err)
-	}
-	return names, nil
+// listing is a host's stored listing. names is sorted. Where the store lists cursors it is
+// kept one cursor per repo, "<key>#<repo>", so no single item grows with the host (DynamoDB
+// caps one at 400 KB); legacy says the names came, wholly or in part, from the single JSON
+// cursor "<key>" an earlier version wrote, which saveListing then moves to per-repo keys.
+type listing struct {
+	names  []string
+	keyed  []string // the names held as per-repo cursors
+	legacy bool
 }
 
-func (a *App) setListingCursor(ctx context.Context, key string, names []string) error {
-	b, _ := json.Marshal(names)
-	return a.Queue.Store.SetCursor(ctx, key, string(b))
+const listingPage = 500
+
+// loadListing reads the listing under key: the per-repo cursors, then any legacy cursor.
+func (a *App) loadListing(ctx context.Context, key string) (listing, error) {
+	var l listing
+	st := a.Queue.Store
+	raw, err := st.GetCursor(ctx, key)
+	if err != nil {
+		return l, err
+	}
+	if raw != "" {
+		if err := json.Unmarshal([]byte(raw), &l.names); err != nil {
+			return l, fmt.Errorf("cursor %s: %w", key, err)
+		}
+		l.legacy = true
+	}
+	cl, ok := st.(store.CursorLister)
+	if !ok {
+		return l, nil
+	}
+	prefix := key + store.CursorGroupSep
+	after := ""
+	for {
+		var page []store.Cursor
+		if pl, ok := st.(store.PagedCursorLister); ok {
+			page, err = pl.ListCursorsPage(ctx, prefix, after, listingPage)
+		} else {
+			page, err = cl.ListCursors(ctx, prefix)
+		}
+		if err != nil {
+			return l, err
+		}
+		for _, c := range page {
+			l.keyed = append(l.keyed, strings.TrimPrefix(c.Name, prefix))
+		}
+		if _, paged := st.(store.PagedCursorLister); !paged || len(page) == 0 {
+			break
+		}
+		after = page[len(page)-1].Name
+	}
+	sort.Strings(l.keyed)
+	l.names = slices.Compact(slices.Concat(l.names, l.keyed))
+	sort.Strings(l.names)
+	return l, nil
+}
+
+// saveListing makes the stored listing under key equal now. On a store that lists cursors it
+// writes only the difference, and deletes a legacy cursor last, so a crash in between leaves
+// both and the next pass repeats the move; any other store keeps one JSON cursor.
+func (a *App) saveListing(ctx context.Context, key string, before listing, now []string) error {
+	st := a.Queue.Store
+	cl, ok := st.(store.CursorLister)
+	if !ok {
+		if slices.Equal(before.names, now) {
+			return nil
+		}
+		b, _ := json.Marshal(now)
+		return st.SetCursor(ctx, key, string(b))
+	}
+	for _, n := range now {
+		if _, has := slices.BinarySearch(before.keyed, n); !has {
+			if err := st.SetCursor(ctx, key+store.CursorGroupSep+n, "1"); err != nil {
+				return err
+			}
+		}
+	}
+	for _, n := range before.keyed {
+		if _, keep := slices.BinarySearch(now, n); !keep {
+			if err := cl.DeleteCursor(ctx, key+store.CursorGroupSep+n); err != nil {
+				return err
+			}
+		}
+	}
+	if before.legacy {
+		return cl.DeleteCursor(ctx, key)
+	}
+	return nil
 }
 
 func (a *App) log() *slog.Logger {

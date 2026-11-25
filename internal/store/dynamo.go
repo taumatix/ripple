@@ -260,6 +260,8 @@ type jobAttrs struct {
 	State                                   string
 	Attempts                                int
 	PRURL, Reason                           string
+	// HeadSHA and BodyHash are absent on items written before they existed, and read as empty.
+	HeadSHA, BodyHash string
 }
 
 func ts(t time.Time) string { return t.UTC().Format(tsFm) }
@@ -625,7 +627,7 @@ func (d *Dynamo) ListReleases(ctx context.Context, ds, pkg string) ([]model.Rele
 
 func (d *Dynamo) jobItem(j model.Job) jobAttrs {
 	a := jobAttrs{item: item{PK: "JOB#" + j.Key, SK: "META"}, Key: j.Key, Repo: j.Repo, Datasource: j.Datasource, Package: j.Package,
-		Version: j.Version, ReleasedAt: ts(j.ReleasedAt), NotBefore: ts(j.NotBefore), State: string(j.State), Attempts: j.Attempts, PRURL: j.PRURL, Reason: j.Reason}
+		Version: j.Version, ReleasedAt: ts(j.ReleasedAt), NotBefore: ts(j.NotBefore), State: string(j.State), Attempts: j.Attempts, PRURL: j.PRURL, Reason: j.Reason, HeadSHA: j.HeadSHA, BodyHash: j.BodyHash}
 	if j.State == model.JobPending {
 		a.GSI1PK, a.GSI1SK = pendingJobsPK(shardOf(j.Key, d.jobShards)), ts(j.NotBefore)+sep+j.Key
 	}
@@ -664,7 +666,7 @@ func (d *Dynamo) syncOpenJob(ctx context.Context, j model.Job) error {
 func fromJobItem(a jobAttrs) model.Job {
 	return model.Job{Key: a.Key, Repo: a.Repo, Datasource: a.Datasource, Package: a.Package, Version: a.Version,
 		ReleasedAt: parseTS(a.ReleasedAt), State: model.JobState(a.State), NotBefore: parseTS(a.NotBefore),
-		Attempts: a.Attempts, PRURL: a.PRURL, Reason: a.Reason}
+		Attempts: a.Attempts, PRURL: a.PRURL, Reason: a.Reason, HeadSHA: a.HeadSHA, BodyHash: a.BodyHash}
 }
 
 func (d *Dynamo) GetJob(ctx context.Context, key string) (model.Job, bool, error) {

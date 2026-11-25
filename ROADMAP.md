@@ -143,12 +143,16 @@ Everything else:
     the closer when either API gives a reliable "a person touched it" read. Rechecked 2026-11-23 against the
     vendored Azure REST pull-request update reference (docs/vendor/azuredevops) and the SCM-Manager source
     notes: neither adds an edit history; nothing buildable offline.
-94. **Edits no host can report.** Not detected: a description edit on Forgejo, Bitbucket Cloud (beyond its
-    activity log), CodeCommit and Gerrit; a changed label, assignee or reviewer on GitLab and Gerrit; a
-    force-push under ripple's own commit identity on Gerrit, Bitbucket Cloud and CodeCommit. A person who does
-    one of these loses nothing only if ripple stored what it opened: record the head SHA and body hash on the
-    job and compare, which would cover every host the same way. It needs the head SHA on `platform.PR` and a
-    new job column (a Postgres migration and a DynamoDB attribute), so it waits for the store work in flight.
+228. **Compare the recorded head and body with the open PR.** Each job now records the head commit and body hash of
+    the PR ripple opened for it (`model.Job.HeadSHA`, `BodyHash`; entry 94, first half). The comparison is not
+    built: it needs the PR body on `platform.PR` (an additive `Body` field, filled from each host's open-PR
+    listing where it reports one; Gerrit and CodeCommit need a second read), then in the engine's open-PR pass
+    a PR whose `HeadSHA` or `model.BodyHash(Body)` differs from its job's is treated as touched (the existing
+    touched-PR memory) so it is neither closed as superseded nor force-pushed over. That covers what the event
+    feeds cannot show: a description edit on Forgejo, Bitbucket Cloud (beyond its activity log), CodeCommit
+    and Gerrit, and a force-push under ripple's own identity on Gerrit, Bitbucket Cloud and CodeCommit. A label,
+    assignee or reviewer change on GitLab and Gerrit stays outside it. Jobs from before the columns existed
+    have empty values and must read as "not recorded", never as "edited".
 101. **Replicas: soak against real databases.** The shared suite races goroutines on one store handle and the
     e2e runs two replicas; neither is a real multi-node Postgres or DynamoDB under load, or with a skewed clock.
     Run three replicas against both with a clock offset and check one PR per job and ordered events.

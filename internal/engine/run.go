@@ -694,8 +694,11 @@ func (r *runner) openPR(p *prPlan) (*platform.PR, error) {
 			e.log().Warn("auto-merge not enabled", "repo", r.repo.FullName, "pr", pr.URL, "err", err)
 		}
 	}
+	bodyHash := model.BodyHash(body)
 	for _, it := range applied {
-		r.finish(it.job, model.JobDone, "", pr.URL)
+		j := it.job
+		j.HeadSHA, j.BodyHash = pr.HeadSHA, bodyHash
+		r.finish(j, model.JobDone, "", pr.URL)
 	}
 	e.log().Info("opened pull request", "repo", r.repo.FullName, "pr", pr.URL, "jobs", len(applied))
 	return &pr, nil

@@ -48,6 +48,8 @@ type fakeGerrit struct {
 	failRead    string
 	// pageCap, when set, caps the page size the server returns, as Gerrit's internal limit does.
 	pageCap int
+	// limitReads makes every GET of a project's HEAD or branches answer 429.
+	limitReads bool
 }
 
 type fakeChange struct {
@@ -358,8 +360,13 @@ func (f *fakeGerrit) serveAPI(w http.ResponseWriter, r *http.Request) {
 		f.postChange(w, parts[1], strings.Join(parts[2:], "/"), body)
 	case parts[0] == "projects" && len(parts) == 2 && parts[1] == "" && r.Method == http.MethodGet:
 		f.listProjects(w, r)
+	case f.limitReads && parts[0] == "projects" && len(parts) >= 3 && (parts[2] == "HEAD" || parts[2] == "branches"):
+		w.Header().Set("Retry-After", "1")
+		text(w, 429, "Too Many Requests")
 	case parts[0] == "projects" && len(parts) == 3 && parts[2] == "HEAD" && r.Method == http.MethodGet:
 		f.projectHead(w, parts[1])
+	case parts[0] == "projects" && len(parts) == 4 && parts[2] == "branches" && r.Method == http.MethodGet:
+		f.branch(w, parts[1], parts[3])
 	case parts[0] == "projects" && len(parts) >= 4 && parts[2] == "commits" && r.Method == http.MethodGet:
 		f.commit(w, parts[1], parts[3], len(parts) == 5 && parts[4] == "files" || len(parts) == 6 && parts[4] == "files")
 	default:
@@ -370,6 +377,10 @@ func (f *fakeGerrit) serveAPI(w http.ResponseWriter, r *http.Request) {
 // projectOf is the project a request is about, for Calls. Called with f.mu held.
 func (f *fakeGerrit) projectOf(r *http.Request, parts []string) string {
 	switch {
+	case parts[0] == "projects" && len(parts) > 1 && (len(parts) == 3 && parts[2] == "HEAD" || len(parts) >= 3 && parts[2] == "branches"):
+		// Head reads belong to discovery polling (ListRepoHeads), not to a scan or a push, so
+		// the conformance suite's per-repo call counts leave them out.
+		return ""
 	case parts[0] == "projects" && len(parts) > 1:
 		return parts[1]
 	case parts[0] == "changes" && len(parts) == 2 && parts[1] == "":
@@ -677,6 +688,23 @@ func (f *fakeGerrit) projectHead(w http.ResponseWriter, project string) {
 		return
 	}
 	writeJSON(w, 200, "refs/heads/main")
+}
+
+// branch is "Get Branch" (rest-api-projects.md): the BranchInfo of one ref.
+func (f *fakeGerrit) branch(w http.ResponseWriter, project, ref string) {
+	f.mu.Lock()
+	ok := f.projects[project]
+	f.mu.Unlock()
+	if !ok {
+		text(w, 404, "Not found: "+project)
+		return
+	}
+	out, err := exec.Command("git", "-C", f.bare(project), "rev-parse", "--verify", "-q", ref).Output()
+	if err != nil {
+		text(w, 404, "Not found: "+ref)
+		return
+	}
+	writeJSON(w, 200, map[string]string{"ref": ref, "revision": strings.TrimSpace(string(out))})
 }
 
 // commit is "Get Commit" (parents) or "List Files" (a map of path to FileInfo with

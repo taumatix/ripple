@@ -72,6 +72,7 @@ type CodeCommit struct {
 	prs       map[string][]*CodeCommitPR
 	limitNext bool
 	failOps   map[string]int
+	throttle  map[string]int
 	requests  []string
 	apiHost   string
 	confirmed int
@@ -210,6 +211,16 @@ func (c *CodeCommit) FailNext(op string, n int) {
 		c.failOps = map[string]int{}
 	}
 	c.failOps[op] = n
+}
+
+// ThrottleNext makes the next n requests for op answer a ThrottlingException.
+func (c *CodeCommit) ThrottleNext(op string, n int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.throttle == nil {
+		c.throttle = map[string]int{}
+	}
+	c.throttle[op] = n
 }
 
 func (c *CodeCommit) pr(path string, id int) *CodeCommitPR {
@@ -437,9 +448,17 @@ func (c *CodeCommit) serveAPI(w http.ResponseWriter, r *http.Request) {
 	if failing {
 		c.failOps[op]--
 	}
+	throttled := c.throttle[op] > 0
+	if throttled {
+		c.throttle[op]--
+	}
 	c.mu.Unlock()
 	if failing {
 		c.awsErr(w, http.StatusInternalServerError, "InternalFailure", op+" failed")
+		return
+	}
+	if throttled {
+		c.awsErr(w, http.StatusBadRequest, "ThrottlingException", "Rate exceeded")
 		return
 	}
 	switch op {
@@ -455,6 +474,10 @@ func (c *CodeCommit) serveAPI(w http.ResponseWriter, r *http.Request) {
 		c.updateStatus(w, in)
 	case "ListRepositories":
 		c.listRepositories(w, in)
+	case "GetRepository":
+		c.getRepository(w, in)
+	case "GetBranch":
+		c.getBranch(w, in)
 	case "ListPullRequests":
 		c.listPullRequests(w, in)
 	case "GetPullRequest":
@@ -506,6 +529,51 @@ func (c *CodeCommit) listRepositories(w http.ResponseWriter, in map[string]any) 
 		out["nextToken"] = next
 	}
 	_ = json.NewEncoder(w).Encode(out)
+}
+
+// existing resolves the repositoryName of a request without counting it as a call on the
+// repository: GetRepository and GetBranch are discovery polling, not scan or push cost.
+func (c *CodeCommit) existing(w http.ResponseWriter, in map[string]any) (string, bool) {
+	name, _ := in["repositoryName"].(string)
+	if name == "" || strings.Contains(name, "/") {
+		c.awsErr(w, http.StatusBadRequest, "RepositoryNameRequiredException", "repositoryName")
+		return "", false
+	}
+	if _, err := os.Stat(c.bare(name)); err != nil {
+		c.awsErr(w, http.StatusBadRequest, "RepositoryDoesNotExistException", name)
+		return "", false
+	}
+	return name, true
+}
+
+// getRepository is GetRepository (docs/vendor/codecommit/api-API_GetRepository.md): the
+// metadata, with defaultBranch only once the repository has a branch to be it.
+func (c *CodeCommit) getRepository(w http.ResponseWriter, in map[string]any) {
+	name, ok := c.existing(w, in)
+	if !ok {
+		return
+	}
+	md := map[string]any{"repositoryName": name, "repositoryId": "id-" + name}
+	if c.hasBranch(name, "main") {
+		md["defaultBranch"] = "main"
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"repositoryMetadata": md})
+}
+
+// getBranch is GetBranch (docs/vendor/codecommit/api-API_GetBranch.md): the branch name and
+// its last commit id.
+func (c *CodeCommit) getBranch(w http.ResponseWriter, in map[string]any) {
+	name, ok := c.existing(w, in)
+	if !ok {
+		return
+	}
+	branch, _ := in["branchName"].(string)
+	if branch == "" || !c.hasBranch(name, branch) {
+		c.awsErr(w, http.StatusBadRequest, "BranchDoesNotExistException", branch)
+		return
+	}
+	id := strings.TrimSpace(git(c.t, c.bare(name), "rev-parse", "refs/heads/"+branch))
+	_ = json.NewEncoder(w).Encode(map[string]any{"branch": map[string]string{"branchName": branch, "commitId": id}})
 }
 
 // repo resolves the repositoryName of a request, counting the call.

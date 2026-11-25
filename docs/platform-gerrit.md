@@ -41,6 +41,17 @@ a secret used nowhere else. It is compared in constant time before the body is r
 request is also accepted. Push events list no files, so ripple asks the commit files API for each pushed commit on
 a branch (up to 20) and re-scans only when a file matters; on any doubt it re-scans.
 
+## Head polling
+
+The client implements `app.HeadLister`, so a project whose default branch moved is re-scanned at the next
+discovery even when its webhook never arrived. The project listing carries no commit, so this is **two extra reads
+per project** each discovery, one project at a time: `GET /projects/<p>/HEAD` (the branch) then
+`GET /projects/<p>/branches/refs%2Fheads%2F<branch>` (its `revision`). A 429 ends the listing and the app keeps
+what it remembered; another failure leaves that project out for the round. A project is reported only once
+`ListRepos` can name its default branch, which the first head listing after a start learns, so the first round
+reports none and the second all (a project already scanned by its add is not re-scanned on first sight anyway).
+The two reads are not counted as scan cost by the conformance suite. Verified against the fake only.
+
 ## Not supported
 
 - **Auto-merge.** Gerrit's docs describe submit through labels and submit rules, not a request that completes
@@ -48,7 +59,7 @@ a branch (up to 20) and re-scans only when a file matters; on any doubt it re-sc
 - A merged or abandoned change with the same Change-Id rejects a later push of that branch name; use a branch
   prefix or names unique per proposal.
 - Gerrit may refuse a re-push whose content is identical ("no new changes"); that surfaces as a push error.
-- The default branch of a project is learned at its first scan, not at discovery.
+- The default branch of a project is learned at its first scan or its first head listing, not by the project listing.
 - A draft is marked WIP after the push, so for a moment it is ready for review.
 
 ## Unverified

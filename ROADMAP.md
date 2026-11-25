@@ -251,9 +251,6 @@ Everything else:
     of Gitea/Forgejo, `archived=ARCHIVED` on Data Center 8+) ran only against fakes; also check that GitLab's
     `simple=true` listing under `archived=true` answers what the doc says, and that a Data Center before 8.0 lists no
     archived repo. Folds into entry 92's real-host run.
-179. **Supersede on a later run.** Within one run, PRs opened for the same module are now closed by the next one (fixed
-    with the live OSV run). A sweep on a later run did not close lower PRs in one observed case after a rerun and a tick;
-    reproduce it with a fake and either fix it or explain it in docs/osv.md.
 185. **Live: a retracted `@latest` and a prerelease-only module.** The fake and unit tests cover a module whose `@latest`
     is retracted (it proposes the newest version that is not), all versions retracted (the module is still answered) and
     prerelease-only; `go.mongodb.org/mongo-driver` is the one real retraction fixture in `live.yml`. Find a real module whose
@@ -379,3 +376,6 @@ Everything else:
     gets a token for a service principal (client secret, certificate or workload identity federation) or a managed
     identity and renews it before expiry, with its settings in `docs/platform-azuredevops.md`; the fake would need a token
     endpoint. See `docs/vendor/azuredevops/entra-oauth.md`.
+225. **Supersede: a lower PR waits for any run with plans.** A lower PR whose close was refused is retried by the next run of
+    the repo that has plans, and a rerun of the lower job is now judged again within its own run; a repo with no plans at
+    all is not swept, so a lone refused close can wait for the next dependency change. Covered against the fake host only.

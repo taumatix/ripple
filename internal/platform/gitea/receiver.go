@@ -142,6 +142,7 @@ func parse(name string, r io.Reader) (platform.Event, bool, error) {
 	case "push":
 		var p struct {
 			Ref, FullName, DefaultBranch string
+			ID                           int64
 			TotalCommits                 *int64
 		}
 		type commit struct{ added, modified, removed []string }
@@ -155,6 +156,7 @@ func parse(name string, r io.Reader) (platform.Event, bool, error) {
 			"ref":           x.Str(&p.Ref),
 			"total_commits": x.I64Ptr(&p.TotalCommits),
 			"repository": webhook.Obj(map[string]*webhook.Node{
+				"id":             x.I64(&p.ID),
 				"full_name":      x.Str(&p.FullName),
 				"default_branch": x.Str(&p.DefaultBranch),
 			}),
@@ -180,7 +182,7 @@ func parse(name string, r io.Reader) (platform.Event, bool, error) {
 			}
 		}
 		return platform.Event{Kind: platform.Push, Repos: []string{p.FullName}, Ref: p.Ref,
-			DefaultBranch: p.DefaultBranch, Files: files}, true, nil
+			DefaultBranch: p.DefaultBranch, Files: files, RepoID: p.ID}, true, nil
 	case "repository":
 		var p struct{ Action, FullName string }
 		err := webhook.Extract(r, webhook.Obj(map[string]*webhook.Node{

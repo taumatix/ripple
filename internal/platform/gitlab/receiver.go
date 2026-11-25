@@ -131,9 +131,12 @@ func (h *Receiver) read(w http.ResponseWriter, r *http.Request, consume func(io.
 }
 
 type pushPayload struct {
-	ObjectKind   string
-	Ref          string
-	Project      struct{ Path, DefaultBranch string }
+	ObjectKind string
+	Ref        string
+	Project    struct {
+		ID                  int64
+		Path, DefaultBranch string
+	}
 	TotalCommits int64
 	Commits      []struct{ Added, Modified, Removed []string }
 }
@@ -154,6 +157,7 @@ func parsePush(r io.Reader) (pushPayload, error) {
 		"object_kind": x.Str(&p.ObjectKind),
 		"ref":         x.Str(&p.Ref),
 		"project": webhook.Obj(map[string]*webhook.Node{
+			"id":                  x.I64(&p.Project.ID),
 			"path_with_namespace": x.Str(&p.Project.Path),
 			"default_branch":      x.Str(&p.Project.DefaultBranch),
 		}),
@@ -202,7 +206,7 @@ func (h *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		id = r.Header.Get("Idempotency-Key")
 	}
 	e := platform.Event{Kind: platform.Push, Delivery: id, Repos: []string{p.Project.Path},
-		Ref: p.Ref, DefaultBranch: p.Project.DefaultBranch}
+		Ref: p.Ref, DefaultBranch: p.Project.DefaultBranch, RepoID: p.Project.ID}
 	// A push of more than 20 commits lists only the newest 20, so the changed files
 	// are incomplete: leave Files empty and the repo is scanned in full.
 	if len(p.Commits) > 0 && p.TotalCommits <= int64(len(p.Commits)) {

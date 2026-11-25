@@ -56,7 +56,9 @@ type GitLab struct {
 	archived map[string]bool
 	calls    map[string]int
 	prs      map[string][]*GitLabPR
-	limit    map[string]bool // token -> answer its next merge request creation with 429
+	limit    map[string]bool  // token -> answer its next merge request creation with 429
+	ids      map[int64]string // project id -> current path (SetProjectID), served at GET /projects/{id}
+	idLookup int
 	// Requests records "METHOD escaped-path" of every API request, in order.
 	requests []string
 	// Auths records the Authorization header of every API request.
@@ -102,6 +104,25 @@ func (g *GitLab) SetArchived(path string, archived bool) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.archived[path] = archived
+}
+
+// SetProjectID makes GET /projects/{id} answer that the project with this numeric id is
+// called path (an id never set is a 404; the same path under another id models a project
+// deleted and recreated). A token sees it only when it reaches path.
+func (g *GitLab) SetProjectID(id int64, path string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.ids == nil {
+		g.ids = map[int64]string{}
+	}
+	g.ids[id] = path
+}
+
+// ProjectIDCalls is how many GET /projects/{id} requests were served.
+func (g *GitLab) ProjectIDCalls() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.idLookup
 }
 
 // RateLimitToken answers the next merge request creation made with token with 429.
@@ -231,6 +252,12 @@ func (g *GitLab) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		g.listProjects(w, r, scope)
 		return
 	}
+	if len(segs) == 4 && r.Method == http.MethodGet {
+		if id, err := strconv.ParseInt(segs[3], 10, 64); err == nil {
+			g.projectByID(w, scope, id)
+			return
+		}
+	}
 	if len(segs) < 5 {
 		g.fail(w, http.StatusNotFound, "404 Not Found")
 		return
@@ -266,6 +293,18 @@ func (g *GitLab) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		g.fail(w, http.StatusNotFound, "404 Not Found")
 	}
+}
+
+func (g *GitLab) projectByID(w http.ResponseWriter, scope string, id int64) {
+	g.mu.Lock()
+	g.idLookup++
+	path, ok := g.ids[id]
+	g.mu.Unlock()
+	if !ok || !inScope(scope, path) {
+		g.fail(w, http.StatusNotFound, "404 Project Not Found")
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"id": id, "path_with_namespace": path})
 }
 
 func (g *GitLab) listProjects(w http.ResponseWriter, r *http.Request, scope string) {

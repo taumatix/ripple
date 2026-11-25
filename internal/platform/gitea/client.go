@@ -170,7 +170,7 @@ func (c *Client) do(ctx context.Context, repo model.Repo, method, rawURL string,
 		return resp.Header, &platform.RateLimitError{Until: until}
 	}
 	if resp.StatusCode >= 300 {
-		return resp.Header, fmt.Errorf("gitea %s %s: status %d: %s", method, req.URL.Path, resp.StatusCode, snippet(data))
+		return resp.Header, &statusError{status: resp.StatusCode, msg: fmt.Sprintf("gitea %s %s: status %d: %s", method, req.URL.Path, resp.StatusCode, snippet(data))}
 	}
 	if out != nil {
 		if err := json.Unmarshal(data, out); err != nil {
@@ -178,6 +178,19 @@ func (c *Client) do(ctx context.Context, repo model.Repo, method, rawURL string,
 		}
 	}
 	return resp.Header, nil
+}
+
+// statusError is a non-2xx answer; its text is what do always said.
+type statusError struct {
+	status int
+	msg    string
+}
+
+func (e *statusError) Error() string { return e.msg }
+
+func isNotFound(err error) bool {
+	var se *statusError
+	return errors.As(err, &se) && se.status == http.StatusNotFound
 }
 
 var ietfReset = regexp.MustCompile(`\bt=(\d+)`)

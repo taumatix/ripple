@@ -320,11 +320,13 @@ Everything else:
     `.ripple.yaml` (today one login serves every repo the server reads, so a repo can make ripple present it to a registry
     only by naming that registry's images), reloading the file without a restart, and a real private registry run (see 130),
     which is also the only check of the refresh-token grant against Azure or Docker Hub.
-204. **Repository ids on the other hosts, and a missed rename by id.** A signed push whose repository id differs from
-    the stored one is now settled by asking the host (`platform.RepoIdentifier`, GitHub's `GET /repositories/{id}`),
-    but only when the id names this repo's own name (a recreated repo). Not done: the host answering with a
-    different name for the stored id (a rename missed twice), and an implementation for GitLab, Gitea/Forgejo and
-    the others, which keep ignoring a mismatch as before. Only the GitHub lookup ran, against the fake host.
+204. **Repository ids: a missed rename by id, and the other hosts.** A signed push whose repository id differs from
+    the stored one is settled by asking the host (`platform.RepoIdentifier`: GitHub `GET /repositories/{id}`, GitLab
+    `GET /projects/{id}`, Gitea/Forgejo `GET /repositories/{id}`), but only when the id names this repo's own name
+    (a recreated repo). Not done: the host answering with a different name for the *stored* id (a rename missed
+    twice), and an implementation for Bitbucket, Azure DevOps, Gerrit, SCM-Manager and CodeCommit, which keep
+    ignoring a mismatch as before. The GitLab and Gitea lookups (and Gitea's `repository.id` payload field and
+    `/repositories/{id}` route, which the vendored excerpts do not cover) ran only against the fakes.
 205. **Webhooks: the rest of the streamed-parse cost.** One string value or key is now capped at 16 KiB while the signature is unchecked, so a forged body with one huge `ref` costs 16 KiB, not up to 16 MiB; the whole budget (`maxExtract`, 16 MiB, reachable by many fields each under the cap) is unchanged and unmeasured on a busy receiver. Azure DevOps, Gerrit, SCM-Manager and CodeCommit authenticate from headers and read whole, bounded by their `maxBody`.
 206. **DynamoDB hygiene: measure it, and decide on self-repair.** The hygiene commands and the server's drift check now list packages from the `PKGS` index (one Query; a table from before it is Scanned once, ROADMAP 176) instead of Scanning every item for `DEP#` keys. Still nobody has timed the check or a per-package recount on a table with millions of items or on real AWS with provisioned capacity, so the suggested page and pause are arithmetic, not measurement; every `PKGS` item shares one partition key, which a table with millions of packages would make a hot read partition (shard it by hash if it shows), and a package an older-version replica introduces after the marker is missed until the marker is deleted. The server only reports drift; whether it should recount a package it finds drifted on its own (rate-limited, one replica at a time under the lease) is undecided.
 219. **Corpus checks: from a real sample, and what the first one found.** `internal/manager/testdata/corpus` holds manifests written

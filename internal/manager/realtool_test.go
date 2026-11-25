@@ -7,13 +7,14 @@
 package manager
 
 import (
-	"bytes"
 	"context"
+	"fmt"
 	"io/fs"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -33,6 +34,9 @@ type realtool struct {
 	bumps    []bump
 	env      []string   // extra KEY=VALUE for the commands
 	steps    [][]string // run in order, in the project directory
+	// local lists the steps (joined with spaces) that touch no registry; every other
+	// step is retried, see attempts. A local step that fails is a real failure at once.
+	local []string
 	// after runs once the steps pass on the updated copy.
 	after func(t *testing.T, dir string)
 }
@@ -92,19 +96,58 @@ func (r realtool) run(t *testing.T) {
 func (r realtool) steps0(t *testing.T, dir, what string) {
 	t.Helper()
 	for _, s := range r.steps {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-		cmd := exec.CommandContext(ctx, s[0], s[1:]...)
-		cmd.Dir = dir
-		cmd.Env = append(os.Environ(), r.env...)
-		var out bytes.Buffer
-		cmd.Stdout, cmd.Stderr = &out, &out
-		err := cmd.Run()
-		cancel()
-		if err != nil {
-			t.Fatalf("%s: `%s` failed: %v\n%s", what, strings.Join(s, " "), err, out.String())
+		name := strings.Join(s, " ")
+		tries := attempts
+		if slices.Contains(r.local, name) {
+			tries = 1
 		}
-		t.Logf("%s: `%s` ok", what, strings.Join(s, " "))
+		var err error
+		var out []byte
+		for i := 1; i <= tries; i++ {
+			ctx, cancel := context.WithTimeout(context.Background(), stepTimeout)
+			cmd := exec.CommandContext(ctx, s[0], s[1:]...)
+			cmd.Dir = dir
+			cmd.Env = append(os.Environ(), r.env...)
+			out, err = cmd.CombinedOutput()
+			cancel()
+			if err == nil {
+				break
+			}
+			t.Logf("%s: `%s` attempt %d/%d failed: %v", what, name, i, tries, err)
+			if i < tries {
+				time.Sleep(backoff * time.Duration(i))
+			}
+		}
+		if err != nil {
+			t.Fatalf("%s: `%s` failed after %d attempt(s): %v\n%s", what, name, tries, err, out)
+		}
+		t.Logf("%s: `%s` ok", what, name)
 	}
+}
+
+// attempts bounds the retries of a step that reaches a public registry: a registry that
+// answers 5xx or times out once is not a verdict on ripple's edit. A real rejection fails
+// every attempt the same way and is reported with the tool's own output.
+const (
+	attempts    = 3
+	backoff     = 15 * time.Second
+	stepTimeout = 5 * time.Minute
+)
+
+// retry runs a registry check up to attempts times and returns the last error.
+func retry(t *testing.T, what string, f func() error) {
+	t.Helper()
+	var err error
+	for i := 1; i <= attempts; i++ {
+		if err = f(); err == nil {
+			return
+		}
+		t.Logf("%s: attempt %d/%d failed: %v", what, i, attempts, err)
+		if i < attempts {
+			time.Sleep(backoff * time.Duration(i))
+		}
+	}
+	t.Errorf("%s: failed after %d attempts: %v", what, attempts, err)
 }
 
 // assertOnlyBumped checks the edit is offset-keeping: every line is as it was, except
@@ -176,6 +219,7 @@ func TestRealtoolGoMod(t *testing.T) {
 		// go.sum is not ripple's edit to make here (the gitws step runs go mod tidy), so
 		// the tool refreshes it, then builds and verifies the module cache.
 		steps: [][]string{{"go", "mod", "tidy"}, {"go", "build", "./..."}, {"go", "mod", "verify"}},
+		local: []string{"go build ./...", "go mod verify"},
 		after: func(t *testing.T, dir string) { mustContain(t, dir, "go.sum", "github.com/google/uuid v1.6.0 h1:") },
 	}.run(t)
 }
@@ -187,6 +231,7 @@ func TestRealtoolCargo(t *testing.T) {
 		// No Cargo.lock is committed: ripple never writes one, so the tool's own resolve
 		// (metadata, then a real compile) is what accepts the new requirement.
 		steps: [][]string{{"cargo", "metadata", "--format-version", "1"}, {"cargo", "check"}},
+		local: []string{"cargo check"},
 		// "1.0.15" is a caret requirement: the lock resolves to the newest compatible release, so
 		// only its presence is asserted, and the compile above proves it satisfies the manifest.
 		after: func(t *testing.T, dir string) { mustContain(t, dir, "Cargo.lock", `name = "itoa"`) },
@@ -198,6 +243,7 @@ func TestRealtoolNpm(t *testing.T) {
 		fixture: "npm", manifest: "package.json", manager: Npm{Dir: "/"},
 		bumps: []bump{{"ms", "2.1.2", "2.1.3"}},
 		steps: [][]string{{"npm", "install", "--package-lock-only", "--ignore-scripts"}, {"npm", "ls", "--package-lock-only", "ms"}},
+		local: []string{"npm ls --package-lock-only ms"},
 		after: func(t *testing.T, dir string) { mustContain(t, dir, "package-lock.json", `"version": "2.1.3"`) },
 	}.run(t)
 }
@@ -224,6 +270,7 @@ func TestRealtoolHelm(t *testing.T) {
 		// dependency update fetches the subchart at the edited version and rewrites Chart.lock,
 		// which ripple leaves stale; lint then reads the chart with its dependency in place.
 		steps: [][]string{{"helm", "dependency", "update"}, {"helm", "dependency", "list"}, {"helm", "lint", "."}},
+		local: []string{"helm dependency list", "helm lint ."},
 		after: func(t *testing.T, dir string) { mustContain(t, dir, "Chart.lock", "version: 3.12.0") },
 	}.run(t)
 }
@@ -257,6 +304,7 @@ func TestRealtoolNuget(t *testing.T) {
 		bumps: []bump{{"Newtonsoft.Json", "12.0.3", "13.0.3"}},
 		env:   []string{"DOTNET_NOLOGO=1", "DOTNET_CLI_TELEMETRY_OPTOUT=1"},
 		steps: [][]string{{"dotnet", "restore"}, {"dotnet", "build", "--no-restore"}},
+		local: []string{"dotnet build --no-restore"},
 		after: func(t *testing.T, dir string) {
 			mustContain(t, dir, "obj/project.assets.json", "Newtonsoft.Json/13.0.3")
 		},
@@ -264,10 +312,19 @@ func TestRealtoolNuget(t *testing.T) {
 }
 
 func TestRealtoolMaven(t *testing.T) {
+	// The dependency plugin is named by full coordinates: a short prefix is resolved by
+	// reading plugin-group metadata from Maven Central, the lookup that flaked in CI.
+	const dep = "org.apache.maven.plugins:maven-dependency-plugin:3.8.1:resolve"
 	realtool{
 		fixture: "maven", manifest: "pom.xml", manager: Maven{Dir: "/"},
 		bumps: []bump{{"org.apache.commons:commons-lang3", "3.12.0", "3.14.0"}},
-		steps: [][]string{{"mvn", "-B", "-q", "validate"}, {"mvn", "-B", "-q", "dependency:resolve"}, {"mvn", "-B", "-q", "compile"}},
+		steps: [][]string{
+			{"mvn", "-B", "-q", "--no-transfer-progress", "validate"},
+			{"mvn", "-B", "-q", "--no-transfer-progress", dep},
+			{"mvn", "-B", "-q", "--no-transfer-progress", "compile"},
+		},
+		local: []string{"mvn -B -q --no-transfer-progress validate"},
+		env:   []string{"MAVEN_OPTS=-Dmaven.wagon.http.retryHandler.count=3"},
 	}.run(t)
 }
 
@@ -281,6 +338,7 @@ func TestRealtoolTerraform(t *testing.T) {
 		// init downloads the provider and module at the edited constraints and writes
 		// .terraform.lock.hcl, which ripple reports stale and does not rewrite.
 		steps: [][]string{{"terraform", "init", "-backend=false", "-input=false"}, {"terraform", "validate"}},
+		local: []string{"terraform validate"},
 		after: func(t *testing.T, dir string) { mustContain(t, dir, ".terraform.lock.hcl", `version     = "3.6.`) },
 	}.run(t)
 }
@@ -290,12 +348,16 @@ func TestRealtoolGitHubActions(t *testing.T) {
 		fixture: "actions", manifest: ".github/workflows/ci.yml", manager: GitHubActions{Dir: "/"},
 		bumps: []bump{{"actions/checkout", "v4.1.0", "v4.2.2"}},
 		steps: [][]string{{"actionlint", ".github/workflows/ci.yml"}},
+		local: []string{"actionlint .github/workflows/ci.yml"},
 		after: func(t *testing.T, dir string) {
 			// actionlint reads the file, not the registry: confirm the tag ripple wrote exists.
-			out, err := exec.Command("git", "ls-remote", "--exit-code", "--tags", "https://github.com/actions/checkout", "v4.2.2").CombinedOutput()
-			if err != nil {
-				t.Errorf("tag actions/checkout@v4.2.2 does not exist: %v\n%s", err, out)
-			}
+			retry(t, "tag actions/checkout@v4.2.2", func() error {
+				out, err := exec.Command("git", "ls-remote", "--exit-code", "--tags", "https://github.com/actions/checkout", "v4.2.2").CombinedOutput()
+				if err != nil {
+					return fmt.Errorf("%v: %s", err, out)
+				}
+				return nil
+			})
 		},
 	}.run(t)
 }
@@ -306,15 +368,19 @@ func TestRealtoolDocker(t *testing.T) {
 		bumps: []bump{{"docker.io/library/alpine", "3.18.4", "3.19.1"}},
 		// No daemon: hadolint lints the file, and the registry is asked whether the tag exists.
 		steps: [][]string{{"hadolint", "Dockerfile"}},
+		local: []string{"hadolint Dockerfile"},
 		after: func(t *testing.T, dir string) {
-			resp, err := http.Get("https://hub.docker.com/v2/repositories/library/alpine/tags/3.19.1")
-			if err != nil {
-				t.Fatal(err)
-			}
-			resp.Body.Close()
-			if resp.StatusCode != http.StatusOK {
-				t.Errorf("alpine:3.19.1 does not exist on Docker Hub: HTTP %d", resp.StatusCode)
-			}
+			retry(t, "alpine:3.19.1 on Docker Hub", func() error {
+				resp, err := http.Get("https://hub.docker.com/v2/repositories/library/alpine/tags/3.19.1")
+				if err != nil {
+					return err
+				}
+				resp.Body.Close()
+				if resp.StatusCode != http.StatusOK {
+					return fmt.Errorf("HTTP %d", resp.StatusCode)
+				}
+				return nil
+			})
 		},
 	}.run(t)
 }

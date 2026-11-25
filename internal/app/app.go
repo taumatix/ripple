@@ -55,6 +55,9 @@ type App struct {
 	// Rubygems polls the versions of the gems the repos use (ecosystem: bundler); nil
 	// polls nothing.
 	Rubygems *engine.RubygemsWatcher
+	// Packagist polls the versions of the packages the repos use (ecosystem: composer); nil
+	// polls nothing.
+	Packagist *engine.PackagistWatcher
 	// metrics and httpLatency are set by EnableMetrics; nil leaves /metrics out.
 	metrics     *metrics.Registry
 	httpLatency *metrics.Histogram
@@ -346,6 +349,7 @@ func (a *App) Tick(ctx context.Context) {
 	a.pollPip(ctx)
 	a.pollHelm(ctx)
 	a.pollRubygems(ctx)
+	a.pollPackagist(ctx)
 	a.pollAdvisories(ctx)
 	a.housekeep(ctx)
 	if _, err := a.Engine.RunDue(ctx); err != nil && ctx.Err() == nil {
@@ -415,6 +419,9 @@ func (a *App) sources() map[string]electedSource {
 	}
 	if a.Rubygems != nil {
 		m["rubygems"] = a.Rubygems
+	}
+	if a.Packagist != nil {
+		m["packagist"] = a.Packagist
 	}
 	if a.Advisories != nil {
 		m["osv"] = a.Advisories
@@ -546,6 +553,9 @@ func (a *App) pollLoop(ctx context.Context) {
 			a.jobs.Wake()
 		}
 		if a.pollRubygems(ctx) > 0 {
+			a.jobs.Wake()
+		}
+		if a.pollPackagist(ctx) > 0 {
 			a.jobs.Wake()
 		}
 		a.housekeep(ctx)
@@ -790,6 +800,21 @@ func (a *App) pollRubygems(ctx context.Context) int {
 		a.Log.Error("rubygems poll", "err", err)
 	case n > 0:
 		a.Log.Info("rubygems poll enqueued jobs", "jobs", n)
+	}
+	return n
+}
+
+// pollPackagist polls the versions of the gems in use and returns how many jobs it enqueued.
+func (a *App) pollPackagist(ctx context.Context) int {
+	if a.Packagist == nil {
+		return 0
+	}
+	n, err := a.pollSource(ctx, a.Packagist)
+	switch {
+	case err != nil && ctx.Err() == nil:
+		a.Log.Error("packagist poll", "err", err)
+	case n > 0:
+		a.Log.Info("packagist poll enqueued jobs", "jobs", n)
 	}
 	return n
 }

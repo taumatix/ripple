@@ -151,6 +151,8 @@ type runner struct {
 	helmLocks map[string]bool
 	// gemLocks holds the Gemfile.lock files that resolve the Gemfiles this PR edits.
 	gemLocks map[string]bool
+	// packagistLocks holds the lock files that resolve the files this PR edits.
+	packagistLocks map[string]bool
 	// pipLocks holds the lock files beside or above the Python files this PR edits.
 	pipLocks map[string]bool
 	// skipReasons says why a job was skipped when it is not the common "changed since indexed".
@@ -395,6 +397,9 @@ func (r *runner) plan(jobs []model.Job, deps []model.Dependency) []*prPlan {
 		if j.Datasource == model.DatasourceRubygems {
 			branch = BranchPrefix + "rubygems/" + slug(j.Package) + "-" + slug(j.Version)
 		}
+		if j.Datasource == model.DatasourcePackagist {
+			branch = BranchPrefix + "packagist/" + slug(j.Package) + "-" + slug(j.Version)
+		}
 		if j.Datasource == model.DatasourceNpm {
 			branch = BranchPrefix + "npm/" + slug(j.Package) + "-" + slug(j.Version)
 		}
@@ -575,6 +580,7 @@ func (r *runner) openPR(p *prPlan) (*platform.PR, error) {
 	r.cargoLocks = nil
 	r.helmLocks = nil
 	r.gemLocks = nil
+	r.packagistLocks = nil
 	r.pipLocks = nil
 	var applied []item
 	for _, it := range p.items {
@@ -672,6 +678,7 @@ func (r *runner) openPR(p *prPlan) (*platform.PR, error) {
 	body += r.cargoNotes()
 	body += r.helmNotes()
 	body += r.gemNotes()
+	body += r.packagistNotes()
 	body += r.pipNotes()
 	changed, err := r.ws.CommitAndPush(r.ctx, p.branch, title)
 	if err != nil {
@@ -790,6 +797,9 @@ func (r *runner) apply(it item) (bool, error) {
 		if d.Datasource == model.DatasourceRubygems {
 			r.noteGemLock(d)
 		}
+		if d.Datasource == model.DatasourcePackagist {
+			r.notePackagistLock(d)
+		}
 		if d.Datasource == model.DatasourcePip {
 			r.notePipLocks(d)
 		}
@@ -873,6 +883,8 @@ func datasourceFooter(datasource string) string {
 		return "a new version appeared in the chart repository"
 	case model.DatasourceRubygems:
 		return "a new version appeared on rubygems.org"
+	case model.DatasourcePackagist:
+		return "a new version appeared on Packagist"
 	}
 	return "the new version appeared in the module index"
 }

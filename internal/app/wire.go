@@ -19,6 +19,7 @@ import (
 	"github.com/taumatix/ripple/internal/gotool"
 	"github.com/taumatix/ripple/internal/helmrepo"
 	"github.com/taumatix/ripple/internal/npmreg"
+	"github.com/taumatix/ripple/internal/packagist"
 	"github.com/taumatix/ripple/internal/platform"
 	"github.com/taumatix/ripple/internal/platform/github"
 	"github.com/taumatix/ripple/internal/platform/gitws"
@@ -110,6 +111,7 @@ func New(ctx context.Context, s *config.Server, log *slog.Logger) (a *App, st st
 	eng.Crates = &cratesindex.Client{UserAgent: "ripple (+https://github.com/taumatix/ripple)"}
 	eng.Helm = &helmrepo.Client{UserAgent: "ripple (+https://github.com/taumatix/ripple)"}
 	eng.Rubygems = &rubygems.Client{UserAgent: "ripple (+https://github.com/taumatix/ripple)"}
+	eng.Packagist = &packagist.Client{UserAgent: "ripple (+https://github.com/taumatix/ripple)"}
 	eng.PyPI = &pypi.Client{UserAgent: "ripple (+https://github.com/taumatix/ripple)"}
 	eng.Npm = &npmreg.Client{UserAgent: "ripple (+https://github.com/taumatix/ripple)"}
 	a = &App{
@@ -125,6 +127,7 @@ func New(ctx context.Context, s *config.Server, log *slog.Logger) (a *App, st st
 		Pip:       &engine.PipWatcher{Engine: eng},
 		Helm:      &engine.HelmWatcher{Engine: eng},
 		Rubygems:  &engine.RubygemsWatcher{Engine: eng},
+		Packagist: &engine.PackagistWatcher{Engine: eng},
 		Watcher:   &engine.Watcher{Engine: eng, Feed: &feed.GoIndex{BaseURL: s.FeedURL, UserAgent: "ripple (+https://github.com/taumatix/ripple)"}},
 	}
 	a.closers = append(a.closers, closeSandbox)

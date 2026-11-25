@@ -51,6 +51,13 @@ operator) and `rubygems/gemfile-and-gemspec.md` (`gem "name", "version"` lines) 
 grammar ripple reads (one-line `gem` declarations, `source`, `git`/`path` blocks and options) is taken from these
 guides and from memory: unverified. Not checked against the live API either.
 
+## packagist
+
+`packagist/packagist-api.txt` is the text of https://packagist.org/apidoc (the `p2` metadata endpoint), with the HTML
+tags stripped. `packagist/composer-versions.md`, `composer-schema.md` and `composer-repositories.md` are
+`doc/articles/versions.md`, `doc/04-schema.md` and `doc/05-repositories.md` of github.com/composer/composer (main),
+fetched 2026-11-25. Not checked against the live service.
+
 ## helm
 
 `helm/chart_repository.md` and `helm/charts.md` are the helm-www pages (helm.sh/docs/topics/chart_repository,

@@ -157,3 +157,11 @@ func TestListOpenPRsReportsHeadSHA(t *testing.T) {
 		t.Fatalf("after a push HeadSHA %q, want %q (not %q)", got, want, first)
 	}
 }
+
+func TestListOpenPRsReportsBody(t *testing.T) {
+	c, _, _ := openRipplePR(t)
+	open, err := c.ListOpenPRs(context.Background(), appRepo, "ripple/")
+	if err != nil || len(open) != 1 || open[0].Body != "body" {
+		t.Fatalf("%+v %v", open, err)
+	}
+}

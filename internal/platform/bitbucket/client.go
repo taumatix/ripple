@@ -205,8 +205,9 @@ func list[T any](ctx context.Context, c *Client, rawURL string, query url.Values
 }
 
 type prJSON struct {
-	ID    int `json:"id"`
-	Links struct {
+	ID          int    `json:"id"`
+	Description string `json:"description"`
+	Links       struct {
 		HTML struct {
 			Href string `json:"href"`
 		} `json:"html"`
@@ -222,7 +223,7 @@ type prJSON struct {
 }
 
 func (p prJSON) pr() platform.PR {
-	return platform.PR{Number: p.ID, URL: p.Links.HTML.Href, Head: p.Source.Branch.Name, HeadSHA: p.Source.Commit.Hash}
+	return platform.PR{Number: p.ID, URL: p.Links.HTML.Href, Head: p.Source.Branch.Name, HeadSHA: p.Source.Commit.Hash, Body: p.Description}
 }
 
 func (c *Client) ListOpenPRs(ctx context.Context, repo model.Repo, prefix string) ([]platform.PR, error) {

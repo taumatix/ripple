@@ -4,6 +4,9 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
 
 ## [Unreleased]
 
+### Added
+- `platform.PR.Body`, filled by the PR read of GitHub, GitLab, Gitea and Forgejo, Azure DevOps, Bitbucket Cloud and Server and CodeCommit (empty on Gerrit). A superseded-PR sweep now leaves a PR alone when its head commit or description differs from what ripple recorded when it opened it, which catches edits the host's own feeds cannot show; jobs with nothing recorded are never treated as edited (ROADMAP 94, new 229).
+
 ### Fixed
 - Supersede: a rerun of the lower job, whose recorded PR is cleared, no longer strands its PR beside a higher one: the open PRs are judged again after a job re-finds its PR already open (ROADMAP 179, new 225).
 

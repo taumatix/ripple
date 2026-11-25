@@ -243,3 +243,13 @@ func TestListOpenPRsReportsHeadSHA(t *testing.T) {
 		}
 	}
 }
+
+func TestListOpenPRsReportsBody(t *testing.T) {
+	for _, forgejo := range []bool{false, true} {
+		e := newSupEnv(t, forgejo)
+		open, err := e.c.ListOpenPRs(context.Background(), model.Repo{FullName: supRepo}, "ripple/")
+		if err != nil || len(open) != 1 || open[0].Body != "body" {
+			t.Fatalf("forgejo=%v %+v %v", forgejo, open, err)
+		}
+	}
+}

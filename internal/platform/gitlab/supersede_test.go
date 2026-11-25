@@ -232,3 +232,11 @@ func TestListOpenPRsReportsHeadSHA(t *testing.T) {
 		t.Fatalf("after a push HeadSHA %q, want %q (not %q)", got, want, first)
 	}
 }
+
+func TestListOpenPRsReportsBody(t *testing.T) {
+	e := newSupEnv(t)
+	open, err := e.c.ListOpenPRs(context.Background(), repo(supPath), "ripple/")
+	if err != nil || len(open) != 1 || open[0].Body != "body" {
+		t.Fatalf("%+v %v", open, err)
+	}
+}

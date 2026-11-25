@@ -694,7 +694,13 @@ func (r *runner) openPR(p *prPlan) (*platform.PR, error) {
 			e.log().Warn("auto-merge not enabled", "repo", r.repo.FullName, "pr", pr.URL, "err", err)
 		}
 	}
-	bodyHash := model.BodyHash(body)
+	// Hash what the host stored when it says (Azure DevOps truncates a long description);
+	// otherwise what was sent.
+	sent := body
+	if pr.Body != "" {
+		sent = pr.Body
+	}
+	bodyHash := model.BodyHash(sent)
 	for _, it := range applied {
 		j := it.job
 		j.HeadSHA, j.BodyHash = pr.HeadSHA, bodyHash

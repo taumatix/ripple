@@ -271,6 +271,10 @@ func (g *GitLab) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		g.fail(w, http.StatusNotFound, "404 Project Not Found")
 		return
 	}
+	if len(segs) == 7 && segs[4] == "repository" && segs[5] == "branches" && r.Method == http.MethodGet {
+		g.branch(w, project, segs[6]) // head polling, not counted as scan cost
+		return
+	}
 	g.mu.Lock()
 	g.calls[project]++
 	limited := g.limit[tok] && r.Method == http.MethodPost
@@ -293,6 +297,21 @@ func (g *GitLab) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		g.fail(w, http.StatusNotFound, "404 Not Found")
 	}
+}
+
+// branch is GET /projects/:id/repository/branches/:branch (docs/vendor/gitlab/api_branches.md):
+// the branch name and its latest commit's id.
+func (g *GitLab) branch(w http.ResponseWriter, project, escaped string) {
+	name, err := url.PathUnescape(escaped)
+	tip := ""
+	if err == nil {
+		tip = branchTip(g.bare(project), name)
+	}
+	if tip == "" {
+		g.fail(w, http.StatusNotFound, "404 Branch Not Found")
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"name": name, "default": name == "main", "commit": map[string]any{"id": tip}})
 }
 
 func (g *GitLab) projectByID(w http.ResponseWriter, scope string, id int64) {
@@ -335,7 +354,13 @@ func (g *GitLab) listProjects(w http.ResponseWriter, r *http.Request, scope stri
 	sort.Strings(all)
 	out := []map[string]any{}
 	for i := (page - 1) * per; i < len(all) && i < page*per; i++ {
-		out = append(out, map[string]any{"path_with_namespace": all[i]})
+		p := map[string]any{"path_with_namespace": all[i]}
+		// Unlike `simple=true`, the full listing names the default branch of a project that has one
+		// (docs/vendor/gitlab/api_projects.md).
+		if q.Get("simple") != "true" && g.hasBranch(all[i], "main") {
+			p["default_branch"] = "main"
+		}
+		out = append(out, p)
 	}
 	_ = json.NewEncoder(w).Encode(out)
 }

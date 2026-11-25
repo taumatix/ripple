@@ -160,7 +160,7 @@ upstream:
     reference: https://docs.gitlab.com/api/rest/
     api-version: "v4"
     docs-pinned: "GitLab 19.7.0-pre, doc/ at gitlab-org/gitlab master, vendored in docs/vendor/gitlab"
-    used: [GET /projects?membership=true, GET and POST /projects/{url-encoded path}/merge_requests (Draft: title prefix, labels), PUT /projects/{id}/merge_requests/{iid}/merge (auto_merge, merge_when_pipeline_succeeds)]
+    used: [GET /projects?membership=true, GET /projects/{path}/repository/branches/{branch}, GET and POST /projects/{url-encoded path}/merge_requests (Draft: title prefix, labels), PUT /projects/{id}/merge_requests/{iid}/merge (auto_merge, merge_when_pipeline_succeeds)]
     auth: "Authorization: Bearer <personal, project or group access token>; git basic auth oauth2:<token>"
     webhooks: [Push Hook, header X-Gitlab-Token or Standard Webhooks signature (webhook-id, webhook-timestamp, webhook-signature = v1,base64(HMAC-SHA256(key, id.timestamp.body)), key from whsec_ token)]
     unverified: "everything: no real GitLab instance was available. Request and response shapes, the 429 Retry-After handling, auto_merge acceptance and the signature scheme are from the vendored docs; the fake GitLab in internal/testutil is written from them, not recorded. The signature vector was computed with openssl, not taken from GitLab"

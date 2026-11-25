@@ -328,9 +328,6 @@ Everything else:
     matching now agree with `packaging` on a recorded vector table (internal/pypi/testdata/pep440.json, regenerate with
     scripts/gen-pep440-vectors.py). Still open: `releases` is documented as deprecated in favour of the PEP 691 index and
     could be dropped, 429 handling for PyPI, and a private index (needs credentials, so a human decision).
-212. **OSV: cap the PRs a security bypass opens.** `security-bypass: [open-pull-requests-limit]` (with the optional
-    `security-bypass-severity`) still opens one PR per advisory past the limit, so one advisory that affects many modules
-    opens that many. A per-advisory cap was left out until real use shows a repo wants it.
 213. **Archive on SCM-Manager and Gerrit against real instances.** Both hosts implement `platform.ArchivedLister` from vendored
     docs and the fakes: SCM-Manager from the `archived` field of `GET repositories`, Gerrit from `GET /projects/?state=READ_ONLY`.
     Check on real instances that an archived SCM-Manager repository still lists with `archived: true` (and `showArchived`
@@ -379,3 +376,7 @@ Everything else:
 225. **Supersede: a lower PR waits for any run with plans.** A lower PR whose close was refused is retried by the next run of
     the repo that has plans, and a rerun of the lower job is now judged again within its own run; a repo with no plans at
     all is not swept, so a lone refused close can wait for the next dependency change. Covered against the fake host only.
+226. **OSV: the per-advisory bypass cap, measured.** `security-bypass-limit-per-advisory` counts the open PRs of one advisory in
+    one repo through the `osv-jobs` index (at most 100 jobs per advisory), so an advisory with more indexed jobs than that
+    counts only the first 100 and an open PR whose job is not indexed does not count. It caps open PRs, not only the ones a
+    bypass opened, and covers the repo, not the installation. Covered against the fake host only; no real repo asked for it yet.

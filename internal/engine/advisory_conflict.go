@@ -228,3 +228,48 @@ func (r *runner) closeBeatenBy(pr platform.PR, open []platform.PR) map[string]bo
 	}
 	return closed
 }
+
+// overAdvisoryCap reports whether the plan has used up the per-advisory cap
+// (security-bypass-limit-per-advisory) of an advisory it fixes: that many of the PRs open
+// now were opened for it, so this one may not bypass the open pull request limit. A read
+// that fails answers false, the uncapped behaviour, and logs.
+func (r *runner) overAdvisoryCap(p *prPlan, open []platform.PR) bool {
+	for _, it := range p.items {
+		if it.bypassCap == 0 || it.advisory == nil {
+			continue
+		}
+		n, err := r.openPRsOfAdvisory(it.advisory.ID, open)
+		if err != nil {
+			r.e.log().Warn("per-advisory cap not checked: reading the advisory's jobs failed", "repo", r.repo.FullName, "advisory", it.advisory.ID, "err", err)
+			continue
+		}
+		if n >= it.bypassCap {
+			return true
+		}
+	}
+	return false
+}
+
+// openPRsOfAdvisory counts the open PRs of this repo that a job of the advisory opened,
+// through the osv-jobs index.
+func (r *runner) openPRsOfAdvisory(id string, open []platform.PR) (int, error) {
+	keys, err := r.e.indexRead(r.ctx, advisoryJobsPrefix+id)
+	if err != nil {
+		return 0, err
+	}
+	urls := map[string]bool{}
+	for _, pr := range open {
+		urls[pr.URL] = true
+	}
+	seen := map[string]bool{}
+	for _, k := range keys {
+		j, ok, err := r.e.Store.GetJob(r.ctx, k)
+		if err != nil {
+			return 0, err
+		}
+		if ok && j.Repo == r.repo.FullName && j.State == model.JobDone && urls[j.PRURL] {
+			seen[j.PRURL] = true
+		}
+	}
+	return len(seen), nil
+}

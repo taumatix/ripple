@@ -137,6 +137,11 @@ type Update struct {
 	// low, moderate, high, critical. An advisory with no rating never bypasses while it is
 	// set. The default, empty, bypasses for every advisory.
 	SecurityBypassSeverity []string `yaml:"security-bypass-severity"`
+	// SecurityBypassLimitPerAdvisory is gomod only: with security-bypass:
+	// [open-pull-requests-limit], the most open PRs one advisory may have before its next PR
+	// stops bypassing the limit and waits for a free slot like an ordinary update. The default,
+	// 0, is no cap: one advisory that affects many modules opens a PR for each.
+	SecurityBypassLimitPerAdvisory int `yaml:"security-bypass-limit-per-advisory"`
 	// PrivateModules is gomod only: module path patterns (GONOSUMDB syntax) that the
 	// server's module proxy serves and the public checksum database does not know. Only a
 	// repo that lists them is given the server's proxy credential.
@@ -299,7 +304,7 @@ func (c *checker) add(n *yaml.Node, format string, a ...any) {
 
 var (
 	rootKeys     = []string{"version", "open-pull-requests-limit", "close-superseded-pull-requests", "backfill-new-dependencies", "dependency-dashboard", "updates"}
-	updateKeys   = []string{"ecosystem", "directory", "schedule", "cooldown", "ignore", "groups", "automerge", "go-toolchain", "cgo", "security-pseudo-versions", "security-from-pseudo-versions", "from-pseudo-versions", "security-bypass", "security-bypass-severity", "private-modules", "directives", "tidy", "files", "patterns", "package"}
+	updateKeys   = []string{"ecosystem", "directory", "schedule", "cooldown", "ignore", "groups", "automerge", "go-toolchain", "cgo", "security-pseudo-versions", "security-from-pseudo-versions", "from-pseudo-versions", "security-bypass", "security-bypass-severity", "security-bypass-limit-per-advisory", "private-modules", "directives", "tidy", "files", "patterns", "package"}
 	scheduleKeys = []string{"days", "from", "to", "timezone"}
 	ignoreKeys   = []string{"dependency", "update-types"}
 	groupKeys    = []string{"patterns", "update-types"}
@@ -506,6 +511,12 @@ func (c *checker) update(n *yaml.Node, u *Update, where string) {
 				c.add(f["security-bypass-severity"], "%s.security-bypass-severity: %q is not low, moderate, high or critical", where, s)
 			}
 		}
+		if u.SecurityBypassLimitPerAdvisory < 0 {
+			c.add(f["security-bypass-limit-per-advisory"], "%s.security-bypass-limit-per-advisory must be 0 (no cap) or more", where)
+		}
+		if u.SecurityBypassLimitPerAdvisory > 0 && !u.Bypasses(BypassLimit) {
+			c.add(f["security-bypass-limit-per-advisory"], "%s.security-bypass-limit-per-advisory does nothing without security-bypass: [%s]", where, BypassLimit)
+		}
 		if len(u.SecurityBypassSeverity) > 0 && len(u.SecurityBypass) == 0 {
 			c.add(f["security-bypass-severity"], "%s.security-bypass-severity does nothing without security-bypass", where)
 		}
@@ -526,7 +537,7 @@ func (c *checker) update(n *yaml.Node, u *Update, where string) {
 			}
 		}
 	case "regex":
-		for _, k := range []string{"cgo", "security-pseudo-versions", "security-from-pseudo-versions", "from-pseudo-versions", "security-bypass", "security-bypass-severity", "private-modules", "directives", "tidy"} {
+		for _, k := range []string{"cgo", "security-pseudo-versions", "security-from-pseudo-versions", "from-pseudo-versions", "security-bypass", "security-bypass-severity", "security-bypass-limit-per-advisory", "private-modules", "directives", "tidy"} {
 			if v := f[k]; v != nil {
 				c.add(v, "%s.%s is only valid with ecosystem: gomod", where, k)
 			}
@@ -557,13 +568,13 @@ func (c *checker) update(n *yaml.Node, u *Update, where string) {
 			}
 		}
 	case "github-actions":
-		for _, k := range []string{"files", "patterns", "package", "cgo", "security-pseudo-versions", "security-bypass", "security-bypass-severity", "private-modules", "directives", "tidy", "go-toolchain"} {
+		for _, k := range []string{"files", "patterns", "package", "cgo", "security-pseudo-versions", "security-bypass", "security-bypass-severity", "security-bypass-limit-per-advisory", "private-modules", "directives", "tidy", "go-toolchain"} {
 			if v := f[k]; v != nil {
 				c.add(v, "%s.%s does not apply to ecosystem: github-actions", where, k)
 			}
 		}
 	case "docker", "npm", "cargo", "pip":
-		for _, k := range []string{"files", "patterns", "package", "cgo", "security-pseudo-versions", "security-bypass", "security-bypass-severity", "private-modules", "directives", "tidy", "go-toolchain"} {
+		for _, k := range []string{"files", "patterns", "package", "cgo", "security-pseudo-versions", "security-bypass", "security-bypass-severity", "security-bypass-limit-per-advisory", "private-modules", "directives", "tidy", "go-toolchain"} {
 			if v := f[k]; v != nil {
 				c.add(v, "%s.%s does not apply to ecosystem: %s", where, k, u.Ecosystem)
 			}

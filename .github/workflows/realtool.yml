@@ -137,7 +137,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: install hadolint (a linter: no Docker daemon is used)
+      - name: "install hadolint (a linter, no Docker daemon is used)"
         run: |
           curl -fsSL -o hadolint https://github.com/hadolint/hadolint/releases/download/v2.12.0/hadolint-Linux-x86_64
           sudo install -m 0755 hadolint /usr/local/bin/hadolint

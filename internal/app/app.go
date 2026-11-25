@@ -61,6 +61,9 @@ type App struct {
 	// Nuget polls the versions of the packages the repos use (ecosystem: nuget); nil
 	// polls nothing.
 	Nuget *engine.NugetWatcher
+	// Maven polls the versions of the packages the repos use (ecosystem: maven); nil
+	// polls nothing.
+	Maven *engine.MavenWatcher
 	// metrics and httpLatency are set by EnableMetrics; nil leaves /metrics out.
 	metrics     *metrics.Registry
 	httpLatency *metrics.Histogram
@@ -354,6 +357,7 @@ func (a *App) Tick(ctx context.Context) {
 	a.pollRubygems(ctx)
 	a.pollPackagist(ctx)
 	a.pollNuget(ctx)
+	a.pollMaven(ctx)
 	a.pollAdvisories(ctx)
 	a.housekeep(ctx)
 	if _, err := a.Engine.RunDue(ctx); err != nil && ctx.Err() == nil {
@@ -429,6 +433,9 @@ func (a *App) sources() map[string]electedSource {
 	}
 	if a.Nuget != nil {
 		m["nuget"] = a.Nuget
+	}
+	if a.Maven != nil {
+		m["maven"] = a.Maven
 	}
 	if a.Advisories != nil {
 		m["osv"] = a.Advisories
@@ -566,6 +573,9 @@ func (a *App) pollLoop(ctx context.Context) {
 			a.jobs.Wake()
 		}
 		if a.pollNuget(ctx) > 0 {
+			a.jobs.Wake()
+		}
+		if a.pollMaven(ctx) > 0 {
 			a.jobs.Wake()
 		}
 		a.housekeep(ctx)
@@ -840,6 +850,21 @@ func (a *App) pollNuget(ctx context.Context) int {
 		a.Log.Error("nuget poll", "err", err)
 	case n > 0:
 		a.Log.Info("nuget poll enqueued jobs", "jobs", n)
+	}
+	return n
+}
+
+// pollMaven polls the versions of the gems in use and returns how many jobs it enqueued.
+func (a *App) pollMaven(ctx context.Context) int {
+	if a.Maven == nil {
+		return 0
+	}
+	n, err := a.pollSource(ctx, a.Maven)
+	switch {
+	case err != nil && ctx.Err() == nil:
+		a.Log.Error("maven poll", "err", err)
+	case n > 0:
+		a.Log.Info("maven poll enqueued jobs", "jobs", n)
 	}
 	return n
 }

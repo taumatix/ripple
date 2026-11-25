@@ -83,6 +83,7 @@ const (
 	rubygemsPollName  = "rubygems"
 	packagistPollName = "packagist"
 	nugetPollName     = "nuget"
+	mavenPollName     = "maven"
 	helmPollName      = "helm"
 )
 
@@ -210,3 +211,14 @@ func (w *NugetWatcher) Elected() bool { return w.elect.isHeld() }
 
 // StepDown gives the claim up; call it when stopping.
 func (w *NugetWatcher) StepDown(ctx context.Context) { w.elect.stepDown(ctx, w.Engine) }
+
+// PollElected is Poll for replicas sharing a store; see Watcher.PollElected.
+func (w *MavenWatcher) PollElected(ctx context.Context, ttl time.Duration) (int, bool, error) {
+	return w.elect.poll(ctx, w.Engine, feedLease(mavenPollName), ttl, w.Poll)
+}
+
+// Elected reports whether this replica held the claim at its last PollElected.
+func (w *MavenWatcher) Elected() bool { return w.elect.isHeld() }
+
+// StepDown gives the claim up; call it when stopping.
+func (w *MavenWatcher) StepDown(ctx context.Context) { w.elect.stepDown(ctx, w.Engine) }

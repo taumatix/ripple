@@ -83,6 +83,14 @@ upstream:
     verified-against: "docs/vendor/nuget pages fetched 2026-11-25; tests use internal/testutil/nuget.go, a fake written from them"
     unverified: "everything against the real service: rate limits, redirects, the service index's resource list, the package id pattern (taken from the vendored pages and memory), NuGet.Config private feeds (not read)"
     checked: 2026-11-25
+  - name: maven-repository
+    kind: http-api
+    reference: https://maven.apache.org/repositories/layout.html
+    docs: https://maven.apache.org/ref/3.9.9/maven-repository-metadata/repository-metadata.html
+    format: "GET https://repo.maven.apache.org/maven2/{group with / for .}/{artifact}/maven-metadata.xml, anonymous; <metadata><versioning><versions><version>; pom.xml <dependency> groupId / artifactId / version"
+    verified-against: "docs/vendor/maven pages and one sample maven-metadata.xml (junit:junit) fetched 2026-11-25; tests use internal/testutil/maven.go, a fake written from them"
+    unverified: "everything else against the real service: rate limits, redirects, very large metadata files, mirrors and settings.xml (not read)"
+    checked: 2026-11-25
   - name: pypi-json-api
     kind: http-api
     reference: https://docs.pypi.org/api/json/

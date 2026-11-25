@@ -375,11 +375,11 @@ Everything else:
     counts only the first 100 and an open PR whose job is not indexed does not count. It caps open PRs, not only the ones a
     bypass opened, and covers the repo, not the installation. Covered against the fake host only; no real repo asked for it yet.
 228. **pip: retarget residuals.** A release the repo's Python cannot run now retargets to the newest older runnable one when the repo is cloned (docs/pip.md). Left: the retargeted job takes the skipped release's `ReleasedAt`, so its cooldown counts from the newer release (no upload times are read); only the floor of the repo's Python is tested, so a repo supporting `>=3.9` is not retargeted away from a release needing `>=3.9.1`; Cargo's MSRV skip has no such fallback (ROADMAP 156); not run against the real PyPI index.
-229. **Helm: verify against a real repository, and the unread forms.** The datasource, manager and docs are written from
+231. **Helm: verify against a real repository, and the unread forms.** The datasource, manager and docs are written from
     the vendored helm-www pages ([docs/vendor/helm](docs/vendor/helm)) and a fake repository; nothing has been run
     against a real `index.yaml` (a large one, redirects, a 404 chart). Add a `-tags live` check against a public repo,
     then the forms skipped today: `oci://` dependencies (OCI tags datasource), `@alias` / `alias:` repositories,
     version ranges, flow-style entries, and `created` dates for the cooldown.
-230. **Helm: refresh `Chart.lock`.** The lock is reported stale in the PR body, not rewritten. Rewriting it needs
+232. **Helm: refresh `Chart.lock`.** The lock is reported stale in the PR body, not rewritten. Rewriting it needs
     `helm dependency update` (network, all repositories of the chart) or the digest algorithm reproduced exactly;
-    decide which after 229 shows a real lock.
+    decide which after 231 shows a real lock.

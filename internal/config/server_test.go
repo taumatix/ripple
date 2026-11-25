@@ -522,3 +522,22 @@ func TestServerGoSumDB(t *testing.T) {
 		t.Fatalf("%q, %v", s.GoSumDB, err)
 	}
 }
+
+func TestServerMetrics(t *testing.T) {
+	s, err := LoadServer(env(base))
+	if err != nil || s.Metrics || s.MetricsToken != "" {
+		t.Fatalf("defaults: %+v, %v", s, err)
+	}
+	s, err = LoadServer(env(with("RIPPLE_METRICS", "true", "RIPPLE_METRICS_TOKEN", "tok")))
+	if err != nil || !s.Metrics || s.MetricsToken != "tok" {
+		t.Fatalf("%+v, %v", s, err)
+	}
+	for name, m := range map[string]map[string]string{
+		"bad bool":           with("RIPPLE_METRICS", "maybe"),
+		"token without flag": with("RIPPLE_METRICS_TOKEN", "tok"),
+	} {
+		if _, err := LoadServer(env(m)); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}

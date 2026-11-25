@@ -60,6 +60,10 @@ type Server struct {
 	GoProxy            string
 	// GoSumDB is GOSUMDB for every go command ripple runs (RIPPLE_GOSUMDB); empty leaves the go command's default.
 	GoSumDB string
+	// Metrics serves GET /metrics (Prometheus text format) on the listener when true (RIPPLE_METRICS, default false);
+	// MetricsToken, when set, is the bearer token a scrape must present (RIPPLE_METRICS_TOKEN).
+	Metrics      bool
+	MetricsToken string
 	// GoProxyUser and GoProxyToken are the credential for GoProxy (HTTP basic auth). They
 	// reach only the go commands that run no repository code, and need RIPPLE_GOPROXY set to a private proxy. GoCC is the C compiler cgo
 	// verification uses; empty is cc.
@@ -180,6 +184,8 @@ RIPPLE_OSV_MAX_FETCH          advisory records fetched per poll (default 100)
 RIPPLE_OSV_SWEEP_BATCH        repos re-checked per poll while a sweep runs (default 10)
 RIPPLE_GOPROXY                module proxy used to verify major bumps (default https://proxy.golang.org)
 RIPPLE_GOSUMDB               GOSUMDB for the go commands ripple runs: off, or a checksum database (name[+key] [url]) for a private proxy; default the go command's own
+RIPPLE_METRICS               true: serve GET /metrics (Prometheus text format) on RIPPLE_LISTEN, default false
+RIPPLE_METRICS_TOKEN          bearer token a /metrics scrape must present; needs RIPPLE_METRICS=true
 RIPPLE_GOPROXY_USER           user for RIPPLE_GOPROXY (HTTP basic auth); with RIPPLE_GOPROXY_TOKEN, sent only to repos listing private-modules
 RIPPLE_GOPROXY_TOKEN          password or token for RIPPLE_GOPROXY; needs an https proxy
 RIPPLE_REGISTRY_AUTH_FILE     Docker config.json with logins for private container registries (ecosystem: docker); read once at start
@@ -341,6 +347,7 @@ func LoadServer(getenv func(string) string) (*Server, error) {
 		OSVSweepBatch:            num("RIPPLE_OSV_SWEEP_BATCH", 10, 1),
 		GoProxy:                  strings.TrimRight(str("RIPPLE_GOPROXY", "https://proxy.golang.org"), "/"),
 		GoSumDB:                  getenv("RIPPLE_GOSUMDB"),
+		MetricsToken:             getenv("RIPPLE_METRICS_TOKEN"),
 		GoProxyUser:              getenv("RIPPLE_GOPROXY_USER"),
 		GoProxyToken:             getenv("RIPPLE_GOPROXY_TOKEN"),
 		GoCC:                     getenv("RIPPLE_GO_CC"),
@@ -428,6 +435,16 @@ func LoadServer(getenv func(string) string) (*Server, error) {
 			errs = append(errs, errors.New("RIPPLE_WEBHOOK_DEDUPE_SIGNATURE: want true or false"))
 		}
 		s.WebhookDedupeSignature = b
+	}
+	if v := getenv("RIPPLE_METRICS"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			errs = append(errs, errors.New("RIPPLE_METRICS: want true or false"))
+		}
+		s.Metrics = b
+	}
+	if s.MetricsToken != "" && !s.Metrics {
+		errs = append(errs, errors.New("RIPPLE_METRICS_TOKEN: set RIPPLE_METRICS=true to serve /metrics"))
 	}
 	if v := getenv("RIPPLE_REGISTRY_HUB_NEWEST"); v != "" {
 		b, err := strconv.ParseBool(v)

@@ -122,6 +122,9 @@ func New(ctx context.Context, s *config.Server, log *slog.Logger) (a *App, st st
 		Watcher:   &engine.Watcher{Engine: eng, Feed: &feed.GoIndex{BaseURL: s.FeedURL, UserAgent: "ripple (+https://github.com/taumatix/ripple)"}},
 	}
 	a.closers = append(a.closers, closeSandbox)
+	if s.Metrics {
+		a.EnableMetrics(s.MetricsToken)
+	}
 	wireReplica(eng, a.Queue, s, log)
 	if s.OSV {
 		eng.Advisories = true

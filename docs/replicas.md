@@ -74,7 +74,13 @@ DynamoDB under real contention, or real clock skew.
 
 ## Observing replicas
 
-The service has no metrics endpoint. `GET /replica` on the webhook port answers one replica as JSON:
+`RIPPLE_METRICS=true` (default off) also serves `GET /metrics` on the same listener in the Prometheus text format, with
+`RIPPLE_METRICS_TOKEN` as an optional bearer token a scrape must send: `ripple_events_dead_lettered_total`,
+`ripple_events_dead`, `ripple_lease_takeovers_total` (the same numbers as below) and `ripple_http_request_duration_seconds`,
+a histogram of the time to serve a request by route (`webhook`, `healthz`, `replica`, `metrics`, `other`). It times
+the webhook acknowledgement, not the work an event queues. Without the setting the path answers 404.
+
+`GET /replica` on the webhook port answers one replica as JSON:
 `replica` (its name), `feed_poller` (whether it holds the feed election), `pollers` (every source it polls now: `feed`, `go-toolchain`, `github-actions`, `docker`, `npm`, `cargo`, `pip`, `osv`; only configured ones), `lease_takeovers` (leases this
 process took over from a holder that died or stalled since it started; also logged as `lease taken over`) and
 `lease_ttl_seconds`; and the dead letters: `events_dead_lettered` (events this process gave up on since it started, a counter to alert a rise of; also logged as `event failed; dead-lettered`) and `events_dead` (how many dead events the store holds now, every replica's, falling when one is requeued or purged; left out when listing them fails, and it lists them, so scrape it at minutes, not seconds).

@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"github.com/taumatix/ripple/internal/config"
+	"github.com/taumatix/ripple/internal/model"
 	"github.com/taumatix/ripple/internal/platform"
 	"github.com/taumatix/ripple/internal/platform/gitws"
 	"github.com/taumatix/ripple/internal/store"
@@ -93,23 +94,32 @@ func (a *App) Discover(ctx context.Context) {
 		if !ok {
 			continue
 		}
-		if err := a.discover(ctx, h.Name, l); err != nil && ctx.Err() == nil {
-			a.log().Error("repo discovery", "host", h.Name, "err", err)
+		repos, err := a.discover(ctx, h.Name, l)
+		if err != nil {
+			if ctx.Err() == nil {
+				a.log().Error("repo discovery", "host", h.Name, "err", err)
+			}
+			continue
+		}
+		if hl, ok := l.(HeadLister); ok {
+			if err := a.rescanMoved(ctx, h.Name, hl, repos); err != nil && ctx.Err() == nil {
+				a.log().Error("repo head rescan", "host", h.Name, "err", err)
+			}
 		}
 	}
 }
 
-func (a *App) discover(ctx context.Context, host string, l platform.Lister) error {
+func (a *App) discover(ctx context.Context, host string, l platform.Lister) ([]model.Repo, error) {
 	a.init()
 	repos, err := l.ListRepos(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	var archivedNow []string
 	if al, ok := l.(platform.ArchivedLister); ok {
 		ar, err := al.ListArchivedRepos(ctx)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		for _, r := range ar {
 			archivedNow = append(archivedNow, r.FullName)
@@ -129,11 +139,11 @@ func (a *App) discover(ctx context.Context, host string, l platform.Lister) erro
 	archivedKey := "discover-archived/" + host
 	beforeL, err := a.loadListing(ctx, key)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	archivedBeforeL, err := a.loadListing(ctx, archivedKey)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	before, archivedBefore := beforeL.names, archivedBeforeL.names
 	// A repo that moved between the listings was archived or unarchived; one in neither
@@ -171,9 +181,9 @@ func (a *App) discover(ctx context.Context, host string, l platform.Lister) erro
 		// No event: the active listing is unchanged, and a changed archived one is only remembered
 		// (first seen archived). A legacy single cursor is still moved to per-repo keys.
 		if err := a.saveListing(ctx, archivedKey, archivedBeforeL, archivedNow); err != nil {
-			return err
+			return nil, err
 		}
-		return a.saveListing(ctx, key, beforeL, now)
+		return repos, a.saveListing(ctx, key, beforeL, now)
 	}
 	gen := fmt.Sprintf("list-%x", hashNames(slices.Concat(now, []string{""}, archivedNow)))
 	for _, c := range []struct {
@@ -184,15 +194,111 @@ func (a *App) discover(ctx context.Context, host string, l platform.Lister) erro
 			continue
 		}
 		if err := a.enqueue(ctx, host, platform.Event{Kind: c.kind, Delivery: gen + "-" + string(c.kind), Repos: c.repos}); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	// The archived listing first: a crash between the two writes repeats the events (their
 	// delivery ids make that a no-op) instead of losing the archive.
 	if err := a.saveListing(ctx, archivedKey, archivedBeforeL, archivedNow); err != nil {
+		return nil, err
+	}
+	return repos, a.saveListing(ctx, key, beforeL, now)
+}
+
+// HeadLister is the optional second half of a platform.Lister for a host with no push events:
+// the commit each listed repo's default branch points at, by the names ListRepos returns. At
+// each Discover the app compares it with the head it saw last time and queues a whole-repo
+// Push for a repo whose head moved, so a host that cannot send webhooks still has its repos
+// re-scanned. A repo missing from the map, or an error, leaves what was remembered in place.
+type HeadLister interface {
+	ListRepoHeads(ctx context.Context) (map[string]string, error)
+}
+
+// headKey is the cursor group of a host's remembered default-branch heads.
+func headKey(host string) string { return "discover-head/" + host }
+
+// rescanMoved queues one Push per default branch name for the listed repos whose head differs
+// from the one remembered, then remembers the heads. A repo seen for the first time is only
+// remembered (its ReposAdded scans it). The events go first and carry a delivery id derived
+// from the heads, so a crash before the heads are written repeats them as a no-op. A store that
+// cannot list cursors remembers nothing and so never re-scans.
+func (a *App) rescanMoved(ctx context.Context, host string, hl HeadLister, repos []model.Repo) error {
+	st := a.Queue.Store
+	cl, ok := st.(store.CursorLister)
+	if !ok {
+		return nil
+	}
+	heads, err := hl.ListRepoHeads(ctx)
+	if err != nil {
 		return err
 	}
-	return a.saveListing(ctx, key, beforeL, now)
+	prefix := headKey(host) + store.CursorGroupSep
+	remembered := map[string]string{}
+	after := ""
+	for {
+		var page []store.Cursor
+		if pl, ok := st.(store.PagedCursorLister); ok {
+			page, err = pl.ListCursorsPage(ctx, prefix, after, listingPage)
+		} else {
+			page, err = cl.ListCursors(ctx, prefix)
+		}
+		if err != nil {
+			return err
+		}
+		for _, c := range page {
+			remembered[strings.TrimPrefix(c.Name, prefix)] = c.Value
+		}
+		if _, paged := st.(store.PagedCursorLister); !paged || len(page) == 0 {
+			break
+		}
+		after = page[len(page)-1].Name
+	}
+	moved := map[string][]string{} // default branch -> repos
+	var changed []string
+	for _, r := range repos {
+		sha, listed := heads[r.FullName]
+		if !listed || sha == "" || remembered[r.FullName] == sha {
+			continue
+		}
+		changed = append(changed, r.FullName)
+		if _, seen := remembered[r.FullName]; seen && r.DefaultBranch != "" {
+			moved[r.DefaultBranch] = append(moved[r.DefaultBranch], r.FullName)
+		}
+	}
+	branches := make([]string, 0, len(moved))
+	for b := range moved {
+		branches = append(branches, b)
+	}
+	sort.Strings(branches)
+	for _, b := range branches {
+		names := moved[b]
+		sort.Strings(names)
+		h := sha256.New()
+		for _, n := range names {
+			h.Write([]byte(n + "\x00" + heads[n] + "\x00"))
+		}
+		ev := platform.Event{Kind: platform.Push, Delivery: fmt.Sprintf("head-%x", h.Sum(nil)[:8]), Repos: names, Ref: "refs/heads/" + b}
+		if err := a.enqueue(ctx, host, ev); err != nil {
+			return err
+		}
+	}
+	for _, n := range changed {
+		if err := st.SetCursor(ctx, prefix+n, heads[n]); err != nil {
+			return err
+		}
+	}
+	listed := make(map[string]bool, len(repos))
+	for _, r := range repos {
+		listed[r.FullName] = true
+	}
+	for n := range remembered { // a repo that left the listing leaves nothing behind
+		if !listed[n] {
+			if err := cl.DeleteCursor(ctx, prefix+n); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // listing is a host's stored listing. names is sorted. Where the store lists cursors it is

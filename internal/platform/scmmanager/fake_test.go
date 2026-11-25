@@ -41,6 +41,10 @@ type fakeSCM struct {
 	gitReject int
 	requests  []fakeReq
 	defCalls  int
+	// limitReads makes every GET of a branch answer 429; failBranch makes the GET of a
+	// repository's branch answer 500.
+	limitReads bool
+	failBranch string
 }
 
 type fakePR struct {
@@ -252,6 +256,9 @@ func (f *fakeSCM) serveAPI(w http.ResponseWriter, r *http.Request) {
 	// Which repository the request is addressed to, for the per-repo call count.
 	repo := ""
 	switch {
+	case len(parts) >= 4 && parts[0] == "repositories" && parts[3] == "branches":
+		// Head reads belong to discovery polling (ListRepoHeads), not to a scan or a push, so
+		// the conformance suite's per-repo call counts leave them out.
 	case len(parts) >= 3 && (parts[0] == "pull-requests" || parts[0] == "repositories"):
 		repo = parts[1] + "/" + parts[2]
 	case len(parts) >= 4 && parts[0] == "config" && parts[1] == "git":
@@ -277,6 +284,11 @@ func (f *fakeSCM) serveAPI(w http.ResponseWriter, r *http.Request) {
 		f.listPRs(w, r, repo)
 	case len(parts) == 3 && parts[0] == "pull-requests" && r.Method == http.MethodPost:
 		f.createPR(w, r, repo, body)
+	case f.limitReads && len(parts) == 5 && parts[0] == "repositories" && parts[3] == "branches":
+		w.Header().Set("Retry-After", "1")
+		apiError(w, 429, "slow down")
+	case len(parts) == 5 && parts[0] == "repositories" && parts[3] == "branches" && r.Method == http.MethodGet:
+		f.branch(w, parts[1]+"/"+parts[2], parts[4])
 	case len(parts) == 5 && parts[0] == "repositories" && parts[3] == "modifications" && r.Method == http.MethodGet:
 		f.modifications(w, repo, parts[4])
 	default:
@@ -331,6 +343,23 @@ func (f *fakeSCM) defaultBranch(w http.ResponseWriter, repo string) {
 	}
 	w.Header().Set("Content-Type", mtDefault)
 	_ = json.NewEncoder(w).Encode(map[string]any{"defaultBranch": "main"})
+}
+
+// branch is the branch resource (assumed, see docs/platform-scmmanager.md "Unverified"):
+// {name, revision}.
+func (f *fakeSCM) branch(w http.ResponseWriter, repo, branch string) {
+	f.mu.Lock()
+	fail := f.failBranch == repo
+	f.mu.Unlock()
+	cmd := exec.Command("git", "rev-parse", "--verify", "-q", "refs/heads/"+branch)
+	cmd.Dir = f.bare(repo)
+	cmd.Env = gitEnv()
+	out, err := cmd.Output()
+	if fail || err != nil {
+		apiError(w, 500, "no such branch")
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"name": branch, "revision": strings.TrimSpace(string(out))})
 }
 
 func (f *fakeSCM) prJSON(p *fakePR) map[string]any {

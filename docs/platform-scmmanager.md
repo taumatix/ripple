@@ -36,6 +36,12 @@ delivery. The secret rides in clear unless the webhook URL is https: use https.
 - **Discovery**: no event announces a new repository, so ripple lists them (`GET repositories`, git only,
   not archived) and asks each one's default branch once (`config/git/{ns}/{name}/default-branch`),
   remembering the answer. A repository with no branch yet is left out until it has one.
+- **Head polling**: the client implements `app.HeadLister`, so a repository whose default branch moved is
+  re-scanned at the next discovery even when its webhook never arrived. The listing carries no commit, so this is
+  **one extra read per repository** each discovery, one at a time: `GET repositories/{ns}/{name}/branches/{default}`
+  and its `revision` (the default branch is already remembered). A 429 ends the listing and the app keeps what it
+  remembered; another failure leaves that repository out for the round. The read is not counted as scan cost by the
+  conformance suite.
 - **Changed files**: the payload has no file list. For a push to the default branch ripple asks the
   modifications of each changeset (added, modified, removed, renamed), up to 100 changesets; more, or any
   failed lookup, leaves the file list empty, which forces a re-scan (always correct, dearer). This is why the
@@ -85,4 +91,6 @@ Written from SCM-Manager's own documents and the plugins' public source (`docs/v
 - the 201 `Location` of a created pull request (a missing one falls back to a list lookup);
 - the modifications of a merge commit (which parent they are against);
 - `shouldDeleteSourceBranch` honoured at merge;
+- the branch resource used for head polling (`GET repositories/{ns}/{name}/branches/{branch}`, media type
+  `application/vnd.scmm-branch+json;v=2`, a `revision` field): from memory of the API, not vendored;
 - the 429 answer: assumed, nothing documents it.

@@ -37,6 +37,7 @@ const (
 	mtPRs        = "application/vnd.scmm-pullRequestCollection+json;v=2"
 	mtRepos      = "application/vnd.scmm-repositoryCollection+json;v=2"
 	mtDefault    = "application/vnd.scmm-gitDefaultBranch+json;v=2"
+	mtBranch     = "application/vnd.scmm-branch+json;v=2"
 	mtModifs     = "application/vnd.scmm-modifications+json;v=2"
 	pageSize     = 100
 	maxChangeset = 100 // changesets of one push asked for their files before a re-scan is cheaper
@@ -382,6 +383,37 @@ func (c *Client) ListRepos(ctx context.Context) ([]model.Repo, error) {
 		out = append(out, model.Repo{FullName: full, DefaultBranch: def})
 	}
 	return out, nil
+}
+
+// ListRepoHeads is the commit each listed repository's default branch points at, for the app's
+// head comparison (app.HeadLister). The listing carries no commit, so it is one read per
+// repository, `GET repositories/{ns}/{name}/branches/{default}` and its `revision`, one at a
+// time (the default branch is already remembered by ListRepos). A 429 ends the listing with
+// the rate-limit error; another failure leaves that repository out for the round.
+func (c *Client) ListRepoHeads(ctx context.Context) (map[string]string, error) {
+	repos, err := c.ListRepos(ctx)
+	if err != nil {
+		return nil, err
+	}
+	heads := map[string]string{}
+	for _, r := range repos {
+		ns, name := split(r.FullName)
+		var b struct {
+			Revision string `json:"revision"`
+		}
+		if _, err := c.do(ctx, http.MethodGet, c.apiURL("repositories", ns, name, "branches", r.DefaultBranch), mtBranch, nil, &b); err != nil {
+			var rl *platform.RateLimitError
+			if errors.As(err, &rl) {
+				return nil, err
+			}
+			c.log().Info("scm-manager head unreadable", "repo", r.FullName, "err", err)
+			continue
+		}
+		if b.Revision != "" {
+			heads[r.FullName] = b.Revision
+		}
+	}
+	return heads, nil
 }
 
 // ListArchivedRepos is the git repositories the listing flags `archived` (the repository

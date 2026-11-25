@@ -40,6 +40,8 @@ func Build(cfg *config.Repo) ([]Manager, error) {
 			out = append(out, Bundler{Dir: u.Directory})
 		case "composer":
 			out = append(out, Composer{Dir: u.Directory})
+		case "nuget":
+			out = append(out, Nuget{Dir: u.Directory})
 		case "pip":
 			out = append(out, Pip{Dir: u.Directory})
 		case "regex":

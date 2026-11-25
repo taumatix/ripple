@@ -65,3 +65,10 @@ helm.sh/docs/topics/charts), fetched 2026-11-25 as raw markdown from the helm-ww
 `internal/helmrepo` and `manager.Helm` were written: the `index.yaml` shape (`entries`, `version`, `deprecated`) and
 the `dependencies` fields of `Chart.yaml`. Not checked against a live repository, so unverified: index size and
 redirect behaviour of real hosts, how `created` is filled, the full constraint grammar (only exact versions are used).
+
+## nuget
+
+`nuget/nuget-service-index.md`, `nuget-pkgbase.md` (package base address, the flat container),
+`nuget-package-versioning.md`, `nuget-package-references.md` and `nuget-cpm.md` (central package management) are the
+Microsoft Learn pages of the same names from https://learn.microsoft.com/en-us/nuget, fetched 2026-11-25. Not checked
+against the live service.

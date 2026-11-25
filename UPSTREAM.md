@@ -75,6 +75,14 @@ upstream:
     verified-against: "docs/vendor/packagist pages fetched 2026-11-25; tests use internal/testutil/packagist.go, a fake written from them"
     unverified: "everything against the real service: rate limits, redirects, the minified encoding of very large packages (only the version key of each entry is read), the exact package-name pattern (taken from memory of Composer's schema, the vendored page says only lowercase words separated by - . _)"
     checked: 2026-11-25
+  - name: nuget-api
+    kind: http-api
+    reference: https://learn.microsoft.com/en-us/nuget/api/overview
+    docs: https://learn.microsoft.com/en-us/nuget/api/package-base-address-resource
+    format: "GET https://api.nuget.org/v3/index.json (PackageBaseAddress/3.0.0), then GET {base}/{lowercase id}/index.json, anonymous; {versions: [...]} lowercased, listed and unlisted; PackageReference / PackageVersion Version attributes in MSBuild project files"
+    verified-against: "docs/vendor/nuget pages fetched 2026-11-25; tests use internal/testutil/nuget.go, a fake written from them"
+    unverified: "everything against the real service: rate limits, redirects, the service index's resource list, the package id pattern (taken from the vendored pages and memory), NuGet.Config private feeds (not read)"
+    checked: 2026-11-25
   - name: pypi-json-api
     kind: http-api
     reference: https://docs.pypi.org/api/json/

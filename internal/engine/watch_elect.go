@@ -82,6 +82,7 @@ const (
 	pipPollName       = "pip"
 	rubygemsPollName  = "rubygems"
 	packagistPollName = "packagist"
+	nugetPollName     = "nuget"
 	helmPollName      = "helm"
 )
 
@@ -198,3 +199,14 @@ func (w *PackagistWatcher) Elected() bool { return w.elect.isHeld() }
 
 // StepDown gives the claim up; call it when stopping.
 func (w *PackagistWatcher) StepDown(ctx context.Context) { w.elect.stepDown(ctx, w.Engine) }
+
+// PollElected is Poll for replicas sharing a store; see Watcher.PollElected.
+func (w *NugetWatcher) PollElected(ctx context.Context, ttl time.Duration) (int, bool, error) {
+	return w.elect.poll(ctx, w.Engine, feedLease(nugetPollName), ttl, w.Poll)
+}
+
+// Elected reports whether this replica held the claim at its last PollElected.
+func (w *NugetWatcher) Elected() bool { return w.elect.isHeld() }
+
+// StepDown gives the claim up; call it when stopping.
+func (w *NugetWatcher) StepDown(ctx context.Context) { w.elect.stepDown(ctx, w.Engine) }

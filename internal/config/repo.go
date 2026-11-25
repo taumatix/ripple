@@ -426,7 +426,7 @@ func ParseNamed(file string, data []byte) (*Repo, error) {
 		r.Version = 1
 	}
 	for i := range r.Updates {
-		if (r.Updates[i].Ecosystem == "gomod" || r.Updates[i].Ecosystem == "github-actions" || r.Updates[i].Ecosystem == "docker" || r.Updates[i].Ecosystem == "npm" || r.Updates[i].Ecosystem == "cargo" || r.Updates[i].Ecosystem == "pip" || r.Updates[i].Ecosystem == "helm" || r.Updates[i].Ecosystem == "bundler" || r.Updates[i].Ecosystem == "composer") && r.Updates[i].Directory == "" {
+		if (r.Updates[i].Ecosystem == "gomod" || r.Updates[i].Ecosystem == "github-actions" || r.Updates[i].Ecosystem == "docker" || r.Updates[i].Ecosystem == "npm" || r.Updates[i].Ecosystem == "cargo" || r.Updates[i].Ecosystem == "pip" || r.Updates[i].Ecosystem == "helm" || r.Updates[i].Ecosystem == "bundler" || r.Updates[i].Ecosystem == "composer" || r.Updates[i].Ecosystem == "nuget") && r.Updates[i].Directory == "" {
 			r.Updates[i].Directory = "/"
 		}
 	}
@@ -573,16 +573,16 @@ func (c *checker) update(n *yaml.Node, u *Update, where string) {
 				c.add(v, "%s.%s does not apply to ecosystem: github-actions", where, k)
 			}
 		}
-	case "docker", "npm", "cargo", "pip", "helm", "bundler", "composer":
+	case "docker", "npm", "cargo", "pip", "helm", "bundler", "composer", "nuget":
 		for _, k := range []string{"files", "patterns", "package", "cgo", "security-pseudo-versions", "security-bypass", "security-bypass-severity", "security-bypass-limit-per-advisory", "private-modules", "directives", "tidy", "go-toolchain"} {
 			if v := f[k]; v != nil {
 				c.add(v, "%s.%s does not apply to ecosystem: %s", where, k, u.Ecosystem)
 			}
 		}
 	case "":
-		c.add(n, "%s.ecosystem is required (gomod, github-actions, docker, npm, cargo, pip, helm, bundler, composer or regex)", where)
+		c.add(n, "%s.ecosystem is required (gomod, github-actions, docker, npm, cargo, pip, helm, bundler, composer, nuget or regex)", where)
 	default:
-		c.add(f["ecosystem"], "%s.ecosystem %q is not supported; use gomod, github-actions, docker, npm, cargo, pip, helm, bundler, composer or regex", where, u.Ecosystem)
+		c.add(f["ecosystem"], "%s.ecosystem %q is not supported; use gomod, github-actions, docker, npm, cargo, pip, helm, bundler, composer, nuget or regex", where, u.Ecosystem)
 	}
 	switch u.Automerge {
 	case "", "patch", "minor", "major":

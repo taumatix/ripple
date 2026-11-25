@@ -187,7 +187,9 @@ func TestRealtoolCargo(t *testing.T) {
 		// No Cargo.lock is committed: ripple never writes one, so the tool's own resolve
 		// (metadata, then a real compile) is what accepts the new requirement.
 		steps: [][]string{{"cargo", "metadata", "--format-version", "1"}, {"cargo", "check"}},
-		after: func(t *testing.T, dir string) { mustContain(t, dir, "Cargo.lock", `version = "1.0.15"`) },
+		// "1.0.15" is a caret requirement: the lock resolves to the newest compatible release, so
+		// only its presence is asserted, and the compile above proves it satisfies the manifest.
+		after: func(t *testing.T, dir string) { mustContain(t, dir, "Cargo.lock", `name = "itoa"`) },
 	}.run(t)
 }
 

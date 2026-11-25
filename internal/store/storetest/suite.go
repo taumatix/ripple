@@ -1234,6 +1234,68 @@ func Run(t *testing.T, mk func(t *testing.T) store.Store) {
 		}
 	})
 
+	t.Run("paged cursor listing", func(t *testing.T) {
+		s := mk(t)
+		pl, ok := s.(store.PagedCursorLister)
+		if !ok {
+			t.Fatalf("%T does not list cursors in pages", s)
+		}
+		for i := 0; i < 7; i++ {
+			if err := s.SetCursor(ctx, fmt.Sprintf("pg#k%02d", i), fmt.Sprint(i)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for n, v := range map[string]string{"pgx#a": "x", "pg": "legacy", "pl:a": "1", "pl:b": "2", "pl:c": "3"} {
+			if err := s.SetCursor(ctx, n, v); err != nil {
+				t.Fatal(err)
+			}
+		}
+		walk := func(prefix string, limit int) (names []string, pages int) {
+			t.Helper()
+			after := ""
+			for {
+				got, err := pl.ListCursorsPage(ctx, prefix, after, limit)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(got) > limit {
+					t.Fatalf("page of %d for limit %d", len(got), limit)
+				}
+				if len(got) == 0 {
+					return names, pages
+				}
+				pages++
+				for _, c := range got {
+					if v, _ := s.GetCursor(ctx, c.Name); v != c.Value {
+						t.Errorf("%s listed with %q, stored %q", c.Name, c.Value, v)
+					}
+					names = append(names, c.Name)
+				}
+				after = got[len(got)-1].Name
+			}
+		}
+		want := []string{"pg#k00", "pg#k01", "pg#k02", "pg#k03", "pg#k04", "pg#k05", "pg#k06"}
+		if got, pages := walk("pg#", 3); !reflect.DeepEqual(got, want) || pages != 3 {
+			t.Errorf("walk of pg# by 3 = %v in %d pages, want %v in 3", got, pages, want)
+		}
+		if got, _ := walk("pg#", 100); !reflect.DeepEqual(got, want) {
+			t.Errorf("walk of pg# by 100 = %v", got)
+		}
+		if got, _ := walk("pl:", 2); !reflect.DeepEqual(got, []string{"pl:a", "pl:b", "pl:c"}) {
+			t.Errorf("walk of a group-less prefix = %v", got)
+		}
+		got, err := pl.ListCursorsPage(ctx, "pg#", "pg#k03", 2)
+		if err != nil || len(got) != 2 || got[0].Name != "pg#k04" || got[1].Name != "pg#k05" {
+			t.Errorf("page after pg#k03 = %v, %v; want k04, k05", got, err)
+		}
+		if got, _ := pl.ListCursorsPage(ctx, "pg#", "pg#k06", 5); len(got) != 0 {
+			t.Errorf("page after the last = %v", got)
+		}
+		if got, _ := pl.ListCursorsPage(ctx, "pg#", "", 0); len(got) != 0 {
+			t.Errorf("limit 0 = %v, want none", got)
+		}
+	})
+
 	t.Run("deleting a plain cursor keeps the group keys named after it", func(t *testing.T) {
 		s := mk(t)
 		cl := s.(store.CursorLister)

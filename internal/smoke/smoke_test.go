@@ -145,6 +145,7 @@ func TestRippleOpensExactlyOnePR(t *testing.T) {
 			// The fake module has no entry in the public checksum database, so `go mod tidy` would drop it.
 			"RIPPLE_GOPROXY=" + proxy.URL, "RIPPLE_GOSUMDB=off",
 			"RIPPLE_MINIMUM_RELEASE_AGE=0",
+			"RIPPLE_METRICS=true", "RIPPLE_METRICS_TOKEN=smoke-metrics",
 		}
 	}
 	if binary != "" {
@@ -246,6 +247,27 @@ func TestRippleOpensExactlyOnePR(t *testing.T) {
 	}
 	if got, ok := gh.FileAt(repo, prs[0].Head, "go.sum"); !ok || !strings.Contains(got, "example.com/lib v1.1.0 h1:") {
 		t.Errorf("go.sum missing the bumped module on %s:\n%s", prs[0].Head, got)
+	}
+
+	// The opt-in /metrics endpoint answers over the real listener, guarded by its token, and has timed the webhooks.
+	mreq := func(token string) (int, string) {
+		req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d/metrics", port), nil)
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+	if code, _ := mreq(""); code != http.StatusUnauthorized {
+		t.Errorf("/metrics without the token: %d, want 401", code)
+	}
+	if code, body := mreq("smoke-metrics"); code != http.StatusOK || !strings.Contains(body, `ripple_http_request_duration_seconds_count{route="webhook"}`) {
+		t.Errorf("/metrics: %d, want 200 with a webhook latency series:\n%s", code, body)
 	}
 }
 

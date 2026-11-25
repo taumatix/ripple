@@ -224,3 +224,41 @@ func TestAHigherSecurityToolchainPRClosesAnOpenLowerOne(t *testing.T) {
 		}
 	})
 }
+
+// Entry 127: a close the host refused when the security toolchain PR opened is retried on
+// the next run of the repo, so the beaten directive PR does not stay open beside it.
+func TestABeatenDirectivePRIsClosedOnALaterRunAfterAFailedClose(t *testing.T) {
+	forEachFake(t, func(t *testing.T, st store.Store) {
+		e, _, osv, n := conflictEnv(t, st)
+		start(t, e, "acme/app")
+		e.tick()
+		prs := e.gh.PRs("acme/app")
+		if len(prs) != 1 || strings.HasPrefix(prs[0].Title, "[security]") {
+			t.Fatalf("precondition: want the directive PR open: %+v", prs)
+		}
+		directive := prs[0]
+
+		e.gh.FailClose = true
+		e.clock.Advance(time.Minute)
+		osv.Publish("GO-2026-7200", e.clock.Now(), toolchainFix(n))
+		e.tick()
+		e.tick()
+		for _, p := range e.gh.PRs("acme/app") {
+			if p.Number == directive.Number && p.Closed {
+				t.Fatalf("the close was meant to fail: %+v", p)
+			}
+		}
+
+		// Any later run of the repo retries it: a second, lower advisory makes one.
+		e.gh.FailClose = false
+		e.clock.Advance(time.Minute)
+		osv.Publish("GO-2026-7201", e.clock.Now(), osvRecord("GO-2026-7201", "stdlib", fmt.Sprintf(`,{"fixed":"1.%d.5"}`, n-2)))
+		e.tick()
+		e.tick()
+		for _, p := range e.gh.PRs("acme/app") {
+			if p.Number == directive.Number && (!p.Closed || !strings.Contains(strings.Join(p.Comments, "\n"), "security")) {
+				t.Fatalf("the beaten directive PR must be closed with a reason on a later run: %+v", p)
+			}
+		}
+	})
+}

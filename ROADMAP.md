@@ -74,9 +74,6 @@ auth model, rate limits); the notes below are what I expect, **unverified** unti
 
 Everything else:
 
-- **Periodic re-scan for hosts without push events.** A host discovered by listing (`platform.Lister`)
-  and without push webhooks is scanned when it first appears and never again; re-scan when its default
-  branch head moves, compared at each listing.
 29. **More datasources and feeds, as many ecosystems as Renovate has.** ~~npm registry~~ (shipped with 30c, polled per package; the replicate feed is not used), ~~PyPI~~ (shipped with 30e, polled per project), ~~crates.io
    sparse index~~ (shipped with 30d, polled per crate), Maven, NuGet, RubyGems, Packagist, ~~Docker/OCI tags~~ (shipped with 30b, polled per image), GitHub releases/tags, Helm, Terraform
    registry. Where a registry has a changes feed, use it; where it has none (OCI registries), fall back to polling
@@ -377,3 +374,4 @@ Everything else:
     `setup.cfg`'s `python_requires` does not yet feed the Requires-Python guard (only `pyproject.toml`, `Pipfile` and
     `.python-version` do). The setup.cfg reader is line-based and was checked against hand-written files, not a sample of
     real projects (see the corpus entry for pip once one is run).
+221. **Implement `app.HeadLister` in the Lister hosts.** `App.Discover` re-scans a listed repo whose default-branch head moved once its host reports heads (`ListRepoHeads`), but no host does. Add it to the hosts with no push events (Gerrit, SCM-Manager, CodeCommit and any other `platform.Lister`) from the listing call if it carries the head, else one extra read per repo, bounded by the host's rate limit.

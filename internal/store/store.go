@@ -143,3 +143,16 @@ type CursorLister interface {
 	ListCursors(ctx context.Context, prefix string) ([]Cursor, error)
 	DeleteCursor(ctx context.Context, name string) error
 }
+
+// PagedCursorLister is the optional bounded form of CursorLister.ListCursors. ListCursorsPage
+// returns at most limit cursors whose name starts with prefix and sorts (bytewise) after
+// the name after, in name order; an empty after starts at the beginning, and an empty page
+// means the listing is done. Feeding the last name of one page back as after walks the set
+// without holding it whole.
+//
+// For a prefix containing the group separator ("docker:packages#") DynamoDB reads only the
+// requested page of the group's index. Any other prefix has no key order on DynamoDB (a
+// Scan), so it is listed whole and sliced, which bounds the answer but not the read.
+type PagedCursorLister interface {
+	ListCursorsPage(ctx context.Context, prefix, after string, limit int) ([]Cursor, error)
+}

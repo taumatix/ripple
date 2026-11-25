@@ -354,10 +354,7 @@ Everything else:
     does not change it), that a Gerrit read-only project is absent from the `ACTIVE` listing and present in `READ_ONLY`,
     and whether Gerrit's webhooks plugin or stream events can report the state change so the listing is not the only path.
     Bitbucket Cloud and Azure DevOps document no archive in `docs/vendor`; nothing to build for them.
-214. **Package cursors: slice the listing itself and measure.** `RIPPLE_POLL_PACKAGES_PER_POLL` bounds the packages a poll visits, but the
-    set is still listed whole (`polledPackages`) before it is sliced. A store-level paged `ListCursors` (after-key and limit on Memory,
-    Postgres and DynamoDB) would bound the index query too. Also unmeasured: how large a real install's set gets, and the
-    right default. A fold racing a replica still running the old version can leave a package only in the legacy cursor until the
+220. **Package cursors: use the paged listing in the engine and measure.** `store.PagedCursorLister` (`ListCursorsPage`, after-name and limit; Memory, Postgres, DynamoDB's group index) exists, but `polledPackages` still lists the whole set before `nextSlice` cuts it. Read the next `RIPPLE_POLL_PACKAGES_PER_POLL` after the resume cursor with `ListCursorsPage` instead (the legacy newline cursor and a store without the interface keep the whole read). Also unmeasured: how large a real install's set gets, and the right default. A fold racing a replica still running the old version can leave a package only in the legacy cursor until the
     next read folds it again; cursors named `<group>#<key>` written before per-package keys carry no index attributes on DynamoDB.
 215. **Docker Hub newest-first listing: check it against the real Hub.** `RIPPLE_REGISTRY_HUB_NEWEST` was written from the
     documented endpoint and a fake, and the docs do not say what `ordering` accepts, the default order or the largest

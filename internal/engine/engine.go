@@ -104,6 +104,9 @@ type Engine struct {
 	// Packagist reads package versions for ecosystem: composer. Nil leaves those dependencies
 	// without updates (see PackagistWatcher).
 	Packagist PackagistRegistry
+	// Nuget reads package versions for ecosystem: nuget. Nil leaves those dependencies
+	// without updates (see NugetWatcher).
+	Nuget NugetRegistry
 	// PyPI reads project versions from the PyPI JSON API for ecosystem: pip. Nil leaves
 	// pip dependencies without updates (see PipWatcher).
 	PyPI PyPIIndex
@@ -407,6 +410,9 @@ func (e *Engine) scan(ctx context.Context, repo model.Repo) error {
 		return err
 	}
 	if err := e.notePackages(ctx, model.DatasourcePackagist, packagistPackagesCursor, deps); err != nil {
+		return err
+	}
+	if err := e.notePackages(ctx, model.DatasourceNuget, nugetPackagesCursor, deps); err != nil {
 		return err
 	}
 	if err := e.Store.ReplaceDependencies(ctx, repo.FullName, deps); err != nil {

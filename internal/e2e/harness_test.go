@@ -25,6 +25,7 @@ import (
 	"github.com/taumatix/ripple/internal/helmrepo"
 	"github.com/taumatix/ripple/internal/model"
 	"github.com/taumatix/ripple/internal/npmreg"
+	"github.com/taumatix/ripple/internal/nuget"
 	"github.com/taumatix/ripple/internal/packagist"
 	"github.com/taumatix/ripple/internal/platform/github"
 	"github.com/taumatix/ripple/internal/pypi"
@@ -147,6 +148,8 @@ type opts struct {
 	gems *testutil.Rubygems
 	// packagist, when set, is the fake registry the engine reads Packagist versions from.
 	packagist *testutil.Packagist
+	// nuget, when set, is the fake registry the engine reads NuGet versions from.
+	nuget *testutil.Nuget
 	// pypi, when set, is the fake PyPI the engine reads project versions from.
 	pypi *testutil.PyPI
 	// engine adjusts the engine before it runs (server-side go settings).
@@ -200,6 +203,9 @@ func newEnvOpts(t *testing.T, st store.Store, lim rules.Limits, o opts) *env {
 	if o.packagist != nil {
 		eng.Packagist = &packagist.Client{BaseURL: o.packagist.URL}
 	}
+	if o.nuget != nil {
+		eng.Nuget = &nuget.Client{BaseURL: o.nuget.URL}
+	}
 	if o.crates != nil {
 		eng.Crates = &cratesindex.Client{BaseURL: o.crates.URL}
 	}
@@ -213,7 +219,7 @@ func newEnvOpts(t *testing.T, st store.Store, lim rules.Limits, o opts) *env {
 		a := &app.App{Engine: eng, Secret: []byte(secret), Log: slog.New(slog.NewTextHandler(io.MultiWriter(testWriter{t}, e.logs), nil)),
 			PollEvery: o.pollEvery, Queue: &app.Queue{},
 			Watcher: &engine.Watcher{Engine: eng, Feed: &feed.GoIndex{BaseURL: e.idx.URL}},
-			Actions: &engine.ActionsWatcher{Engine: eng}, Docker: &engine.DockerWatcher{Engine: eng}, Npm: &engine.NpmWatcher{Engine: eng}, Cargo: &engine.CargoWatcher{Engine: eng}, Pip: &engine.PipWatcher{Engine: eng}, Helm: &engine.HelmWatcher{Engine: eng}, Rubygems: &engine.RubygemsWatcher{Engine: eng}, Packagist: &engine.PackagistWatcher{Engine: eng}}
+			Actions: &engine.ActionsWatcher{Engine: eng}, Docker: &engine.DockerWatcher{Engine: eng}, Npm: &engine.NpmWatcher{Engine: eng}, Cargo: &engine.CargoWatcher{Engine: eng}, Pip: &engine.PipWatcher{Engine: eng}, Helm: &engine.HelmWatcher{Engine: eng}, Rubygems: &engine.RubygemsWatcher{Engine: eng}, Packagist: &engine.PackagistWatcher{Engine: eng}, Nuget: &engine.NugetWatcher{Engine: eng}}
 		if o.goDL != nil {
 			a.Toolchain = &engine.ToolchainWatcher{Engine: eng, Source: &feed.GoDL{BaseURL: o.goDL.URL}}
 		}

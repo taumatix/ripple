@@ -34,3 +34,13 @@ Run one locally (from the repository root; `-tags realtool` is added for you):
 Lock files: ripple edits the manifest and reports the lock file stale (the PR body says which to refresh).
 These tests assert the second half: the tool's own refresh command accepts the edited manifest and writes
 the lock at the new version. The stale note itself is the engine's, covered by its own tests.
+
+Flakes: a step that reaches a public registry is retried (3 attempts, 15 s then 30 s apart, 5 minutes each)
+and, when the attempts run out, fails with the tool's own output of the last one; a step that touches no
+registry (`go build`, `helm lint`, `terraform validate`, ...) fails at once. A real rejection of ripple's edit
+fails every attempt the same way, so retrying does not hide it. The Maven test names the dependency plugin by
+its full coordinates so no plugin-prefix lookup against Maven Central is needed, and the Cargo, Composer,
+NuGet and Maven jobs cache their download directories. What still depends on a live registry at run time:
+every ecosystem's registry, the Terraform module's source on GitHub, the tag checks against GitHub and Docker
+Hub, and the floating tool versions (`dtolnay/rust-toolchain@stable`, Node 22, Ruby 3.3, .NET 8.0.x, the
+latest Terraform).

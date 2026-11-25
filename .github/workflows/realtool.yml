@@ -15,6 +15,7 @@ permissions:
 jobs:
   gomod:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -23,15 +24,22 @@ jobs:
       - run: scripts/realtool.sh TestRealtoolGoMod
   cargo:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
       - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: realtool-cargo-${{ runner.os }}-${{ hashFiles('internal/manager/testdata/realtool/cargo/Cargo.toml') }}
+          restore-keys: realtool-cargo-${{ runner.os }}-
       - run: scripts/realtool.sh TestRealtoolCargo
   npm:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -43,6 +51,7 @@ jobs:
       - run: scripts/realtool.sh TestRealtoolNpm
   pip:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -54,6 +63,7 @@ jobs:
       - run: scripts/realtool.sh TestRealtoolPip
   helm:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -63,6 +73,7 @@ jobs:
       - run: scripts/realtool.sh TestRealtoolHelm
   bundler:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -74,6 +85,7 @@ jobs:
       - run: scripts/realtool.sh TestRealtoolBundler
   composer:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -83,9 +95,15 @@ jobs:
         with:
           php-version: "8.2"
           tools: composer:v2
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/composer
+          key: realtool-composer-${{ runner.os }}-${{ hashFiles('internal/manager/testdata/realtool/composer/composer.json') }}
+          restore-keys: realtool-composer-${{ runner.os }}-
       - run: scripts/realtool.sh TestRealtoolComposer
   nuget:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -94,9 +112,15 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: realtool-nuget-${{ runner.os }}-${{ hashFiles('internal/manager/testdata/realtool/nuget/realtool.csproj') }}
+          restore-keys: realtool-nuget-${{ runner.os }}-
       - run: scripts/realtool.sh TestRealtoolNuget
   maven:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -106,9 +130,15 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: realtool-maven-${{ runner.os }}-${{ hashFiles('internal/manager/testdata/realtool/maven/pom.xml') }}
+          restore-keys: realtool-maven-${{ runner.os }}-
       - run: scripts/realtool.sh TestRealtoolMaven
   terraform:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -120,6 +150,7 @@ jobs:
       - run: scripts/realtool.sh TestRealtoolTerraform
   github-actions:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -132,6 +163,7 @@ jobs:
       - run: scripts/realtool.sh TestRealtoolGitHubActions
   docker:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5

@@ -104,6 +104,16 @@ func (c *CountingPlatform) CloseUntouchedPR(ctx context.Context, r model.Repo, p
 	return platform.CloseUntouchedPR(ctx, c.Inner, r, pr, comment)
 }
 
+// EditPRBody forwards to Inner, or answers platform.ErrNoEditPR (without counting a
+// call) when Inner cannot edit descriptions.
+func (c *CountingPlatform) EditPRBody(ctx context.Context, r model.Repo, pr platform.PR, edit func(string) (string, bool)) (bool, error) {
+	if _, ok := c.Inner.(platform.PRBodyEditor); !ok {
+		return false, platform.ErrNoEditPR
+	}
+	c.hit(r.FullName)
+	return platform.EditPRBody(ctx, c.Inner, r, pr, edit)
+}
+
 // RateLimitedUntil and ReadsLegacyConfig pass Inner's answers through; they make no call.
 func (c *CountingPlatform) RateLimitedUntil(r model.Repo) time.Time {
 	return platform.RateLimitedUntil(c.Inner, r)

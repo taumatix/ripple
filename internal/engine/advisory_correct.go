@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"golang.org/x/mod/semver"
@@ -107,8 +108,104 @@ func (e *Engine) reconcileCorrected(ctx context.Context, v *advisory.Vuln) (busy
 			busy = true
 		}
 	}
+	for _, repo := range order {
+		e.refreshBodies(ctx, v, repo, byRepo[repo])
+	}
 	e.reconcileDashboards(ctx, v)
 	return busy
+}
+
+// refreshBodies rewrites the advisory's line in the body of each open PR ripple opened
+// for it, when the record was amended without ceasing to apply (a new summary, severity
+// or CVSS): the line is rebuilt from the note the fan-out has just stored. A PR a
+// person touched, whose line a person rewrote, or whose host cannot edit it is left as
+// it is. It runs under no lease: it writes no job row, and the host re-reads the PR.
+func (e *Engine) refreshBodies(ctx context.Context, v *advisory.Vuln, repoName string, jobs []model.Job) {
+	var done []model.Job
+	for _, j := range jobs {
+		if j.State == model.JobDone && j.PRURL != "" {
+			done = append(done, j)
+		}
+	}
+	if len(done) == 0 || e.Paused(ctx, repoName) {
+		return
+	}
+	deps, err := e.Store.ListRepoDependencies(ctx, repoName)
+	if err != nil {
+		return
+	}
+	repo, found, err := e.Store.GetRepo(ctx, repoName)
+	if err != nil || !found {
+		return
+	}
+	var open []platform.PR
+	listed := false
+	for _, j := range done {
+		note := e.advisoryNoteFor(ctx, j)
+		if note == nil || note.ID != v.ID || e.corrected(v, j, deps) {
+			continue
+		}
+		if !listed {
+			if open, err = e.Platform.ListOpenPRs(ctx, repo, BranchPrefix); err != nil {
+				e.log().Warn("osv: list open pull requests", "repo", repoName, "err", err)
+				return
+			}
+			listed = true
+		}
+		for _, pr := range open {
+			if pr.URL != j.PRURL {
+				continue
+			}
+			changed, err := platform.EditPRBody(ctx, e.Platform, repo, pr, func(body string) (string, bool) {
+				return withAdvisoryLine(body, *note, j.Package, j.Version)
+			})
+			switch {
+			case errors.Is(err, platform.ErrNoEditPR):
+				return
+			case err != nil:
+				e.log().Warn("osv: pull request description not rewritten", "repo", repoName, "pr", pr.URL, "err", err)
+			case changed:
+				e.log().Info("osv: rewrote the advisory line of a pull request description", "repo", repoName, "pr", pr.URL, "id", v.ID)
+			}
+			break
+		}
+	}
+}
+
+// withAdvisoryLine returns body with the advisory's line rebuilt from note, and whether
+// that changed it. The line is found by its start (id, link, module, version), which ripple
+// wrote; a body without it was rewritten by a person and is left alone. A parenthesis
+// about the pseudo-version the dependency left stays as it was written.
+func withAdvisoryLine(body string, note advisoryNote, pkg, version string) (string, bool) {
+	prefix := advisoryLinePrefix(note, pkg, version)
+	start := -1
+	if strings.HasPrefix(body, prefix) {
+		start = 0
+	} else if i := strings.Index(body, "\n"+prefix); i >= 0 {
+		start = i + 1
+	}
+	if start < 0 {
+		return body, false
+	}
+	end := len(body)
+	if i := strings.IndexByte(body[start:], '\n'); i >= 0 {
+		end = start + i + 1
+	}
+	old := body[start:end]
+	movesOff := ""
+	if rest := strings.TrimPrefix(old, prefix); strings.HasPrefix(rest, " (moves off the pseudo-version ") {
+		if i := strings.IndexByte(rest, ')'); i >= 0 {
+			movesOff = rest[:i+1]
+		}
+	}
+	line := advisoryLine(note, pkg, version, movesOff)
+	if !strings.HasSuffix(old, "\n") {
+		line = strings.TrimSuffix(line, "\n")
+	}
+	if line == old {
+		return body, false
+	}
+	return body[:start] + line + body[end:], true
 }
 
 // retryBusy applies again the records whose correction found a repo busy: it fetches each

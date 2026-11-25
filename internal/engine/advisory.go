@@ -354,6 +354,35 @@ func withSecurityLabel(items []item, labels []string) []string {
 	return labels
 }
 
+// advisoryLinePrefix is how an advisory's line in a PR body starts, up to what OSV may
+// amend: the line is found by it when the record changes.
+func advisoryLinePrefix(a advisoryNote, pkg, version string) string {
+	return fmt.Sprintf("- [%s](%s) in `%s`, fixed in `%s`", a.ID, a.URL, pkg, version)
+}
+
+// advisoryLine is one advisory's line of the PR body, newline included. movesOff is the
+// parenthesis about a pseudo-version the dependency leaves, or "". The text that comes
+// from OSV is shown, never interpreted.
+func advisoryLine(a advisoryNote, pkg, version, movesOff string) string {
+	var b strings.Builder
+	b.WriteString(advisoryLinePrefix(a, pkg, version))
+	b.WriteString(movesOff)
+	if a.Pseudo {
+		b.WriteString(" (a pseudo-version: no release fixes this advisory, so this pins a commit; review it)")
+	}
+	if a.Severity != "" {
+		fmt.Fprintf(&b, ", severity %s", a.Severity)
+	}
+	if a.CVSS != "" {
+		fmt.Fprintf(&b, " (`%s`)", a.CVSS)
+	}
+	if a.Summary != "" {
+		fmt.Fprintf(&b, ": %s", a.Summary)
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
 // securityText marks the PR title and lists the advisories in the body.
 func securityText(items []item, title, body string) (string, string) {
 	var b strings.Builder
@@ -368,26 +397,14 @@ func securityText(items []item, title, body string) (string, string) {
 			seen[""] = true
 		}
 		seen[a.ID] = true
-		fmt.Fprintf(&b, "- [%s](%s) in `%s`, fixed in `%s`", a.ID, a.URL, it.job.Package, it.job.Version)
+		movesOff := ""
 		for _, d := range it.deps {
 			if module.IsPseudoVersion(d.Version) && !module.IsPseudoVersion(it.job.Version) {
-				fmt.Fprintf(&b, " (moves off the pseudo-version `%s` the module is required at; check that the commit's changes are in the release)", d.Version)
+				movesOff = fmt.Sprintf(" (moves off the pseudo-version `%s` the module is required at; check that the commit's changes are in the release)", d.Version)
 				break
 			}
 		}
-		if a.Pseudo {
-			b.WriteString(" (a pseudo-version: no release fixes this advisory, so this pins a commit; review it)")
-		}
-		if a.Severity != "" {
-			fmt.Fprintf(&b, ", severity %s", a.Severity)
-		}
-		if a.CVSS != "" {
-			fmt.Fprintf(&b, " (`%s`)", a.CVSS)
-		}
-		if a.Summary != "" {
-			fmt.Fprintf(&b, ": %s", a.Summary)
-		}
-		b.WriteString("\n")
+		b.WriteString(advisoryLine(*a, it.job.Package, it.job.Version, movesOff))
 	}
 	if b.Len() == 0 {
 		return title, body

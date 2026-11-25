@@ -33,6 +33,11 @@ func (e *Engine) polledPackages(ctx context.Context, cursor string) ([]string, e
 			raw = ""
 		}
 	}
+	if pl, ok := e.Store.(store.PagedCursorLister); ok && e.PollPackagesPerPoll > 0 && strings.TrimSpace(raw) == "" {
+		if _, ok := e.Store.(store.CursorLister); ok {
+			return e.pagedSlice(ctx, pl, cursor)
+		}
+	}
 	set := map[string]bool{}
 	for _, p := range strings.Fields(raw) {
 		set[p] = true
@@ -81,6 +86,68 @@ func (e *Engine) nextSlice(ctx context.Context, cursor string, sorted []string) 
 	for i := 0; i < n; i++ {
 		out = append(out, sorted[(start+i)%len(sorted)])
 	}
+	if err := e.Store.SetCursor(ctx, resumeCursor(cursor), out[len(out)-1]); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// pagedSlice is nextSlice for a store that lists cursors in pages and a set with no legacy
+// list left: it reads only the packages one poll needs, not the set, and returns what
+// nextSlice would have returned for the whole sorted set. Names compare bytewise on both
+// sides, so the store's order is the sort.Strings order. It reads at most PollPackagesPerPoll+1
+// names after the resume position and, when those run out before the slice is full, the same
+// again from the start, so the set is told to be at most one slice (returned whole, resume
+// untouched) from larger (rotated, resume stored) without listing it.
+func (e *Engine) pagedSlice(ctx context.Context, pl store.PagedCursorLister, cursor string) ([]string, error) {
+	n := e.PollPackagesPerPoll
+	prefix := cursor + store.CursorGroupSep
+	last, err := e.Store.GetCursor(ctx, resumeCursor(cursor))
+	if err != nil {
+		return nil, err
+	}
+	after := ""
+	if last != "" {
+		after = prefix + last
+	}
+	names := func(after string, limit int) ([]string, error) {
+		page, err := pl.ListCursorsPage(ctx, prefix, after, limit)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]string, len(page))
+		for i, c := range page {
+			out[i] = strings.TrimPrefix(c.Name, prefix)
+		}
+		return out, nil
+	}
+	tail, err := names(after, n+1)
+	if err != nil {
+		return nil, err
+	}
+	if len(tail) > n {
+		return e.storeSlice(ctx, cursor, tail[:n])
+	}
+	head := []string{}
+	if last != "" {
+		all, err := names("", n+1)
+		if err != nil {
+			return nil, err
+		}
+		for _, p := range all {
+			if p <= last {
+				head = append(head, p)
+			}
+		}
+	}
+	if len(head)+len(tail) <= n {
+		return append(head, tail...), nil
+	}
+	return e.storeSlice(ctx, cursor, append(tail, head[:n-len(tail)]...))
+}
+
+// storeSlice records where a slice ends before it is polled, as nextSlice does.
+func (e *Engine) storeSlice(ctx context.Context, cursor string, out []string) ([]string, error) {
 	if err := e.Store.SetCursor(ctx, resumeCursor(cursor), out[len(out)-1]); err != nil {
 		return nil, err
 	}

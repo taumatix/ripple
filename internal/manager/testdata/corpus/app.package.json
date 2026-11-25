@@ -1,0 +1,60 @@
+{
+  "name": "@acme/web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "workspaces": ["packages/*"],
+  "packageManager": "pnpm@9.1.0",
+  "dependencies": {
+    "next": "14.2.3",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "@acme/ui": "workspace:*",
+    "@acme/shared": "workspace:^1.2.0",
+    "left-pad": "latest",
+    "lodash-es": "npm:lodash@^4.17.21",
+    "fork": "github:user/repo#semver:^1.0.0",
+    "tarball": "https://example.com/pkg-1.0.0.tgz",
+    "local": "file:../local",
+    "linked": "link:../linked",
+    "any": "*",
+    "empty": "",
+    "xr": "1.x",
+    "xr2": "1.2.x",
+    "tilde-major": "~1",
+    "caret-zero": "^0.2.3",
+    "caret-zero-zero": "^0.0.3",
+    "pre": "^2.0.0-rc.1",
+    "gte": ">=2.1.0",
+    "gt": ">2.1.0",
+    "range": ">=1.2.3 <2.0.0",
+    "hyphen": "1.2.3 - 2.3.4",
+    "union": "^1.0.0 || ^2.0.0",
+    "v-prefix": "v1.2.3",
+    "eq": "=1.2.3",
+    "space": " ^1.2.3 ",
+    "git": "git+https://github.com/foo/bar.git#v1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.12",
+    "typescript": "~5.4.5",
+    "vitest": "^1.6.0",
+    "eslint": "^8.57.0 || ^9.0.0"
+  },
+  "peerDependencies": {
+    "react": ">=17"
+  },
+  "optionalDependencies": {
+    "fsevents": "~2.3.3"
+  },
+  "overrides": {
+    "foo": { ".": "1.0.0", "bar": "2.0.0" }
+  },
+  "resolutions": {
+    "**/semver": "7.6.0"
+  },
+  "pnpm": {
+    "overrides": { "minimist": "^1.2.8" }
+  },
+  "dependenciesMeta": { "x": { "injected": true } }
+}

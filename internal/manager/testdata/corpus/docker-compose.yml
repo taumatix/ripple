@@ -1,0 +1,31 @@
+version: "3.9"
+x-common: &common
+  restart: unless-stopped
+  logging:
+    driver: json-file
+
+services:
+  db:
+    <<: *common
+    image: postgres:16.3-alpine
+    environment:
+      POSTGRES_PASSWORD: example
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+  cache:
+    image: "redis:7.2"
+  app:
+    image: "${REGISTRY:-ghcr.io/acme}/app:${TAG:-latest}"
+    build: .
+  proxy:
+    image: nginx:1.27.0 # edge
+  mail:
+    image: docker.io/mailhog/mailhog:v1.0.1
+  stats:
+    image: grafana/grafana-oss:11.0.0@sha256:0000000000000000000000000000000000000000000000000000000000000000
+  untagged:
+    image: alpine
+  latest:
+    image: busybox:latest
+volumes:
+  pgdata: {}

@@ -1,0 +1,17 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: prod
+resources:
+  - deployment.yaml
+images:
+  - name: acme/api
+    newName: ghcr.io/acme/api
+    newTag: 1.4.2
+  - name: nginx
+    newTag: "1.27"
+  - name: redis
+    digest: sha256:5555555555555555555555555555555555555555555555555555555555555555
+  - name: busybox
+    newName: mirror.example/busybox
+patches:
+  - path: p.yaml

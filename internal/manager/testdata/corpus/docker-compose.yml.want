@@ -1,0 +1,5 @@
+docker.io/library/postgres : 16.3-alpine
+docker.io/library/redis : 7.2
+docker.io/library/nginx : 1.27.0
+docker.io/mailhog/mailhog : v1.0.1
+docker.io/grafana/grafana-oss : 11.0.0

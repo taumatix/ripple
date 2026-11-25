@@ -33,6 +33,10 @@ func TestPipPythonFloorFiles(t *testing.T) {
 		{"pyproject.toml", "not = = toml", ""},
 		{"Pipfile", "[requires]\npython_version = \"3.11\"\n", "3.11"},
 		{"Pipfile", "[requires]\npython_full_version = \"3.11.4\"\n", "3.11.4"},
+		{"setup.cfg", "[metadata]\nname = x\n[options]\npython_requires = >=3.8, <4\ninstall_requires =\n    requests\n", "3.8"},
+		{"setup.cfg", "[options]\npython_requires = >=3.9  # old\n", "3.9"},
+		{"setup.cfg", "[metadata]\npython_requires = >=3.9\n", ""},
+		{"setup.cfg", "[options]\ninstall_requires = x\n", ""},
 		{"sub/.python-version", "# pin\n3.12.1\n", "3.12.1"},
 		{".python-version", "pypy3.10\n", ""},
 	} {

@@ -9,10 +9,10 @@ import (
 
 // PipPythonFiles are the files, in a manifest's directory and each parent, that can
 // declare the Python the repo supports, nearest directory first.
-var PipPythonFiles = []string{"pyproject.toml", "Pipfile", ".python-version"}
+var PipPythonFiles = []string{"pyproject.toml", "setup.cfg", "Pipfile", ".python-version"}
 
 // PipPythonFloor reads the lowest Python a file declares support for: `[project]
-// requires-python`, Poetry's `python` dependency, a Pipfile's `[requires]
+// requires-python`, a setup.cfg's `[options] python_requires`, Poetry's `python` dependency, a Pipfile's `[requires]
 // python_version`/`python_full_version`, or a `.python-version` first line. floor is ""
 // when the file declares none, or none ripple can read with certainty (an upper bound
 // only, an interpreter that is not CPython).
@@ -32,6 +32,8 @@ func PipPythonFloor(name string, content []byte) (floor string) {
 				}
 			}
 		}
+	case "setup.cfg":
+		return pipSetupCfgPythonFloor(string(content))
 	case ".python-version":
 		for _, line := range strings.Split(string(content), "\n") {
 			line = strings.TrimSpace(tomlStripComment(line))
@@ -93,4 +95,28 @@ func pipAltFloor(alt string) string {
 		}
 	}
 	return out
+}
+
+// pipSetupCfgPythonFloor reads `python_requires` from a setup.cfg's `[options]` (the
+// value is on the key's line; setup.py is never read).
+func pipSetupCfgPythonFloor(src string) string {
+	section := ""
+	for _, line := range strings.Split(src, "\n") {
+		line = strings.TrimSuffix(line, "\r")
+		trim := strings.TrimSpace(line)
+		if trim == "" || strings.HasPrefix(trim, "#") || strings.HasPrefix(trim, ";") || line[0] == ' ' || line[0] == '\t' {
+			continue
+		}
+		if m := pipCfgSectionRE.FindStringSubmatch(line); m != nil {
+			section = strings.ToLower(m[1])
+			continue
+		}
+		if section != "options" {
+			continue
+		}
+		if m := pipCfgKeyRE.FindStringSubmatch(line); m != nil && strings.EqualFold(m[1], "python_requires") {
+			return PipPythonSpecFloor(strings.TrimSpace(stripRequirementsComment(m[2])))
+		}
+	}
+	return ""
 }

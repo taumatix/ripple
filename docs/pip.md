@@ -60,7 +60,7 @@ Ordering and specifier matching are checked against the `packaging` library on a
 ## Requires-Python
 
 PyPI reports `requires_python` per file. A repo's Python is the lowest version it declares, read from the nearest
-`pyproject.toml` (`[project] requires-python`, else Poetry's `python`), `Pipfile` (`[requires] python_version` or
+`pyproject.toml` (`[project] requires-python`, else Poetry's `python`), `setup.cfg` (`[options] python_requires`, on the key's line), `Pipfile` (`[requires] python_version` or
 `python_full_version`) or `.python-version` up the tree (the nearest directory wins, in that order). The floor of
 `>=3.9,<4`, `~=3.9`, `^3.9`, `==3.11.*` and `3.11` is 3.9, 3.9, 3.9, 3.11 and 3.11 (of Poetry's `||` alternatives, the lowest).
 

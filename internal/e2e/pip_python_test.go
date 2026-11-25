@@ -44,3 +44,25 @@ func TestPipRequiresPythonSkipsReleaseThePythonCannotRun(t *testing.T) {
 		}
 	})
 }
+
+// A setup.cfg's python_requires is the repo's Python like pyproject.toml's.
+func TestPipRequiresPythonReadsSetupCfg(t *testing.T) {
+	forEach(t, func(t *testing.T, st store.Store) {
+		e, idx := pipEnv(t, st)
+		idx.Publish("requests", "2.31.0")
+		e.gh.AddRepo("acme/cfg", map[string]string{".ripple.yaml": pipConfig,
+			"setup.cfg": "[metadata]\nname = a\n\n[options]\npython_requires = >=3.9\ninstall_requires =\n    requests==2.31.0\n"})
+		start(t, e, "acme/cfg")
+		e.clock.Advance(time.Minute)
+		idx.PublishRequiresPython("requests", "2.33.0", ">=3.10")
+		e.tick()
+		e.tick()
+		if n := len(e.gh.PRs("acme/cfg")); n != 0 {
+			t.Fatalf("python 3.9 cannot run 2.33.0: %d PRs", n)
+		}
+		j, ok, err := e.st.GetJob(context.Background(), model.JobKey("acme/cfg", model.DatasourcePip, "requests", "2.33.0"))
+		if err != nil || !ok || j.State != model.JobSkipped || !strings.Contains(j.Reason, "setup.cfg") {
+			t.Errorf("job = %+v, %v, %v", j, ok, err)
+		}
+	})
+}

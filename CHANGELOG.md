@@ -6,6 +6,8 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
 
 - With `RIPPLE_POLL_PACKAGES_PER_POLL` set, a package poll reads only its slice of the polled-package set through the store's optional paged cursor listing instead of listing the whole set; the packages visited and their rotation are unchanged, and the legacy cursor, stores that do not page, and the unset default keep the whole read.
 
+- Gerrit, SCM-Manager and CodeCommit implement `app.HeadLister`: a listed repository whose default-branch head moved is re-scanned at the next discovery even if its webhook or event never arrived. Costs one to two extra reads per repository per discovery (see each `docs/platform-*.md`); verified against the fakes only.
+
 ## [0.4.0] - 2026-11-25
 
 Additive release: no public API was removed or changed. Opt-in ecosystems: Helm, Bundler, Composer, NuGet, Maven and Terraform

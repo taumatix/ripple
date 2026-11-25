@@ -80,6 +80,7 @@ const (
 	npmPollName       = "npm"
 	cargoPollName     = "cargo"
 	pipPollName       = "pip"
+	rubygemsPollName  = "rubygems"
 	helmPollName      = "helm"
 )
 
@@ -174,3 +175,14 @@ func (w *HelmWatcher) Elected() bool { return w.elect.isHeld() }
 
 // StepDown gives the claim up; call it when stopping.
 func (w *HelmWatcher) StepDown(ctx context.Context) { w.elect.stepDown(ctx, w.Engine) }
+
+// PollElected is Poll for replicas sharing a store; see Watcher.PollElected.
+func (w *RubygemsWatcher) PollElected(ctx context.Context, ttl time.Duration) (int, bool, error) {
+	return w.elect.poll(ctx, w.Engine, feedLease(rubygemsPollName), ttl, w.Poll)
+}
+
+// Elected reports whether this replica held the claim at its last PollElected.
+func (w *RubygemsWatcher) Elected() bool { return w.elect.isHeld() }
+
+// StepDown gives the claim up; call it when stopping.
+func (w *RubygemsWatcher) StepDown(ctx context.Context) { w.elect.stepDown(ctx, w.Engine) }

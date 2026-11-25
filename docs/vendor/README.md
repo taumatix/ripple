@@ -43,6 +43,14 @@ fake's list, so the two cannot drift. **Assumed, unverified**: that the match ig
 clauses the service applies the check (the fake applies it to condition, filter, key-condition, projection and update
 expressions); DynamoDB Local is the check on both.
 
+## rubygems
+
+`rubygems/rubygems-org-api.md` (the `/api/v1/versions/<gem>.json` shape), `rubygems/versioning.md` (the `~>`
+operator) and `rubygems/gemfile-and-gemspec.md` (`gem "name", "version"` lines) are the rubygems/guides pages, fetched
+2026-11-25 as raw markdown. The Bundler `Gemfile` man page could not be fetched (its path moved), so the Gemfile
+grammar ripple reads (one-line `gem` declarations, `source`, `git`/`path` blocks and options) is taken from these
+guides and from memory: unverified. Not checked against the live API either.
+
 ## helm
 
 `helm/chart_repository.md` and `helm/charts.md` are the helm-www pages (helm.sh/docs/topics/chart_repository,

@@ -72,7 +72,7 @@ auth model, rate limits); the notes below are what I expect, **unverified** unti
 Everything else:
 
 29. **More datasources and feeds, as many ecosystems as Renovate has.** ~~npm registry~~ (shipped with 30c, polled per package; the replicate feed is not used), ~~PyPI~~ (shipped with 30e, polled per project), ~~crates.io
-   sparse index~~ (shipped with 30d, polled per crate), Maven, NuGet, RubyGems, Packagist, ~~Docker/OCI tags~~ (shipped with 30b, polled per image), GitHub releases/tags, ~~Helm~~ (shipped with 30f, polled per repository index), Terraform
+   sparse index~~ (shipped with 30d, polled per crate), Maven, NuGet, ~~RubyGems~~ (shipped as the bundler manager, [docs/bundler.md](docs/bundler.md), polled per gem), Packagist, ~~Docker/OCI tags~~ (shipped with 30b, polled per image), GitHub releases/tags, ~~Helm~~ (shipped with 30f, polled per repository index), Terraform
    registry. Where a registry has a changes feed, use it; where it has none (OCI registries), fall back to polling
    only the packages the reverse index says someone imports, never every repo. Each datasource says which of the two it is.
 30. **More managers, toward Renovate parity.** ~~GitHub Actions~~ shipped ([docs/github-actions.md](docs/github-actions.md)).
@@ -383,3 +383,11 @@ Everything else:
 232. **Helm: refresh `Chart.lock`.** The lock is reported stale in the PR body, not rewritten. Rewriting it needs
     `helm dependency update` (network, all repositories of the chart) or the digest algorithm reproduced exactly;
     decide which after 231 shows a real lock.
+233. **Bundler: verify against the real rubygems.org, and the unread forms.** The datasource, manager and docs are
+    written from the vendored RubyGems guides ([docs/vendor/rubygems](docs/vendor/rubygems)) and a fake; nothing has
+    run against the real API (large gems, rate limits, yanked or platform-only versions). Add a `-tags live` check, then
+    the forms skipped today: two-segment `"~> 1.2"` and other constraints, four-segment versions, `gems.rb`, `.gemspec`
+    dependencies, a private `source` (credentials), multi-line declarations, and `created_at` for the cooldown.
+234. **Bundler: refresh `Gemfile.lock`.** The lock is reported stale in the PR body, not rewritten. Rewriting a lock
+    entry without running bundler needs the new version's dependency set from the API; decide after 233 whether that
+    is worth doing.

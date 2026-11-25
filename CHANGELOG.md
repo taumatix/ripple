@@ -5,6 +5,7 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
 ## [Unreleased]
 
 ### Added
+- Bundler: `ecosystem: bundler` (opt-in, [docs/bundler.md](docs/bundler.md)) bumps the `gem "name", "1.2.3"` / `"~> 1.2.3"` versions of a `Gemfile` against rubygems.org (new `internal/rubygems` datasource `rubygems`, `manager.Bundler`, `engine.RubygemsWatcher`, additive). Offset-keeping edit; `Gemfile.lock` reported stale; git, path and non-rubygems.org sources left alone. Covered against a fake rubygems.org only, nothing verified against the real one.
 - `platform.PR.Body`, filled by the PR read of GitHub, GitLab, Gitea and Forgejo, Azure DevOps, Bitbucket Cloud and Server and CodeCommit (empty on Gerrit). A superseded-PR sweep now leaves a PR alone when its head commit or description differs from what ripple recorded when it opened it, which catches edits the host's own feeds cannot show; jobs with nothing recorded are never treated as edited (ROADMAP 94, new 229).
 
 ### Fixed

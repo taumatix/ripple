@@ -33,6 +33,9 @@ func applicable(d model.Dependency, ds, pkg, version string) (rules.UpdateType, 
 	if ds == model.DatasourceHelm {
 		return applicableHelm(d, pkg, version)
 	}
+	if ds == model.DatasourceRubygems {
+		return applicableRubygems(d, pkg, version)
+	}
 	if ds == model.DatasourceNpm {
 		return applicableNpm(d, pkg, version)
 	}

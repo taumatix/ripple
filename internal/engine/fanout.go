@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"time"
 
+	"golang.org/x/mod/module"
+	"golang.org/x/mod/semver"
+
 	"github.com/taumatix/ripple/internal/config"
 	"github.com/taumatix/ripple/internal/model"
 	"github.com/taumatix/ripple/internal/rules"
@@ -27,7 +30,7 @@ func (e *Engine) FanOut(ctx context.Context, rel model.Release) (int, error) {
 			continue
 		}
 		typ, ok := applicable(d, rel.Datasource, rel.Package, rel.Version)
-		if !ok {
+		if !ok && !module.IsPseudoVersion(d.Version) {
 			continue
 		}
 		rs, err := e.repoState(ctx, repos, d.Repo)
@@ -36,6 +39,23 @@ func (e *Engine) FanOut(ctx context.Context, rel model.Release) (int, error) {
 		}
 		if !rs.found {
 			continue
+		}
+		if !ok {
+			// A dependency at a pseudo-version moves on a release only where the entry opts in.
+			if rs.cfgErr != nil || rs.cfg == nil {
+				continue
+			}
+			if u, have := rs.cfg.UpdateFor(d.Manager, d.File); !have || !u.FromPseudoVersions {
+				continue
+			}
+			if typ, ok = applicablePseudoRelease(d, rel.Package, rel.Version, rel.Time); !ok {
+				continue
+			}
+			if lower, err := e.lowerPseudoRelease(ctx, d, rel); err != nil {
+				return n, err
+			} else if lower {
+				continue // an earlier release can already contain the commit: that one is proposed
+			}
 		}
 		dec, ok := e.decide(rs, d, typ, rel.Time)
 		if !ok || !dec.Enabled {
@@ -97,4 +117,22 @@ func (e *Engine) decide(rs *repoState, d model.Dependency, typ rules.UpdateType,
 		return rules.Decision{}, false
 	}
 	return rules.Evaluate(e.Limits, u, d.Package, typ, released, e.now()), true
+}
+
+// lowerPseudoRelease reports whether a stored release below rel would also move d off its
+// pseudo-version (the "first release above the commit" rule of from-pseudo-versions).
+func (e *Engine) lowerPseudoRelease(ctx context.Context, d model.Dependency, rel model.Release) (bool, error) {
+	rels, err := e.Store.ListReleases(ctx, rel.Datasource, rel.Package)
+	if err != nil {
+		return false, fmt.Errorf("list releases of %s: %w", rel.Package, err)
+	}
+	for _, o := range rels {
+		if semver.Compare(o.Version, rel.Version) >= 0 {
+			continue
+		}
+		if _, ok := applicablePseudoRelease(d, o.Package, o.Version, o.Time); ok {
+			return true, nil
+		}
+	}
+	return false, nil
 }

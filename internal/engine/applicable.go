@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"time"
+
 	"golang.org/x/mod/module"
 	"golang.org/x/mod/semver"
 
@@ -105,4 +107,17 @@ func applicablePseudoCurrent(d model.Dependency, pkg, fixed string) (rules.Updat
 		return rules.Minor, true
 	}
 	return rules.Patch, true
+}
+
+// applicablePseudoRelease judges an ordinary (non-advisory) release for a dependency
+// required at a pseudo-version, for an entry that set from-pseudo-versions: the same rule
+// as applicablePseudoCurrent, plus the release must have been published after the commit
+// the pseudo-version names, since an older release cannot contain it. The caller checks
+// the opt-in.
+func applicablePseudoRelease(d model.Dependency, pkg, version string, released time.Time) (rules.UpdateType, bool) {
+	at, err := module.PseudoVersionTime(d.Version)
+	if err != nil || !released.After(at) {
+		return "", false
+	}
+	return applicablePseudoCurrent(d, pkg, version)
 }

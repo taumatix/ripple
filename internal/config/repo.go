@@ -121,6 +121,12 @@ type Update struct {
 	// pseudo-version is a commit someone chose on purpose) and lists the advisory on the
 	// dependency dashboard. The PR is never automerged.
 	SecurityFromPseudoVersions bool `yaml:"security-from-pseudo-versions"`
+	// FromPseudoVersions is gomod only: a module required at a pseudo-version (a commit
+	// someone chose) moves to the first release above it that was released after the
+	// commit's timestamp, so the release can contain the commit. The default, false, never
+	// moves a pseudo-version except for an advisory (security-from-pseudo-versions). The PR
+	// is never automerged and says it leaves a pseudo-version.
+	FromPseudoVersions bool `yaml:"from-pseudo-versions"`
 	// SecurityBypass is gomod only: what a security PR (one that fixes an OSV advisory)
 	// skips besides the cooldown. "open-pull-requests-limit" opens it even when the repo
 	// is at its cap of open ripple PRs; "schedule" opens it outside the schedule window.
@@ -293,7 +299,7 @@ func (c *checker) add(n *yaml.Node, format string, a ...any) {
 
 var (
 	rootKeys     = []string{"version", "open-pull-requests-limit", "close-superseded-pull-requests", "backfill-new-dependencies", "dependency-dashboard", "updates"}
-	updateKeys   = []string{"ecosystem", "directory", "schedule", "cooldown", "ignore", "groups", "automerge", "go-toolchain", "cgo", "security-pseudo-versions", "security-from-pseudo-versions", "security-bypass", "security-bypass-severity", "private-modules", "directives", "tidy", "files", "patterns", "package"}
+	updateKeys   = []string{"ecosystem", "directory", "schedule", "cooldown", "ignore", "groups", "automerge", "go-toolchain", "cgo", "security-pseudo-versions", "security-from-pseudo-versions", "from-pseudo-versions", "security-bypass", "security-bypass-severity", "private-modules", "directives", "tidy", "files", "patterns", "package"}
 	scheduleKeys = []string{"days", "from", "to", "timezone"}
 	ignoreKeys   = []string{"dependency", "update-types"}
 	groupKeys    = []string{"patterns", "update-types"}
@@ -520,7 +526,7 @@ func (c *checker) update(n *yaml.Node, u *Update, where string) {
 			}
 		}
 	case "regex":
-		for _, k := range []string{"cgo", "security-pseudo-versions", "security-from-pseudo-versions", "security-bypass", "security-bypass-severity", "private-modules", "directives", "tidy"} {
+		for _, k := range []string{"cgo", "security-pseudo-versions", "security-from-pseudo-versions", "from-pseudo-versions", "security-bypass", "security-bypass-severity", "private-modules", "directives", "tidy"} {
 			if v := f[k]; v != nil {
 				c.add(v, "%s.%s is only valid with ecosystem: gomod", where, k)
 			}

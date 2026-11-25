@@ -113,7 +113,7 @@ func (e *Engine) backfill(ctx context.Context, repo string, cfg *config.Repo, pr
 			rest = todo[i:]
 			break
 		}
-		best, typ, err := e.backfillTarget(ctx, d, &lookups, &proxy)
+		best, typ, err := e.backfillTarget(ctx, d, fromPseudoOptIn(cfg, d), &lookups, &proxy)
 		if err != nil {
 			return err
 		}
@@ -151,7 +151,7 @@ func (e *Engine) backfill(ctx context.Context, repo string, cfg *config.Repo, pr
 // backfillTarget picks the release d should be brought to: of the stored releases of its
 // own path and of the next majors on its line, the newest that is an update, falling back
 // to a Lookup only for a dependency whose own path has no stored release at all.
-func (e *Engine) backfillTarget(ctx context.Context, d model.Dependency, lookups, proxy *int) (*model.Release, rules.UpdateType, error) {
+func (e *Engine) backfillTarget(ctx context.Context, d model.Dependency, fromPseudo bool, lookups, proxy *int) (*model.Release, rules.UpdateType, error) {
 	paths := []string{d.Package}
 	if d.Datasource == model.DatasourceGo && d.Manager == "gomod" {
 		paths = append(paths, majorPaths(d.Package, e.backfillMajors())...)
@@ -227,6 +227,14 @@ func (e *Engine) backfillTarget(ctx context.Context, d model.Dependency, lookups
 	var bestTyp rules.UpdateType
 	for i := range cands {
 		typ, ok := applicable(d, d.Datasource, cands[i].Package, cands[i].Version)
+		if !ok && fromPseudo {
+			// A pseudo-version moves to the first release that can contain it, not the newest.
+			if typ, ok = applicablePseudoRelease(d, cands[i].Package, cands[i].Version, cands[i].Time); ok &&
+				(best == nil || semver.Compare(cands[i].Version, best.Version) < 0) {
+				best, bestTyp = &cands[i], typ
+			}
+			continue
+		}
 		if !ok {
 			continue
 		}
@@ -263,4 +271,14 @@ func majorPaths(pkg string, n int) []string {
 		}
 	}
 	return out
+}
+
+// fromPseudoOptIn reports whether d is a pseudo-version dependency whose update entry set
+// from-pseudo-versions.
+func fromPseudoOptIn(cfg *config.Repo, d model.Dependency) bool {
+	if d.Datasource != model.DatasourceGo || !module.IsPseudoVersion(d.Version) {
+		return false
+	}
+	u, ok := cfg.UpdateFor(d.Manager, d.File)
+	return ok && u.FromPseudoVersions
 }

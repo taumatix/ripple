@@ -72,6 +72,7 @@ updates:
     tidy: minimal                  # optional, off by default: keep unrelated go.mod requirements and go.sum lines (see below)
     security-pseudo-versions: false  # optional: propose a release when an advisory's only fix is a pseudo-version (docs/osv.md)
     security-from-pseudo-versions: false  # optional: move a pseudo-version dependency to the release that fixes its advisory (docs/osv.md)
+    from-pseudo-versions: false           # optional: move a pseudo-version dependency to the first release after its commit (docs/osv.md)
     security-bypass: []            # optional: [open-pull-requests-limit, schedule] let a security PR skip them too (docs/osv.md)
     security-bypass-severity: []   # optional: [high, critical] bypass only for advisories with these ratings (docs/osv.md)
     cooldown: 7d                   # wait this long after a release (never less than the server minimum)

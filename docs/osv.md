@@ -39,8 +39,14 @@ If the release feed already queued the same bump behind its cooldown, the adviso
 - **Dependency at a pseudo-version, fixed by a release.** A pseudo-version is a commit someone chose, so ripple does
   not move it by default and the dashboard lists the advisory. Opt in with `security-from-pseudo-versions: true` on a
   `gomod` entry: ripple then proposes the lowest fixing release above the commit, on the same major, never automerged,
-  and the PR says it leaves a pseudo-version. A release that is not an advisory fix still never replaces a
-  pseudo-version.
+  and the PR says it leaves a pseudo-version. A release that is not an advisory fix replaces a
+  pseudo-version only with `from-pseudo-versions` (next item).
+- **Leaving a pseudo-version without an advisory.** Opt in with `from-pseudo-versions: true` on a `gomod` entry. A module
+  required at a pseudo-version then moves to the first release above it, same module path and major, that was released
+  after the commit's timestamp (an older release cannot contain the commit; the rule does not check that a newer one
+  does). Only that first release is proposed, from a new release or from a repo added later (the backfill picks the
+  lowest such release, not the newest). The PR says it leaves a pseudo-version and is never automerged. Off by default: a
+  pseudo-version is a commit someone chose.
 - **Corrected records.** When OSV corrects a record so that it no longer affects the version a repo uses (or withdraws
   it), ripple finishes the job that was waiting for it as skipped, closes the PR it opened for it with a comment saying
   why, and drops its dashboard entry. A PR a person touched stays open, and so does every PR when

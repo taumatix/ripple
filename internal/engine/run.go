@@ -13,6 +13,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/mod/module"
+
 	"github.com/taumatix/ripple/internal/config"
 	"github.com/taumatix/ripple/internal/manager"
 	"github.com/taumatix/ripple/internal/model"
@@ -320,6 +322,11 @@ func (r *runner) plan(jobs []model.Job, deps []model.Dependency) []*prPlan {
 			if !ok && it.advisory != nil && haveU && u.SecurityFromPseudoVersions {
 				// The dependency is at a pseudo-version and a release fixes its advisory.
 				typ, ok = applicablePseudoCurrent(d, j.Package, j.Version)
+				pseudo = pseudo || ok
+			}
+			if !ok && it.advisory == nil && haveU && u.FromPseudoVersions {
+				// An ordinary release for a dependency at a pseudo-version the entry opted to move.
+				typ, ok = applicablePseudoRelease(d, j.Package, j.Version, j.ReleasedAt)
 				pseudo = pseudo || ok
 			}
 			if !ok || !haveU {
@@ -830,6 +837,17 @@ func describe(p *prPlan, items []item) (title, body string) {
 		}
 	}
 	b.WriteString(toolchainNotes(items))
+	for _, it := range items {
+		if it.advisory != nil {
+			continue // the security text says it
+		}
+		for _, d := range it.deps {
+			if d.Datasource == model.DatasourceGo && module.IsPseudoVersion(d.Version) && !module.IsPseudoVersion(it.job.Version) {
+				fmt.Fprintf(&b, "\n`%s` moves off the pseudo-version `%s` the module is required at (`from-pseudo-versions`); check that the commit's changes are in the release.\n", d.Package, d.Version)
+				break
+			}
+		}
+	}
 	for _, it := range items {
 		if it.typ == rules.Major {
 			fmt.Fprintf(&b, "\n**Breaking: major version update.** `%s` moves to `%s`; go.mod and the import paths in the Go files were rewritten. Release notes: %s\n", it.deps[0].Package, it.job.Package, releaseNotes(it.job.Package, it.job.Version))

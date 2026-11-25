@@ -118,3 +118,16 @@ func TestSecurityBypassSeverityIsValidatedAndNeedsABypass(t *testing.T) {
 		t.Errorf("with docker: %v", err)
 	}
 }
+
+func TestFromPseudoVersionsIsGomodOnlyAndOffByDefault(t *testing.T) {
+	c, err := Parse([]byte("updates:\n  - ecosystem: gomod\n    from-pseudo-versions: true\n"))
+	if err != nil || !c.Updates[0].FromPseudoVersions {
+		t.Fatalf("err=%v %+v", err, c)
+	}
+	if c, err = Parse([]byte("updates:\n  - ecosystem: gomod\n")); err != nil || c.Updates[0].FromPseudoVersions {
+		t.Fatalf("default: err=%v", err)
+	}
+	if _, err := Parse([]byte("updates:\n  - ecosystem: regex\n    from-pseudo-versions: true\n    files: [Makefile]\n    patterns: ['(?P<name>a) (?P<version>b)']\n")); err == nil || !strings.Contains(err.Error(), "from-pseudo-versions") {
+		t.Errorf("with regex: %v", err)
+	}
+}

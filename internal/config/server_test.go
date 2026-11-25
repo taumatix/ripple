@@ -511,3 +511,14 @@ func TestServerOSVBackfillOpenPRs(t *testing.T) {
 		t.Fatal("maybe accepted")
 	}
 }
+
+func TestServerGoSumDB(t *testing.T) {
+	s, err := LoadServer(env(base))
+	if err != nil || s.GoSumDB != "" {
+		t.Fatalf("default: %q, %v", s.GoSumDB, err)
+	}
+	s, err = LoadServer(env(with("RIPPLE_GOSUMDB", "off")))
+	if err != nil || s.GoSumDB != "off" {
+		t.Fatalf("%q, %v", s.GoSumDB, err)
+	}
+}

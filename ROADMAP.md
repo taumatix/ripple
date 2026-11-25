@@ -6,13 +6,12 @@ Ordered by how much each entry limits real deployments. The top is next.
    module proxy, so `go` refuses to run under it, and bwrap has never run on a Linux host. Give it a
    network namespace with a forwarded socket to the gate (or run `go` with a prefilled module cache),
    and add a Linux CI job that runs the sandbox end-to-end tests. See [docs/sandbox.md](docs/sandbox.md).
-3. **Finish the image smoke test.** The release workflow ran for real on v0.3.0 (tag trigger, five binaries, a
-   multi-arch GHCR image, the release, and the `verify` job all green; the GHCR package answered an anonymous
-   pull). What is left is `internal/smoke`: it cannot assert the PR's `go.mod` content because the
-   server has no `RIPPLE_GOSUMDB`: add that setting (also what a private-proxy deployment needs), set it
-   off in the smoke test, import the fake module there, and assert the bumped `go.mod` and `go.sum`.
-   Apple `container` has no `--network host`, so the smoke test runs against the image only in CI.
 
+227. **A verified build can leave a binary in the PR.** Found by the image smoke test (ROADMAP 3, now shipped): a repository
+    whose only package is `package main` makes the verification step's `go build ./...` write the executable into the
+    checkout, and the next `git add -A` commits it (a 1.8 MB `uses-lib` blob in the PR). Build with `-o` pointing outside
+    the checkout (or discard the output) in `internal/platform/gitws`, and add a test that a main-only repo's PR carries
+    only its source files. The smoke test uses a library package until this is fixed.
 
 Platforms (code hosts). The goal is the whole list Renovate supports, each behind the one `Platform`
 interface, each with the same end-to-end test (a push or release event leads to exactly one PR in

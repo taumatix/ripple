@@ -196,7 +196,7 @@ a pure-Go fallback builds green without compiling its C; the PR then says the C 
 `cgo: true` on a `gomod` entry to build with a C compiler (`RIPPLE_GO_CC`, default `cc`); with no compiler the
 PR says it could not verify (a draft for a major bump), never a silent pass. Under a container backend the image
 brings the compiler. `private-modules:` lists module patterns (`example.com/team/*`, `*.corp.example.com`)
-kept out of the checksum database. A proxy that needs credentials takes `RIPPLE_GOPROXY_USER` and
+kept out of the checksum database. `RIPPLE_GOSUMDB` sets the checksum database (`off`, or a private one) for those commands. A proxy that needs credentials takes `RIPPLE_GOPROXY_USER` and
 `RIPPLE_GOPROXY_TOKEN` (https only, with `RIPPLE_GOPROXY` set to that proxy); only `go mod tidy`, `vendor` and `work sync` get them, never `build` or
 `vet`, and they stay out of go's environment, argv, logs and PRs. Details in [docs/sandbox.md](docs/sandbox.md).
 

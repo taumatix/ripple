@@ -58,6 +58,8 @@ type Server struct {
 	// index (RIPPLE_OSV_BACKFILL_OPEN_PRS, default false; docs/osv.md).
 	OSVBackfillOpenPRs bool
 	GoProxy            string
+	// GoSumDB is GOSUMDB for every go command ripple runs (RIPPLE_GOSUMDB); empty leaves the go command's default.
+	GoSumDB string
 	// GoProxyUser and GoProxyToken are the credential for GoProxy (HTTP basic auth). They
 	// reach only the go commands that run no repository code, and need RIPPLE_GOPROXY set to a private proxy. GoCC is the C compiler cgo
 	// verification uses; empty is cc.
@@ -177,6 +179,7 @@ RIPPLE_OSV_INTERVAL           default 10m
 RIPPLE_OSV_MAX_FETCH          advisory records fetched per poll (default 100)
 RIPPLE_OSV_SWEEP_BATCH        repos re-checked per poll while a sweep runs (default 10)
 RIPPLE_GOPROXY                module proxy used to verify major bumps (default https://proxy.golang.org)
+RIPPLE_GOSUMDB               GOSUMDB for the go commands ripple runs: off, or a checksum database (name[+key] [url]) for a private proxy; default the go command's own
 RIPPLE_GOPROXY_USER           user for RIPPLE_GOPROXY (HTTP basic auth); with RIPPLE_GOPROXY_TOKEN, sent only to repos listing private-modules
 RIPPLE_GOPROXY_TOKEN          password or token for RIPPLE_GOPROXY; needs an https proxy
 RIPPLE_REGISTRY_AUTH_FILE     Docker config.json with logins for private container registries (ecosystem: docker); read once at start
@@ -337,6 +340,7 @@ func LoadServer(getenv func(string) string) (*Server, error) {
 		OSVMaxFetch:              num("RIPPLE_OSV_MAX_FETCH", 100, 1),
 		OSVSweepBatch:            num("RIPPLE_OSV_SWEEP_BATCH", 10, 1),
 		GoProxy:                  strings.TrimRight(str("RIPPLE_GOPROXY", "https://proxy.golang.org"), "/"),
+		GoSumDB:                  getenv("RIPPLE_GOSUMDB"),
 		GoProxyUser:              getenv("RIPPLE_GOPROXY_USER"),
 		GoProxyToken:             getenv("RIPPLE_GOPROXY_TOKEN"),
 		GoCC:                     getenv("RIPPLE_GO_CC"),

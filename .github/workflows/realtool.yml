@@ -1,0 +1,54 @@
+name: realtool
+# Each job applies ripple's edit to a small real project under internal/manager/testdata/realtool and
+# runs that ecosystem's own tool on the result (docs/realtool.md). A missing tool fails the job.
+on:
+  pull_request:
+    paths:
+      - "internal/manager/**"
+      - "scripts/realtool.sh"
+      - ".github/workflows/realtool.yml"
+  workflow_dispatch:
+  schedule:
+    - cron: "23 5 * * 1"
+permissions:
+  contents: read
+jobs:
+  gomod:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: scripts/realtool.sh TestRealtoolGoMod
+  cargo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: dtolnay/rust-toolchain@stable
+      - run: scripts/realtool.sh TestRealtoolCargo
+  npm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: scripts/realtool.sh TestRealtoolNpm
+  pip:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: scripts/realtool.sh TestRealtoolPip

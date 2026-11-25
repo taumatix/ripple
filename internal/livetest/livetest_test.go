@@ -97,3 +97,30 @@ func TestRequestsArePaced(t *testing.T) {
 		t.Fatalf("slept %v", slept)
 	}
 }
+
+func TestATransientGatewayErrorIsRetriedThenSucceeds(t *testing.T) {
+	var n atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if n.Add(1) == 1 {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		io.WriteString(w, "ok")
+	}))
+	defer srv.Close()
+	tr, slept := fastTransport()
+	resp, err := (&http.Client{Transport: tr}).Get(srv.URL)
+	if err != nil || resp.StatusCode != 200 || tr.Requests() != 2 || len(*slept) != 1 {
+		t.Fatalf("%v %v requests %d slept %v", resp, err, tr.Requests(), *slept)
+	}
+}
+
+func TestAPersistent502IsReturnedNotHidden(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusBadGateway) }))
+	defer srv.Close()
+	tr, _ := fastTransport()
+	resp, err := (&http.Client{Transport: tr}).Get(srv.URL)
+	if err != nil || resp.StatusCode != 502 || tr.Requests() != maxAttempts {
+		t.Fatalf("%v %v requests %d", resp, err, tr.Requests())
+	}
+}

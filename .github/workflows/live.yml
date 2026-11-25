@@ -1,21 +1,48 @@
 name: live
-# Read-only tests against the real public services (proxy.golang.org, index.golang.org, api.osv.dev, ...).
-# Not run on pull requests: a third party's outage must not block a merge. Run it by hand on a branch
-# that changes a provider or a feed, and weekly to notice an upstream that moved.
+# Read-only tests against the real public services (proxy.golang.org, index.golang.org, api.osv.dev,
+# the npm, PyPI, crates.io, RubyGems, Packagist, NuGet, Maven Central and Terraform registries, a Helm
+# chart repository, container registries and GitHub tags): they check that the parsers and the schema
+# ripple assumes still match what the services send. Anonymous, no credential of any kind, a few
+# requests per test through internal/livetest (descriptive User-Agent, paced, Retry-After honoured,
+# bounded retry on 429/5xx, then a failure that names the status; nothing skips).
+#
+# Not a required check: a third party's outage must not block a merge, so branch protection does not
+# list this job. It runs daily to notice an upstream that moved, by hand, and on a pull request that
+# touches a datasource package or this file.
 on:
   workflow_dispatch:
   schedule:
-    - cron: "17 5 * * 1"
+    - cron: "17 5 * * *"
+  pull_request:
+    paths:
+      - ".github/workflows/live.yml"
+      - "internal/livetest/**"
+      - "internal/feed/**"
+      - "internal/advisory/**"
+      - "internal/npmreg/**"
+      - "internal/pypi/**"
+      - "internal/cratesindex/**"
+      - "internal/rubygems/**"
+      - "internal/packagist/**"
+      - "internal/nuget/**"
+      - "internal/maven/**"
+      - "internal/terraform/**"
+      - "internal/helmrepo/**"
+      - "internal/registry/**"
+      - "internal/platform/github/**"
 permissions:
   contents: read
+concurrency:
+  group: live-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   live:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: go proxy, go index, OSV, npm, PyPI, crates.io, container registries and GitHub tags (anonymous, a handful of requests per test)
-        run: go test -tags live -count=1 -v ./internal/livetest ./internal/feed ./internal/advisory ./internal/e2e ./internal/npmreg ./internal/pypi ./internal/cratesindex ./internal/registry ./internal/platform/github -run 'Live'
+      - name: every datasource, anonymous, read only
+        run: go test -tags live -count=1 -v ./internal/livetest ./internal/feed ./internal/advisory ./internal/e2e ./internal/npmreg ./internal/pypi ./internal/cratesindex ./internal/rubygems ./internal/packagist ./internal/nuget ./internal/maven ./internal/terraform ./internal/helmrepo ./internal/registry ./internal/platform/github -run 'Live'

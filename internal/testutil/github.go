@@ -537,7 +537,7 @@ func (g *GitHub) handleRepo(w http.ResponseWriter, r *http.Request) {
 		g.mu.Lock()
 		p := &PR{Repo: repo, Head: in.Head, Base: in.Base, Title: in.Title, Body: in.Body, Draft: in.Draft, Number: len(g.prs[repo]) + 1}
 		g.prs[repo] = append(g.prs[repo], p)
-		resp := prJSON(repo, p)
+		resp := g.withHeadSHA(repo, p, prJSON(repo, p))
 		g.mu.Unlock()
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(resp)
@@ -801,4 +801,16 @@ func (g *GitHub) Bearers() []string {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	return append([]string(nil), g.bearers...)
+}
+
+// HeadSHA is the commit branch points at in the bare repository, or "" when there is none.
+func (g *GitHub) HeadSHA(repo, branch string) string {
+	cmd := exec.Command("git", "rev-parse", "--verify", "--quiet", "refs/heads/"+branch)
+	cmd.Dir = g.bare(repo)
+	cmd.Env = gitEnv()
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }

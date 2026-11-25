@@ -284,6 +284,7 @@ func Run(t *testing.T, mk func(t *testing.T) store.Store) {
 			t.Fatalf("limit ignored: %v", due)
 		}
 		a.State, a.PRURL, a.Attempts, a.Reason = model.JobDone, "https://example.test/pr/1", 1, "ok"
+		a.HeadSHA, a.BodyHash = "0123456789abcdef0123456789abcdef01234567", model.BodyHash("body")
 		if err := s.UpdateJob(ctx, a); err != nil {
 			t.Fatal(err)
 		}
@@ -895,6 +896,7 @@ func Run(t *testing.T, mk func(t *testing.T) store.Store) {
 		}
 		done := j
 		done.State, done.PRURL = model.JobDone, "https://example.test/pr/1"
+		done.HeadSHA, done.BodyHash = "fedcba9876543210fedcba9876543210fedcba98", model.BodyHash("fenced")
 		if err := s.UpdateJobFenced(ctx, done, b); err != nil {
 			t.Fatalf("the new holder's write: %v", err)
 		}
@@ -904,7 +906,7 @@ func Run(t *testing.T, mk func(t *testing.T) store.Store) {
 		if err := s.UpdateJobFenced(ctx, stale, a); !errors.Is(err, store.ErrLeaseLost) {
 			t.Fatalf("the displaced holder's write: %v, want ErrLeaseLost", err)
 		}
-		if got, _, _ := s.GetJob(ctx, j.Key); got.State != model.JobDone || got.PRURL != done.PRURL {
+		if got, _, _ := s.GetJob(ctx, j.Key); got != done {
 			t.Fatalf("stale write landed: %+v", got)
 		}
 		if lister, ok := s.(store.OpenJobLister); ok {

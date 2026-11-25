@@ -2,6 +2,8 @@
 package model
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 	"time"
 )
@@ -84,6 +86,23 @@ type Job struct {
 	Attempts   int
 	PRURL      string
 	Reason     string
+	// HeadSHA and BodyHash describe the pull request ripple opened for the job: the
+	// commit its head branch pointed at (empty when the host's create response does not
+	// say) and BodyHash of the body it sent. A later pass compares them with what the
+	// host reports to notice an edit the host's own event feed cannot show. Both are
+	// empty on a job that finished before they were recorded, and for jobs that opened
+	// no PR.
+	HeadSHA  string
+	BodyHash string
+}
+
+// BodyHash is the hash recorded in Job.BodyHash: SHA-256 of body, hex encoded, after
+// line endings are normalised to \n and trailing whitespace is dropped, because hosts
+// differ in whether they keep the CRLFs and the final newline of a body they were sent.
+func BodyHash(body string) string {
+	body = strings.TrimRight(strings.ReplaceAll(body, "\r\n", "\n"), " \t\r\n")
+	sum := sha256.Sum256([]byte(body))
+	return hex.EncodeToString(sum[:])
 }
 
 func JobKey(repo, datasource, pkg, version string) string {

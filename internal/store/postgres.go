@@ -219,18 +219,18 @@ func (p *Postgres) ListReleases(ctx context.Context, ds, pkg string) ([]model.Re
 }
 
 func (p *Postgres) EnqueueJob(ctx context.Context, j model.Job) (bool, error) {
-	tag, err := p.pool.Exec(ctx, `INSERT INTO jobs(key,repo,datasource,package,version,released_at,state,not_before,attempts,pr_url,reason)
-VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT (key) DO NOTHING`,
-		j.Key, j.Repo, j.Datasource, j.Package, j.Version, j.ReleasedAt, string(j.State), j.NotBefore, j.Attempts, j.PRURL, j.Reason)
+	tag, err := p.pool.Exec(ctx, `INSERT INTO jobs(key,repo,datasource,package,version,released_at,state,not_before,attempts,pr_url,reason,head_sha,body_hash)
+VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT (key) DO NOTHING`,
+		j.Key, j.Repo, j.Datasource, j.Package, j.Version, j.ReleasedAt, string(j.State), j.NotBefore, j.Attempts, j.PRURL, j.Reason, j.HeadSHA, j.BodyHash)
 	return tag.RowsAffected() == 1, wrap("enqueue job", err)
 }
 
-const jobCols = `key,repo,datasource,package,version,released_at,state,not_before,attempts,pr_url,reason`
+const jobCols = `key,repo,datasource,package,version,released_at,state,not_before,attempts,pr_url,reason,head_sha,body_hash`
 
 func scanJob(row pgx.Row) (model.Job, error) {
 	var j model.Job
 	var st string
-	err := row.Scan(&j.Key, &j.Repo, &j.Datasource, &j.Package, &j.Version, &j.ReleasedAt, &st, &j.NotBefore, &j.Attempts, &j.PRURL, &j.Reason)
+	err := row.Scan(&j.Key, &j.Repo, &j.Datasource, &j.Package, &j.Version, &j.ReleasedAt, &st, &j.NotBefore, &j.Attempts, &j.PRURL, &j.Reason, &j.HeadSHA, &j.BodyHash)
 	j.State = model.JobState(st)
 	j.ReleasedAt, j.NotBefore = j.ReleasedAt.UTC(), j.NotBefore.UTC()
 	return j, err
@@ -245,8 +245,8 @@ func (p *Postgres) GetJob(ctx context.Context, key string) (model.Job, bool, err
 }
 
 func (p *Postgres) UpdateJob(ctx context.Context, j model.Job) error {
-	_, err := p.pool.Exec(ctx, `UPDATE jobs SET state=$2, not_before=$3, attempts=$4, pr_url=$5, reason=$6 WHERE key=$1`,
-		j.Key, string(j.State), j.NotBefore, j.Attempts, j.PRURL, j.Reason)
+	_, err := p.pool.Exec(ctx, `UPDATE jobs SET state=$2, not_before=$3, attempts=$4, pr_url=$5, reason=$6, head_sha=$7, body_hash=$8 WHERE key=$1`,
+		j.Key, string(j.State), j.NotBefore, j.Attempts, j.PRURL, j.Reason, j.HeadSHA, j.BodyHash)
 	return wrap("update job", err)
 }
 
@@ -317,9 +317,9 @@ func wrap(op string, err error) error {
 // snapshot as the write. A row-less result means the job is missing or the lease is not
 // ours; the lease is the case that matters, so both read as ErrLeaseLost.
 func (p *Postgres) UpdateJobFenced(ctx context.Context, j model.Job, l Lease) error {
-	tag, err := p.pool.Exec(ctx, `UPDATE jobs SET state=$2, not_before=$3, attempts=$4, pr_url=$5, reason=$6
+	tag, err := p.pool.Exec(ctx, `UPDATE jobs SET state=$2, not_before=$3, attempts=$4, pr_url=$5, reason=$6, head_sha=$10, body_hash=$11
 WHERE key=$1 AND EXISTS (SELECT 1 FROM leases WHERE name=$7 AND owner=$8 AND token=$9)`,
-		j.Key, string(j.State), j.NotBefore, j.Attempts, j.PRURL, j.Reason, l.Name, l.Owner, l.Token)
+		j.Key, string(j.State), j.NotBefore, j.Attempts, j.PRURL, j.Reason, l.Name, l.Owner, l.Token, j.HeadSHA, j.BodyHash)
 	if err != nil {
 		return wrap("update job", err)
 	}

@@ -72,3 +72,10 @@ redirect behaviour of real hosts, how `created` is filled, the full constraint g
 `nuget-package-versioning.md`, `nuget-package-references.md` and `nuget-cpm.md` (central package management) are the
 Microsoft Learn pages of the same names from https://learn.microsoft.com/en-us/nuget, fetched 2026-11-25. Not checked
 against the live service.
+
+## maven
+
+`maven/repository-layout.txt` and `maven/repository-metadata.txt` are the text of
+https://maven.apache.org/repositories/layout.html and https://maven.apache.org/ref/3.9.9/maven-repository-metadata/repository-metadata.html
+with the HTML tags stripped; `maven/junit-maven-metadata.xml` is the `maven-metadata.xml` of `junit:junit` on Maven
+Central. All fetched 2026-11-25. Not checked against the live service beyond that one file.

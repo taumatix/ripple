@@ -24,7 +24,7 @@ func (a *App) replicaStatus(w http.ResponseWriter, r *http.Request) {
 		Replica    string `json:"replica"`
 		FeedPoller bool   `json:"feed_poller"`
 		// Pollers names the elected sources this replica polls now: feed, go-toolchain,
-		// github-actions, docker, npm, cargo, pip, helm, rubygems, packagist, nuget (only those configured).
+		// github-actions, docker, npm, cargo, pip, helm, rubygems, packagist, nuget, maven (only those configured).
 		Pollers         []string `json:"pollers"`
 		LeaseTakeovers  int64    `json:"lease_takeovers"`
 		LeaseTTLSeconds int      `json:"lease_ttl_seconds"`

@@ -42,6 +42,8 @@ func Build(cfg *config.Repo) ([]Manager, error) {
 			out = append(out, Composer{Dir: u.Directory})
 		case "nuget":
 			out = append(out, Nuget{Dir: u.Directory})
+		case "maven":
+			out = append(out, Maven{Dir: u.Directory})
 		case "pip":
 			out = append(out, Pip{Dir: u.Directory})
 		case "regex":

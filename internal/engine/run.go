@@ -405,6 +405,9 @@ func (r *runner) plan(jobs []model.Job, deps []model.Dependency) []*prPlan {
 		if j.Datasource == model.DatasourceNuget {
 			branch = BranchPrefix + "nuget/" + slug(j.Package) + "-" + slug(j.Version)
 		}
+		if j.Datasource == model.DatasourceMaven {
+			branch = BranchPrefix + "maven/" + slug(j.Package) + "-" + slug(j.Version)
+		}
 		if j.Datasource == model.DatasourceNpm {
 			branch = BranchPrefix + "npm/" + slug(j.Package) + "-" + slug(j.Version)
 		}
@@ -897,6 +900,8 @@ func datasourceFooter(datasource string) string {
 		return "a new version appeared on Packagist"
 	case model.DatasourceNuget:
 		return "a new version appeared on nuget.org"
+	case model.DatasourceMaven:
+		return "a new version appeared on Maven Central"
 	}
 	return "the new version appeared in the module index"
 }

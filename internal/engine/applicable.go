@@ -42,6 +42,9 @@ func applicable(d model.Dependency, ds, pkg, version string) (rules.UpdateType, 
 	if ds == model.DatasourceNuget {
 		return applicableNuget(d, pkg, version)
 	}
+	if ds == model.DatasourceMaven {
+		return applicableMaven(d, pkg, version)
+	}
 	if ds == model.DatasourceNpm {
 		return applicableNpm(d, pkg, version)
 	}

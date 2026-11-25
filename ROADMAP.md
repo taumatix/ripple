@@ -72,7 +72,7 @@ auth model, rate limits); the notes below are what I expect, **unverified** unti
 Everything else:
 
 29. **More datasources and feeds, as many ecosystems as Renovate has.** ~~npm registry~~ (shipped with 30c, polled per package; the replicate feed is not used), ~~PyPI~~ (shipped with 30e, polled per project), ~~crates.io
-   sparse index~~ (shipped with 30d, polled per crate), Maven, ~~NuGet~~ (shipped as the nuget manager, [docs/nuget.md](docs/nuget.md), polled per package id), ~~RubyGems~~ (shipped as the bundler manager, [docs/bundler.md](docs/bundler.md), polled per gem), ~~Packagist~~ (shipped as the composer manager, [docs/composer.md](docs/composer.md), polled per package), ~~Docker/OCI tags~~ (shipped with 30b, polled per image), GitHub releases/tags, ~~Helm~~ (shipped with 30f, polled per repository index), Terraform
+   sparse index~~ (shipped with 30d, polled per crate), ~~Maven~~ (shipped as the maven manager, [docs/maven.md](docs/maven.md), polled per artifact), ~~NuGet~~ (shipped as the nuget manager, [docs/nuget.md](docs/nuget.md), polled per package id), ~~RubyGems~~ (shipped as the bundler manager, [docs/bundler.md](docs/bundler.md), polled per gem), ~~Packagist~~ (shipped as the composer manager, [docs/composer.md](docs/composer.md), polled per package), ~~Docker/OCI tags~~ (shipped with 30b, polled per image), GitHub releases/tags, ~~Helm~~ (shipped with 30f, polled per repository index), Terraform
    registry. Where a registry has a changes feed, use it; where it has none (OCI registries), fall back to polling
    only the packages the reverse index says someone imports, never every repo. Each datasource says which of the two it is.
 30. **More managers, toward Renovate parity.** ~~GitHub Actions~~ shipped ([docs/github-actions.md](docs/github-actions.md)).
@@ -409,3 +409,9 @@ Everything else:
 238. **NuGet: refresh `packages.lock.json`.** The lock is reported stale in the PR body, not rewritten. Rewriting it
     without running the SDK needs each package's dependency set and content hash from the registration and `.nupkg`;
     decide after 237 whether that is worth doing.
+239. **Maven: verify against the real Maven Central, and the unread forms.** The datasource, manager and docs are
+    written from the vendored Maven pages ([docs/vendor/maven](docs/vendor/maven)), one sample metadata file and a fake;
+    nothing has run against the real service. Add a `-tags live` check, then the forms skipped today: two-segment
+    versions (`4.13`, common on Central), qualified versions, properties (`${x.version}`, resolved from `<properties>` and
+    the parent), versions managed by a parent or BOM, `<repositories>` and `settings.xml` mirrors, and Gradle
+    (`build.gradle`, `libs.versions.toml`) as a sibling manager on this datasource.

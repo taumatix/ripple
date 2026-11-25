@@ -1,0 +1,297 @@
+Maven Repository Metadata Model – Metadata
+
+      Apache/
+      Maven/
+      Ref/
+      Maven 3.9.9/
+      Maven Repository Metadata Model/
+    Metadata 
+        | Last Published: 2024-08-14
+          Version: 3.9.9
+
+   Overview
+    Introduction
+    Javadocs
+   Descriptors Reference
+    POM
+    Settings
+    Toolchains
+   Reference
+    Lifecycles
+    Plugin Bindings to Default Lifecycle
+    Artifact Handlers
+    CLI options
+    Super POM
+   Development
+    Maven Developer Centre
+    Maven Core ITs
+   Project Documentation
+    Project Information
+    Project Reports
+   Maven Projects
+    Maven
+    Archetypes
+    Extensions
+    Parent POMs
+    Plugins
+    Skins
+    Components
+
+      Archetype
+      Artifact Resolver
+      Doxia
+      Indexer
+      JXR
+      Plugin Testing
+      Plugin Tools
+      Resource Bundles
+      SCM
+      Shared Components
+      Surefire
+      Wagon
+
+   ASF
+    How Apache Works
+    Foundation
+    Data Privacy
+    Sponsoring Apache
+    Thanks
+
+Metadata
+
+Per-directory repository metadata repository-metadata.xml.
+
+A directory may represent 3 types of content: "groupId", "groupId/artifactId" or "groupId/artifactId/version".
+
+Most metadata content has a meaning when the directory represents a "groupId/artifactId" (groupId, artifactId, versioning)
+
+<metadata xmlns="http://maven.apache.org/METADATA/1.1.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://maven.apache.org/METADATA/1.1.0 https://maven.apache.org/xsd/repository-metadata-1.1.0.xsd"
+  modelVersion=.. >
+  <groupId/>
+  <artifactId/>
+  <versioning>
+    <latest/>
+    <release/>
+    <versions/>
+
+    <lastUpdated/>
+
+    <snapshot>
+      <timestamp/>
+      <buildNumber/>
+      <localCopy/>
+    </snapshot>
+    <snapshotVersions>
+      <snapshotVersion>
+        <classifier/>
+        <extension/>
+        <value/>
+        <updated/>
+      </snapshotVersion>
+    </snapshotVersions>
+  </versioning>
+  <version/>
+
+  <plugins>
+    <plugin>
+      <name/>
+      <prefix/>
+      <artifactId/>
+    </plugin>
+  </plugins>
+</metadata>
+
+metadata
+
+No description.
+
+Attribute
+
+Type
+
+Description
+
+              modelVersion
+
+              String
+
+The version of the underlying metadata model.
+
+Element
+
+Type
+
+Description
+
+              groupId
+
+              String
+
+The groupId when this directory represents "groupId/artifactId" or "groupId/artifactId/version".
+
+              artifactId
+
+              String
+
+The artifactId when this directory represents "groupId/artifactId" or "groupId/artifactId/version".
+
+                versioning
+
+              Versioning
+
+Versioning information when this directory represents "groupId/artifactId" or "groupId/artifactId/version".
+
+              version
+
+              String
+
+The base version (ie. ending in -SNAPSHOT) when this directory represents a "groupId/artifactId/version" for a SNAPSHOT.
+
+              plugins/plugin*
+
+              List<Plugin>
+
+(Many) The set of plugins when this directory represents a "groupId".
+
+versioning
+
+Versioning information for "groupId/artifactId" or "groupId/artifactId/version" SNAPSHOT
+
+Element
+
+Type
+
+Description
+
+              latest
+
+              String
+
+What the last version added to the directory is, including both releases and snapshots ("groupId/artifactId" directory only)
+
+              release
+
+              String
+
+What the last version added to the directory is, for the releases only ("groupId/artifactId" directory only)
+
+              versions/version*
+
+              List<String>
+
+(Many) Versions available of the artifact (both releases and snapshots) ("groupId/artifactId" directory only)
+
+              lastUpdated
+
+              String
+
+When the metadata was last updated (both "groupId/artifactId" and "groupId/artifactId/version" directories). The timestamp is expressed using UTC in the format yyyyMMddHHmmss.
+
+                snapshot
+
+              Snapshot
+
+The current snapshot data in use for this version ("groupId/artifactId/version" only)
+
+              snapshotVersions/snapshotVersion*
+
+              List<SnapshotVersion>
+
+(Many) Information for each sub-artifact available in this artifact snapshot. This is only the most recent SNAPSHOT for each unique extension/classifier combination.
+
+snapshot
+
+Snapshot data for the last artifact corresponding to the SNAPSHOT base version
+
+Element
+
+Type
+
+Description
+
+              timestamp
+
+              String
+
+The timestamp when this version was deployed. The timestamp is expressed using UTC in the format yyyyMMdd.HHmmss.
+
+              buildNumber
+
+              int
+
+The incremental build number
+Default value: 0
+
+              localCopy
+
+              boolean
+
+Whether to use a local copy instead (with filename that includes the base version)
+Default value: false
+
+snapshotVersion
+
+Versioning information for a sub-artifact of the current snapshot artifact.
+
+Element
+
+Type
+
+Description
+
+              classifier
+
+              String
+
+The classifier of the sub-artifact. Each classifier and extension pair may only appear once.
+Default value: 
+
+              extension
+
+              String
+
+The file extension of the sub-artifact. Each classifier and extension pair may only appear once.
+
+              value
+
+              String
+
+The resolved snapshot version of the sub-artifact.
+
+              updated
+
+              String
+
+The timestamp when this version information was last updated. The timestamp is expressed using UTC in the format yyyyMMddHHmmss.
+
+plugin
+
+Mapping information for a single plugin within this group.
+
+Element
+
+Type
+
+Description
+
+              name
+
+              String
+
+Display name for the plugin.
+
+              prefix
+
+              String
+
+The plugin invocation prefix (i.e. eclipse for eclipse:eclipse)
+
+              artifactId
+
+              String
+
+The plugin artifactId
+
+            ©      2001–2024
+The Apache Software Foundation

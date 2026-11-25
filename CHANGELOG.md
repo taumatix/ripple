@@ -4,6 +4,19 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-25
+
+Additive release: no public API was removed or changed. Opt-in ecosystems: Helm, Bundler, Composer, NuGet, Maven and Terraform
+(`ecosystem:`), each verified against a fake registry, the real public registry (`-tags live`) and the ecosystem's own tool
+(`-tags realtool`) in CI. Not verified: private registries and authenticated paths, lock-file regeneration, GitLab, Gitea,
+Bitbucket, Data Center, GHES and real DynamoDB behaviour.
+
+Behaviour that changes **without** an opt-in, for existing deployments:
+- pip and Cargo propose the newest older release the repo's Python or compiler can use instead of only skipping a release
+  that its `Requires-Python` or `rust-version` excludes.
+- Docker tag parsing reads zero-padded tags such as `22.04`.
+- A Cargo requirement is now read with a byte-offset TOML scanner, so more manifests are read and more requirements move.
+
 ### Added
 - Real-tool tests: registry-reaching steps retry (3 attempts) and report the tool's own error when exhausted, the Maven test names the dependency plugin by full coordinates, and the Cargo, Composer, NuGet and Maven jobs cache their downloads. Test and CI only.
 - Real-tool tests (`-tags realtool`, [docs/realtool.md](docs/realtool.md), `.github/workflows/realtool.yml`): a small real Go, Cargo, npm, pip, Helm, Bundler, Composer, NuGet, Maven, Terraform, GitHub Actions and Docker project is edited by the manager and then checked by the ecosystem's own tool. Test and CI only; no behaviour change.

@@ -158,12 +158,18 @@ type Client struct {
 
 	mu      sync.Mutex
 	limited map[string]time.Time
+	// defaults is each repository's default branch as ListRepoHeads last read it; ListRepos
+	// reports it, so a moved head can be re-scanned on the right branch.
+	defaults map[string]string
 }
 
 var (
 	_ platform.Platform    = (*Client)(nil)
 	_ platform.RateLimiter = (*Client)(nil)
 	_ platform.Lister      = (*Client)(nil)
+	_ interface {
+		ListRepoHeads(context.Context) (map[string]string, error)
+	} = (*Client)(nil) // app.HeadLister
 )
 
 func (c *Client) now() time.Time {
@@ -605,7 +611,7 @@ func (c *Client) ListRepos(ctx context.Context) ([]model.Repo, error) {
 			for _, r := range resp.Repositories {
 				p := region + "/" + r.Name
 				if _, _, err := CheckPath(p); err == nil {
-					out = append(out, model.Repo{FullName: p})
+					out = append(out, model.Repo{FullName: p, DefaultBranch: c.defaultOf(p)})
 				}
 			}
 			if token = resp.Next; token == "" {
@@ -614,6 +620,74 @@ func (c *Client) ListRepos(ctx context.Context) ([]model.Repo, error) {
 		}
 	}
 	return out, nil
+}
+
+func (c *Client) defaultOf(path string) string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.defaults[path]
+}
+
+// ListRepoHeads is the commit each listed repository's default branch points at, for the app's
+// head comparison (app.HeadLister). ListRepositories carries no branch or commit, so a repository
+// costs one GetBranch per discovery (docs/vendor/codecommit/api-API_GetBranch.md, `commitId`), one
+// at a time, plus one GetRepository (`defaultBranch`) the first time it is seen. A throttle ends
+// the listing with the rate-limit error; another failure leaves that repository out for the round.
+// A repository is reported only once ListRepos can name its default branch, which this call
+// learns, so the first listing after a start reports none and the next all.
+func (c *Client) ListRepoHeads(ctx context.Context) (map[string]string, error) {
+	repos, err := c.ListRepos(ctx)
+	if err != nil {
+		return nil, err
+	}
+	heads := map[string]string{}
+	for _, r := range repos {
+		region, name, err := CheckPath(r.FullName)
+		if err != nil {
+			continue
+		}
+		branch := r.DefaultBranch
+		if branch == "" {
+			var md struct {
+				Metadata struct {
+					Default string `json:"defaultBranch"`
+				} `json:"repositoryMetadata"`
+			}
+			if err := c.call(ctx, region, "GetRepository", map[string]any{"repositoryName": name}, &md); err != nil {
+				var rl *platform.RateLimitError
+				if errors.As(err, &rl) {
+					return nil, err
+				}
+				continue
+			}
+			if branch = md.Metadata.Default; branch == "" { // an empty repository
+				continue
+			}
+			c.mu.Lock()
+			if c.defaults == nil {
+				c.defaults = map[string]string{}
+			}
+			c.defaults[r.FullName] = branch
+			c.mu.Unlock()
+			continue // not yet in ListRepos' answer for this round
+		}
+		var out struct {
+			Branch struct {
+				CommitID string `json:"commitId"`
+			} `json:"branch"`
+		}
+		if err := c.call(ctx, region, "GetBranch", map[string]any{"repositoryName": name, "branchName": branch}, &out); err != nil {
+			var rl *platform.RateLimitError
+			if errors.As(err, &rl) {
+				return nil, err
+			}
+			continue
+		}
+		if out.Branch.CommitID != "" {
+			heads[r.FullName] = out.Branch.CommitID
+		}
+	}
+	return heads, nil
 }
 
 // maxDiffPages bounds ChangedFiles; a push touching more files than this is scanned in full.

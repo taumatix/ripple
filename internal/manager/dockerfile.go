@@ -459,6 +459,14 @@ func scanHelmValues(lines []string) []occurrence {
 	var out []occurrence
 	for i, line := range lines {
 		m := yamlKeyRE.FindStringSubmatch(line)
+		if m != nil && m[2] == "image" {
+			// ingress-nginx writes `registry:`, `image: path/name` and `tag:` under `image:`,
+			// with no `repository:`; when the tag sibling is there it is that pair.
+			if o, ok := helmPair(lines, i, m); ok {
+				out = append(out, o)
+				continue
+			}
+		}
 		if m != nil && m[2] != "repository" && strings.Contains(strings.ToLower(m[2]), "image") && m[4] != "" && !strings.ContainsAny(m[4], "{}") && !strings.Contains(m[4], "://") {
 			// `image: repo:tag` (or `initImage: ...`): the whole reference on one line.
 			if r, ok := parseImageOpt(m[4], true); ok {
@@ -467,75 +475,89 @@ func scanHelmValues(lines []string) []occurrence {
 			}
 			continue
 		}
-		if m == nil || m[2] != "repository" || m[4] == "" || strings.Contains(m[1], "-") {
+		if m == nil || m[2] != "repository" {
 			continue
 		}
-		n := indentOf(line)
-		parent := -1
-		for j := i - 1; j >= 0; j-- {
-			if blankOrComment(lines[j]) {
-				continue
-			}
-			if indentOf(lines[j]) < n {
-				parent = j
-				break
-			}
-		}
-		if parent < 0 {
-			continue
-		}
-		pm := yamlKeyRE.FindStringSubmatch(lines[parent])
-		if pm == nil || pm[4] != "" || !strings.Contains(strings.ToLower(pm[2]), "image") {
-			continue
-		}
-		var registryHost string
-		var tag []string
-		tagLine := 0
-		var dig []string
-		digLine := 0
-		for j := parent + 1; j < len(lines); j++ {
-			if blankOrComment(lines[j]) {
-				continue
-			}
-			if indentOf(lines[j]) < n {
-				break
-			}
-			if indentOf(lines[j]) != n {
-				continue
-			}
-			km := yamlKeyRE.FindStringSubmatch(lines[j])
-			if km == nil {
-				continue
-			}
-			switch km[2] {
-			case "registry":
-				registryHost = km[4]
-			case "digest":
-				if km[4] != "" {
-					dig, digLine = km, j
-				}
-			case "tag":
-				tag, tagLine = km, j
-			}
-		}
-		repo := m[4]
-		if registryHost != "" {
-			repo = registryHost + "/" + repo
-		}
-		if tag == nil || strings.ContainsAny(repo+tag[4], "{}$") || strings.Contains(repo, "://") {
-			continue
-		}
-		if dig != nil && !strings.HasPrefix(dig[4], "sha256:") {
-			continue
-		}
-		if r, ok := parseImageOpt(repo+":"+tag[4], true); ok {
-			o := occurrence{line: tagLine, ref: r, tagOnly: true,
-				prefix: tag[1] + "tag: ", quoteOpen: tag[3], quoteClose: tag[5], rest: tag[6]}
-			if dig != nil {
-				o.dig = newDigestLine(digLine, "digest", dig)
-			}
+		if o, ok := helmPair(lines, i, m); ok {
 			out = append(out, o)
 		}
 	}
 	return out
+}
+
+// helmPair reads the `registry:`, repository-key and `tag:` (and `digest:`) siblings
+// around the line i that holds the repository (m is its parsed key line): the key is
+// `repository`, or `image` under an image key when the chart has no `repository:`.
+func helmPair(lines []string, i int, m []string) (occurrence, bool) {
+	line := lines[i]
+	if m == nil || m[4] == "" || strings.Contains(m[1], "-") {
+		return occurrence{}, false
+	}
+	n := indentOf(line)
+	parent := -1
+	for j := i - 1; j >= 0; j-- {
+		if blankOrComment(lines[j]) {
+			continue
+		}
+		if indentOf(lines[j]) < n {
+			parent = j
+			break
+		}
+	}
+	if parent < 0 {
+		return occurrence{}, false
+	}
+	pm := yamlKeyRE.FindStringSubmatch(lines[parent])
+	if pm == nil || pm[4] != "" || !strings.Contains(strings.ToLower(pm[2]), "image") {
+		return occurrence{}, false
+	}
+	var registryHost string
+	var tag []string
+	tagLine := 0
+	var dig []string
+	digLine := 0
+	for j := parent + 1; j < len(lines); j++ {
+		if blankOrComment(lines[j]) {
+			continue
+		}
+		if indentOf(lines[j]) < n {
+			break
+		}
+		if indentOf(lines[j]) != n {
+			continue
+		}
+		km := yamlKeyRE.FindStringSubmatch(lines[j])
+		if km == nil {
+			continue
+		}
+		switch km[2] {
+		case "registry":
+			registryHost = km[4]
+		case "digest":
+			if km[4] != "" {
+				dig, digLine = km, j
+			}
+		case "tag":
+			tag, tagLine = km, j
+		}
+	}
+	repo := m[4]
+	if registryHost != "" {
+		repo = registryHost + "/" + repo
+	}
+	if tag == nil || strings.ContainsAny(repo+tag[4], "{}$") || strings.Contains(repo, "://") {
+		return occurrence{}, false
+	}
+	if dig != nil && !strings.HasPrefix(dig[4], "sha256:") {
+		return occurrence{}, false
+	}
+	if r, ok := parseImageOpt(repo+":"+tag[4], true); ok {
+		o := occurrence{line: tagLine, ref: r, tagOnly: true,
+			prefix: tag[1] + "tag: ", quoteOpen: tag[3], quoteClose: tag[5], rest: tag[6]}
+		if dig != nil {
+			o.dig = newDigestLine(digLine, "digest", dig)
+		}
+		return o, true
+	}
+	return occurrence{}, false
 }

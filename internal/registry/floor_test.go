@@ -16,15 +16,21 @@ import (
 func TestTagFloorNeverHidesANewerTag(t *testing.T) {
 	r := rand.New(rand.NewSource(7))
 	nums := []int{0, 1, 2, 9, 10, 11, 25, 26, 99, 100, 101, 250}
+	pad := func(n int) string {
+		if n > 0 && n < 10 && r.Intn(2) == 0 {
+			return fmt.Sprintf("0%d", n)
+		}
+		return fmt.Sprint(n)
+	}
 	for i := 0; i < 3000; i++ {
 		pick := func() string {
 			switch r.Intn(3) {
 			case 0:
 				return fmt.Sprint(nums[r.Intn(len(nums))])
 			case 1:
-				return fmt.Sprintf("%d.%d", nums[r.Intn(len(nums))], nums[r.Intn(len(nums))])
+				return fmt.Sprintf("%d.%s", nums[r.Intn(len(nums))], pad(nums[r.Intn(len(nums))]))
 			}
-			return fmt.Sprintf("%d.%d.%d", nums[r.Intn(len(nums))], nums[r.Intn(len(nums))], nums[r.Intn(len(nums))])
+			return fmt.Sprintf("%d.%s.%s", nums[r.Intn(len(nums))], pad(nums[r.Intn(len(nums))]), pad(nums[r.Intn(len(nums))]))
 		}
 		var tags []string
 		for j := 0; j < 40; j++ {
@@ -103,5 +109,13 @@ func TestTagsFromFallsBackWhenLastIsRefused(t *testing.T) {
 	got, err := clientFor(f).TagsFrom(context.Background(), "ghcr.io/org/img", TagFloor("1.2.3"))
 	if err != nil || !slices.Equal(got, []string{"1.2.3", "1.3.0"}) {
 		t.Fatalf("got %v err=%v", got, err)
+	}
+}
+
+// A zero-padded later number ("22.07") is newer than an unpadded one ("22.5") yet sorts
+// before it, so the floor must not start above it.
+func TestTagFloorKeepsZeroPaddedTags(t *testing.T) {
+	if f, tag := TagFloor("22.5"), "22.07"; tag < f {
+		t.Errorf("floor %q hides %q", f, tag)
 	}
 }

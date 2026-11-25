@@ -318,9 +318,8 @@ Everything else:
 219. **Corpus checks: from a real sample, and what the first one found.** `internal/manager/testdata/corpus` holds manifests written
     the way ripgrep, tokio, express, bitnami and ingress-nginx write theirs, with reviewed `.want` files (`go test ./internal/manager
     -run TestCorpus -update-corpus` rewrites them); they were written from memory and the documented formats, not downloaded, so the
-    miss rate over real crates.io, npm and Hub files is still unmeasured. Not read, found by the corpus: an ingress-nginx style values
-    block with `registry:` and `image: path/name` and no `repository` key, and a calendar tag with a leading zero (`ubuntu:22.04`, the
-    registry tag parser needs a semver-shaped number). npm still classifies `0.2.3` -> `0.3.0` as minor (Cargo uses leftmost-nonzero);
+    miss rate over real crates.io, npm and Hub files is still unmeasured. The first two misses it found are fixed (an ingress-nginx
+    style `registry:`/`image:`/`tag:` block, and a calendar tag with a zero-padded number, `ubuntu:22.04`). npm still classifies `0.2.3` -> `0.3.0` as minor (Cargo uses leftmost-nonzero);
     a Dockerfile `FROM` with a `v${V}` ARG prefix and Helm `global.imageRegistry` indirection stay unread. The Cargo `*`/lone `<`
     and npm hyphen, lone `>`, peer and `overrides` forms stay unread on purpose.
 211. **pip: drop `releases` for the PEP 691 index; rate limits; private indexes.** PEP 440 ordering and specifier

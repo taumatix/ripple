@@ -7,7 +7,9 @@ import (
 	"errors"
 	"slices"
 	"testing"
+	"time"
 
+	"github.com/taumatix/ripple/internal/httpretry"
 	"github.com/taumatix/ripple/internal/livetest"
 )
 
@@ -16,9 +18,12 @@ import (
 // org.apache.commons:commons-lang3, whose 3.12.0 is immutable (Central never deletes). Not
 // covered: other repositories (a private mirror, Google's), which need their own base URL.
 
+// Maven Central answers 429, with no Retry-After, to a busy shared address such as a GitHub-hosted
+// runner (seen on 2026-11-25), so these tests wait out a longer backoff than the default before
+// the 429 is reported as the failure it is.
 func liveClient() *Client {
 	hc, _ := livetest.Client()
-	return &Client{HTTP: hc, UserAgent: livetest.UserAgent}
+	return &Client{HTTP: hc, UserAgent: livetest.UserAgent, Retry: httpretry.Policy{MaxAttempts: 6, MaxWait: time.Minute}}
 }
 
 func TestLiveVersionsAndReleases(t *testing.T) {

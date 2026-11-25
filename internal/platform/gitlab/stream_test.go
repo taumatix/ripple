@@ -1,12 +1,15 @@
 package gitlab_test
 
 import (
+	"context"
 	"log/slog"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/taumatix/ripple/internal/model"
+	"github.com/taumatix/ripple/internal/platform"
 	"github.com/taumatix/ripple/internal/platform/gitlab"
 	"github.com/taumatix/ripple/internal/testutil"
 )

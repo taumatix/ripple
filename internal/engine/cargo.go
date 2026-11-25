@@ -297,3 +297,55 @@ func (r *runner) cargoNotes() string {
 	}
 	return s
 }
+
+// cargoRetarget runs after the rust-version guard refused job's release: it queues a job
+// for the newest older release that the repo's compiler can build, when that is still an
+// update for d and the repo's rules allow it. It returns text for the skip reason ("" when
+// the refusal was not about the compiler, or no release fits).
+func (r *runner) cargoRetarget(job model.Job, d model.Dependency) string {
+	have, _ := r.cargoRustVersion(d.File)
+	if have == "" || r.e.Crates == nil {
+		return ""
+	}
+	cr, err := r.e.Crates.Crate(r.ctx, d.Package)
+	if err != nil {
+		return ""
+	}
+	refused := false
+	for _, v := range cr.Versions {
+		if v.Version == job.Version && manager.RustVersionNewer(v.RustVersion, have) {
+			refused = true
+		}
+	}
+	if !refused {
+		return ""
+	}
+	alt := ""
+	for _, v := range cr.Versions {
+		sv := "v" + v.Version
+		if v.Yanked || !semver.IsValid(sv) || semver.Prerelease(sv) != "" || semver.Compare(sv, "v"+job.Version) >= 0 ||
+			manager.RustVersionNewer(v.RustVersion, have) || (alt != "" && semver.Compare(sv, "v"+alt) <= 0) {
+			continue
+		}
+		if _, ok := applicableCargo(d, d.Package, v.Version); ok {
+			alt = v.Version
+		}
+	}
+	if alt == "" {
+		return ""
+	}
+	typ, _ := applicableCargo(d, d.Package, alt)
+	dec, ok := r.e.decide(&repoState{found: true, cfg: r.cfg}, d, typ, job.ReleasedAt)
+	if !ok || !dec.Enabled {
+		return ""
+	}
+	if _, err := r.e.Store.EnqueueJob(r.ctx, model.Job{
+		Key: model.JobKey(job.Repo, model.DatasourceCargo, job.Package, alt), Repo: job.Repo,
+		Datasource: model.DatasourceCargo, Package: job.Package, Version: alt,
+		ReleasedAt: job.ReleasedAt, State: model.JobPending, NotBefore: dec.NotBefore,
+	}); err != nil {
+		r.e.log().Warn("retargeted job not queued", "repo", job.Repo, "package", job.Package, "version", alt, "err", err)
+		return ""
+	}
+	return "; retargeted to " + alt + ", the newest release that compiler can build"
+}

@@ -342,3 +342,32 @@ func TestCargoRespectsRustVersion(t *testing.T) {
 		}
 	})
 }
+
+// When the newest release needs a newer compiler than the repo's rust-version, the
+// newest older release it can build is proposed instead.
+func TestCargoRetargetsToNewestBuildableRelease(t *testing.T) {
+	forEach(t, func(t *testing.T, st store.Store) {
+		e, idx := cargoEnv(t, st)
+		idx.Publish("dep", "1.0.0")
+		e.gh.AddRepo("acme/app", map[string]string{".ripple.yaml": cargoConfig,
+			"Cargo.toml": "[package]\nname = \"app\"\nrust-version = \"1.70\"\n[dependencies]\ndep = \"1.0.0\"\n"})
+		start(t, e, "acme/app")
+		e.clock.Advance(time.Minute)
+		idx.PublishMSRV("dep", "1.1.0", "1.68")
+		idx.PublishMSRV("dep", "1.2.0", "1.70")
+		idx.PublishMSRV("dep", "1.3.0", "1.80")
+		idx.PublishMSRV("dep", "1.4.0", "1.85")
+		for i := 0; i < 4; i++ {
+			e.tick()
+		}
+		head, _ := onePR(t, e, "acme/app", false)
+		got, _ := e.gh.FileAt("acme/app", head, "Cargo.toml")
+		if !strings.Contains(got, `dep = "1.2.0"`) {
+			t.Errorf("not retargeted to 1.2.0:\n%s", got)
+		}
+		j, ok, _ := e.st.GetJob(context.Background(), model.JobKey("acme/app", model.DatasourceCargo, "dep", "1.4.0"))
+		if !ok || j.State != model.JobSkipped || !strings.Contains(j.Reason, "retargeted to 1.2.0") {
+			t.Errorf("newest job = %+v, %v", j, ok)
+		}
+	})
+}

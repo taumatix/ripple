@@ -51,8 +51,9 @@ dates, so the cooldown runs from when ripple first saw the version.
 
 **MSRV.** The index carries each release's `rust_version`. When the manifest declares a `rust-version` (its own
 `[package] rust-version`, or the workspace's `[workspace.package]` for a member that says `rust-version.workspace = true`)
-and the target release declares a newer one, the job is recorded as skipped with that reason. ripple does not fall back
-to an older release that would build. A manifest with no `rust-version` is not checked.
+and the target release declares a newer one, the job is recorded as skipped with that reason, and ripple queues a job for the newest older stable,
+non-yanked release whose `rust_version` the manifest's compiler satisfies (when it is still an update and the repo's
+rules allow it), so the repo gets that PR instead. No such release: just the skip. A manifest with no `rust-version` is not checked.
 
 Only crates some repo uses are read, once per poll, never the index as a whole.
 

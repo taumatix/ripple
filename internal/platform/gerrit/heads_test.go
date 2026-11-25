@@ -14,10 +14,9 @@ import (
 var _ app.HeadLister = (*gerrit.Client)(nil)
 
 // ListRepoHeads: HEAD names the default branch, "Get Branch" gives its commit
-// (rest-api-projects.md). A project's head is withheld until ListRepos can name its default
-// branch, which the client learns here, so a moved head is never remembered without a branch
-// to re-scan.
-func TestListRepoHeadsReportsDefaultBranchCommitOnceTheBranchIsKnown(t *testing.T) {
+// (rest-api-projects.md). The first listing after a start already reports the head, because the
+// branch it just read is the one it asks for; ListRepos names it from then on.
+func TestListRepoHeadsReportsHeadsOnTheFirstListing(t *testing.T) {
 	f := newFakeGerrit(t)
 	f.AddRepo("acme/app", map[string]string{"x": "1"})
 	c := newClient(f)
@@ -27,16 +26,12 @@ func TestListRepoHeadsReportsDefaultBranchCommitOnceTheBranchIsKnown(t *testing.
 		t.Fatalf("ListRepos before any head listing: %v %v", repos, err)
 	}
 	heads, err := c.ListRepoHeads(ctx)
-	if err != nil || len(heads) != 0 {
-		t.Fatalf("first ListRepoHeads %v %v: want nothing yet (default branch unknown to ListRepos)", heads, err)
+	if err != nil || len(heads) != 1 || heads["acme/app"] != f.rev("acme/app", "refs/heads/main") {
+		t.Fatalf("first ListRepoHeads %v %v, want main's commit", heads, err)
 	}
 	repos, _ = c.ListRepos(ctx)
 	if len(repos) != 1 || repos[0].DefaultBranch != "main" {
 		t.Fatalf("ListRepos after learning: %v", repos)
-	}
-	heads, err = c.ListRepoHeads(ctx)
-	if err != nil || len(heads) != 1 || heads["acme/app"] != f.rev("acme/app", "refs/heads/main") {
-		t.Fatalf("ListRepoHeads %v %v, want main's commit", heads, err)
 	}
 }
 
@@ -98,5 +93,35 @@ func TestDiscoverRescansAGerritProjectWhoseHeadMovedOnce(t *testing.T) {
 	got := pushes()
 	if len(got) != 1 || got[0].Repo != "gerrit:acme/moves" || got[0].Ref != "refs/heads/main" {
 		t.Fatalf("a moved head queued %+v, want one whole-repo push for gerrit:acme/moves", got)
+	}
+}
+
+// A head that moved while ripple was down is caught by the first discovery of the new process,
+// not the one after it.
+func TestDiscoverCatchesAHeadThatMovedWhileRippleWasDown(t *testing.T) {
+	f := newFakeGerrit(t)
+	f.AddRepo("acme/moves", map[string]string{"x": "1"})
+	f.AddRepo("acme/still", map[string]string{"x": "1"})
+	st := store.NewMemory()
+	newApp := func(c *gerrit.Client) *app.App {
+		return &app.App{Hosts: []*platform.Host{{Name: "gerrit", Platform: c}}, Queue: &app.Queue{Store: st, Process: func(context.Context, model.Event) error { return nil }}}
+	}
+	newApp(newClient(f)).Discover(ctx)
+	newApp(newClient(f)).Discover(ctx) // heads remembered
+	f.Commit("acme/moves", map[string]string{"x": "while down"})
+
+	newApp(newClient(f)).Discover(ctx) // a new process: nothing learned
+	evs, err := st.ListEvents(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pushes []model.Event
+	for _, e := range evs {
+		if e.Kind == "push" {
+			pushes = append(pushes, e)
+		}
+	}
+	if len(pushes) != 1 || pushes[0].Repo != "gerrit:acme/moves" || pushes[0].Ref != "refs/heads/main" {
+		t.Fatalf("first discovery after a restart queued %+v, want one push for gerrit:acme/moves", pushes)
 	}
 }

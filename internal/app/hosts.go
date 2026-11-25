@@ -102,7 +102,7 @@ func (a *App) Discover(ctx context.Context) {
 			continue
 		}
 		if hl, ok := l.(HeadLister); ok {
-			if err := a.rescanMoved(ctx, h.Name, hl, repos); err != nil && ctx.Err() == nil {
+			if err := a.rescanMoved(ctx, h.Name, l, hl, repos); err != nil && ctx.Err() == nil {
 				a.log().Error("repo head rescan", "host", h.Name, "err", err)
 			}
 		}
@@ -222,7 +222,7 @@ func headKey(host string) string { return "discover-head/" + host }
 // remembered (its ReposAdded scans it). The events go first and carry a delivery id derived
 // from the heads, so a crash before the heads are written repeats them as a no-op. A store that
 // cannot list cursors remembers nothing and so never re-scans.
-func (a *App) rescanMoved(ctx context.Context, host string, hl HeadLister, repos []model.Repo) error {
+func (a *App) rescanMoved(ctx context.Context, host string, l platform.Lister, hl HeadLister, repos []model.Repo) error {
 	st := a.Queue.Store
 	cl, ok := st.(store.CursorLister)
 	if !ok {
@@ -231,6 +231,18 @@ func (a *App) rescanMoved(ctx context.Context, host string, hl HeadLister, repos
 	heads, err := hl.ListRepoHeads(ctx)
 	if err != nil {
 		return err
+	}
+	// A host that learns default branches while listing heads (Gerrit, CodeCommit) named none in
+	// the listing above on its first round after a start. If a repo it just reported a head for
+	// was listed without one, list again once, now that it can name them: a head that moved
+	// while ripple was down is then re-scanned on the right branch in this round.
+	for _, r := range repos {
+		if _, listed := heads[r.FullName]; listed && r.DefaultBranch == "" {
+			if again, err := l.ListRepos(ctx); err == nil {
+				repos = again
+			}
+			break
+		}
 	}
 	prefix := headKey(host) + store.CursorGroupSep
 	remembered := map[string]string{}

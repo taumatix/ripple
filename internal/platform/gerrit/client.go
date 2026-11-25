@@ -426,8 +426,9 @@ func (c *Client) ListRepos(ctx context.Context) ([]model.Repo, error) {
 // per project: "Get HEAD" for the branch name and "Get Branch" for its commit
 // (docs/vendor/gerrit/rest-api-projects.md), one project at a time. A 429 ends the listing with
 // the rate-limit error (the app then keeps what it remembered); any other failure leaves that
-// project out of the map. A project is reported only once ListRepos can name its default branch,
-// which this call learns, so the first listing after a start reports none and the next all.
+// project out of the map. The default branch this call reads is remembered for ListRepos, and the
+// app lists once more in the same round to get it, so the first round after a start already
+// catches a head that moved while ripple was down.
 func (c *Client) ListRepoHeads(ctx context.Context) (map[string]string, error) {
 	repos, err := c.ListRepos(ctx)
 	if err != nil {
@@ -463,7 +464,7 @@ func (c *Client) ListRepoHeads(ctx context.Context) (map[string]string, error) {
 		}
 		c.defaults[r.FullName] = branch
 		c.mu.Unlock()
-		if r.DefaultBranch == branch && commitSHA.MatchString(bi.Revision) {
+		if commitSHA.MatchString(bi.Revision) {
 			heads[r.FullName] = bi.Revision
 		}
 	}

@@ -63,10 +63,13 @@ Separately from events, the client implements `app.HeadLister`: at each discover
 commit every listed repository's default branch points at and re-scans one whose head moved, so a lost or
 misconfigured rule no longer leaves a repository unscanned until its next event. `ListRepositories` carries
 neither branch nor commit, so this costs **one `GetBranch` per repository** each discovery (`commitId`), one
-at a time, plus one `GetRepository` (`defaultBranch`) the first time a repository is seen. A throttle ends the
+at a time. The default branches not yet known are read first with `BatchGetRepositories` (`defaultBranch`), up to
+100 repositories a call, so a repository costs no extra read once its branch is known (an empty repository has
+none and is asked about again each round, in the same batches). A throttle ends the
 listing (the region is held back for the usual minute) and the app keeps what it remembered; another failure
-leaves that repository out for the round. A repository is reported once `ListRepos` can name its default
-branch, which the first head listing after a start learns, so the first round reports none and the second all.
+leaves that repository out for the round. The first head listing after a start already reports every head
+(the app lists once more in that round to get the branches just learned), so a head that moved while ripple was
+down is re-scanned on the first round.
 Verified against the fake only, which is written from the vendored pages; `codecommit:GetBranch` is now in
 the IAM list above.
 

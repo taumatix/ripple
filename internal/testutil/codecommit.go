@@ -144,6 +144,16 @@ func (c *CodeCommit) AddRepo(path string, files map[string]string) {
 	c.Commit(path, files)
 }
 
+// AddEmptyRepo creates a repository with no branch, so it has no default branch yet.
+func (c *CodeCommit) AddEmptyRepo(path string) {
+	c.t.Helper()
+	bare := c.bare(c.name(path))
+	if err := os.MkdirAll(bare, 0o755); err != nil {
+		c.t.Fatal(err)
+	}
+	git(c.t, bare, "init", "--bare", "-b", "main")
+}
+
 // Commit adds a commit on main with files (a human pushing to the default branch).
 func (c *CodeCommit) Commit(path string, files map[string]string) {
 	c.t.Helper()
@@ -474,6 +484,8 @@ func (c *CodeCommit) serveAPI(w http.ResponseWriter, r *http.Request) {
 		c.updateStatus(w, in)
 	case "ListRepositories":
 		c.listRepositories(w, in)
+	case "BatchGetRepositories":
+		c.batchGetRepositories(w, in)
 	case "GetRepository":
 		c.getRepository(w, in)
 	case "GetBranch":
@@ -558,6 +570,35 @@ func (c *CodeCommit) getRepository(w http.ResponseWriter, in map[string]any) {
 		md["defaultBranch"] = "main"
 	}
 	_ = json.NewEncoder(w).Encode(map[string]any{"repositoryMetadata": md})
+}
+
+// batchGetRepositories is BatchGetRepositories (docs/vendor/codecommit/api-API_BatchGetRepositories.md):
+// the metadata of up to 100 named repositories, the names that do not exist listed apart.
+func (c *CodeCommit) batchGetRepositories(w http.ResponseWriter, in map[string]any) {
+	names, _ := in["repositoryNames"].([]any)
+	if len(names) == 0 {
+		c.awsErr(w, http.StatusBadRequest, "RepositoryNamesRequiredException", "repositoryNames")
+		return
+	}
+	if len(names) > 100 {
+		c.awsErr(w, http.StatusBadRequest, "MaximumRepositoryNamesExceededException", "more than 100 names")
+		return
+	}
+	var repos []map[string]any
+	notFound := []string{}
+	for _, n := range names {
+		name, _ := n.(string)
+		if _, err := os.Stat(c.bare(name)); err != nil || name == "" || strings.Contains(name, "/") {
+			notFound = append(notFound, name)
+			continue
+		}
+		md := map[string]any{"repositoryName": name, "repositoryId": "id-" + name}
+		if c.hasBranch(name, "main") {
+			md["defaultBranch"] = "main"
+		}
+		repos = append(repos, md)
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"repositories": repos, "repositoriesNotFound": notFound})
 }
 
 // getBranch is GetBranch (docs/vendor/codecommit/api-API_GetBranch.md): the branch name and

@@ -65,7 +65,8 @@ again, fetched fresh, at the start of the next polls until the repo is free. A r
   go.mod. The security job goes first (the higher fixed version first); the other waits, with a reason naming the PR,
   until it is merged or closed. A directive or toolchain PR of ripple's that is already open and does not fix an advisory is closed, untouched and with a
 comment, once the security PR has opened; its job goes back to waiting for that PR and is judged afresh when it is merged
-or closed. A PR a person touched, a host that cannot close PRs, and `close-superseded-pull-requests: false` leave both
+or closed. A close the host refused, or one that was switched on later, is retried on every later run of the repo that has
+plans, so the beaten PR does not stay open beside the security PR. A PR a person touched, a host that cannot close PRs, and `close-superseded-pull-requests: false` leave both
 open, and then whoever merges second resolves the conflict.
 - **No fix at all, or none ripple can propose.** With `dependency-dashboard: true` the dashboard gains a section
   "Advisories without a fix ripple can propose", linking the advisory. Entries disappear when a fix is proposed, the

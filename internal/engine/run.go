@@ -450,6 +450,9 @@ func (r *runner) execute(plans []*prPlan, deps []model.Dependency) {
 	if closed := r.sweepSuperseded(deps, open); len(closed) > 0 {
 		open = without(open, closed)
 	}
+	if closed := r.sweepBeaten(open); len(closed) > 0 {
+		open = without(open, closed)
+	}
 	plans = r.holdForSecurity(plans, deps, open)
 	heads := map[string]platform.PR{}
 	for _, pr := range open {

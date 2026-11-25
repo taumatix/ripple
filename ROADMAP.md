@@ -184,9 +184,6 @@ Everything else:
     for; that Scan and the listing are verified on the in-process fake (including that the build runs once and reruns after a failed one), and DynamoDB Local runs them only in CI. A scan
     (not the sweep) still runs one history round, so a repo with over 500 pairs or 100 records is completed only by a sweep
     or a go.mod change; consider a few rounds per scan once real repo sizes are known. Postgres `ListRepos` is CI-only.
-127. **OSV: conflict and pseudo-version residuals.** The beaten-PR close covers a non-security PR when a security
-    toolchain PR opens (a lower security toolchain PR beside a higher one is closed by the supersede flow, pinned by an e2e
-    test), and a toolchain PR opened by an older run than the security job is only held, never closed, unless the security PR opens in a later run with it open.
 132. **Webhook retry ids, verified on real hosts.** Delivery ids are now persisted (store delivery table), but whether
     Bitbucket Cloud's `X-Request-UUID` and Azure DevOps' payload `id` stay the same across a retry is still
     unverified: the vendored docs state neither (see docs/platform-bitbucket.md, docs/platform-azuredevops.md). A
@@ -373,3 +370,8 @@ Everything else:
     real projects (see the corpus entry for pip once one is run).
 221. **Implement `app.HeadLister` in the Lister hosts.** `App.Discover` re-scans a listed repo whose default-branch head moved once its host reports heads (`ListRepoHeads`), but no host does. Add it to the hosts with no push events (Gerrit, SCM-Manager, CodeCommit and any other `platform.Lister`) from the listing call if it carries the head, else one extra read per repo, bounded by the host's rate limit.
 222. **OSV: reconcile residuals.** The one-time `RIPPLE_OSV_BACKFILL_OPEN_PRS` pass (which finds a done job's open PR from before the `osv-jobs` index) has never run against a real host; a record shared by twin GHSA and GO notes is reconciled per note; the busy-repo retry list holds at most 100 ids. An amended record's line in a PR description is now rewritten (GitHub only, verified against the fake: that the real GraphQL `viewer { login }` of an installation token equals the editor login of the app's own description edit is assumed, and if it does not the PR is just treated as touched and left alone); the other hosts have no `PRBodyEditor` and no way yet to tell ripple's description edit from a person's.
+223. **OSV: the beaten-PR sweep on real hosts.** A beaten directive or toolchain PR is now also closed on a later run of
+    the repo (`sweepBeaten`), covered end to end against the fake GitHub only. A repo whose runs stop having plans never
+    reaches the sweep, so a beaten PR beside a security PR waits for the next plan in that repo; the sweep is not run
+    from the advisory reconcile, and it only pairs a security toolchain PR with a PR of the same repo, not across a
+    fork or a second base branch.

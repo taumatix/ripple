@@ -63,15 +63,9 @@ func (r *runner) holdForSecurity(plans []*prPlan, deps []model.Dependency, open 
 		}
 	}
 	for _, pr := range open {
-		tail, ok := strings.CutPrefix(pr.Head, BranchPrefix+"go/"+slug(model.PackageGoToolchain)+"-")
-		if !ok || semver.Canonical(tail) != tail || slug(tail) != tail {
-			continue
+		if tail, ok := r.securityToolchainPR(pr); ok {
+			claims = append(claims, claim{version: tail, branch: pr.Head, ref: "the open security pull request " + pr.URL, files: toolFiles})
 		}
-		j, found, err := r.e.Store.GetJob(r.ctx, model.JobKey(r.repo.FullName, model.DatasourceGoToolchain, model.PackageGoToolchain, tail))
-		if err != nil || !found || j.State != model.JobDone || j.PRURL == "" || j.PRURL != pr.URL || r.e.advisoryNoteFor(r.ctx, j) == nil {
-			continue
-		}
-		claims = append(claims, claim{version: tail, branch: pr.Head, ref: "the open security pull request " + pr.URL, files: toolFiles})
 	}
 	if len(claims) == 0 {
 		return plans
@@ -92,6 +86,20 @@ func (r *runner) holdForSecurity(plans []*prPlan, deps []model.Dependency, open 
 		}
 	}
 	return kept
+}
+
+// securityToolchainPR reports whether pr is an open security toolchain PR ripple opened,
+// and the version it moves to: its own finished job, advisory note and PR URL must agree.
+func (r *runner) securityToolchainPR(pr platform.PR) (string, bool) {
+	tail, ok := strings.CutPrefix(pr.Head, BranchPrefix+"go/"+slug(model.PackageGoToolchain)+"-")
+	if !ok || semver.Canonical(tail) != tail || slug(tail) != tail {
+		return "", false
+	}
+	j, found, err := r.e.Store.GetJob(r.ctx, model.JobKey(r.repo.FullName, model.DatasourceGoToolchain, model.PackageGoToolchain, tail))
+	if err != nil || !found || j.State != model.JobDone || j.PRURL == "" || j.PRURL != pr.URL || r.e.advisoryNoteFor(r.ctx, j) == nil {
+		return "", false
+	}
+	return tail, true
 }
 
 func itemFiles(it item) map[string]bool {
@@ -144,11 +152,49 @@ func (r *runner) closeBeaten(p *prPlan, pr platform.PR, open []platform.PR) {
 			security = true
 		}
 	}
-	if !security {
-		return
+	if security {
+		r.closeBeatenBy(pr, open)
 	}
+}
+
+// sweepBeaten retries what closeBeaten failed to close in an earlier run: a close the
+// host refused, or a repo that turned close-superseded-pull-requests on since. For every
+// open security toolchain PR of ripple's it closes the open directive and toolchain PRs
+// that are not security PRs and edit the same line, so a beaten PR does not stay open
+// beside the one that beat it for good. It makes no call when no such pair is open and
+// returns the heads it closed.
+func (r *runner) sweepBeaten(open []platform.PR) map[string]bool {
+	closed := map[string]bool{}
+	if !r.e.Advisories || !r.cfg.ClosesSuperseded() {
+		return closed
+	}
+	var beaten bool
 	for _, old := range open {
-		if old.Head == p.branch {
+		for _, pkg := range []string{model.PackageGoDirective, model.PackageGoToolchain} {
+			if _, ok := staleVersion(old.Head, pkg); ok {
+				beaten = true
+			}
+		}
+	}
+	if !beaten {
+		return closed
+	}
+	for _, pr := range open {
+		if _, ok := r.securityToolchainPR(pr); ok {
+			for head := range r.closeBeatenBy(pr, open) {
+				closed[head] = true
+			}
+		}
+	}
+	return closed
+}
+
+// closeBeatenBy closes the open ripple PRs that are not security PRs and edit the toolchain
+// line that the security toolchain PR pr edits, and returns their heads.
+func (r *runner) closeBeatenBy(pr platform.PR, open []platform.PR) map[string]bool {
+	closed := map[string]bool{}
+	for _, old := range open {
+		if old.Head == pr.Head {
 			continue
 		}
 		for _, pkg := range []string{model.PackageGoDirective, model.PackageGoToolchain} {
@@ -169,6 +215,7 @@ func (r *runner) closeBeaten(p *prPlan, pr platform.PR, open []platform.PR) {
 			case !done:
 				r.e.log().Info("pull request left open beside a security update: it was touched by someone else", "repo", r.repo.FullName, "pr", old.URL)
 			default:
+				closed[old.Head] = true
 				j.State, j.PRURL = model.JobPending, ""
 				j.NotBefore = r.e.now().Add(deferBy)
 				j.Reason = fmt.Sprintf("waiting for the security pull request %s: both edit the toolchain line of the same go.mod", pr.URL)
@@ -179,4 +226,5 @@ func (r *runner) closeBeaten(p *prPlan, pr platform.PR, open []platform.PR) {
 			}
 		}
 	}
+	return closed
 }

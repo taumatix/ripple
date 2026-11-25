@@ -8,20 +8,27 @@ import (
 	"golang.org/x/mod/semver"
 )
 
-var tagRE = regexp.MustCompile(`^(v?)((?:0|[1-9][0-9]*)(?:\.(?:0|[1-9][0-9]*)){0,2})(-[A-Za-z0-9][A-Za-z0-9.-]*)?$`)
+var tagRE = regexp.MustCompile(`^(v?)((?:0|[1-9][0-9]*)(?:\.(?:0[1-9]|0|[1-9][0-9]*)){0,2})(-[A-Za-z0-9][A-Za-z0-9.-]*)?$`)
 
 // ParseTag splits an image tag into the semver ripple compares and its shape: the v
 // prefix, how many numeric components it spells and its variant suffix. "1.25",
 // "1.25.3", "1.25-alpine" and "v1.25" are four shapes; a tag moves only to a newer
 // tag of its own shape, so a floating `3.19` stays floating and `-alpine` stays
-// alpine. Tags with no leading version (latest, bookworm) or a fourth component are
-// not tracked.
+// alpine. A second or third component may be a zero-padded month or day ("22.04",
+// `ubuntu:22.04` compares as 22.4); the first may not ("01.2" is not tracked). Tags with
+// no leading version (latest, bookworm) or a fourth component are not tracked.
 func ParseTag(tag string) (sv, shape string, ok bool) {
 	m := tagRE.FindStringSubmatch(tag)
 	if m == nil {
 		return "", "", false
 	}
-	sv = "v" + m[2]
+	comps := strings.Split(m[2], ".")
+	for i, c := range comps {
+		if len(c) == 2 && c[0] == '0' {
+			comps[i] = c[1:]
+		}
+	}
+	sv = "v" + strings.Join(comps, ".")
 	suffix := m[3]
 	if suffix == "" {
 		suffix = "-"
@@ -61,6 +68,13 @@ func TagFloor(cur string) string {
 		cand := m[1] + strings.Join(comps[:i], ".")
 		if i > 0 {
 			cand += "."
+		}
+		// A newer tag may spell a later number zero-padded ("22.07" is newer than "22.5"),
+		// and "0" is the lowest string such a component can start with.
+		if i > 0 {
+			if z := cand + "0"; z < floor {
+				floor = z
+			}
 		}
 		cand += "1" + strings.Repeat("0", len(c))
 		if cand < floor {

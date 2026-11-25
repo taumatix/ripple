@@ -28,7 +28,7 @@ Also read, each edited on its tag line only (quotes, comments and layout kept):
   takes the digest the registry reports for the new tag, and the edit is refused if none can be read.
 - **Helm values** (`values.yaml`, `values-*.yaml`, `values.*.yaml`, `*-values.yaml`, `*.values.yaml`): a `repository:` and
   `tag:` pair that are siblings under a key whose name contains `image` (`image`, `initImage`, `sidecar.image`), with an
-  optional `registry:` sibling. A pair with a `digest: sha256:...` moves with it, like Kustomize's; a templated value (`{{ }}`, `$`) or a URL
+  optional `registry:` sibling (ingress-nginx's form, `registry:`, `image: path/name` and `tag:` under `image:` with no `repository:`, is the same pair). A pair with a `digest: sha256:...` moves with it, like Kustomize's; a templated value (`{{ }}`, `$`) or a URL
   repository is left alone, and so is a `tag` that is empty. A single-string `image: repo:tag` under any key whose name
   contains `image` (`image`, `initImage`, `sidecar.image`) is read too, quotes and comment kept.
 - **Per-stage `ARG`**: `ARG V=1.2` declared after a `FROM` and used as the whole tag in a later `COPY --from=image:${V}` or
@@ -45,7 +45,7 @@ before the variable (`v${V}`) is not read.
 
 | Form | Handling |
 |---|---|
-| `FROM nginx:1.25`, `FROM ghcr.io/org/img:v2.3.1-alpine` | bumped to a newer tag of the **same shape** |
+| `FROM nginx:1.25`, `FROM ghcr.io/org/img:v2.3.1-alpine`, `FROM ubuntu:22.04` | bumped to a newer tag of the **same shape** (a zero-padded second or third number, `22.04`, compares as 22.4) |
 | `FROM img:1.25@sha256:...` | tag and digest move together; the digest is read from the registry for the new tag |
 | `FROM img`, `img:latest`, `img:stable`, `img@sha256:...` (no tag) | ignored: no version to compare |
 | `FROM ${BASE}:1`, `FROM scratch`, a stage name | ignored |

@@ -399,3 +399,40 @@ func TestDockerDigestPairsSingleStringsAndArgSuffixMove(t *testing.T) {
 		}
 	})
 }
+
+// ingress-nginx writes `registry:`, `image: path/name` and `tag:` under `image:` (no
+// `repository:`), and Ubuntu tags a release by zero-padded month: both move.
+func TestDockerIngressStyleValuesAndCalendarTagMove(t *testing.T) {
+	forEach(t, func(t *testing.T, st store.Store) {
+		e, reg := dockerEnv(t, st)
+		reg.AddTag("org/controller", "v1.10.1")
+		reg.AddTag("library/ubuntu", "22.04")
+		values := "controller:\n  image:\n    registry: ghcr.io\n    image: org/controller\n    tag: \"v1.10.1\"\n"
+		df := "FROM ubuntu:22.04 AS base\n"
+		e.gh.AddRepo("acme/app", map[string]string{".ripple.yaml": dockerConfig, "chart/values.yaml": values, "Dockerfile": df})
+		start(t, e, "acme/app")
+		e.clock.Advance(time.Minute)
+		reg.AddTag("org/controller", "v1.11.0")
+		reg.AddTag("library/ubuntu", "22.10")
+		reg.AddTag("library/ubuntu", "24.04")
+		e.tick()
+		e.tick()
+		want := map[string][2]string{
+			"chart/values.yaml": {"chart/values.yaml", strings.Replace(values, "v1.10.1", "v1.11.0", 1)},
+			"Dockerfile":        {"Dockerfile", "FROM ubuntu:24.04 AS base\n"},
+		}
+		seen := map[string]bool{}
+		for _, pr := range e.gh.PRs("acme/app") {
+			for k, w := range want {
+				if got, _ := e.gh.FileAt("acme/app", pr.Head, w[0]); got == w[1] {
+					seen[k] = true
+				}
+			}
+		}
+		for k := range want {
+			if !seen[k] {
+				t.Errorf("no PR made the %s edit", k)
+			}
+		}
+	})
+}

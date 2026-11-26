@@ -17,6 +17,7 @@ import (
 
 	"github.com/taumatix/ripple/internal/app"
 	"github.com/taumatix/ripple/internal/config"
+	"github.com/taumatix/ripple/internal/sandbox"
 )
 
 const usage = `usage:
@@ -47,6 +48,9 @@ func run(args []string, out, errw io.Writer, getenv func(string) string) int {
 			return 1
 		}
 		return 0
+	case len(args) >= 1 && args[0] == sandbox.RelayArg:
+		// Not a user command: the in-sandbox relay of RIPPLE_SANDBOX=bwrap (internal/sandbox).
+		return sandbox.RunRelay(args[1:], errw)
 	case len(args) >= 2 && args[0] == "config" && args[1] == "validate":
 		return validate(args[2:], out, errw, getenv)
 	case len(args) >= 1 && args[0] == "events":

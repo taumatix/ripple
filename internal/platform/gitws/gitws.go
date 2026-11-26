@@ -602,6 +602,19 @@ func (w *workspace) RunGo(ctx context.Context, dir string, args ...string) (stri
 		}
 		defer gate.Close()
 		pol.LoopbackPorts = []int{gate.Port()}
+		if gs, ok := w.o.Sandbox.(sandbox.GateSocketer); ok && gs.NeedsGateSocket() {
+			// bwrap's command has its own network namespace: the gate is reached through a
+			// unix socket bound into it, in a private directory removed afterwards.
+			sockDir, err := os.MkdirTemp("", "ripple-gate-")
+			if err != nil {
+				return "", err
+			}
+			defer os.RemoveAll(sockDir)
+			pol.GateSocket = filepath.Join(sockDir, "gate.sock")
+			if err := gate.ListenUnix(pol.GateSocket); err != nil {
+				return "", err
+			}
+		}
 		for i, e := range env {
 			if strings.HasPrefix(e, "GOPROXY=") {
 				env[i] = "GOPROXY=" + gate.URL

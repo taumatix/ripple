@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
 	"strings"
 )
 
@@ -67,6 +68,22 @@ func NewGateAuth(upstream, user, token string) (*Gate, error) {
 	g.URL = "http://" + ln.Addr().String() + prefix
 	go g.srv.Serve(ln)
 	return g, nil
+}
+
+// ListenUnix makes the gate also answer on a unix socket at path (the file must not
+// exist), for a backend that cannot reach host loopback ports. The URL prefix applies
+// the same way. The socket is created 0600 and removed by Close.
+func (g *Gate) ListenUnix(path string) error {
+	ln, err := net.Listen("unix", path)
+	if err != nil {
+		return err
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		ln.Close()
+		return err
+	}
+	go g.srv.Serve(ln)
+	return nil
 }
 
 // Port is the loopback port to allow in a Policy.

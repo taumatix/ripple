@@ -123,3 +123,46 @@ func TestBwrapRefusesDenyInsideBoundTree(t *testing.T) {
 		t.Fatalf("unrelated deny refused: %v", err)
 	}
 }
+
+func TestBwrapProxyNeedsRelayAndGateSocket(t *testing.T) {
+	p := Policy{Workdir: "/w", LoopbackPorts: []int{1234}, GateSocket: "/tmp/g/gate.sock"}
+	for name, b := range map[string]Backend{
+		"no relay binary": Bwrap("/usr/bin/bwrap"),
+		"relative relay":  BwrapRelay("/usr/bin/bwrap", "ripple"),
+	} {
+		if _, err := b.Wrap(p, []string{"go"}); !errors.Is(err, ErrNetUnsupported) {
+			t.Errorf("%s: err = %v, want ErrNetUnsupported", name, err)
+		}
+	}
+	noSock := p
+	noSock.GateSocket = ""
+	if _, err := BwrapRelay("/usr/bin/bwrap", "/opt/ripple").Wrap(noSock, []string{"go"}); !errors.Is(err, ErrNetUnsupported) {
+		t.Errorf("no gate socket: err = %v, want ErrNetUnsupported", err)
+	}
+	two := p
+	two.LoopbackPorts = []int{1, 2}
+	if _, err := BwrapRelay("/usr/bin/bwrap", "/opt/ripple").Wrap(two, []string{"go"}); !errors.Is(err, ErrNetUnsupported) {
+		t.Errorf("two ports: err = %v, want ErrNetUnsupported", err)
+	}
+}
+
+func TestBwrapRelayArgv(t *testing.T) {
+	got, err := BwrapRelay("/usr/bin/bwrap", "/opt/ripple").Wrap(Policy{
+		Workdir: "/w/job", LoopbackPorts: []int{1234}, GateSocket: "/tmp/g/gate.sock",
+	}, []string{"/usr/bin/go", "build"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := " " + strings.Join(got, " ") + " "
+	for _, want := range []string{
+		" --unshare-all ", " --ro-bind /opt/ripple /.ripple/relay ", " --bind /tmp/g/gate.sock /.ripple/gate.sock ",
+		" -- /.ripple/relay sandbox-relay 1234 /.ripple/gate.sock -- /usr/bin/go build ",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("argv lacks %q: %v", want, got)
+		}
+	}
+	if strings.Contains(s, "--share-net") {
+		t.Errorf("network shared: %v", got)
+	}
+}

@@ -1,0 +1,55 @@
+name: sandbox-bwrap
+# RIPPLE_SANDBOX=bwrap against real bubblewrap on a hosted Ubuntu runner (docs/sandbox.md).
+# RIPPLE_REQUIRE_BWRAP=1 turns a missing or unusable bwrap into a test failure, and the last step
+# fails the job if any test was skipped, so this job cannot pass without exercising bwrap.
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  bwrap:
+    # 24.04 is where AppArmor first restricted unprivileged user namespaces; latest is what the
+    # runner image currently is (26.04 on 2026-11-26). The probe step records what each needs.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      RIPPLE_REQUIRE_BWRAP: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: install bubblewrap
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y bubblewrap
+          bwrap --version
+          cat /etc/os-release | head -3
+          sysctl kernel.unprivileged_userns_clone kernel.apparmor_restrict_unprivileged_userns || true
+      - name: probe, unprivileged user namespaces as the runner leaves them
+        id: probe
+        continue-on-error: true
+        run: bwrap --unshare-all --ro-bind / / --dev /dev true
+      - name: allow unprivileged user namespaces (Ubuntu 24.04 restricts them with AppArmor)
+        if: steps.probe.outcome == 'failure'
+        run: |
+          echo "the probe failed, lifting kernel.apparmor_restrict_unprivileged_userns"
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          bwrap --unshare-all --ro-bind / / --dev /dev true
+      - name: sandbox tests under real bwrap
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -count=1 -v -timeout 20m -run 'Bwrap|Relay' ./internal/sandbox/ ./internal/e2e/ | tee bwrap.log
+      - name: no skipped test, and the bwrap tests ran
+        run: |
+          if grep -E -- '--- SKIP' bwrap.log; then echo "tests were skipped"; exit 1; fi
+          for t in TestBwrapLiveFilesystem TestBwrapLiveReachesOnlyTheGate TestDependencyUpdateUnderBwrap; do
+            grep -q -- "--- PASS: $t " bwrap.log || { echo "$t did not run"; exit 1; }
+          done

@@ -11,7 +11,9 @@ package sandbox
 import (
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 )
 
@@ -28,6 +30,10 @@ type Policy struct {
 	Deny     []string // never readable or writable, even if inside an allowed path
 	// LoopbackPorts are the only network destinations (127.0.0.1:port); empty means no network.
 	LoopbackPorts []int
+	// GateSocket is a unix socket the gate also listens on. A backend that cannot share
+	// host loopback ports (bwrap, in its own network namespace) forwards LoopbackPorts[0]
+	// to it; see GateSocketer. Other backends ignore it.
+	GateSocket string
 	// Env names the variables the command runs with ("KEY=value"). Process-level backends
 	// ignore it (the command inherits them); a container backend passes the keys through.
 	Env []string
@@ -46,6 +52,11 @@ type Policy struct {
 // Policy.Proxy, and the backend decides what network the command gets.
 type NetworkOwner interface{ OwnsNetwork() bool }
 
+// GateSocketer marks a backend that reaches the Gate through a unix socket
+// (Policy.GateSocket) instead of a host loopback port; the caller then calls
+// Gate.ListenUnix before wrapping.
+type GateSocketer interface{ NeedsGateSocket() bool }
+
 // Reaper is a backend whose confined command can outlive the process that started it
 // (a container keeps running when its client is killed). Reap stops the one that was
 // started with argv, as returned by Wrap; it is best effort and never blocks long.
@@ -62,6 +73,16 @@ type ClientEnver interface{ ClientEnv(job []string) []string }
 type Backend interface {
 	Name() string
 	Wrap(p Policy, argv []string) ([]string, error)
+}
+
+// bwrapWithSelf is the bwrap backend whose in-sandbox relay is this very executable
+// (which must dispatch RelayArg to RunRelay: ripple's main does). Without a resolvable
+// path it is plain Bwrap, which refuses to run a command that needs the proxy.
+func bwrapWithSelf(bin string) Backend {
+	if exe, err := os.Executable(); err == nil && filepath.IsAbs(exe) {
+		return BwrapRelay(bin, exe)
+	}
+	return Bwrap(bin)
 }
 
 type none struct{}
@@ -97,7 +118,7 @@ func DetectWith(name string, look func(string) (string, error), o ContainerOptio
 	case "", "none":
 		return None(), nil
 	case "bwrap":
-		return need("bwrap", Bwrap)
+		return need("bwrap", bwrapWithSelf)
 	case "seatbelt":
 		return need("sandbox-exec", Seatbelt)
 	case "container", "docker", "podman":
@@ -113,7 +134,7 @@ func DetectWith(name string, look func(string) (string, error), o ContainerOptio
 	case "auto":
 		switch runtime.GOOS {
 		case "linux":
-			return need("bwrap", Bwrap)
+			return need("bwrap", bwrapWithSelf)
 		case "darwin":
 			return need("sandbox-exec", Seatbelt)
 		}

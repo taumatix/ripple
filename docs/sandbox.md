@@ -111,17 +111,41 @@ fetch, push and the server stay on the host.
 - `git clone`, `fetch` and `push` run unconfined: they hold the installation token and execute no repository
   code (hooks are off, `GIT_ALLOW_PROTOCOL` is pinned).
 - The server process itself, and every other part of the job.
-- `bwrap` cannot confine the network to a proxy port, so `go` refuses to run under it rather than share the
-  host network. Until a Linux backend can reach the proxy (a network namespace with a forwarded socket), Linux
-  deployments should use `docker` or `podman` (above) instead, or wait for entry 1 of the roadmap.
+- `bwrap` needs the `ripple` executable as its relay (below). If the executable's path cannot be resolved, or the
+  policy cannot be met, `go` refuses to run rather than share the host network.
 - `sandbox-exec` is deprecated by Apple. If it is removed, `auto` fails at start-up.
+
+## bwrap: how `go` reaches the proxy
+
+bwrap always starts the command in a fresh network namespace (`--unshare-all`): the only interface is `lo`. For a step
+that needs the proxy, the server serves the gate (the same reverse proxy seatbelt uses, with its random path prefix)
+additionally on a unix socket in a private `0700` temp directory. The command is started through ripple itself as
+`ripple sandbox-relay <port> <socket> -- go ...`: the ripple executable and that one socket are the only host paths
+bound in beyond the workspace and system trees. The relay listens on the namespace's `127.0.0.1:<port>` (the gate's
+port, so `GOPROXY` is the same URL as under seatbelt), forwards each connection to the socket, runs `go`, and returns its
+exit status. Nothing else is reachable: no other host loopback port, no external address (`Network is unreachable`).
+`sandbox-relay` is an internal subcommand of the `ripple` binary, not a user command.
+
+It fails closed: a policy that asks for the proxy gets `ErrNetUnsupported` (so `go` does not run) unless the backend
+has an absolute relay path, there is a gate socket, and exactly one port was asked for.
 
 ## What is verified
 
 Seatbelt is exercised for real: `internal/sandbox` runs commands under it and checks that a file outside
 the workspace cannot be read or written and that only the named loopback port connects, and
 `internal/e2e` drives a webhook-to-PR dependency update with `go` and `git` confined. Both live in `_darwin_test.go` files, so they do not run on Linux CI.
-Bwrap is covered only by argv unit tests; it has never run.
+
+Bwrap runs for real in the `sandbox-bwrap` CI job (`.github/workflows/bwrap.yml`, on `ubuntu-24.04` and
+`ubuntu-latest`), never on a developer's Mac: `internal/sandbox/bwrap_live_linux_test.go` (file confinement; no host loopback
+port without a proxy; through the relay only the gate answers, another host port and `1.1.1.1` do not; the exit status
+survives) and `internal/e2e/sandbox_bwrap_linux_test.go` (a webhook-to-PR update with `go mod tidy`, `build`, `vet` and
+local `git` confined, `go.sum` refreshed through the gate). `RIPPLE_REQUIRE_BWRAP=1`, set in that job, makes a missing
+bwrap a failure and the job fails on any skipped test. **Ubuntu 24.04 and AppArmor:** the job probes
+`bwrap --unshare-all` before the tests and only lifts `kernel.apparmor_restrict_unprivileged_userns` if the probe fails;
+on 2026-11-26 `ubuntu-24.04` (24.04.5, bubblewrap 0.9.0) failed the probe with the sysctl at 1 and passed
+after it was set to 0, while `ubuntu-latest` (26.04, bubblewrap 0.11.1) passed with it at 1. On your own Ubuntu 24.04+ host, check that `bwrap --unshare-all --ro-bind / / true` works for the
+server's user before choosing `bwrap`. Not verified: other distributions, a bwrap older than 0.9, a server running with
+a restricted `/tmp` (the gate socket directory comes from `os.MkdirTemp`), and cgo builds under bwrap.
 
 macOS notes: `/usr/bin/git` is an `xcrun` shim that writes a cache outside the workspace, so ripple runs the
 Command Line Tools' own `git` under the sandbox. Temporary files go to the workspace (`TMPDIR`).

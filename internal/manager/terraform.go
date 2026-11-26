@@ -49,7 +49,7 @@ var terraformDeclaredRE = regexp.MustCompile(`^[0-9]+\.[0-9]+(\.[0-9]+)?$`)
 func ParseTerraformDeclared(s string) bool { return terraformDeclaredRE.MatchString(s) }
 
 var (
-	terraformConstraintRE    = regexp.MustCompile(`^(?:=\s*|~>\s*)?([0-9]+\.[0-9]+\.[0-9]+)$`)
+	terraformConstraintRE     = regexp.MustCompile(`^(?:=\s*|~>\s*)?([0-9]+\.[0-9]+\.[0-9]+)$`)
 	terraformPessimisticTwoRE = regexp.MustCompile(`^~>\s*([0-9]+\.[0-9]+)$`)
 )
 

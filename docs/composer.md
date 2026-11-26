@@ -44,4 +44,6 @@ the poll the job is stale and nothing is written.
 
 The branch prefix is `ripple/packagist/`.
 
-See [UPSTREAM.md](../UPSTREAM.md): nothing here is verified against the real Packagist.
+See [UPSTREAM.md](../UPSTREAM.md). The version listing is read live from the real Packagist by a `-tags live` test
+([live-tests.md](live-tests.md)) and an edited `composer.json` is accepted by Composer in the real-tool test
+([realtool.md](realtool.md)); rate limits and redirects are not checked.

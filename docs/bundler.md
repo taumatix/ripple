@@ -41,4 +41,6 @@ to the branch.
 
 The branch prefix is `ripple/rubygems/`.
 
-See [UPSTREAM.md](../UPSTREAM.md): nothing here is verified against the real rubygems.org.
+See [UPSTREAM.md](../UPSTREAM.md). The version listing is read live from the real rubygems.org by a `-tags live` test
+([live-tests.md](live-tests.md)) and an edited Gemfile is accepted by `bundle lock` in the real-tool test
+([realtool.md](realtool.md)); rate limits and yanked versions are not checked.

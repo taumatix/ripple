@@ -142,9 +142,9 @@ survives) and `internal/e2e/sandbox_bwrap_linux_test.go` (a webhook-to-PR update
 local `git` confined, `go.sum` refreshed through the gate). `RIPPLE_REQUIRE_BWRAP=1`, set in that job, makes a missing
 bwrap a failure and the job fails on any skipped test. **Ubuntu 24.04 and AppArmor:** the job probes
 `bwrap --unshare-all` before the tests and only lifts `kernel.apparmor_restrict_unprivileged_userns` if the probe fails;
-see the job log for what each runner needed (on 2026-11-26 `ubuntu-latest` reported bubblewrap 0.11.1 with that sysctl at 1 and
-needed no change). On your own Ubuntu 24.04+ host, check that `bwrap --unshare-all --ro-bind / / true` works for the
-server's user before choosing `bwrap`. Not verified: other distributions, a bwrap older than 0.11, a server running with
+on 2026-11-26 `ubuntu-24.04` (24.04.5, bubblewrap 0.9.0) failed the probe with the sysctl at 1 and passed
+after it was set to 0, while `ubuntu-latest` (26.04, bubblewrap 0.11.1) passed with it at 1. On your own Ubuntu 24.04+ host, check that `bwrap --unshare-all --ro-bind / / true` works for the
+server's user before choosing `bwrap`. Not verified: other distributions, a bwrap older than 0.9, a server running with
 a restricted `/tmp` (the gate socket directory comes from `os.MkdirTemp`), and cgo builds under bwrap.
 
 macOS notes: `/usr/bin/git` is an `xcrun` shim that writes a cache outside the workspace, so ripple runs the

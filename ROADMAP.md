@@ -396,24 +396,26 @@ Everything else:
 236. **Composer: refresh `composer.lock`.** The lock is reported stale in the PR body, not rewritten. Rewriting an entry
     without running Composer needs the new version's `require` set and its `dist` hashes from the metadata; decide after
     235 whether that is worth doing.
-237. **NuGet: verify against the real nuget.org, and the unread forms.** The datasource, manager and docs are written
-    from the vendored Microsoft Learn pages ([docs/vendor/nuget](docs/vendor/nuget)) and a fake; nothing has run against
-    the real service (service index shape, rate limits, redirects). Add a `-tags live` check, then the forms skipped
-    today: ranges and floating versions, `<Version>` child elements, `Update=` items, property-indirected versions,
+237. **NuGet: the unread forms.** The datasource, manager and docs are written from the vendored Microsoft Learn pages
+    ([docs/vendor/nuget](docs/vendor/nuget)); a `-tags live` test (`internal/nuget`, `.github/workflows/live.yml`) reads
+    the real nuget.org and a `-tags realtool` test ([docs/realtool.md](docs/realtool.md)) checks an edited project with
+    `dotnet`. Not covered by either: rate limits and redirects. The forms skipped today: ranges and floating versions, `<Version>` child elements, `Update=` items, property-indirected versions,
     prerelease and four-segment versions, `packages.config`, and `NuGet.Config` sources with package source mapping
     (today a private id is looked up on nuget.org only; see the dependency-confusion note in docs/nuget.md).
 238. **NuGet: refresh `packages.lock.json`.** The lock is reported stale in the PR body, not rewritten. Rewriting it
     without running the SDK needs each package's dependency set and content hash from the registration and `.nupkg`;
     decide after 237 whether that is worth doing.
-239. **Maven: verify against the real Maven Central, and the unread forms.** The datasource, manager and docs are
-    written from the vendored Maven pages ([docs/vendor/maven](docs/vendor/maven)), one sample metadata file and a fake;
-    nothing has run against the real service. Add a `-tags live` check, then the forms skipped today: two-segment
+239. **Maven: the unread forms.** The datasource, manager and docs are written from the vendored Maven pages
+    ([docs/vendor/maven](docs/vendor/maven)); a `-tags live` test (`internal/maven`, `.github/workflows/live.yml`) reads
+    the real Maven Central and a `-tags realtool` test ([docs/realtool.md](docs/realtool.md)) checks an edited pom with
+    `mvn`. The forms skipped today: two-segment
     versions (`4.13`, common on Central), qualified versions, properties (`${x.version}`, resolved from `<properties>` and
     the parent), versions managed by a parent or BOM, `<repositories>` and `settings.xml` mirrors, and Gradle
     (`build.gradle`, `libs.versions.toml`) as a sibling manager on this datasource.
-240. **Terraform: verify against the real registry, and the unread forms.** The datasource, manager and docs are written
-    from the vendored HashiCorp pages ([docs/vendor/terraform](docs/vendor/terraform)) and a fake; nothing has run against
-    the real service. Add a `-tags live` check, then the forms skipped today: ranges and other operators (`>= 1.0`,
+240. **Terraform: the unread forms.** The datasource, manager and docs are written from the vendored HashiCorp pages
+    ([docs/vendor/terraform](docs/vendor/terraform)); a `-tags live` test (`internal/terraform`,
+    `.github/workflows/live.yml`) reads the real registry and a `-tags realtool` test
+    ([docs/realtool.md](docs/realtool.md)) checks an edited configuration with `terraform`. The forms skipped today: ranges and other operators (`>= 1.0`,
     `~> 1.2`), `//subdir` module addresses, the legacy `aws = "~> 4.0"` provider form, hosted registries and
     `.terraformrc` mirrors, `*.tf.json`, `.terraform-version` and the `required_version` constraint, and OpenTofu's registry.
 241. **Terraform: refresh `.terraform.lock.hcl`.** The lock is reported stale in provider PRs, not rewritten. Rewriting it

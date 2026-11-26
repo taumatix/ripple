@@ -36,7 +36,7 @@ const maxBody = 64 << 20
 
 var partRE = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]*$`)
 
-var releaseRE = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
+var releaseRE = regexp.MustCompile(`^[0-9]+\.[0-9]+(\.[0-9]+)?$`)
 
 // ValidCoordinate reports whether groupId and artifactId can name an artifact. They come from a
 // pom.xml, so they are checked before they join a URL ("..", "/" and the like are refused).
@@ -121,9 +121,10 @@ func (c *Client) Versions(ctx context.Context, pkg string) ([]string, error) {
 	return doc.Versions, nil
 }
 
-// Releases lists the versions ripple may propose: three numeric segments, which leaves out
-// every qualified version (1.0.0-SNAPSHOT, 1.0.0.RELEASE, 1.0-beta) and the one- and
-// two-segment ones, none of which a three-segment edit can move to.
+// Releases lists the versions ripple may propose: two or three numeric segments, which leaves
+// out every qualified version (1.0.0-SNAPSHOT, 1.0.0.RELEASE, 1.0-beta) and the one- and
+// four-segment ones. Whether a two-segment release is a candidate for a given declaration is the
+// engine's call: a three-segment declaration is never moved to one.
 func Releases(versions []string) []string {
 	seen := map[string]bool{}
 	var out []string

@@ -52,7 +52,7 @@ func TestVersions(t *testing.T) {
 	if want := []string{"1.0.0", "1.2", "1.2.3", "1.2.3-SNAPSHOT", "2.0.0"}; !reflect.DeepEqual(vs, want) {
 		t.Errorf("got %v", vs)
 	}
-	if got, want := Releases(vs), []string{"1.0.0", "1.2.3", "2.0.0"}; !reflect.DeepEqual(got, want) {
+	if got, want := Releases(vs), []string{"1.0.0", "1.2", "1.2.3", "2.0.0"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("releases %v", got)
 	}
 	if _, err := c.Versions(context.Background(), "org.example:private"); !errors.Is(err, ErrDenied) {

@@ -408,10 +408,20 @@ Everything else:
 239. **Maven: the unread forms.** The datasource, manager and docs are written from the vendored Maven pages
     ([docs/vendor/maven](docs/vendor/maven)); a `-tags live` test (`internal/maven`, `.github/workflows/live.yml`) reads
     the real Maven Central and a `-tags realtool` test ([docs/realtool.md](docs/realtool.md)) checks an edited pom with
-    `mvn`. The forms skipped today: two-segment
-    versions (`4.13`, common on Central), qualified versions, properties (`${x.version}`, resolved from `<properties>` and
-    the parent), versions managed by a parent or BOM, `<repositories>` and `settings.xml` mirrors, and Gradle
-    (`build.gradle`, `libs.versions.toml`) as a sibling manager on this datasource.
+    `mvn`. Two-segment versions (`4.13`) and `${x}` properties declared once in the pom's own `<properties>` and used
+    only by one artifact are read now (docs/maven.md). The forms skipped today: qualified versions, a property that
+    several artifacts share (248), properties and versions managed by a parent or BOM (249), `<repositories>` and
+    `settings.xml` mirrors, and Gradle (`build.gradle`, `libs.versions.toml`) as a sibling manager on this datasource.
+248. **Maven: shared properties, and saying what was skipped.** `${jackson.version}` used by `jackson-core` and
+    `jackson-databind` is left alone because ripple reads one artifact's releases and cannot tell the sibling has the new
+    version. Check every artifact that uses the property (one metadata read each, same group) and move it only when all
+    have the release. A skipped property is invisible today (the PR just never opens); report it per file. The
+    command-line override of a property (`-Dx.version=`) is not seen, and Maven resolving a once-declared property as
+    `pom-reference.txt` describes is that page's text, not run beyond the realtool pom.
+249. **Maven: parents and BOMs.** A `<parent>` pom's `<properties>` and `<dependencyManagement>` are not followed, so a
+    dependency whose version comes from `spring-boot-starter-parent` or an imported BOM stays unread. Reading the parent
+    needs its pom from the repository (a second datasource read) and Maven's inheritance rules (vendored
+    `pom-reference.txt` "Inheritance"), and the edit then belongs in the parent's file or is impossible.
 240. **Terraform: the unread forms.** The datasource, manager and docs are written from the vendored HashiCorp pages
     ([docs/vendor/terraform](docs/vendor/terraform)); a `-tags live` test (`internal/terraform`,
     `.github/workflows/live.yml`) reads the real registry and a `-tags realtool` test

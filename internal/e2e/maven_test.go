@@ -1,6 +1,8 @@
 package e2e
 
 import (
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -130,6 +132,119 @@ func TestMavenDeniedArtifactIsLeftAlone(t *testing.T) {
 		e.tick()
 		if n := len(e.gh.PRs("acme/app")); n != 0 {
 			t.Errorf("an artifact that refuses anonymous reads opened %d PRs", n)
+		}
+	})
+}
+
+// pomForms mixes the forms that are read since ROADMAP 239's first piece: a two-segment version, a
+// version given by a property of the pom's own <properties>, and the ones that stay unread (a
+// property used by two packages, a property the pom does not define).
+const pomForms = `<project>
+  <modelVersion>4.0.0</modelVersion>
+  <properties>
+    <commons.version>3.12.0</commons.version>
+    <shared.version>2.0.0</shared.version>
+  </properties>
+  <dependencies>
+    <dependency>
+      <groupId>junit</groupId>
+      <artifactId>junit</artifactId>
+      <version>4.13</version>
+    </dependency>
+    <dependency>
+      <groupId>a.b</groupId>
+      <artifactId>short</artifactId>
+      <version>1.0</version>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.commons</groupId>
+      <artifactId>commons-lang3</artifactId>
+      <version>${commons.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>com.google.guava</groupId>
+      <artifactId>guava</artifactId>
+      <version>32.1.2</version>
+    </dependency>
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-api</artifactId>
+      <version>${shared.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-simple</artifactId>
+      <version>${shared.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>a.b</groupId>
+      <artifactId>parented</artifactId>
+      <version>${parent.managed.version}</version>
+    </dependency>
+  </dependencies>
+</project>
+`
+
+func TestMavenTwoSegmentAndPropertyVersions(t *testing.T) {
+	forEach(t, func(t *testing.T, st store.Store) {
+		e, reg := mavenEnv(t, st)
+		reg.Publish("junit:junit", "4.13")
+		reg.Publish("a.b:short", "1.0")
+		reg.Publish("org.apache.commons:commons-lang3", "3.12.0")
+		reg.Publish("com.google.guava:guava", "32.1.2")
+		e.gh.AddRepo("acme/app", map[string]string{".ripple.yaml": mavenConfig, "pom.xml": pomForms})
+		start(t, e, "acme/app")
+		var got []string
+		for _, d := range e.deps("acme/app") {
+			got = append(got, d.Package+"@"+d.Version)
+		}
+		sort.Strings(got)
+		want := []string{"a.b:short@1.0", "com.google.guava:guava@32.1.2", "junit:junit@4.13", "org.apache.commons:commons-lang3@3.12.0"}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("tracked %v, want %v (a property shared by two packages and one the pom does not define stay unread)", got, want)
+		}
+
+		e.clock.Advance(time.Minute)
+		reg.Publish("junit:junit", "4.13.2")
+		reg.Publish("junit:junit", "4.13.3-SNAPSHOT") // qualified: not proposed
+		reg.Publish("a.b:short", "1.1")               // a two-segment declaration moves to a two-segment release
+		reg.Publish("org.apache.commons:commons-lang3", "3.14.0")
+		reg.Publish("com.google.guava:guava", "33.1") // a three-segment declaration never moves to a two-segment one
+		reg.Publish("com.google.guava:guava", "33.0.0")
+		reg.Publish("org.slf4j:slf4j-api", "2.0.9")
+		reg.Publish("org.slf4j:slf4j-simple", "2.0.9")
+		e.tick()
+		e.tick()
+
+		edits := map[string][2]string{
+			"junit":         {"<version>4.13</version>", "<version>4.13.2</version>"},
+			"short":         {"<version>1.0</version>", "<version>1.1</version>"},
+			"commons-lang3": {"<commons.version>3.12.0<", "<commons.version>3.14.0<"}, // the property moves, the dependency keeps ${commons.version}
+			"guava":         {"<version>32.1.2</version>", "<version>33.0.0</version>"},
+		}
+		prs := e.gh.PRs("acme/app")
+		if len(prs) != len(edits) {
+			t.Fatalf("one PR per tracked package, got %d", len(prs))
+		}
+		for _, pr := range prs {
+			content, _ := e.gh.FileAt("acme/app", pr.Head, "pom.xml")
+			var edit [2]string
+			for name, ed := range edits {
+				if strings.Contains(pr.Head, name) {
+					edit = ed
+				}
+			}
+			if edit == ([2]string{}) {
+				t.Fatalf("unexpected branch %q", pr.Head)
+			}
+			if want := strings.Replace(pomForms, edit[0], edit[1], 1); content != want {
+				t.Errorf("%s: only that text moves, layout kept:\n%s", pr.Head, content)
+			}
+		}
+		for _, r := range reg.Requests() {
+			if strings.Contains(r.Path, "slf4j") || strings.Contains(r.Path, "parented") {
+				t.Errorf("a package ripple does not track was asked for: %s", r.Path)
+			}
 		}
 	})
 }

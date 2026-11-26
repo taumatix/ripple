@@ -78,7 +78,8 @@ against the live service.
 `maven/repository-layout.txt` and `maven/repository-metadata.txt` are the text of
 https://maven.apache.org/repositories/layout.html and https://maven.apache.org/ref/3.9.9/maven-repository-metadata/repository-metadata.html
 with the HTML tags stripped; `maven/junit-maven-metadata.xml` is the `maven-metadata.xml` of `junit:junit` on Maven
-Central. All fetched 2026-11-25. Not checked against the live service beyond that one file.
+Central. All fetched 2026-11-25. `maven/pom-reference.txt` is the text of https://maven.apache.org/pom.html (the
+POM Reference: "Properties", "Version Order Specification"), tags stripped, fetched 2026-11-26.
 
 ## terraform
 

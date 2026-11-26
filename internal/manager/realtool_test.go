@@ -317,7 +317,11 @@ func TestRealtoolMaven(t *testing.T) {
 	const dep = "org.apache.maven.plugins:maven-dependency-plugin:3.8.1:resolve"
 	realtool{
 		fixture: "maven", manifest: "pom.xml", manager: Maven{Dir: "/"},
-		bumps: []bump{{"org.apache.commons:commons-lang3", "3.12.0", "3.14.0"}},
+		bumps: []bump{
+			{"org.apache.commons:commons-lang3", "3.12.0", "3.14.0"},
+			{"junit:junit", "4.13", "4.13.2"},         // a two-segment version
+			{"org.slf4j:slf4j-api", "2.0.0", "2.0.9"}, // through <slf4j.version>: the property line moves
+		},
 		steps: [][]string{
 			{"mvn", "-B", "-q", "--no-transfer-progress", "validate"},
 			{"mvn", "-B", "-q", "--no-transfer-progress", dep},

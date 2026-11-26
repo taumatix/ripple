@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 
 	"golang.org/x/mod/semver"
 
@@ -30,6 +31,11 @@ func applicableMaven(d model.Dependency, pkg, version string) (rules.UpdateType,
 		return "", false
 	}
 	if !manager.ParseMavenSpec(d.Version) || !manager.ParseMavenSpec(version) {
+		return "", false
+	}
+	// A three-segment declaration keeps moving to three-segment releases only, as before two-segment
+	// ones were read at all; a two-segment one (4.13) may move to either (4.13.2, 4.14).
+	if strings.Count(d.Version, ".") == 2 && strings.Count(version, ".") != 2 {
 		return "", false
 	}
 	return rules.Classify("v"+d.Version, "v"+version)

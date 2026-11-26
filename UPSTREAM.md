@@ -86,10 +86,10 @@ ripple is bound to two external contracts. The block below is the source of trut
   kind: http-api
   url: https://maven.apache.org/repositories/layout.html
   docs: https://maven.apache.org/ref/3.9.9/maven-repository-metadata/repository-metadata.html
-  format: "GET https://repo.maven.apache.org/maven2/{group with / for .}/{artifact}/maven-metadata.xml, anonymous; <metadata><versioning><versions><version>; pom.xml <dependency> groupId / artifactId / version"
-  verified-against: "docs/vendor/maven pages and one sample maven-metadata.xml (junit:junit) fetched 2026-11-25; tests use internal/testutil/maven.go, a fake written from them"
-  unverified: "everything else against the real service: rate limits, redirects, very large metadata files, mirrors and settings.xml (not read)"
-  checked: 2026-11-25
+  format: "GET https://repo.maven.apache.org/maven2/{group with / for .}/{artifact}/maven-metadata.xml, anonymous; <metadata><versioning><versions><version>; pom.xml <dependency> groupId / artifactId / version, version given as ${name} from the pom's own <properties>"
+  verified-against: "docs/vendor/maven pages (repository layout and metadata, fetched 2026-11-25; the POM reference's Properties and Version Order Specification, fetched 2026-11-26) and a sample maven-metadata.xml (junit:junit); tests use internal/testutil/maven.go, a fake written from them, the -tags live test against Maven Central, and the -tags realtool test with mvn (CI)"
+  unverified: "rate limits, redirects, very large metadata files, mirrors and settings.xml (not read), parent and BOM properties (not followed), command-line property overrides (not seen)"
+  checked: 2026-11-26
 - name: pypi-json-api
   kind: http-api
   url: https://docs.pypi.org/api/json/

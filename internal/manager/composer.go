@@ -8,6 +8,7 @@ import (
 	"path"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/taumatix/ripple/internal/config"
@@ -22,10 +23,12 @@ import (
 // switched off) is left alone entirely.
 //
 // Left alone besides: platform requirements (php, ext-*, lib-*), a range, several
-// constraints (`">=1.0 <2.0"`, `"^1.0 || ^2.0"`), a wildcard, a two-segment `"^1.2"` (the
-// constraint already allows every later 1.x, so a new release needs a lock refresh and no
-// edit), a stability flag, a `dev-` branch, a version with other than three numeric
-// segments, and a string with a JSON escape in it.
+// constraints (`">=1.0 <2.0"`, `"^1.0 || ^2.0"`), a wildcard, a stability flag, a `dev-`
+// branch, a one-segment or four-segment version, `"~0.3"` and a string with a JSON escape in it.
+//
+// A two-segment `"^1.2"`, `"~1.2"` or `"^0.3"` is read too: it already allows every later
+// release of its line, so only a release beyond the line (a later major, or for `^0.Y` a later
+// minor) is an update, and the text becomes the new release's first two segments (`"^2.1"`).
 type Composer struct {
 	Dir string
 }
@@ -42,15 +45,57 @@ type ComposerSpec struct {
 	Version string
 }
 
-var composerSpecRE = regexp.MustCompile(`^((?:[\^~=][ \t]*)?v?)([0-9]+\.[0-9]+\.[0-9]+)$`)
+var composerSpecRE = regexp.MustCompile(`^((?:[\^~=][ \t]*)?v?)(?:([0-9]+\.[0-9]+\.[0-9]+)|([0-9]+\.[0-9]+))$`)
 
-// ParseComposerSpec reads a package's version text.
+// ParseComposerSpec reads a package's version text. A two-segment text is read for "^X.Y" and
+// for "~X.Y" with X of 1 or more only: docs/vendor/packagist/composer-versions.md gives "~1.2"
+// as ">=1.2 <2.0.0" and "^0.3" as ">=0.3.0 <0.4.0", and says nothing of "~0.3".
 func ParseComposerSpec(s string) (ComposerSpec, bool) {
 	m := composerSpecRE.FindStringSubmatch(s)
 	if m == nil {
 		return ComposerSpec{}, false
 	}
-	return ComposerSpec{Prefix: m[1], Version: m[2]}, true
+	if m[2] != "" {
+		return ComposerSpec{Prefix: m[1], Version: m[2]}, true
+	}
+	switch {
+	case strings.HasPrefix(m[1], "^"):
+	case strings.HasPrefix(m[1], "~") && !strings.HasPrefix(m[3], "0."):
+	default:
+		return ComposerSpec{}, false
+	}
+	return ComposerSpec{Prefix: m[1], Version: m[3]}, true
+}
+
+// TwoSegment reports a "^X.Y" or "~X.Y" constraint, which already allows every later release
+// of its line, so only a release beyond the line is an update.
+func (s ComposerSpec) TwoSegment() bool { return strings.Count(s.Version, ".") == 1 }
+
+func atoiParts(v string) (major, minor int) {
+	a, rest, _ := strings.Cut(v, ".")
+	b, _, _ := strings.Cut(rest, ".")
+	major, _ = strconv.Atoi(a)
+	minor, _ = strconv.Atoi(b)
+	return major, minor
+}
+
+// Moves reports whether release X.Y.Z (a leading "v" allowed) is outside a two-segment
+// constraint and newer than it: of a later major, or for "^0.Y" of a later minor.
+func (s ComposerSpec) Moves(release string) bool {
+	cm, cn := atoiParts(s.Version)
+	rm, rn := atoiParts(strings.TrimPrefix(release, "v"))
+	if rm != cm {
+		return rm > cm
+	}
+	return cm == 0 && strings.Contains(s.Prefix, "^") && rn > cn
+}
+
+// twoSegmentTarget is the text a two-segment constraint takes to follow release nv: its first
+// two segments, and false when the constraint already allows nv or nv is older.
+func (s ComposerSpec) twoSegmentTarget(nv string) (string, bool) {
+	major, rest, _ := strings.Cut(nv, ".")
+	minor, _, _ := strings.Cut(rest, ".")
+	return major + "." + minor, s.Moves(nv)
 }
 
 type composerEntry struct {
@@ -171,12 +216,20 @@ func (c Composer) Apply(content []byte, dep model.Dependency, newPackage, newVer
 	if newPackage != "" && newPackage != dep.Package {
 		return nil, fmt.Errorf("%w: a package cannot be renamed", ErrUnsupported)
 	}
-	if _, ok := ParseComposerSpec(dep.Version); !ok {
+	cur, ok := ParseComposerSpec(dep.Version)
+	if !ok {
 		return nil, fmt.Errorf("%w: %q is not a version ripple moves", ErrUnsupported, dep.Version)
 	}
 	nv := strings.TrimPrefix(newVersion, "v")
-	if _, ok := ParseComposerSpec(nv); !ok {
+	if r, ok := ParseComposerSpec(nv); !ok || r.TwoSegment() {
 		return nil, fmt.Errorf("%w: %q is not a release version", ErrUnsupported, newVersion)
+	}
+	text := nv
+	if cur.TwoSegment() {
+		var later bool
+		if text, later = cur.twoSegmentTarget(nv); !later {
+			return nil, fmt.Errorf("%w: %q already allows %s", ErrUnsupported, dep.Version, nv)
+		}
 	}
 	var hits []composerEntry
 	for _, e := range scanComposerJSON(content) {
@@ -190,7 +243,7 @@ func (c Composer) Apply(content []byte, dep model.Dependency, newPackage, newVer
 	sort.Slice(hits, func(i, j int) bool { return hits[i].start > hits[j].start })
 	out := string(content)
 	for _, e := range hits {
-		out = out[:e.start] + nv + out[e.end:]
+		out = out[:e.start] + text + out[e.end:]
 	}
 	return []byte(out), nil
 }

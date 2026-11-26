@@ -39,7 +39,15 @@ func applicablePackagist(d model.Dependency, pkg, version string) (rules.UpdateT
 	if !ok {
 		return "", false
 	}
-	return rules.Classify("v"+spec.Version, "v"+to.Version)
+	cur := spec.Version
+	if spec.TwoSegment() {
+		// "^1.2" already allows every later 1.x: only a release outside the line is an update.
+		if to.TwoSegment() || !spec.Moves(to.Version) {
+			return "", false
+		}
+		cur += ".0"
+	}
+	return rules.Classify("v"+cur, "v"+to.Version)
 }
 
 // packagistTargets lists, newest first, the newest release of each update type that is an

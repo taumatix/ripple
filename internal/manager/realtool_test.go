@@ -338,12 +338,16 @@ func TestRealtoolTerraform(t *testing.T) {
 		bumps: []bump{
 			{"providers/hashicorp/random", "3.5.0", "3.6.0"},
 			{"modules/cloudposse/label/null", "0.24.1", "0.25.0"},
+			{"providers/hashicorp/null", "3.1", "3.2"}, // `~> 3.1` becomes `~> 3.2`
 		},
 		// init downloads the provider and module at the edited constraints and writes
 		// .terraform.lock.hcl, which ripple reports stale and does not rewrite.
 		steps: [][]string{{"terraform", "init", "-backend=false", "-input=false"}, {"terraform", "validate"}},
 		local: []string{"terraform validate"},
-		after: func(t *testing.T, dir string) { mustContain(t, dir, ".terraform.lock.hcl", `version     = "3.6.`) },
+		after: func(t *testing.T, dir string) {
+			mustContain(t, dir, ".terraform.lock.hcl", `version     = "3.6.`)
+			mustContain(t, dir, ".terraform.lock.hcl", `constraints = "~> 3.2"`) // the two-segment edit, as terraform records it
+		},
 	}.run(t)
 }
 

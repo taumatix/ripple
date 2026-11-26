@@ -90,7 +90,7 @@ func TestTerraformExtract(t *testing.T) {
 		}
 		got = append(got, d.Package+"@"+d.Version)
 	}
-	want := []string{"providers/hashicorp/aws@5.1.0", "providers/hashicorp/random@3.5.1", "modules/terraform-aws-modules/vpc/aws@5.1.0"}
+	want := []string{"providers/hashicorp/aws@5.1.0", "providers/hashicorp/random@3.5.1", "providers/acme/twoseg@1.2", "modules/terraform-aws-modules/vpc/aws@5.1.0"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v want %v", got, want)
 	}

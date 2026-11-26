@@ -118,3 +118,76 @@ func TestTerraformDeniedPackageIsLeftAlone(t *testing.T) {
 		}
 	})
 }
+
+const tfTwoSegment = `terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 4.1"
+    }
+    gcp = {
+      source  = "hashicorp/google"
+      version = ">= 4.1"
+    }
+  }
+}
+
+module "vpc" {
+  source  = "terraform-aws-modules/vpc/aws"
+  version = "~> 5.1"
+}
+`
+
+// The two-segment pessimistic form (docs/vendor/terraform/version-constraints.txt, "~>": `~> 1.1`
+// allows 1.2 and 1.10 but not 2.0) keeps its two segments, and a `>=` floor is never read.
+func TestTerraformTwoSegmentPessimistic(t *testing.T) {
+	forEach(t, func(t *testing.T, st store.Store) {
+		e, reg := terraformEnv(t, st)
+		reg.Publish("providers/hashicorp/aws", "4.1.0")
+		reg.Publish("modules/terraform-aws-modules/vpc/aws", "5.1.0")
+		reg.Publish("providers/hashicorp/google", "4.1.0")
+		e.gh.AddRepo("acme/app", map[string]string{".ripple.yaml": terraformConfig, "main.tf": tfTwoSegment})
+		start(t, e, "acme/app")
+		if n := len(e.deps("acme/app")); n != 2 {
+			t.Fatalf("the two `~>` constraints are tracked, the `>=` is not: %+v", e.deps("acme/app"))
+		}
+
+		e.clock.Advance(time.Minute)
+		reg.Publish("providers/hashicorp/aws", "4.1.9")  // inside `~> 4.1` and the same X.Y: no edit would result
+		reg.Publish("providers/hashicorp/aws", "4.10.2") // `~> 4.1` allows it; the text becomes `~> 4.10`
+		reg.Publish("modules/terraform-aws-modules/vpc/aws", "5.1.4")
+		reg.Publish("modules/terraform-aws-modules/vpc/aws", "6.0.1")
+		reg.Publish("providers/hashicorp/google", "4.9.0") // never read: a floor
+		e.tick()
+		e.tick() // a replay must not open a second PR
+
+		prs := e.gh.PRs("acme/app")
+		want := map[string][2]string{
+			"aws": {`version = "~> 4.1"`, `version = "~> 4.10"`},
+			"vpc": {`version = "~> 5.1"`, `version = "~> 6.0"`},
+		}
+		if len(prs) != len(want) {
+			t.Fatalf("one PR per package, got %d", len(prs))
+		}
+		for _, pr := range prs {
+			got, _ := e.gh.FileAt("acme/app", pr.Head, "main.tf")
+			var w [2]string
+			switch {
+			case strings.Contains(pr.Head, "aws-4-10-2") || strings.Contains(pr.Head, "hashicorp-aws"):
+				w = want["aws"]
+			case strings.Contains(pr.Head, "vpc"):
+				w = want["vpc"]
+			default:
+				t.Fatalf("unexpected branch %q", pr.Head)
+			}
+			if exp := strings.Replace(tfTwoSegment, w[0], w[1], 1); got != exp {
+				t.Errorf("%s: only that constraint moves, shape and layout kept:\n%s", pr.Head, got)
+			}
+		}
+		for _, r := range reg.Requests() {
+			if strings.Contains(r.Path, "google") {
+				t.Errorf("a floor constraint was asked for: %s", r.Path)
+			}
+		}
+	})
+}

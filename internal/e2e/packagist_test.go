@@ -42,8 +42,8 @@ func TestComposerPackageBump(t *testing.T) {
 		e.gh.AddRepo("acme/app", map[string]string{".ripple.yaml": composerConfig, "composer.json": composerE2E, "composer.lock": "{}\n"})
 		e.gh.AddRepo("acme/optout", map[string]string{"composer.json": composerE2E})
 		start(t, e, "acme/app", "acme/optout")
-		if n := len(e.deps("acme/app")); n != 4 {
-			t.Fatalf("monolog, console, fromrepo and phpunit are tracked (not php nor a two-segment range), got %+v", e.deps("acme/app"))
+		if n := len(e.deps("acme/app")); n != 5 {
+			t.Fatalf("monolog, console, two/seg, fromrepo and phpunit are tracked (not php), got %+v", e.deps("acme/app"))
 		}
 
 		e.clock.Advance(time.Minute)
@@ -52,13 +52,14 @@ func TestComposerPackageBump(t *testing.T) {
 		reg.Publish("monolog/monolog", "dev-main")  // a branch: not proposed
 		reg.Publish("symfony/console", "v5.4.9")
 		reg.Publish("phpunit/phpunit", "9.6.0")
-		reg.Publish("two/seg", "1.3.0") // never read: a two-segment range
+		reg.Publish("two/seg", "1.3.0") // "^1.2" is ">=1.2.0 <2.0.0": already allowed, no PR
+		reg.Publish("two/seg", "2.4.1") // a later major leaves the constraint
 		e.tick()
 		e.tick() // a replay must not open a second PR
 
 		prs := e.gh.PRs("acme/app")
-		if len(prs) != 3 {
-			t.Fatalf("one PR per package (monolog, console, phpunit), got %d", len(prs))
+		if len(prs) != 4 {
+			t.Fatalf("one PR per package (monolog, console, phpunit, two/seg), got %d", len(prs))
 		}
 		for _, pr := range prs {
 			got, _ := e.gh.FileAt("acme/app", pr.Head, "composer.json")
@@ -70,6 +71,8 @@ func TestComposerPackageBump(t *testing.T) {
 				from, to = `"v5.4.1"`, `"v5.4.9"`
 			case strings.Contains(pr.Head, "phpunit"):
 				from, to = `"9.5.0"`, `"9.6.0"`
+			case strings.Contains(pr.Head, "two-seg"):
+				from, to = `"^1.2"`, `"^2.4"` // the new release's first two segments
 			default:
 				t.Fatalf("unexpected branch %q", pr.Head)
 			}
@@ -92,7 +95,7 @@ func TestComposerPackageBump(t *testing.T) {
 			if r.Authorization != "" || !strings.HasPrefix(r.Path, "/p2/") {
 				t.Errorf("request %+v: anonymous, and only for a package's metadata", r)
 			}
-			if strings.Contains(r.Path, "two/seg") || r.Path == "/p2/php.json" {
+			if r.Path == "/p2/php.json" {
 				t.Errorf("a requirement ripple does not track was asked for: %s", r.Path)
 			}
 		}

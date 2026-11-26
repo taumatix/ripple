@@ -22,8 +22,14 @@ The `require` and `require-dev` objects of a `composer.json`. A package is track
 - the file has no `repositories` entry. Any entry (a private Composer repository, a VCS or path source, or
   `{"packagist.org": false}`) and the whole file is left alone, because the package may not come from Packagist.
 
-Skipped: a range (`>=1.0 <2.0`), several constraints (`^1.0 || ^2.0`), a wildcard (`1.*`), a two-segment `^1.2`
-(the constraint already allows every later 1.x, so a new release needs a lock refresh and no `composer.json` edit),
+Also tracked: the two-segment `^1.2`, `~1.2` and `^0.3`. Composer's versions article gives `~1.2` as `>=1.2 <2.0.0`
+and `^0.3` as `>=0.3.0 <0.4.0`, so a later release of the same line is already allowed and needs a lock refresh, not an
+edit. Only a release outside the line is proposed: a later major (`^1.2`, `~1.2`) or, for `^0.Y`, a later minor. The text
+becomes that release's first two segments (`^1.2` to `^2.4` for 2.4.1; `^0.3` to `^0.4` for 0.4.2), which it satisfies,
+and a later major is a `major` update under the usual policy. `~0.3` is skipped: the article shows the `~` rule for a
+`1.x` example only.
+
+Skipped: a range (`>=1.0 <2.0`), several constraints (`^1.0 || ^2.0`), a wildcard (`1.*`), a one-segment `^1` or `~1`,
 a stability flag, a `dev-` branch, four-segment or prerelease versions. Other keys (`extra`, `suggest`, `conflict`,
 `replace`, `provide`) are not read.
 

@@ -47,7 +47,7 @@ func TestComposerExtract(t *testing.T) {
 		}
 		got = append(got, d.Package+"@"+d.Version)
 	}
-	want := "monolog/monolog@^2.9.0 symfony/console@v5.4.1 guzzlehttp/guzzle@~7.5.0 esc/aped@1.0.0 exact/pkg@3.4.5 phpunit/phpunit@9.5.0"
+	want := "monolog/monolog@^2.9.0 symfony/console@v5.4.1 guzzlehttp/guzzle@~7.5.0 two/seg@^1.2 esc/aped@1.0.0 exact/pkg@3.4.5 phpunit/phpunit@9.5.0"
 	if strings.Join(got, " ") != want {
 		t.Errorf("got %q, want %q", strings.Join(got, " "), want)
 	}

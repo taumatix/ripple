@@ -7,12 +7,6 @@ Ordered by how much each entry limits real deployments. The top is next.
    network namespace with a forwarded socket to the gate (or run `go` with a prefilled module cache),
    and add a Linux CI job that runs the sandbox end-to-end tests. See [docs/sandbox.md](docs/sandbox.md).
 
-227. **A verified build can leave a binary in the PR.** Found by the image smoke test (ROADMAP 3, now shipped): a repository
-    whose only package is `package main` makes the verification step's `go build ./...` write the executable into the
-    checkout, and the next `git add -A` commits it (a 1.8 MB `uses-lib` blob in the PR). Build with `-o` pointing outside
-    the checkout (or discard the output) in `internal/platform/gitws`, and add a test that a main-only repo's PR carries
-    only its source files. The smoke test uses a library package until this is fixed.
-
 Platforms (code hosts). The goal is the whole list Renovate supports, each behind the one `Platform`
 interface, each with the same end-to-end test (a push or release event leads to exactly one PR in
 exactly the importing repos, and zero API calls for the rest). Every platform entry starts by

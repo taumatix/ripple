@@ -66,7 +66,7 @@ func TestSandboxConfinesGoAndLocalGitButNotNetworkGit(t *testing.T) {
 	if len(rec.find(" checkout ")) != 1 {
 		t.Errorf("local git not wrapped: %+v", rec.calls)
 	}
-	goCalls := rec.find(" build ./...")
+	goCalls := rec.find(" build -o /dev/null ./...") // the output is discarded, ROADMAP 227
 	if len(goCalls) != 1 {
 		t.Fatalf("go build wrapped %d times, want 1", len(goCalls))
 	}

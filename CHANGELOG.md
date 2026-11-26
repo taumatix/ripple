@@ -4,6 +4,12 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
 
 ## [Unreleased]
 
+### Fixed
+
+- A verified build no longer leaves a binary in the PR: for a repository whose only package is `package main`, the verification `go build ./...` wrote the executable into the checkout and the next `git add -A` committed it. The build now discards its output (`-o` the null device). Verified by an end-to-end test against the fake host and by the image smoke test, which now uses a main-only repository.
+
+### Added
+
 - Maven (opt-in `ecosystem: maven` only; nothing outside it changes): a two-segment version (`4.13`) is now read and moved, to a two- or three-segment release (a three-segment declaration still moves to three-segment releases only), and a version given as `${x.version}` is read from the pom's own `<properties>` and moves by editing the property's value, when the property is declared once and every use is a dependency version of one `groupId:artifactId`; otherwise it is left alone. Parents, BOMs, a property shared by several artifacts and command-line overrides are not handled ([docs/maven.md](docs/maven.md), ROADMAP 239). Covered by unit tests from the vendored POM reference, an end-to-end run against the fake Central, and `TestRealtoolMaven` (CI; `mvn` was not available where this was written, so that run is untested locally).
 
 - With `RIPPLE_POLL_PACKAGES_PER_POLL` set, a package poll reads only its slice of the polled-package set through the store's optional paged cursor listing instead of listing the whole set; the packages visited and their rotation are unchanged, and the legacy cursor, stores that do not page, and the unset default keep the whole read.

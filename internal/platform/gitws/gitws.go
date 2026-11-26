@@ -608,7 +608,14 @@ func (w *workspace) RunGo(ctx context.Context, dir string, args ...string) (stri
 			}
 		}
 	}
-	argv, err := w.confine(pol, append([]string{gobin}, args...))
+	goArgs := args
+	if args[0] == "build" {
+		// Verification only: a repository whose sole package is `package main` would
+		// otherwise get its executable written into the checkout, and the next
+		// `git add -A` would commit it (ROADMAP 227). go discards output for -o os.DevNull.
+		goArgs = append([]string{"build", "-o", os.DevNull}, args[1:]...)
+	}
+	argv, err := w.confine(pol, append([]string{gobin}, goArgs...))
 	if err != nil {
 		return "", fmt.Errorf("go %s: %w", strings.Join(args, " "), err)
 	}

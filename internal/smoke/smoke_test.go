@@ -110,9 +110,8 @@ func TestRippleOpensExactlyOnePR(t *testing.T) {
 	const repo = "acme/uses-lib"
 	gh.AddRepo(repo, map[string]string{
 		"go.mod": "module example.com/uses-lib\n\ngo 1.22\n\nrequire (\n\texample.com/lib v1.0.0\n)\n",
-		// A library, not a main package: `go build ./...` over a single main package writes its binary
-		// into the checkout, and ripple would commit it (ROADMAP, new entry).
-		"uses.go": "package useslib\n\nimport _ \"example.com/lib\"\n",
+		// A main-only repository: verification must not leave its executable in the PR (ROADMAP 227).
+		"main.go": "package main\n\nimport _ \"example.com/lib\"\n\nfunc main() {}\n",
 	})
 	gitRoot := strings.TrimPrefix(gh.GitBase, "file://")
 	if out, err := exec.Command("chmod", "-R", "a+rwX", gitRoot).CombinedOutput(); err != nil {
@@ -247,6 +246,9 @@ func TestRippleOpensExactlyOnePR(t *testing.T) {
 	}
 	if got, ok := gh.FileAt(repo, prs[0].Head, "go.sum"); !ok || !strings.Contains(got, "example.com/lib v1.1.0 h1:") {
 		t.Errorf("go.sum missing the bumped module on %s:\n%s", prs[0].Head, got)
+	}
+	if tree, ok := gh.FileAt(repo, prs[0].Head, ""); !ok || strings.Contains(tree, "\nuses-lib") || strings.Contains(tree, "\napp") {
+		t.Errorf("a build output was committed on %s:\n%s", prs[0].Head, tree)
 	}
 
 	// The opt-in /metrics endpoint answers over the real listener, guarded by its token, and has timed the webhooks.

@@ -2,24 +2,44 @@ package sandbox
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
-type bwrap struct{ bin string }
+type bwrap struct{ bin, relay string }
 
-// Bwrap is the Linux backend (bubblewrap). UNVERIFIED on the development host (macOS);
-// the argv is covered by unit tests and the CI "sandbox-bwrap" job runs the e2e.
-// Network is always a fresh, empty namespace: bwrap cannot filter, so a policy that
-// asks for a proxy port gets ErrNetUnsupported.
-func Bwrap(bin string) Backend { return bwrap{bin} }
+// Bwrap is the Linux backend (bubblewrap). The network is always a fresh namespace with
+// only a loopback interface. A policy that asks for a proxy port gets ErrNetUnsupported
+// from this constructor's backend: reaching the gate needs the relay of BwrapRelay.
+func Bwrap(bin string) Backend { return bwrap{bin: bin} }
+
+// BwrapRelay is Bwrap that can also reach the module proxy gate. The command still runs
+// in an empty network namespace (no interface but lo). relayExe, an absolute path to
+// the ripple executable, is bound read-only into the sandbox and started first as
+// `sandbox-relay <port> <socket> -- <command>` (RunRelay): it listens on the namespace's
+// 127.0.0.1:<port> and forwards each connection to the gate's unix socket, which is the
+// only host path bound in besides the workspace. Nothing else is reachable.
+func BwrapRelay(bin, relayExe string) Backend { return bwrap{bin: bin, relay: relayExe} }
 
 func (bwrap) Name() string { return "bwrap" }
+
+// NeedsGateSocket marks a backend whose proxy access is a unix socket the caller serves
+// the Gate on (Policy.GateSocket) rather than a host loopback port.
+func (b bwrap) NeedsGateSocket() bool { return b.relay != "" }
+
+// Paths of the relay and the gate socket inside the sandbox.
+const (
+	relayInSandbox  = "/.ripple/relay"
+	socketInSandbox = "/.ripple/gate.sock"
+)
 
 // systemRO are mounted read-only when present. Home directories are deliberately absent.
 var systemRO = []string{"/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/etc/ssl", "/etc/ca-certificates", "/etc/passwd", "/etc/group", "/etc/nsswitch.conf", "/etc/localtime"}
 
 func (b bwrap) Wrap(p Policy, argv []string) ([]string, error) {
-	if len(p.LoopbackPorts) > 0 {
+	// Fail closed: a proxy is reachable only through the relay and a gate socket, exactly one port.
+	viaRelay := len(p.LoopbackPorts) > 0
+	if viaRelay && (len(p.LoopbackPorts) != 1 || p.GateSocket == "" || !strings.HasPrefix(b.relay, "/") || !strings.HasPrefix(p.GateSocket, "/")) {
 		return nil, ErrNetUnsupported
 	}
 	if err := checkPolicy(p, argv); err != nil {
@@ -45,7 +65,13 @@ func (b bwrap) Wrap(p Policy, argv []string) ([]string, error) {
 			}
 		}
 	}
-	out = append(out, "--chdir", p.Workdir, "--")
+	out = append(out, "--chdir", p.Workdir)
+	if viaRelay {
+		out = append(out, "--ro-bind", b.relay, relayInSandbox, "--bind", p.GateSocket, socketInSandbox, "--",
+			relayInSandbox, RelayArg, strconv.Itoa(p.LoopbackPorts[0]), socketInSandbox, "--")
+		return append(out, argv...), nil
+	}
+	out = append(out, "--")
 	return append(out, argv...), nil
 }
 

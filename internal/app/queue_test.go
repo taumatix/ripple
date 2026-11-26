@@ -211,6 +211,8 @@ func TestFailedEventIsRetriedThenDeadLettered(t *testing.T) {
 	_ = q.Add(context.Background(), ev(1, "flaky", "acme/a"), ev(1, "broken", "acme/b"))
 	eventually(t, "flaky handled on retry", func() bool { return g.has("flaky") })
 	eventually(t, "broken dead-lettered after MaxAttempts", func() bool { return len(dead(t, st)) == 1 })
+	// The dead event is stored before the queue drops it from memory, so Len is read once it settles.
+	eventually(t, "queue to drop the dead-lettered event", func() bool { return q.Len() == 0 })
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.fail["broken"] != 97 {

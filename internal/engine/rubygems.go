@@ -39,7 +39,15 @@ func applicableRubygems(d model.Dependency, pkg, version string) (rules.UpdateTy
 	if !ok {
 		return "", false
 	}
-	return rules.Classify("v"+spec.Version, "v"+to.Version)
+	cur := spec.Version
+	if spec.TwoSegment() {
+		cur += ".0"
+	}
+	typ, ok := rules.Classify("v"+cur, "v"+to.Version)
+	if ok && spec.TwoSegment() && typ != rules.Major {
+		return "", false // "~> 1.2" already allows every later 1.x: nothing to edit
+	}
+	return typ, ok
 }
 
 // rubygemsTargets lists, newest first, the newest release of each update type that is an

@@ -82,7 +82,7 @@ jobs:
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: "3.3"
-      - run: scripts/realtool.sh TestRealtoolBundler
+      - run: scripts/realtool.sh TestRealtoolBundler TestRealtoolBundlerTwoSegment
   composer:
     runs-on: ubuntu-latest
     timeout-minutes: 30

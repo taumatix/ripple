@@ -24,6 +24,17 @@ import (
 // version as it stands in the file, and the new version handed to Apply.
 type bump struct{ pkg, from, to string }
 
+// written is the text that replaces from in the file: to, cut to as many segments as from has
+// (a two-segment "~> 2.2" constraint is rewritten to the new release's two segments).
+func (b bump) written() string {
+	n := strings.Count(b.from, ".") + 1
+	parts := strings.Split(b.to, ".")
+	if len(parts) < n {
+		return b.to
+	}
+	return strings.Join(parts[:n], ".")
+}
+
 // realtool describes one fixture: a directory under testdata/realtool, the manager that
 // owns its manifest, the edits to make, and the commands that must pass before (on the
 // untouched fixture, proving it is a genuine project) and after.
@@ -166,7 +177,10 @@ func assertOnlyBumped(t *testing.T, old, got string, bumps []bump) {
 		changed++
 		ok := false
 		for _, b := range bumps {
-			if strings.Contains(ol[i], b.from) && gl[i] == strings.Replace(ol[i], b.from, b.to, 1) {
+			// Either the whole new version (Maven moves "4.13" to "4.14.0") or, for a two-segment
+			// constraint, its first segments (Bundler's "~> 2.2" becomes "~> 3.1").
+			if strings.Contains(ol[i], b.from) && (gl[i] == strings.Replace(ol[i], b.from, b.to, 1) ||
+				gl[i] == strings.Replace(ol[i], b.from, b.written(), 1)) {
 				ok = true
 			}
 		}
@@ -282,6 +296,17 @@ func TestRealtoolBundler(t *testing.T) {
 		// No Gemfile.lock is committed; bundle lock resolves the edited Gemfile against rubygems.org.
 		steps: [][]string{{"bundle", "lock"}},
 		after: func(t *testing.T, dir string) { mustContain(t, dir, "Gemfile.lock", "rake (13.2.1)") },
+	}.run(t)
+}
+
+// A two-segment "~> 2.2" is ">= 2.2, < 3.0"; ripple moves it to "~> 3.1" for rack 3.1.0 and bundler
+// must resolve the edited Gemfile to a 3.x rack.
+func TestRealtoolBundlerTwoSegment(t *testing.T) {
+	realtool{
+		fixture: "bundler-twosegment", manifest: "Gemfile", manager: Bundler{Dir: "/"},
+		bumps: []bump{{"rack", "2.2", "3.1.0"}},
+		steps: [][]string{{"bundle", "lock"}},
+		after: func(t *testing.T, dir string) { mustContain(t, dir, "Gemfile.lock", "rack (3.") },
 	}.run(t)
 }
 

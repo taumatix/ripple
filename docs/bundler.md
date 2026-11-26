@@ -15,15 +15,26 @@ Only `directory` applies (and the shared keys such as cooldown and grouping). Wi
 
 `gem "name", "<version>"` lines of a `Gemfile`. A gem is tracked when all of these hold:
 
-- the version is one release in the forms `1.2.3`, `= 1.2.3` or `~> 1.2.3` (three numeric segments);
+- the version is one release in the forms `1.2.3`, `= 1.2.3` or `~> 1.2.3` (three numeric segments), or the
+  two-segment pessimistic `~> 1.2`;
 - the line is complete on one line (a trailing comma continues on the next, and is skipped);
 - the gem has no `git:`, `github:`, `path:`, `source:` (or `:git =>` style) option and is not inside a `git`, `path`,
   `github` or `source` block;
 - the file names no `source` other than `https://rubygems.org`. One other source and the whole file is left alone.
 
-Skipped: a gem with no version, several constraints (`">= 1", "< 2"`), a range, a two-segment `"~> 1.2"` (the Gemfile
-already allows every later 1.x, so a new release needs a lock refresh and no Gemfile edit), four-segment or
-prerelease versions, `.gemspec` files and `gems.rb`.
+Skipped: a gem with no version, several constraints (`">= 1", "< 2"`), a range, a single `">= 1.0"` or `"> 1.0"`
+(it already allows every later release, so there is never anything to write), a one-segment `"~> 1"`, `<`, `<=` and
+`!=` constraints (no new text follows from a release alone), four-segment or prerelease versions, `.gemspec` files and
+`gems.rb`.
+
+### The two-segment `~> 1.2`
+
+The Gemfile man page ([docs/vendor/rubygems/gemfile.md](vendor/rubygems/gemfile.md), "Gems > Version") defines `~> 2.1`
+as `>= 2.1` and `< 3.0`, and `~> 2.0.3` as `>= 2.0.3` and `< 2.1`. So `~> 1.2` already allows every later 1.x: a release
+of the same major is never proposed (a `Gemfile.lock` refresh picks it up). A release of a later major is proposed as a
+`major` update (the same `update-types` rules, cooldown and no auto-merge default as every other manager), and the file
+then takes that release's first two segments: `~> 1.2` becomes `~> 2.1` for 2.1.3. The new constraint always allows the
+release it names and never a lower major, so it is never wider than what that release implies.
 
 ## What is proposed
 

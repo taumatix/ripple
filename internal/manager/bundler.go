@@ -5,6 +5,7 @@ import (
 	"path"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/taumatix/ripple/internal/config"
@@ -18,10 +19,15 @@ import (
 // declared inside a `git`, `path`, `github` or `source` block or with a `git:`, `path:`,
 // `github:` or `source:` option, is left alone.
 //
+// A two-segment "~> 1.2" is ">= 1.2, < 2.0" (docs/vendor/rubygems/gemfile.md, "Gems >
+// Version"): every later 1.x is already allowed, so only a release of a later major is an
+// update, and it moves the two digits to the new release's major and minor ("~> 2.1" for
+// 2.1.3), which that release satisfies.
+//
 // Left alone besides: a gem with no version, a range or several constraints (">= 1", "< 2"),
-// a two-segment "~> 1.2" (the Gemfile already allows every later 1.x, so a newer release
-// needs only a lock refresh), a version with other than three numeric segments, a
-// prerelease, and a declaration split over several lines.
+// a single ">=" or ">" (it already allows every later release), a one-segment "~> 1", a
+// version with other than three numeric segments, a prerelease, and a declaration split
+// over several lines.
 type Bundler struct {
 	Dir string
 }
@@ -32,21 +38,39 @@ func (b Bundler) Matches(p string) bool {
 	return path.Base(p) == "Gemfile" && config.InDirectory(b.Dir, p)
 }
 
-// BundlerSpec is a gem version ripple can move: "[= |~> ]X.Y.Z".
+// BundlerSpec is a gem version ripple can move: "[= |~> ]X.Y.Z" or "~> X.Y".
 type BundlerSpec struct {
 	Prefix  string // "", "= ", "~> " as written
-	Version string
+	Version string // "X.Y.Z", or "X.Y" after "~> "
 }
 
-var bundlerSpecRE = regexp.MustCompile(`^((?:=|~>)[ \t]*)?([0-9]+\.[0-9]+\.[0-9]+)$`)
+var bundlerSpecRE = regexp.MustCompile(`^(?:((?:=|~>)[ \t]*)?([0-9]+\.[0-9]+\.[0-9]+)|(~>[ \t]*)([0-9]+\.[0-9]+))$`)
 
 // ParseBundlerSpec reads a gem's version text.
 func ParseBundlerSpec(s string) (BundlerSpec, bool) {
 	m := bundlerSpecRE.FindStringSubmatch(s)
-	if m == nil {
+	switch {
+	case m == nil:
 		return BundlerSpec{}, false
+	case m[4] != "":
+		return BundlerSpec{Prefix: m[3], Version: m[4]}, true
 	}
 	return BundlerSpec{Prefix: m[1], Version: m[2]}, true
+}
+
+// TwoSegment reports a "~> X.Y" constraint, which allows every release from X.Y up to the next
+// major.
+func (s BundlerSpec) TwoSegment() bool { return strings.Count(s.Version, ".") == 1 }
+
+// twoSegmentTarget is the text a "~> X.Y" constraint takes to follow release nv (X.Y.Z): its
+// first two segments, and false when nv is not of a later major than the constraint.
+func (s BundlerSpec) twoSegmentTarget(nv string) (string, bool) {
+	cur, _, _ := strings.Cut(s.Version, ".")
+	major, rest, _ := strings.Cut(nv, ".")
+	minor, _, _ := strings.Cut(rest, ".")
+	a, _ := strconv.Atoi(cur)
+	b, _ := strconv.Atoi(major)
+	return major + "." + minor, b > a
 }
 
 type gemEntry struct {
@@ -138,12 +162,20 @@ func (b Bundler) Apply(content []byte, dep model.Dependency, newPackage, newVers
 	if newPackage != "" && newPackage != dep.Package {
 		return nil, fmt.Errorf("%w: a gem cannot be renamed", ErrUnsupported)
 	}
-	if _, ok := ParseBundlerSpec(dep.Version); !ok {
+	cur, ok := ParseBundlerSpec(dep.Version)
+	if !ok {
 		return nil, fmt.Errorf("%w: %q is not a version ripple moves", ErrUnsupported, dep.Version)
 	}
 	nv := strings.TrimPrefix(newVersion, "v")
-	if _, ok := ParseBundlerSpec(nv); !ok {
+	if r, ok := ParseBundlerSpec(nv); !ok || r.TwoSegment() {
 		return nil, fmt.Errorf("%w: %q is not a release version", ErrUnsupported, newVersion)
+	}
+	text := nv
+	if cur.TwoSegment() {
+		var later bool
+		if text, later = cur.twoSegmentTarget(nv); !later {
+			return nil, fmt.Errorf("%w: %q already allows %s", ErrUnsupported, dep.Version, nv)
+		}
 	}
 	var hits []gemEntry
 	for _, e := range scanGemfile(string(content)) {
@@ -157,7 +189,7 @@ func (b Bundler) Apply(content []byte, dep model.Dependency, newPackage, newVers
 	sort.Slice(hits, func(i, j int) bool { return hits[i].start > hits[j].start })
 	out := string(content)
 	for _, e := range hits {
-		out = out[:e.start] + nv + out[e.end:]
+		out = out[:e.start] + text + out[e.end:]
 	}
 	return []byte(out), nil
 }

@@ -92,6 +92,11 @@ func (a *App) Discover(ctx context.Context) {
 	for _, h := range a.Hosts {
 		l, ok := h.Platform.(platform.Lister)
 		if !ok {
+			if il, ok := h.Platform.(InstalledHeadLister); ok {
+				if err := a.rescanInstalled(ctx, h.Name, il); err != nil && ctx.Err() == nil {
+					a.log().Error("repo head rescan", "host", h.Name, "err", err)
+				}
+			}
 			continue
 		}
 		repos, err := a.discover(ctx, h.Name, l)
@@ -223,9 +228,7 @@ func headKey(host string) string { return "discover-head/" + host }
 // from the heads, so a crash before the heads are written repeats them as a no-op. A store that
 // cannot list cursors remembers nothing and so never re-scans.
 func (a *App) rescanMoved(ctx context.Context, host string, l platform.Lister, hl HeadLister, repos []model.Repo) error {
-	st := a.Queue.Store
-	cl, ok := st.(store.CursorLister)
-	if !ok {
+	if _, ok := a.Queue.Store.(store.CursorLister); !ok {
 		return nil
 	}
 	heads, err := hl.ListRepoHeads(ctx)
@@ -244,11 +247,64 @@ func (a *App) rescanMoved(ctx context.Context, host string, l platform.Lister, h
 			break
 		}
 	}
+	obs := make([]headObs, 0, len(repos))
+	for _, r := range repos {
+		obs = append(obs, headObs{name: r.FullName, branch: r.DefaultBranch, head: heads[r.FullName]})
+	}
+	return a.applyHeads(ctx, host, obs)
+}
+
+// InstalledHeadLister is the HeadLister of a host whose repos are not a listing the app can
+// compare (GitHub: an App's installations, no ListRepos): it names, for each repo it can see,
+// the installation the repo is reached through, its default branch and that branch's head. A
+// moved head is queued as a Push under that installation, which is how a scan gets its token.
+// The same rules apply as for HeadLister: a repo seen first is only remembered, an empty head is
+// skipped, and an error leaves what was remembered in place.
+type InstalledHeadLister interface {
+	ListInstalledRepoHeads(ctx context.Context) ([]platform.RepoHead, error)
+}
+
+// rescanInstalled is rescanMoved for an InstalledHeadLister.
+func (a *App) rescanInstalled(ctx context.Context, host string, il InstalledHeadLister) error {
+	a.init() // as Run does first; a Tick right after a restart must not race it
+	if _, ok := a.Queue.Store.(store.CursorLister); !ok {
+		return nil
+	}
+	hs, err := il.ListInstalledRepoHeads(ctx)
+	if err != nil {
+		return err
+	}
+	obs := make([]headObs, 0, len(hs))
+	for _, h := range hs {
+		obs = append(obs, headObs{name: h.FullName, branch: h.DefaultBranch, head: h.Head, scope: h.InstallationID})
+	}
+	return a.applyHeads(ctx, host, obs)
+}
+
+// headObs is one repo's observed head: its default branch (empty when unknown), the commit
+// (empty when it has none), and the credential scope a scan must run under (0 when the host
+// has one credential).
+type headObs struct {
+	name, branch, head string
+	scope              int64
+}
+
+// applyHeads queues the Pushes for the observed repos whose head differs from the one
+// remembered, then remembers the heads. See rescanMoved.
+func (a *App) applyHeads(ctx context.Context, host string, obs []headObs) error {
+	st := a.Queue.Store
+	cl, ok := st.(store.CursorLister)
+	if !ok {
+		return nil
+	}
 	prefix := headKey(host) + store.CursorGroupSep
 	remembered := map[string]string{}
 	after := ""
 	for {
-		var page []store.Cursor
+		var (
+			page []store.Cursor
+			err  error
+		)
 		if pl, ok := st.(store.PagedCursorLister); ok {
 			page, err = pl.ListCursorsPage(ctx, prefix, after, listingPage)
 		} else {
@@ -265,31 +321,46 @@ func (a *App) rescanMoved(ctx context.Context, host string, l platform.Lister, h
 		}
 		after = page[len(page)-1].Name
 	}
-	moved := map[string][]string{} // default branch -> repos
+	type group struct {
+		scope  int64
+		branch string
+	}
+	heads := make(map[string]string, len(obs))
+	moved := map[group][]string{}
 	var changed []string
-	for _, r := range repos {
-		sha, listed := heads[r.FullName]
-		if !listed || sha == "" || remembered[r.FullName] == sha {
+	for _, o := range obs {
+		heads[o.name] = o.head
+		if o.head == "" || remembered[o.name] == o.head {
 			continue
 		}
-		changed = append(changed, r.FullName)
-		if _, seen := remembered[r.FullName]; seen && r.DefaultBranch != "" {
-			moved[r.DefaultBranch] = append(moved[r.DefaultBranch], r.FullName)
+		changed = append(changed, o.name)
+		if _, seen := remembered[o.name]; seen && o.branch != "" {
+			g := group{o.scope, o.branch}
+			moved[g] = append(moved[g], o.name)
 		}
 	}
-	branches := make([]string, 0, len(moved))
-	for b := range moved {
-		branches = append(branches, b)
+	groups := make([]group, 0, len(moved))
+	for g := range moved {
+		groups = append(groups, g)
 	}
-	sort.Strings(branches)
-	for _, b := range branches {
-		names := moved[b]
+	sort.Slice(groups, func(i, j int) bool {
+		if groups[i].scope != groups[j].scope {
+			return groups[i].scope < groups[j].scope
+		}
+		return groups[i].branch < groups[j].branch
+	})
+	for _, g := range groups {
+		names := moved[g]
 		sort.Strings(names)
 		h := sha256.New()
 		for _, n := range names {
 			h.Write([]byte(n + "\x00" + heads[n] + "\x00"))
 		}
-		ev := platform.Event{Kind: platform.Push, Delivery: fmt.Sprintf("head-%x", h.Sum(nil)[:8]), Repos: names, Ref: "refs/heads/" + b}
+		ev := platform.Event{Kind: platform.Push, Delivery: fmt.Sprintf("head-%x", h.Sum(nil)[:8]), Repos: names, Ref: "refs/heads/" + g.branch, Scope: g.scope}
+		if g.scope != 0 {
+			// The claimed default branch lets the engine heal a stored one that went stale.
+			ev.DefaultBranch = g.branch
+		}
 		if err := a.enqueue(ctx, host, ev); err != nil {
 			return err
 		}
@@ -299,12 +370,8 @@ func (a *App) rescanMoved(ctx context.Context, host string, l platform.Lister, h
 			return err
 		}
 	}
-	listed := make(map[string]bool, len(repos))
-	for _, r := range repos {
-		listed[r.FullName] = true
-	}
 	for n := range remembered { // a repo that left the listing leaves nothing behind
-		if !listed[n] {
+		if _, listed := heads[n]; !listed {
 			if err := cl.DeleteCursor(ctx, prefix+n); err != nil {
 				return err
 			}

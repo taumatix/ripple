@@ -17,6 +17,7 @@ import (
 type issuedToken struct {
 	expires time.Time
 	revoked bool
+	inst    int64 // the installation the token was minted for
 }
 
 // GitHTTP is the fake GitHub's git smart-HTTP server: git-http-backend over the

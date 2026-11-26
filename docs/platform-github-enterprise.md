@@ -59,6 +59,38 @@ upstream. The pull request is still opened on the GHES. See [github-actions.md](
 | The GHES release is not known up front | at start ripple reads `GET /api/v3/meta` (`installed_version`, unauthenticated) once and logs it at info; a release below ripple's own floor of 3.9 earns one warning. The floor is ripple's choice, not published by GitHub, and unverified. The release changes nothing else; a failed read is a warning and never blocks start |
 | Rate limits are off by default | nothing to do; a 429 or 403 with `Retry-After` is still honoured if an administrator turns them on |
 
+## Head polling (github.com and GHES)
+
+A push whose webhook never arrived is found at the next discovery. The client implements
+`app.InstalledHeadLister`: it lists the App's installations (`GET /app/installations`, app JWT, 100 a page,
+suspended ones skipped), then each installation's repositories (`GET /installation/repositories`, 100 a page;
+archived and disabled repositories skipped), then reads every default branch head with one GraphQL request per 100
+repositories (`repository(owner:, name:) { defaultBranchRef { name target { oid } } }` aliased 100 times, names passed
+as variables, plus `rateLimit`). A repository whose head moved since the remembered one is re-scanned in the same
+round as a webhook push would be, under its installation and with its default branch (so a renamed default branch is
+learned too). The first discovery after a start catches a head that moved while ripple was down; a repository seen for
+the first time is only remembered; an empty repository and one the read could not resolve are skipped.
+
+- **Batch size 100**: GraphQL connections are limited to 1-100 items, a query costs its connection requests divided by
+  100, the node limit is 500,000 and the allowance is 5,000 points an hour per installation (secondary limits: 2,000
+  points a minute, 100 concurrent requests, a 10 second timeout answering 502/504). A bigger batch buys nothing and
+  edges toward the timeout. Sources: `docs/vendor/github/graphql-repository-heads.md`.
+- **Spend**: the whole read (installations, repositories, heads) is kept for `Client.HeadEvery` (default 10 minutes)
+  and discoveries in between cost no request. For 1,000 repositories in one installation a read is 10 repository
+  pages and 10 GraphQL requests.
+- **Rate limits**: a 429 or secondary limit ends the round without waiting, holds that installation until the limit
+  lifts (no request meanwhile) and is retried at a later discovery. The read also stops, and holds until `resetAt`,
+  when `rateLimit.remaining` falls below 100 with batches still to read, so polling leaves points for scans. Any
+  failed request fails the whole round and forgets nothing.
+- **GHES**: REST at `HOST/api/v3`, GraphQL at `HOST/api/graphql`. A GHES with GraphQL disabled fails every round
+  (a failure is not remembered, so it is retried and logged at each discovery); webhooks keep working.
+- A personal-access-token client (no App) has nothing to poll.
+
+Verified against the fake GitHub and GHES only (unit and end-to-end). **A `-tags live` test cannot cover this**:
+GraphQL requires a token, so it cannot be called anonymously. Unverified against a real server: the minimum cost of
+1 point for an aliased read, the `RATE_LIMITED` error type of an exhausted GraphQL budget, `defaultBranchRef` being
+null for an empty repository, and everything GHES.
+
 ## Not covered
 
 ripple uses only the REST endpoints and the one GraphQL mutation listed in [UPSTREAM.md](../UPSTREAM.md), so there is

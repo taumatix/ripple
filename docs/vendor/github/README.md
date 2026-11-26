@@ -10,6 +10,10 @@ Fetched 2026-11-23, read before the `repository` event mapping in `internal/webh
 | `repository-lite.schema.json` | same repo, `common/repository-lite.schema.json` | `id`, `name`, `full_name`, `default_branch`, `archived` |
 | `installation.created.schema.json`, `installation_repositories.added.schema.json` | same repo, `installation/created`, `installation_repositories/added` | `repositories[]` / `repositories_added[]` items require `id`, `node_id`, `name`, `full_name`, `private` |
 
+Head polling (fetched 2026-11-26): `graphql-repository-heads.md` carries the `Repository.defaultBranchRef`,
+`Ref.target`, `Commit.oid` and `RateLimit` definitions verbatim from the public GraphQL schema, the GraphQL node and
+rate limits, `GET /app/installations` and `GET /installation/repositories`; what it could not confirm is marked there.
+
 Assumed, unverified against a real delivery (the docs page does not show these actions' bodies and
 no live App was available):
 

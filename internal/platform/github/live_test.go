@@ -20,6 +20,10 @@ import (
 // none of these repositories) answers 404 and the tags, commits and releases are then read
 // from the upstream, with the pinned X-GitHub-Api-Version and no token. Anonymous reads are
 // limited to 60 an hour per address, so this makes about a dozen requests in all.
+//
+// Head polling (ListInstalledRepoHeads) is not covered here: it reads through GraphQL, which
+// GitHub refuses without a token, and through installation endpoints that need an App. It is
+// covered by heads_test.go and internal/e2e against the fake only.
 
 func liveGitHub(t *testing.T) (*github.Client, model.Repo) {
 	t.Helper()

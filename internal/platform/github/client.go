@@ -76,8 +76,16 @@ type Client struct {
 	// longer than 30s. Writes are never retried.
 	Retry httpretry.Policy
 
+	// HeadEvery is how long ListInstalledRepoHeads reuses what it read before reading again
+	// (head polling; see heads.go). Zero means 10 minutes.
+	HeadEvery time.Duration
+
 	mu      sync.Mutex
 	limited map[int64]time.Time
+
+	headMu   sync.Mutex
+	headSnap []platform.RepoHead
+	headAt   time.Time
 }
 
 var (
@@ -88,6 +96,9 @@ var (
 	_ platform.IssueReopener = (*Client)(nil)
 	_ platform.RateLimiter   = (*Client)(nil)
 	_ platform.LegacyConfig  = (*Client)(nil)
+	_ interface {
+		ListInstalledRepoHeads(context.Context) ([]platform.RepoHead, error)
+	} = (*Client)(nil) // app.InstalledHeadLister
 )
 
 func (c *Client) credentials() platform.Credentials {

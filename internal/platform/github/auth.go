@@ -142,6 +142,73 @@ func (a *AppAuth) Token(ctx context.Context, id int64) (string, error) {
 	return out.Token, nil
 }
 
+// Installation is one installation of the App.
+type Installation struct {
+	ID        int64
+	Suspended bool
+}
+
+// maxInstallationPages bounds the listing of installations (100 per page).
+const maxInstallationPages = 100
+
+// Installations lists the App's installations: GET /app/installations, which takes the app JWT
+// (not an installation token), per_page at most 100, each item with id and suspended_at
+// (docs/vendor/github/graphql-repository-heads.md).
+func (a *AppAuth) Installations(ctx context.Context) ([]Installation, error) {
+	jwt, err := a.JWT()
+	if err != nil {
+		return nil, err
+	}
+	hc := a.HTTP
+	if hc == nil {
+		hc = &http.Client{Timeout: 30 * time.Second}
+	}
+	var all []Installation
+	for page := 1; page <= maxInstallationPages; page++ {
+		var resp *http.Response
+		for {
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/app/installations?per_page=100&page=%d", strings.TrimRight(a.APIBase, "/"), page), nil)
+			if err != nil {
+				return nil, err
+			}
+			version := a.Versions.Current()
+			setHeaders(req, version)
+			req.Header.Set("Authorization", "Bearer "+jwt)
+			resp, err = hc.Do(req)
+			if err != nil {
+				return nil, fmt.Errorf("list installations: %w", err)
+			}
+			if resp.StatusCode == http.StatusGone && a.Versions.Lower(version) {
+				resp.Body.Close()
+				continue
+			}
+			break
+		}
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+		resp.Body.Close()
+		if isRateLimited(resp) {
+			return nil, &platform.RateLimitError{Until: retryAt(resp, a.now())}
+		}
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("list installations: status %d", resp.StatusCode)
+		}
+		var items []struct {
+			ID          int64   `json:"id"`
+			SuspendedAt *string `json:"suspended_at"`
+		}
+		if err := json.Unmarshal(body, &items); err != nil {
+			return nil, fmt.Errorf("list installations: decode: %w", err)
+		}
+		for _, it := range items {
+			all = append(all, Installation{ID: it.ID, Suspended: it.SuspendedAt != nil})
+		}
+		if len(items) < 100 {
+			return all, nil
+		}
+	}
+	return nil, fmt.Errorf("list installations: more than %d pages", maxInstallationPages)
+}
+
 // AppCredentials is the platform.Credentials of a TokenSource: the token for the
 // repo's installation, sent to git as x-access-token.
 type AppCredentials struct{ Tokens TokenSource }

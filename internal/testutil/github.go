@@ -92,6 +92,8 @@ type GitHub struct {
 	repoIDLookups int
 	// FailClose makes closing a pull request (PATCH /pulls/{n}) answer 500.
 	FailClose bool
+	// headSt is the head-polling state; see github_heads.go.
+	headSt *headState
 }
 
 func NewGitHub(t *testing.T) *GitHub {
@@ -357,10 +359,15 @@ func (g *GitHub) serve(w http.ResponseWriter, r *http.Request) {
 		if g.issued == nil {
 			g.issued = map[string]*issuedToken{}
 		}
-		g.issued[tok] = &issuedToken{expires: time.Now().Add(ttl)}
+		instID, _ := strconv.ParseInt(strings.TrimSuffix(strings.TrimPrefix(path, "/app/installations/"), "/access_tokens"), 10, 64)
+		g.issued[tok] = &issuedToken{expires: time.Now().Add(ttl), inst: instID}
 		g.mu.Unlock()
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(map[string]any{"token": tok, "expires_at": time.Now().Add(ttl).UTC().Format(time.RFC3339)})
+		return
+	}
+	if path == "/app/installations" && r.Method == http.MethodGet {
+		g.handleInstallations(w, r, auth)
 		return
 	}
 	g.mu.Lock()
@@ -373,6 +380,8 @@ func (g *GitHub) serve(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case path == "/graphql" && r.Method == http.MethodPost:
 		g.handleGraphQL(w, r)
+	case path == "/installation/repositories" && r.Method == http.MethodGet:
+		g.handleInstallationRepos(w, r, auth)
 	case strings.HasPrefix(path, "/repos/"):
 		g.handleRepo(w, r)
 	case strings.HasPrefix(path, "/repositories/") && r.Method == http.MethodGet:
@@ -384,6 +393,9 @@ func (g *GitHub) serve(w http.ResponseWriter, r *http.Request) {
 
 func (g *GitHub) handleGraphQL(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
+	if g.handleHeadsQuery(w, r, body) {
+		return
+	}
 	var req struct {
 		Query     string
 		Variables struct{ ID string }

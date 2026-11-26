@@ -393,7 +393,12 @@ Everything else:
 237. **NuGet: the unread forms.** The datasource, manager and docs are written from the vendored Microsoft Learn pages
     ([docs/vendor/nuget](docs/vendor/nuget)); a `-tags live` test (`internal/nuget`, `.github/workflows/live.yml`) reads
     the real nuget.org and a `-tags realtool` test ([docs/realtool.md](docs/realtool.md)) checks an edited project with
-    `dotnet`. Not covered by either: rate limits and redirects. The forms skipped today: ranges and floating versions, `<Version>` child elements, `Update=` items, property-indirected versions,
+    `dotnet`. Not covered by either: rate limits and redirects. `<Version>` child elements and `Update=` items were
+    considered (2026-11-26) and left unread: the vendored pages carry no `<Version>` child of a `PackageReference`
+    (their `<PackageVersion>` is the project's own version, a different thing) and show `Update=` once, in a
+    `Directory.Packages.props` example with no statement of how it combines with the `Include` item it updates, so
+    which declaration a bump should edit is not settled by the docs. Vendor the MSBuild item `Update` and
+    metadata pages first, then add them. The forms skipped today: ranges and floating versions, property-indirected versions,
     prerelease and four-segment versions, `packages.config`, and `NuGet.Config` sources with package source mapping
     (today a private id is looked up on nuget.org only; see the dependency-confusion note in docs/nuget.md).
 238. **NuGet: refresh `packages.lock.json`.** The lock is reported stale in the PR body, not rewritten. Rewriting it

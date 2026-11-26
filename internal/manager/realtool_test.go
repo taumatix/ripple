@@ -177,7 +177,10 @@ func assertOnlyBumped(t *testing.T, old, got string, bumps []bump) {
 		changed++
 		ok := false
 		for _, b := range bumps {
-			if strings.Contains(ol[i], b.from) && gl[i] == strings.Replace(ol[i], b.from, b.written(), 1) {
+			// Either the whole new version (Maven moves "4.13" to "4.14.0") or, for a two-segment
+			// constraint, its first segments (Bundler's "~> 2.2" becomes "~> 3.1").
+			if strings.Contains(ol[i], b.from) && (gl[i] == strings.Replace(ol[i], b.from, b.to, 1) ||
+				gl[i] == strings.Replace(ol[i], b.from, b.written(), 1)) {
 				ok = true
 			}
 		}

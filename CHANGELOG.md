@@ -26,6 +26,8 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
 
 - GitLab implements `app.HeadLister`: a member project whose default-branch head moved is re-scanned at the next discovery even if its push webhook never arrived, at one extra read per project per discovery (see `docs/platform-gitlab.md`); verified against the fake only. The other webhook hosts are still push-only.
 
+- `RIPPLE_SANDBOX=bwrap` now works: `go` runs in a network namespace whose only route out is an in-sandbox relay (`ripple sandbox-relay`, an internal subcommand) to the module proxy gate, served additionally on a private unix socket, and fails closed when it cannot be set up. Verified under real bubblewrap in the `sandbox-bwrap` CI job (a skipped sandbox test fails it); see `docs/sandbox.md` for what is not covered.
+
 ## [0.4.0] - 2026-11-25
 
 Additive release: no public API was removed or changed. Opt-in ecosystems: Helm, Bundler, Composer, NuGet, Maven and Terraform
@@ -240,8 +242,8 @@ Behaviour that changes **without** an opt-in, for existing deployments:
 - OS-level sandbox for `go` and local `git` (`RIPPLE_SANDBOX`: `none` (default), `auto`, `seatbelt`, `bwrap`).
   Under `seatbelt` (macOS) the commands run with every path unreadable and unwritable except the
   checkout, the build cache and the toolchain, and the only network they can open is a loopback gate
-  to `RIPPLE_GOPROXY` behind a random path prefix. `bwrap` (Linux) is implemented but unverified and cannot
-  confine the network to a proxy, so `go` refuses to run under it. Clone, fetch and push are not
+  to `RIPPLE_GOPROXY` behind a random path prefix. `bwrap` (Linux) puts them in a network namespace whose
+  only route out is an in-sandbox relay to the same gate, and refuses to run otherwise. Clone, fetch and push are not
   confined. See [docs/sandbox.md](docs/sandbox.md).
 - Webhook receiver: requests without a well-formed `X-Hub-Signature-256` are refused before the body is
   read, at most 4 bodies are buffered at once (others get 503 with `Retry-After`), and a declared length

@@ -18,9 +18,12 @@ import (
 //	terraform { required_providers { aws = { source = "hashicorp/aws"  version = "~> 5.1.0" } } }
 //
 // A package is "modules/namespace/name/provider" or "providers/namespace/type"; the Dependency's
-// Version is the bare X.Y.Z, and the constraint's operator (none, "=" or "~>") stays as written.
+// Version is the bare X.Y.Z (or X.Y after "~>"), and the constraint's operator (none, "=" or "~>")
+// stays as written. `~> 1.2` moves to `~> 1.5` for release 1.5.3: the same shape, and it allows
+// what the release needs.
 //
-// Left alone: a range or any other operator (">= 1.0", "~> 1.2", "1.0, < 2.0"), an interpolated
+// Left alone: a range or any other operator (">= 1.0", "1.0, < 2.0": a floor says what a module
+// needs, not which release to use), a two-segment version after no operator or "=", an interpolated
 // value, a source with a host, a git, local or `//subdir` address, a module with no version, a
 // provider with no `source` (the legacy `aws = "~> 4.0"` form), and anything in a comment or a
 // heredoc. Registry mirrors and `.terraformrc` are not read.
@@ -39,7 +42,16 @@ var terraformSpecRE = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
 // ParseTerraformSpec reports whether s is a bare version ripple moves ("X.Y.Z").
 func ParseTerraformSpec(s string) bool { return terraformSpecRE.MatchString(s) }
 
-var terraformConstraintRE = regexp.MustCompile(`^(?:=\s*|~>\s*)?([0-9]+\.[0-9]+\.[0-9]+)$`)
+var terraformDeclaredRE = regexp.MustCompile(`^[0-9]+\.[0-9]+(\.[0-9]+)?$`)
+
+// ParseTerraformDeclared reports whether s is the version text of a declaration ripple moves:
+// "X.Y.Z" (after no operator, "=" or "~>") or "X.Y" (after "~>" only).
+func ParseTerraformDeclared(s string) bool { return terraformDeclaredRE.MatchString(s) }
+
+var (
+	terraformConstraintRE    = regexp.MustCompile(`^(?:=\s*|~>\s*)?([0-9]+\.[0-9]+\.[0-9]+)$`)
+	terraformPessimisticTwoRE = regexp.MustCompile(`^~>\s*([0-9]+\.[0-9]+)$`)
+)
 
 type tfTok struct {
 	kind       byte // 'i' identifier, 's' string, 'p' punctuation
@@ -219,7 +231,11 @@ func tfEntry(src, ver tfTok, content string, pkgOf func(string) (string, bool)) 
 	if !ok {
 		return terraformEntry{}, false
 	}
-	m := terraformConstraintRE.FindStringSubmatchIndex(strings.TrimSpace(ver.text))
+	trimmed := strings.TrimSpace(ver.text)
+	m := terraformConstraintRE.FindStringSubmatchIndex(trimmed)
+	if m == nil {
+		m = terraformPessimisticTwoRE.FindStringSubmatchIndex(trimmed)
+	}
 	if m == nil {
 		return terraformEntry{}, false
 	}
@@ -289,11 +305,18 @@ func (t Terraform) Apply(content []byte, dep model.Dependency, newPackage, newVe
 	if newPackage != "" && newPackage != dep.Package {
 		return nil, fmt.Errorf("%w: a module or provider cannot be renamed", ErrUnsupported)
 	}
-	if !ParseTerraformSpec(dep.Version) {
+	if !ParseTerraformDeclared(dep.Version) {
 		return nil, fmt.Errorf("%w: %q is not a version ripple moves", ErrUnsupported, dep.Version)
 	}
 	nv := strings.TrimPrefix(newVersion, "v")
-	if !ParseTerraformSpec(nv) {
+	if !ParseTerraformDeclared(nv) {
+		return nil, fmt.Errorf("%w: %q is not a release version", ErrUnsupported, newVersion)
+	}
+	// `~> 1.2` keeps its two segments: `~> 1.5` allows what release 1.5.3 needs (docs/vendor/terraform/
+	// version-constraints.txt, "~>"), so the patch of the release is dropped.
+	if strings.Count(dep.Version, ".") == 1 {
+		nv = strings.Join(strings.SplitN(nv, ".", 3)[:2], ".")
+	} else if strings.Count(nv, ".") != 2 {
 		return nil, fmt.Errorf("%w: %q is not a release version", ErrUnsupported, newVersion)
 	}
 	var hits []terraformEntry

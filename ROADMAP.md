@@ -425,9 +425,17 @@ Everything else:
 240. **Terraform: the unread forms.** The datasource, manager and docs are written from the vendored HashiCorp pages
     ([docs/vendor/terraform](docs/vendor/terraform)); a `-tags live` test (`internal/terraform`,
     `.github/workflows/live.yml`) reads the real registry and a `-tags realtool` test
-    ([docs/realtool.md](docs/realtool.md)) checks an edited configuration with `terraform`. The forms skipped today: ranges and other operators (`>= 1.0`,
-    `~> 1.2`), `//subdir` module addresses, the legacy `aws = "~> 4.0"` provider form, hosted registries and
+    ([docs/realtool.md](docs/realtool.md)) checks an edited configuration with `terraform`. `~> 1.2` is read now
+    (docs/terraform.md). The forms skipped today: floors, ranges and other operators (250), `//subdir` module addresses, the legacy `aws = "~> 4.0"` provider form, hosted registries and
     `.terraformrc` mirrors, `*.tf.json`, `.terraform-version` and the `required_version` constraint, and OpenTofu's registry.
+250. **Terraform: floors and ranges (`>= 1.0`, `>= 1.0, < 2.0`, `< 3.0`).** Left unread on purpose, not for lack of a
+    parser. The vendored page's best practices say a reusable module "should constrain only [its] minimum allowed
+    versions ... such as `>= 0.12.0`", so a floor states what the module needs, not which release it uses; raising it to
+    the newest release would silently shrink what the module supports, and `>` would exclude the release it names. An
+    upper bound (`< 2.0`) is the other half: moving it means widening a promise the author made. Decide per declaration
+    kind before reading any: a root module's range `>= 1.2, < 2.0` could widen its ceiling when a new major exists
+    (opt-in key, off by default), and `required_version` (Terraform itself) is a separate datasource. Nothing is
+    verified about how a given range should move beyond the vendored operator table.
 241. **Terraform: refresh `.terraform.lock.hcl`.** The lock is reported stale in provider PRs, not rewritten. Rewriting it
     without running Terraform needs the provider package checksums (`h1:` and `zh:`) per platform from the registry's
     download metadata; decide after 240 whether that is worth doing.

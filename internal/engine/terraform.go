@@ -31,8 +31,16 @@ func applicableTerraform(d model.Dependency, pkg, version string) (rules.UpdateT
 	if d.Datasource != model.DatasourceTerraform || d.Package != pkg {
 		return "", false
 	}
-	if !manager.ParseTerraformSpec(d.Version) || !manager.ParseTerraformSpec(version) {
+	if !manager.ParseTerraformDeclared(d.Version) || !manager.ParseTerraformSpec(version) {
 		return "", false
+	}
+	if strings.Count(d.Version, ".") == 1 {
+		// `~> 1.2` is rewritten to the release's X.Y, so a release counts only when that differs
+		// from the declaration (1.2.9 would leave the text as it is), and it is judged by it.
+		version = strings.Join(strings.SplitN(version, ".", 3)[:2], ".")
+		if semver.Compare("v"+version, "v"+d.Version) <= 0 {
+			return "", false
+		}
 	}
 	return rules.Classify("v"+d.Version, "v"+version)
 }

@@ -20,7 +20,7 @@ const gemfileE2E = `source "https://rubygems.org"
 
 gem "rails", "7.1.2"
 gem 'nokogiri', '~> 1.15.4', require: false   # keeps its operator
-gem "two", "~> 1.2"
+gem "two", ">= 1.2"
 gem "bare"
 gem "fromgit", "1.0.0", git: "https://example.com/x.git"
 `
@@ -37,7 +37,7 @@ func TestBundlerGemBump(t *testing.T) {
 		e.gh.AddRepo("acme/optout", map[string]string{"Gemfile": gemfileE2E})
 		start(t, e, "acme/app", "acme/optout")
 		if n := len(e.deps("acme/app")); n != 2 {
-			t.Fatalf("rails and nokogiri are tracked (not a two-segment range, a bare gem or a git gem), got %+v", e.deps("acme/app"))
+			t.Fatalf("rails and nokogiri are tracked (not a \">=\" floor, a bare gem or a git gem), got %+v", e.deps("acme/app"))
 		}
 
 		e.clock.Advance(time.Minute)
@@ -119,6 +119,57 @@ func TestBundlerOtherSourceIsNotRead(t *testing.T) {
 		e.tick()
 		if len(e.deps("acme/app")) != 0 || len(e.gh.PRs("acme/app")) != 0 || len(gems.Requests()) != 0 {
 			t.Errorf("a Gemfile on a private source was read: deps %v, requests %v", e.deps("acme/app"), gems.Requests())
+		}
+	})
+}
+
+const gemfileTwoSegmentE2E = `source "https://rubygems.org"
+
+gem "pess", "~> 1.2", require: false   # two segments
+gem "other", "~> 3.4"
+`
+
+// "~> 1.2" is ">= 1.2, < 2.0" (docs/vendor/rubygems/gemfile.md, "Gems > Version"): a later 1.x is
+// already allowed and is no PR, a 2.x release is, and the file then says "~> 2.1".
+func TestBundlerTwoSegmentMajor(t *testing.T) {
+	forEach(t, func(t *testing.T, st store.Store) {
+		e, gems := gemsEnv(t, st)
+		gems.Publish("pess", "1.2.0")
+		gems.Publish("other", "3.4.0")
+		e.gh.AddRepo("acme/app", map[string]string{".ripple.yaml": bundlerConfig, "Gemfile": gemfileTwoSegmentE2E, "Gemfile.lock": "GEM\n"})
+		start(t, e, "acme/app")
+		if n := len(e.deps("acme/app")); n != 2 {
+			t.Fatalf("both two-segment gems are tracked, got %+v", e.deps("acme/app"))
+		}
+
+		e.clock.Advance(time.Minute)
+		gems.Publish("pess", "1.9.4") // inside "~> 1.2": a lock refresh, not an edit
+		gems.Publish("other", "3.9.0")
+		e.tick()
+		if n := len(e.gh.PRs("acme/app")); n != 0 {
+			t.Fatalf("a release the constraint already allows opened %d PRs", n)
+		}
+
+		e.clock.Advance(time.Minute)
+		gems.Publish("pess", "2.1.3")
+		e.tick()
+		e.tick()
+		prs := e.gh.PRs("acme/app")
+		if len(prs) != 1 {
+			t.Fatalf("one PR for the major, got %d", len(prs))
+		}
+		got, _ := e.gh.FileAt("acme/app", prs[0].Head, "Gemfile")
+		if want := strings.Replace(gemfileTwoSegmentE2E, `"~> 1.2"`, `"~> 2.1"`, 1); got != want {
+			t.Errorf("two digits move, layout kept:\n%s", got)
+		}
+		if !strings.HasPrefix(prs[0].Head, "ripple/rubygems/pess-2.1.3") {
+			t.Errorf("branch %q", prs[0].Head)
+		}
+		if lock, _ := e.gh.FileAt("acme/app", prs[0].Head, "Gemfile.lock"); lock != "GEM\n" {
+			t.Errorf("Gemfile.lock must be left alone, got %q", lock)
+		}
+		if !strings.Contains(prs[0].Body, "Gemfile.lock not regenerated") {
+			t.Errorf("body lacks the lock note:\n%s", prs[0].Body)
 		}
 	})
 }

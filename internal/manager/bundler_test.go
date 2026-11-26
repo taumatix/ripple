@@ -47,7 +47,7 @@ func TestBundlerExtract(t *testing.T) {
 		}
 		got = append(got, d.Package+"@"+d.Version)
 	}
-	want := "rails@7.1.2 nokogiri@~> 1.15.4 pg@= 1.5.4 rspec@3.12.0 after@2.0.0"
+	want := "rails@7.1.2 nokogiri@~> 1.15.4 pg@= 1.5.4 two@~> 1.2 rspec@3.12.0 after@2.0.0"
 	if strings.Join(got, " ") != want {
 		t.Errorf("got %q, want %q", strings.Join(got, " "), want)
 	}

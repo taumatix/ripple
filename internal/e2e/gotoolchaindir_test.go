@@ -74,7 +74,7 @@ func TestVerifyUsesTheGoTheBumpNames(t *testing.T) {
 		e, _ := directiveAboveServer(t, st, dir)
 		_, body := onePR(t, e, "acme/app", false)
 		got := calls(t, log)
-		for _, want := range []string{"mod tidy", "build ./...", "vet ./..."} {
+		for _, want := range []string{"mod tidy", "build -o /dev/null ./...", "vet ./..."} {
 			if !strings.Contains(got, want) {
 				t.Errorf("the installed Go never ran %q:\n%s", want, got)
 			}

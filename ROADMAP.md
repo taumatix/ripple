@@ -371,26 +371,26 @@ Everything else:
     counts only the first 100 and an open PR whose job is not indexed does not count. It caps open PRs, not only the ones a
     bypass opened, and covers the repo, not the installation. Covered against the fake host only; no real repo asked for it yet.
 228. **pip: retarget residuals.** A release the repo's Python cannot run now retargets to the newest older runnable one when the repo is cloned (docs/pip.md). Left: the retargeted job takes the skipped release's `ReleasedAt`, so its cooldown counts from the newer release (no upload times are read); only the floor of the repo's Python is tested, so a repo supporting `>=3.9` is not retargeted away from a release needing `>=3.9.1`; Cargo's MSRV skip has no such fallback (ROADMAP 156); not run against the real PyPI index.
-231. **Helm: verify against a real repository, and the unread forms.** The datasource, manager and docs are written from
-    the vendored helm-www pages ([docs/vendor/helm](docs/vendor/helm)) and a fake repository; nothing has been run
-    against a real `index.yaml` (a large one, redirects, a 404 chart). Add a `-tags live` check against a public repo,
-    then the forms skipped today: `oci://` dependencies (OCI tags datasource), `@alias` / `alias:` repositories,
-    version ranges, flow-style entries, and `created` dates for the cooldown.
+231. **Helm: the unread forms.** The datasource, manager and docs are written from the vendored helm-www pages
+    ([docs/vendor/helm](docs/vendor/helm)). A `-tags live` test reads the real ingress-nginx `index.yaml`
+    (`internal/helmrepo`) and `TestRealtoolHelm` runs `helm dependency update` / `lint` on an edited chart; not covered
+    live: a very large index (`charts.helm.sh/stable`), redirects. Still skipped: `oci://` dependencies (OCI tags
+    datasource), `@alias` / `alias:` repositories, version ranges, flow-style entries, and `created` dates for the cooldown.
 232. **Helm: refresh `Chart.lock`.** The lock is reported stale in the PR body, not rewritten. Rewriting it needs
     `helm dependency update` (network, all repositories of the chart) or the digest algorithm reproduced exactly;
     decide which after 231 shows a real lock.
-233. **Bundler: verify against the real rubygems.org, and the unread forms.** The datasource, manager and docs are
-    written from the vendored RubyGems guides ([docs/vendor/rubygems](docs/vendor/rubygems)) and a fake; nothing has
-    run against the real API (large gems, rate limits, yanked or platform-only versions). Add a `-tags live` check, then
-    the forms skipped today: two-segment `"~> 1.2"` and other constraints, four-segment versions, `gems.rb`, `.gemspec`
+233. **Bundler: the unread forms.** The datasource, manager and docs are written from the vendored RubyGems guides
+    ([docs/vendor/rubygems](docs/vendor/rubygems)). A `-tags live` test reads `rack` and `nokogiri` from the real
+    rubygems.org (`internal/rubygems`) and `TestRealtoolBundler` runs `bundle lock` on an edited Gemfile; not covered
+    live: rate limits, yanked versions. Still skipped: two-segment `"~> 1.2"` and other constraints, four-segment versions, `gems.rb`, `.gemspec`
     dependencies, a private `source` (credentials), multi-line declarations, and `created_at` for the cooldown.
 234. **Bundler: refresh `Gemfile.lock`.** The lock is reported stale in the PR body, not rewritten. Rewriting a lock
     entry without running bundler needs the new version's dependency set from the API; decide after 233 whether that
     is worth doing.
-235. **Composer: verify against the real Packagist, and the unread forms.** The datasource, manager and docs are written
-    from the vendored Composer and Packagist pages ([docs/vendor/packagist](docs/vendor/packagist)) and a fake; nothing
-    has run against the real service (the minified `p2` encoding of large packages, rate limits, redirects, the package
-    name pattern). Add a `-tags live` check, then the forms skipped today: two-segment `^1.2` and other constraints,
+235. **Composer: the unread forms.** The datasource, manager and docs are written from the vendored Composer and
+    Packagist pages ([docs/vendor/packagist](docs/vendor/packagist)). A `-tags live` test reads `monolog/monolog` from the
+    real Packagist (`internal/packagist`) and `TestRealtoolComposer` runs `composer validate` / `update --dry-run` on an
+    edited file; not covered live: rate limits, redirects. Still skipped: two-segment `^1.2` and other constraints,
     `||` alternatives, four-segment versions, a private `repositories` entry (credentials in `auth.json`), `published-time`
     for the cooldown, and the `p2/<name>~dev.json` branches.
 236. **Composer: refresh `composer.lock`.** The lock is reported stale in the PR body, not rewritten. Rewriting an entry

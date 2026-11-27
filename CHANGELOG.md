@@ -52,6 +52,8 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
 
 - Terraform: no behaviour change. `TestRealtoolTerraformConstraintMeaning` (CI only; `terraform` was not available where this was written, so it has not run) asks real terraform what a floor and a range lock, to settle whether ripple should read them (ROADMAP 250). Until it runs, the decision to leave floors and ranges unread rests on the vendored docs; an opt-in ceiling widening is ROADMAP 324.
 
+- Gitea and Forgejo: a label a repository lacks is now created (`POST /repos/{o}/{r}/labels`, colour `#0075ca`) and applied, so `labels:` works on a fresh repository; before it was dropped and only logged. The real-instance job now also proves two paths end to end on Gitea 1.27.3, Forgejo 17.0.2 and Forgejo 7.0.16: a deleted repository is forgotten at the next discovery (no instance announces a deletion), and a repository announced by a `created` webhook before its first push is registered once with its dependencies when the push arrives. New optional conformance fixtures `ReportsDeletes` and `AnnouncesCreates` (the fake implements the first, the real fixture both). Not verified: creating a label with a token that lacks write access (the fake answers 403; the real answer is assumed), a created repository whose first push has no push webhook (nothing rescans it until Gitea head polling, ROADMAP 247), and the other hosts' deletion and created-before-push paths.
+
 ## [0.4.0] - 2026-11-25
 
 Additive release: no public API was removed or changed. Opt-in ecosystems: Helm, Bundler, Composer, NuGet, Maven and Terraform

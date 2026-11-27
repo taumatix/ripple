@@ -56,8 +56,6 @@ two after a second commit, three after a force-push. A label or comment added by
 description on a real instance are still verified only against the fake. The excerpts it relies on are in
 `docs/vendor/gitea/supersede-excerpts.md` and `docs/vendor/forgejo/supersede-excerpts.md`.
 
-## Unverified
-
 ## Real instances
 
 `.github/workflows/hosts-gitea.yml` runs the whole conformance suite (`platformtest.Run`, including push to exactly one
@@ -69,17 +67,27 @@ demand. The recorded answers are in `docs/vendor/gitea/real-answers.md`; the tes
   repository, so one whose first push raced a discovery stayed unregistered until a later one. `ListRepos` now polls
   `GET /repos/{o}/{r}` for a repository it has not seen empty before, for up to `Client.EmptySettle` (5 s), and lists
   it once it settles; one that stays empty costs a single wait. The suite's fixture no longer waits, so the real
-  legs prove it (ROADMAP 280). Not covered: a `repository` created webhook for a repository still empty (ROADMAP 283).
+  legs prove it (ROADMAP 280).
+- A `repository` `created` webhook arrives before the first push. Run for real (`CreatedBeforeTheFirstPushStillRegistersOnce`):
+  ripple answers it 202 and scans the empty clone, which fails cleanly (`git ls-tree: Not a valid object name HEAD`), falls
+  back to a full checkout and records 0 dependencies. The first push then arrives as a `push` event and the repository is
+  registered once, with its dependencies, and gets one PR for a release. Without a push webhook nothing rescans it
+  until head polling exists for Gitea (ROADMAP 247).
 - A fresh pull request already has one `pull_push` (see above); the first version closed nothing.
-- A label name the repository lacks is dropped with `200 []`; the client now logs "labels not applied" naming them.
+- A label name the repository lacks is dropped with `200 []`. The client now creates it (`POST /repos/{o}/{r}/labels`
+  with a name and the colour `#0075ca`) and applies it, so `labels:` works on a fresh repository: the real tests find
+  both `dependencies` and the created `nosuchlabel` on the pull request on all three instances. If creating is refused
+  (a token without write access) the client logs "labels not applied" naming them, as before.
 - Forgejo 7.0.16 refuses label names (`422`, ids only). Labelling never worked there. The client now retries a 422 with the
   ids from `GET .../labels` (first 50 labels), so `labels:` works on 7.x; `TestRealCreatePRLabels` proves it on each leg.
 - No instance rate-limits by default, so the 429 path is exercised through the fixture's proxy only; what a
   throttling reverse proxy in front of a real instance sends is not recorded.
 - The git basic-auth user is irrelevant (any is accepted); the token is what authenticates.
 - Both Forgejo releases send `X-Hub-Signature-256` as well as `X-Forgejo-Signature`.
-- A system webhook announces a created repository but never a deleted one, so the receiver's removal path is proven
-  against the fake only; a deleted repository is noticed by discovery.
+- A system webhook announces a created repository but never a deleted one, so a deleted repository is noticed by
+  discovery only. Run for real (`DeleteForgetsTheRepo`): after the delete, the next discovery drops the repository
+  and its dependencies, the other repository stays, and the release opens its one PR there. A deleted repository
+  answers `404` to its pull request listing.
 - Forgejo 7.0.16 is detected as Forgejo (`+gitea-1.21.11`). Forgejo before 7 was not run and is still undetectable.
 
 ## Unverified

@@ -231,6 +231,7 @@ func (c *countingTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	for p := range c.n {
 		if strings.Contains(s, p) {
 			c.n[p]++
+			fmt.Fprintf(os.Stderr, "counted %s %s\n", r.Method, s)
 		}
 	}
 	c.mu.Unlock()

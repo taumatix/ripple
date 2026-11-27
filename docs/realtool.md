@@ -33,6 +33,7 @@ Run one locally (from the repository root; `-tags realtool` is added for you):
 | `TestRealtoolMavenSharedProperty` | `dependency:list` on a pom whose `${jackson.version}` feeds two artifacts, before and after the edit; a `-Djackson.version` override beating the property | mvn, JDK 17 |
 | `TestRealtoolMavenParent` | `dependency:list` before and after a `spring-boot-starter-parent` bump: the managed `slf4j-api` changes | mvn, JDK 17 |
 | `TestRealtoolTerraform` | `terraform init -backend=false`, `terraform validate` | terraform |
+| `TestRealtoolTerraformConstraintMeaning` | `terraform init` under `= 3.5.0`, `>= 3.5.0`, `>= 3.0.0`, `>= 3.5.0, < 3.6.0`, `>= 3.5.0, < 3.7.0`, and the version `.terraform.lock.hcl` holds | terraform |
 | `TestRealtoolGitHubActions` | `actionlint`, plus `git ls-remote` that the new tag exists | actionlint, git |
 | `TestRealtoolDocker` | `hadolint` (no daemon), plus a Docker Hub check that the new tag exists | hadolint |
 

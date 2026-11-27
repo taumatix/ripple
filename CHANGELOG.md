@@ -50,6 +50,8 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
 
 - Maven (opt-in within `ecosystem: maven`; nothing outside it changes): a property shared by several dependencies (`${jackson.version}` on `jackson-core` and `jackson-databind`) is now read as one entry and moves only to a release every user of it has, and the `<parent>` version is tracked like a dependency. A property used anywhere but a dependency `<version>` stays unread, and each declaration left unread is now logged with the reason. Covered by unit tests, end-to-end tests against the fake Central, and `TestRealtoolMavenSharedProperty` and `TestRealtoolMavenParent` (CI only: `mvn` was not available where this was written, so neither has run locally). Not verified: that a parent bump is safe for the whole managed set, and a `-D` override is not seen by ripple ([docs/maven.md](docs/maven.md), ROADMAP 320-323).
 
+- Terraform: no behaviour change. `TestRealtoolTerraformConstraintMeaning` (CI only; `terraform` was not available where this was written, so it has not run) asks real terraform what a floor and a range lock, to settle whether ripple should read them (ROADMAP 250). Until it runs, the decision to leave floors and ranges unread rests on the vendored docs; an opt-in ceiling widening is ROADMAP 324.
+
 ## [0.4.0] - 2026-11-25
 
 Additive release: no public API was removed or changed. Opt-in ecosystems: Helm, Bundler, Composer, NuGet, Maven and Terraform

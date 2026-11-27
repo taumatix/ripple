@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -597,6 +598,63 @@ func TestRealtoolTerraform(t *testing.T) {
 			mustContain(t, dir, ".terraform.lock.hcl", `constraints = "~> 3.2"`) // the two-segment edit, as terraform records it
 		},
 	}.run(t)
+}
+
+// TestRealtoolTerraformConstraintMeaning asks real terraform what a floor and a range allow
+// (ROADMAP 250), by the version `terraform init` locks for hashicorp/random under each. It
+// decides which forms ripple may read: a form whose edit changes nothing terraform installs,
+// or only widens what it may install, is not a dependency update.
+func TestRealtoolTerraformConstraintMeaning(t *testing.T) {
+	if _, err := exec.LookPath("terraform"); err != nil {
+		t.Fatal("terraform is not installed: the real-tool tests need it (CI installs it); not skipping")
+	}
+	locked := func(t *testing.T, constraint string) string {
+		t.Helper()
+		dir := t.TempDir()
+		cfg := "terraform {\n  required_providers {\n    random = {\n      source  = \"hashicorp/random\"\n      version = \"" + constraint + "\"\n    }\n  }\n}\n"
+		if err := os.WriteFile(filepath.Join(dir, "main.tf"), []byte(cfg), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		var version string
+		retry(t, "terraform init with "+constraint, func() error {
+			cmd := exec.Command("terraform", "init", "-backend=false", "-input=false")
+			cmd.Dir = dir
+			if out, err := cmd.CombinedOutput(); err != nil {
+				return fmt.Errorf("%v: %s", err, out)
+			}
+			lock, err := os.ReadFile(filepath.Join(dir, ".terraform.lock.hcl"))
+			if err != nil {
+				return err
+			}
+			m := regexp.MustCompile(`(?m)^\s*version\s*=\s*"([0-9.]+)"`).FindSubmatch(lock)
+			if m == nil {
+				return fmt.Errorf("no version in lock file:\n%s", lock)
+			}
+			version = string(m[1])
+			return nil
+		})
+		return version
+	}
+
+	exact, floor, floorOld := locked(t, "= 3.5.0"), locked(t, ">= 3.5.0"), locked(t, ">= 3.0.0")
+	t.Logf("= 3.5.0 locks %s; >= 3.5.0 locks %s; >= 3.0.0 locks %s", exact, floor, floorOld)
+	if exact != "3.5.0" {
+		t.Errorf("= 3.5.0 locked %s", exact)
+	}
+	// A floor never holds the install at the floor: raising it changes nothing installed
+	// as long as the floor stays below the newest release, so a bump of it is not an update.
+	if floor == "3.5.0" || floor != floorOld {
+		t.Errorf("a floor should lock the newest release whatever its value: >= 3.5.0 gave %s, >= 3.0.0 gave %s", floor, floorOld)
+	}
+	// A ceiling is what holds an install back: widening it is what lets the newest in.
+	capped, widened := locked(t, ">= 3.5.0, < 3.6.0"), locked(t, ">= 3.5.0, < 3.7.0")
+	t.Logf("< 3.6.0 locks %s; < 3.7.0 locks %s", capped, widened)
+	if !strings.HasPrefix(capped, "3.5.") {
+		t.Errorf(">= 3.5.0, < 3.6.0 locked %s, want a 3.5.x", capped)
+	}
+	if !strings.HasPrefix(widened, "3.6.") {
+		t.Errorf(">= 3.5.0, < 3.7.0 locked %s, want a 3.6.x", widened)
+	}
 }
 
 func TestRealtoolGitHubActions(t *testing.T) {

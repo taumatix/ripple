@@ -422,8 +422,15 @@ Everything else:
     the newest release would silently shrink what the module supports, and `>` would exclude the release it names. An
     upper bound (`< 2.0`) is the other half: moving it means widening a promise the author made. Decide per declaration
     kind before reading any: a root module's range `>= 1.2, < 2.0` could widen its ceiling when a new major exists
-    (opt-in key, off by default), and `required_version` (Terraform itself) is a separate datasource. Nothing is
-    verified about how a given range should move beyond the vendored operator table.
+    (opt-in key, off by default), and `required_version` (Terraform itself) is a separate datasource.
+    Decided, pending the first CI run of `TestRealtoolTerraformConstraintMeaning` (terraform was not available where
+    it was written): no form is safe to read by default. The test asserts that a floor locks the newest release
+    whatever its value (so a floor edit installs nothing new) and that a ceiling is what holds an install back (so
+    widening one changes what installs, which is the author's call). What remains is 324, opt-in only.
+324. **Terraform: an opt-in key to widen a ceiling.** `>= 1.2, < 2.0` could move to `< 3.0` when a 2.x release exists
+    and the repository says it wants that (a per-repository setting, off by default), the one form 250's test shows
+    changes what installs. Needs the setting, a datasource read for a release above the ceiling, and a PR body that says
+    the promise is being widened. Read `required_version` separately.
 241. **Terraform: refresh `.terraform.lock.hcl`.** The lock is reported stale in provider PRs, not rewritten. Rewriting it
     without running Terraform needs the provider package checksums (`h1:` and `zh:`) per platform from the registry's
     download metadata; decide after 240 whether that is worth doing.

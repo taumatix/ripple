@@ -4,6 +4,7 @@ package gitea_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -32,6 +33,30 @@ func TestRealCloseUntouchedPR(t *testing.T) {
 
 	_, _, raw := in.call(t, token(f.tok), http.MethodGet, fmt.Sprintf("/repos/%s/pulls/%d", path, pr.Number), nil, nil)
 	t.Logf("FACT pull request: %s", snippet(raw, 1500))
+	var cur struct {
+		State string `json:"state"`
+		Head  struct {
+			Ref  string `json:"ref"`
+			Repo *struct {
+				FullName string `json:"full_name"`
+			} `json:"repo"`
+		} `json:"head"`
+		ContentVersion *int `json:"content_version"`
+	}
+	_ = json.Unmarshal(raw, &cur)
+	cv := "absent"
+	if cur.ContentVersion != nil {
+		cv = fmt.Sprint(*cur.ContentVersion)
+	}
+	hr := "null"
+	if cur.Head.Repo != nil {
+		hr = cur.Head.Repo.FullName
+	}
+	t.Logf("FACT pull request fields the decision reads: state=%q head.ref=%q head.repo=%q content_version=%s", cur.State, cur.Head.Ref, hr, cv)
+	for _, p := range []string{"/pulls/%d/reviews", "/issues/%d/comments"} {
+		_, _, b := in.call(t, token(f.tok), http.MethodGet, fmt.Sprintf("/repos/%s"+p, path, pr.Number), nil, nil)
+		t.Logf("FACT %s -> %s", p, snippet(b, 600))
+	}
 	_, _, raw = in.call(t, token(f.tok), http.MethodGet, fmt.Sprintf("/repos/%s/pulls/%d/commits?limit=2&verification=false&files=false", path, pr.Number), nil, nil)
 	t.Logf("FACT pull request commits: %s", snippet(raw, 1500))
 

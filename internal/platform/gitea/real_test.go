@@ -59,25 +59,26 @@ func TestRealRequestAutoMerge(t *testing.T) {
 	}
 }
 
-// mergeable waits until the instance has finished checking whether the pull request can merge
-// (GET pulls/{n} `mergeable`). A merge request made while it is still checking is answered
-// 405 {"message":"Please try again later"} (Gitea 1.27.3; seen on the second request of
-// TestRealScheduledMerge, right after the first was accepted), which is not what the test asks.
-// RequestAutoMerge itself waits through that answer; see TestRealRequestAutoMerge.
-func (f *realFixture) mergeable(t *testing.T, path string, n int, when string) {
+// mergeRequest sends one merge request and, while the instance answers 405
+// {"message":"Please try again later"}, sends it again. Gitea 1.27.3 answers that while the
+// pull request's mergeability check (an asynchronous queue job) is pending, and nothing the API
+// shows says so beforehand: CI run 46019416863 read `mergeable: true` on GET pulls/{n} after
+// 4 reads and still got the 405 on the next merge request, which was then accepted (201). The
+// 405 is the only signal, so it is the one waited for; every other answer is returned as is.
+// The retries are logged so a run shows how often it happened.
+func (f *realFixture) mergeRequest(t *testing.T, path string, n int, body map[string]any, when string) (int, []byte) {
 	t.Helper()
 	deadline := time.Now().Add(30 * time.Second)
-	for polls := 1; ; polls++ {
-		var pr struct {
-			Mergeable bool `json:"mergeable"`
+	for refused := 0; ; refused++ {
+		st, _, resp := f.in.call(t, token(f.tok), http.MethodPost, fmt.Sprintf("/repos/%s/pulls/%d/merge", path, n), body, nil)
+		if st != http.StatusMethodNotAllowed {
+			if refused > 0 {
+				t.Logf("FACT %s#%d %s: %d x 405 %q before %d", path, n, when, refused, strings.TrimSpace(string(resp)), st)
+			}
+			return st, resp
 		}
-		f.in.must(t, token(f.tok), http.MethodGet, fmt.Sprintf("/repos/%s/pulls/%d", path, n), nil, &pr)
-		if pr.Mergeable {
-			t.Logf("FACT %s#%d mergeable after %d reads, %s", path, n, polls, when)
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("%s#%d still not mergeable after 30s, %s", path, n, when)
+		if !strings.Contains(string(resp), "Please try again later") || time.Now().After(deadline) {
+			t.Fatalf("%s#%d %s: 405 %q after %d refusals", path, n, when, resp, refused+1)
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
@@ -221,9 +222,7 @@ func TestRealScheduledMerge(t *testing.T) {
 	path := f.Path("facts")
 	for i, key := range []string{"do", "Do"} {
 		n := f.branchPR(t, "facts", fmt.Sprintf("ripple/go/m%d", i))
-		f.mergeable(t, path, n, "before the first merge request")
-		st, _, body := in.call(t, token(f.tok), http.MethodPost, fmt.Sprintf("/repos/%s/pulls/%d/merge", path, n),
-			map[string]any{key: "squash", "merge_when_checks_succeed": true}, nil)
+		st, body := f.mergeRequest(t, path, n, map[string]any{key: "squash", "merge_when_checks_succeed": true}, "first request")
 		var pr struct {
 			State  string `json:"state"`
 			Merged bool   `json:"merged"`
@@ -237,9 +236,7 @@ func TestRealScheduledMerge(t *testing.T) {
 		for _, e := range tl {
 			types = append(types, e.Type)
 		}
-		f.mergeable(t, path, n, "before the second merge request")
-		st2, _, body2 := in.call(t, token(f.tok), http.MethodPost, fmt.Sprintf("/repos/%s/pulls/%d/merge", path, n),
-			map[string]any{key: "squash", "merge_when_checks_succeed": true}, nil)
+		st2, body2 := f.mergeRequest(t, path, n, map[string]any{key: "squash", "merge_when_checks_succeed": true}, "second request")
 		t.Logf("FACT merge key=%q: status %d body %q; pr state=%s merged=%v; timeline %v; second request %d %q",
 			key, st, strings.TrimSpace(string(body)), pr.State, pr.Merged, types, st2, strings.TrimSpace(string(body2)))
 		// Literal answers of Gitea 1.27.3, Forgejo 17.0.2 and 7.0.16, either key case.

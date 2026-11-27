@@ -40,18 +40,12 @@ xsrf=$(awk '$6=="XSRF_TOKEN"{print $7}' "$jar")
 echo "--- mint an HTTP password"
 code=$(curl -sS -b "$jar" -H "X-Gerrit-Auth: $xsrf" -H 'Content-Type: application/json' -X PUT \
   -d '{"generate":true}' -o "$work/pass.out" -w '%{http_code}' "$base/accounts/self/password.http")
-echo "PUT password.http with the cookie session: $code: $(head -c 200 "$work/pass.out")"
-# Finding (Gerrit 3.15.0, dev auth): a cookie session is refused for the credential endpoints with
-# "Invalid authentication method"; /a/ wants a password it does not have. An SSH key is the other way in.
-ssh-keygen -q -t ed25519 -N '' -f "$work/key"
-code=$(curl -sS -b "$jar" -H "X-Gerrit-Auth: $xsrf" -H 'Content-Type: text/plain' -X POST \
-  --data-binary @"$work/key.pub" -o "$work/ssh.out" -w '%{http_code}' "$base/accounts/self/sshkeys")
-echo "POST sshkeys with the cookie session: $code: $(head -c 200 "$work/ssh.out")"
-[ "$code" = 200 ] || exit 1
-pass=$(openssl rand -hex 16)
-echo "::add-mask::$pass"
-ssh -p 29418 -i "$work/key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
-  "$user@127.0.0.1" gerrit set-account "$user" --http-password "$pass"
+# Findings (Gerrit 3.15.0, dev auth): the REST servlet hands out no XSRF_TOKEN cookie; the web UI's host page
+# ("GET /") does, and without the X-Gerrit-Auth header a cookie session's PUT is refused with "Invalid
+# authentication method". With it, PUT answers 201 (not 200) and the body is the password after the XSSI line.
+echo "PUT password.http with the cookie session: $code"
+[ "$code" = 201 ] || { echo "body: $(head -c 200 "$work/pass.out")"; exit 1; }
+pass=$(strip < "$work/pass.out" | tr -d '"')
 [ -n "$pass" ] || { echo "empty password"; exit 1; }
 echo "::add-mask::$pass"
 

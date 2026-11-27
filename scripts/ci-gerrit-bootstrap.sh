@@ -94,7 +94,7 @@ cat > "$work/meta/webhooks.config" <<EOF
   retryInterval = 500
 EOF
 git -C "$work/meta" add webhooks.config
-git -C "$work/meta" -c user.name=ci -c user.email=ci@example.invalid commit -q -m "ripple CI: post ref-updated events to the relay"
+git -C "$work/meta" -c user.name=ci -c user.email=$email commit -q -m "ripple CI: post ref-updated events to the relay"
 g push -q "$base/a/All-Projects" HEAD:refs/meta/config
 
 {

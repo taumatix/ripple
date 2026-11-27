@@ -43,7 +43,7 @@ import (
 const (
 	relayAddr  = "127.0.0.1:18999"
 	relayToken = "ci-hook-secret" // the ?token= scripts/ci-gerrit-bootstrap.sh gives the plugin; the CI server is throwaway
-	authorMail = "ripple@users.noreply.invalid"
+	authorMail = "ripple@example.com"
 )
 
 type realEnv struct{ base, user, pass string }

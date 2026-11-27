@@ -17,7 +17,7 @@ base=${GERRIT_URL:-http://127.0.0.1:8080}
 user=${GERRIT_USER:-admin}
 relay=${RELAY_URL:-http://127.0.0.1:18999/hook}
 token=${HOOK_TOKEN:-ci-hook-secret}
-email=${AUTHOR_EMAIL:-ripple@users.noreply.invalid}
+email=${AUTHOR_EMAIL:-ripple@example.com}
 work=$(mktemp -d)
 jar=$work/jar
 

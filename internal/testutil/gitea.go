@@ -52,6 +52,10 @@ type Gitea struct {
 	idLookup int
 	// Merges records the raw merge request bodies, in order.
 	Merges []string
+	// MergeChecking makes the next that many merge requests answer 405 "Please try again later",
+	// as Gitea 1.27.3 does while it is still checking whether the pull request can merge
+	// (docs/vendor/gitea/real-answers.md). Each such request is also recorded in Merges.
+	MergeChecking int
 	// VersionCalls counts GET /api/v1/version.
 	VersionCalls int
 	// FailClose makes closing a pull request (PATCH with state) answer 500; FailComment
@@ -423,6 +427,11 @@ func (g *Gitea) merge(w http.ResponseWriter, r *http.Request, repo, num string) 
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.Merges = append(g.Merges, string(raw))
+	if g.MergeChecking > 0 {
+		g.MergeChecking--
+		g.fail(w, http.StatusMethodNotAllowed, "Please try again later")
+		return
+	}
 	for _, p := range g.prs[repo] {
 		if p.Number == n {
 			p.AutoMerge = true

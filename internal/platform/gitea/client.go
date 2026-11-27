@@ -88,6 +88,10 @@ type Client struct {
 	Sandbox                 sandbox.Backend
 	// Now is the clock a Retry-After is counted from; nil means time.Now.
 	Now func() time.Time
+	// MergeSettle is how long RequestAutoMerge waits while the instance answers 405 "Please try
+	// again later" (it is still checking whether the pull request can merge). Zero means 15 s;
+	// negative means ask once.
+	MergeSettle time.Duration
 
 	mu      sync.Mutex
 	flavour Flavour
@@ -403,9 +407,28 @@ func (c *Client) RequestAutoMerge(ctx context.Context, repo model.Repo, pr platf
 	if f == Forgejo {
 		key = "Do"
 	}
-	_, err = c.do(ctx, repo, http.MethodPost, c.api(fmt.Sprintf("/repos/%s/%s/pulls/%d/merge", o, n, pr.Number)),
-		map[string]any{key: "squash", "merge_when_checks_succeed": true}, nil)
-	return err
+	wait := c.MergeSettle
+	if wait == 0 {
+		wait = 15 * time.Second
+	}
+	deadline := time.Now().Add(wait)
+	poll := max(wait/30, 10*time.Millisecond)
+	for {
+		_, err = c.do(ctx, repo, http.MethodPost, c.api(fmt.Sprintf("/repos/%s/%s/pulls/%d/merge", o, n, pr.Number)),
+			map[string]any{key: "squash", "merge_when_checks_succeed": true}, nil)
+		// Gitea 1.27.3 answers 405 while the pull request is still being checked for mergeability
+		// (docs/vendor/gitea/real-answers.md); every other error is final.
+		var se *statusError
+		if err == nil || wait < 0 || !errors.As(err, &se) || se.status != http.StatusMethodNotAllowed ||
+			!time.Now().Add(poll).Before(deadline) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(poll):
+		}
+	}
 }
 
 // ownTimeline are the timeline entry types ripple's own actions leave on a pull

@@ -26,10 +26,16 @@ Also tracked: the two-segment `^1.2`, `~1.2` and `^0.3`. Composer's versions art
 and `^0.3` as `>=0.3.0 <0.4.0`, so a later release of the same line is already allowed and needs a lock refresh, not an
 edit. Only a release outside the line is proposed: a later major (`^1.2`, `~1.2`) or, for `^0.Y`, a later minor. The text
 becomes that release's first two segments (`^1.2` to `^2.4` for 2.4.1; `^0.3` to `^0.4` for 0.4.2), which it satisfies,
-and a later major is a `major` update under the usual policy. `~0.3` is skipped: the article shows the `~` rule for a
-`1.x` example only.
+and a later major is a `major` update under the usual policy.
 
-Skipped: a range (`>=1.0 <2.0`), several constraints (`^1.0 || ^2.0`), a wildcard (`1.*`), a one-segment `^1` or `~1`,
+Also tracked, after real Composer 2 was asked what each locks (`TestRealtoolComposerConstraintMeaning`, run in CI
+`realtool / composer` against Packagist, 2026-11-27): `~0.3` (locks mockery 0.9.11, so `>=0.3 <1.0`: only a later major
+moves it, to the release's first two segments, `~0.3` to `~1.2` for 1.2.0), and the one-segment `^1`, `~1` and `^0`
+(`^1` and `~1` lock monolog 1.27.1, `^0` locks mockery 0.9.11, so each is `>=X <X+1`: only a later major moves it, to
+that release's major alone, `^1` to `^2` for 2.4.1). `^0.3` is unchanged: `>=0.3.0 <0.4.0`, so a 0.4 release moves it.
+Nothing was run for `=1` or a bare `1`, so they stay skipped.
+
+Skipped: a range (`>=1.0 <2.0`), several constraints (`^1.0 || ^2.0`), a wildcard (`1.*`), a bare `1` or `=1`,
 a stability flag, a `dev-` branch, four-segment or prerelease versions. Other keys (`extra`, `suggest`, `conflict`,
 `replace`, `provide`) are not read.
 

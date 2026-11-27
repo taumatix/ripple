@@ -40,12 +40,12 @@ func applicablePackagist(d model.Dependency, pkg, version string) (rules.UpdateT
 		return "", false
 	}
 	cur := spec.Version
-	if spec.TwoSegment() {
+	if spec.Partial() {
 		// "^1.2" already allows every later 1.x: only a release outside the line is an update.
-		if to.TwoSegment() || !spec.Moves(to.Version) {
+		if to.Partial() || !spec.Moves(to.Version) {
 			return "", false
 		}
-		cur += ".0"
+		cur = spec.Floor()
 	}
 	return rules.Classify("v"+cur, "v"+to.Version)
 }

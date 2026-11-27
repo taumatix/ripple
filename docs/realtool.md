@@ -23,8 +23,9 @@ Run one locally (from the repository root; `-tags realtool` is added for you):
 | `TestRealtoolNpm` | `npm install --package-lock-only --ignore-scripts`, `npm ls` | npm |
 | `TestRealtoolPip` | `pip download --no-deps` | python3 with pip |
 | `TestRealtoolHelm` | `helm dependency update`, `helm dependency list`, `helm lint` | helm |
-| `TestRealtoolBundler` | `bundle lock` | bundler |
-| `TestRealtoolComposer` | `composer validate`, `composer update --dry-run`, `composer update --no-install` | php, composer |
+| `TestRealtoolBundler`, `TestRealtoolBundlerTwoSegment`, `TestRealtoolBundlerOneSegment` | `bundle lock`; the last two also assert which rack the untouched `~> 1` / edited constraint resolves to | bundler |
+| `TestRealtoolComposer`, `TestRealtoolComposerTwoSegment` | `composer validate`, `composer update --dry-run`, `composer update --no-install` | php, composer |
+| `TestRealtoolComposerConstraintMeaning` | `composer update --no-install` on one constraint (`~1`, `^1`, `~1.2`, `^1.2`, `~0.3`, `^0.3`, `^0.7`, `^0.8`, `^0.9`, `^0`) and the version it locks | php, composer |
 | `TestRealtoolNuget` | `dotnet restore`, `dotnet build --no-restore` | dotnet 8 |
 | `TestRealtoolMaven` | `mvn validate`, `dependency:resolve`, `compile` | mvn, JDK 17 |
 | `TestRealtoolTerraform` | `terraform init -backend=false`, `terraform validate` | terraform |

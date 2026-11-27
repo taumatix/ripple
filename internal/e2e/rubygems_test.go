@@ -173,3 +173,42 @@ func TestBundlerTwoSegmentMajor(t *testing.T) {
 		}
 	})
 }
+
+const gemfileOneSegmentE2E = `source "https://rubygems.org"
+
+gem "pess", "~> 1"   # one segment
+`
+
+// "~> 1" is ">= 1, < 2" as the real `bundle lock` resolves it (TestRealtoolBundlerOneSegment): a later
+// 1.x is no PR, a 2.x release is, and the file then says "~> 2".
+func TestBundlerOneSegmentMajor(t *testing.T) {
+	forEach(t, func(t *testing.T, st store.Store) {
+		e, gems := gemsEnv(t, st)
+		gems.Publish("pess", "1.0.0")
+		e.gh.AddRepo("acme/app", map[string]string{".ripple.yaml": bundlerConfig, "Gemfile": gemfileOneSegmentE2E, "Gemfile.lock": "GEM\n"})
+		start(t, e, "acme/app")
+		if n := len(e.deps("acme/app")); n != 1 {
+			t.Fatalf("the one-segment gem is tracked, got %+v", e.deps("acme/app"))
+		}
+
+		e.clock.Advance(time.Minute)
+		gems.Publish("pess", "1.6.13")
+		e.tick()
+		if n := len(e.gh.PRs("acme/app")); n != 0 {
+			t.Fatalf("a release the constraint already allows opened %d PRs", n)
+		}
+
+		e.clock.Advance(time.Minute)
+		gems.Publish("pess", "2.2.26")
+		e.tick()
+		e.tick()
+		prs := e.gh.PRs("acme/app")
+		if len(prs) != 1 {
+			t.Fatalf("one PR for the major, got %d", len(prs))
+		}
+		got, _ := e.gh.FileAt("acme/app", prs[0].Head, "Gemfile")
+		if want := strings.Replace(gemfileOneSegmentE2E, `"~> 1"`, `"~> 2"`, 1); got != want {
+			t.Errorf("one digit moves, layout kept:\n%s", got)
+		}
+	})
+}

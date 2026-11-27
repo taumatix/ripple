@@ -135,3 +135,61 @@ func TestComposerPrivateRepositoryIsNotRead(t *testing.T) {
 		}
 	})
 }
+
+const composerPartialE2E = `{
+    "require": {
+        "one/caret": "^1",
+        "one/tilde": "~1",
+        "zero/tilde": "~0.3",
+        "zero/caret": "^0"
+    }
+}
+`
+
+// Composer 2 locks "^1" and "~1" to the 1.x line, "~0.3" to 0.3 up to 1.0 and "^0" to 0.x
+// (TestRealtoolComposerConstraintMeaning), so only a later major is an update, and the text
+// becomes the new release's major (or first two segments for "~0.3").
+func TestComposerOneSegmentAndTildeZero(t *testing.T) {
+	forEach(t, func(t *testing.T, st store.Store) {
+		e, reg := packagistEnv(t, st)
+		reg.Publish("one/caret", "1.0.0")
+		reg.Publish("one/tilde", "1.0.0")
+		reg.Publish("zero/tilde", "0.3.0")
+		reg.Publish("zero/caret", "0.1.0")
+		e.gh.AddRepo("acme/app", map[string]string{".ripple.yaml": composerConfig, "composer.json": composerPartialE2E})
+		start(t, e, "acme/app")
+		if n := len(e.deps("acme/app")); n != 4 {
+			t.Fatalf("all four are tracked, got %+v", e.deps("acme/app"))
+		}
+
+		e.clock.Advance(time.Minute)
+		reg.Publish("one/caret", "1.9.0")  // inside ^1
+		reg.Publish("one/caret", "2.3.4")  // a later major
+		reg.Publish("one/tilde", "1.5.0")  // inside ~1
+		reg.Publish("zero/tilde", "0.9.0") // inside ~0.3 (>=0.3 <1.0)
+		reg.Publish("zero/tilde", "1.2.0") // a later major
+		reg.Publish("zero/caret", "0.5.0") // inside ^0 (>=0 <1)
+		e.tick()
+		e.tick()
+
+		prs := e.gh.PRs("acme/app")
+		if len(prs) != 2 {
+			t.Fatalf("one/caret and zero/tilde only (the rest is allowed already), got %d", len(prs))
+		}
+		for _, pr := range prs {
+			got, _ := e.gh.FileAt("acme/app", pr.Head, "composer.json")
+			from, to := "", ""
+			switch {
+			case strings.Contains(pr.Head, "one-caret"):
+				from, to = `"^1"`, `"^2"`
+			case strings.Contains(pr.Head, "zero-tilde"):
+				from, to = `"~0.3"`, `"~1.2"`
+			default:
+				t.Fatalf("unexpected branch %q", pr.Head)
+			}
+			if want := strings.Replace(composerPartialE2E, from, to, 1); got != want {
+				t.Errorf("%s: only that constraint moves:\n%s", pr.Head, got)
+			}
+		}
+	})
+}

@@ -1,6 +1,6 @@
 name: hosts-gitlab-gerrit
 # The Gerrit and GitLab hosts run against the real servers (public images, no secrets), not the in-process
-# fakes: the conformance suite plus a push -> exactly-one-PR flow. Typical wall time: gerrit ~2 min (measured: about 70 s of job time plus image pull).
+# fakes: the conformance suite plus a push -> exactly-one-PR flow. Typical wall time, measured: gerrit ~2 min (about 75 s of job time plus image pull), gitlab ~7 min (image pull of about 1.5 GB, the instance takes about 3 min to answer readiness, the suite about 2 min).
 # Path-filtered so it does not slow every PR; a change to the hosts, their fakes, or this job runs it.
 on:
   pull_request:

@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -299,6 +300,7 @@ func (f *realGitLab) Host(t *testing.T, g gitws.Options, now func() time.Time) *
 		var gr group
 		f.api.mustJSON("POST", "groups", map[string]any{"name": name, "path": name, "visibility": "private"}, &gr)
 		topID, topPath = gr.ID, gr.FullPath
+		f.awaitWebhooks(t)
 	})
 	name := fmt.Sprintf("s%d", groupSeq.Add(1))
 	var sub group
@@ -562,10 +564,19 @@ func TestRealTokensAreBearer(t *testing.T) {
 	}
 	// ripple's own client with the project token, scoped as RIPPLE_GITLAB_TOKENS would.
 	c := &gitlab.Client{BaseURL: f.e.base, Tokens: gitlab.Tokens{Scoped: map[string]string{repo.FullName: proj.Token}}}
-	repos, err := c.ListRepos(t.Context())
-	if err != nil {
-		t.Fatal(err)
+	var repos []model.Repo
+	var err error
+	start := time.Now()
+	for time.Since(start) < 60*time.Second {
+		if repos, err = c.ListRepos(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		if len(repos) > 0 {
+			break
+		}
+		time.Sleep(time.Second)
 	}
+	t.Logf("FACT a new project access token's membership listing shows its project after %v", time.Since(start).Round(100*time.Millisecond))
 	t.Logf("FACT membership listing with the project token: %d repos", len(repos))
 	if len(repos) != 1 || repos[0].FullName != repo.FullName {
 		t.Errorf("a project token lists exactly its project: %+v", repos)
@@ -621,4 +632,36 @@ func TestRealZRateLimit(t *testing.T) {
 		return
 	}
 	t.Fatal("no 429 within 4 minutes of the throttle being on")
+}
+
+// awaitWebhooks proves project webhooks reach the relay before any test depends on one. The setting that
+// allows local webhook targets is cached by the instance for up to a minute, and a hook fired in that
+// window is dropped for good (GitLab does not retry a blocked URL), so poll a canary project's hook test
+// until the relay sees it.
+func (f *realGitLab) awaitWebhooks(t *testing.T) {
+	t.Helper()
+	var p struct {
+		ID   int    `json:"id"`
+		Path string `json:"path_with_namespace"`
+	}
+	f.api.mustJSON("POST", "projects", map[string]any{"name": "canary", "path": "canary", "namespace_id": topID, "initialize_with_readme": true}, &p)
+	var h struct {
+		ID int `json:"id"`
+	}
+	f.api.mustJSON("POST", fmt.Sprintf("projects/%d/hooks", p.ID), map[string]any{
+		"url": "http://" + relayAddr + "/hook", "token": hookSecret, "push_events": true, "enable_ssl_verification": false}, &h)
+	start := time.Now()
+	for time.Since(start) < 3*time.Minute {
+		st, _, body := f.api.do("POST", fmt.Sprintf("projects/%d/hooks/%d/test/push_events", p.ID, h.ID), nil)
+		theRelay.mu.Lock()
+		got := slices.ContainsFunc(theRelay.got, func(d *delivered) bool { return d.Project == p.Path })
+		theRelay.mu.Unlock()
+		if got {
+			t.Logf("FACT: the first webhook reached the relay after %v (last hook test: HTTP %d)", time.Since(start).Round(time.Second), st)
+			return
+		}
+		t.Logf("canary hook not delivered yet: HTTP %d %s", st, body)
+		time.Sleep(5 * time.Second)
+	}
+	t.Fatal("no webhook reached the relay within 3 minutes")
 }

@@ -164,8 +164,9 @@ ripple is bound to two external contracts. The block below is the source of trut
   used: [GET /projects?membership=true, GET /projects/{path}/repository/branches/{branch}, GET and POST /projects/{url-encoded path}/merge_requests (Draft: title prefix, labels), PUT /projects/{id}/merge_requests/{iid}/merge (auto_merge, merge_when_pipeline_succeeds)]
   auth: "Authorization: Bearer <personal, project or group access token>; git basic auth oauth2:<token>"
   webhooks: [Push Hook, header X-Gitlab-Token or Standard Webhooks signature (webhook-id, webhook-timestamp, webhook-signature = v1,base64(HMAC-SHA256(key, id.timestamp.body)), key from whsec_ token)]
-  unverified: "everything: no real GitLab instance was available. Request and response shapes, the 429 Retry-After handling, auto_merge acceptance and the signature scheme are from the vendored docs; the fake GitLab in internal/testutil is written from them, not recorded. The signature vector was computed with openssl, not taken from GitLab"
-  checked: 2026-11-23
+  verified-live: "GitLab CE 19.6.2 (gitlab/gitlab-ce@sha256:926ff73d53698c1e3724e65a8be5cc980bd18104f87db6d8d461c6f7a84d7bba) 2026-11-27: conformance suite, real project webhooks (secret token), Bearer with personal, project and group tokens, 429 with Retry-After, draft title, auto_merge, archive listing, MR creation lagging a push by 1-2 s"
+  unverified: "signing-token (whsec_) scheme against a real delivery; system-hook discovery; group webhooks (Premium); gitlab.com throttle values; auto_merge with a real pipeline; GitLab versions other than 19.6.2; roles other than Maintainer (Developer is refused auto_merge on a protected default branch)"
+  checked: 2026-11-27
 - name: bitbucket-cloud
   kind: http-api
   url: https://developer.atlassian.com/cloud/bitbucket/rest/intro/

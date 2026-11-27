@@ -338,3 +338,19 @@ func TestCredentialIsOAuth2UserAndToken(t *testing.T) {
 		t.Errorf("credential = %+v, err %v", got, err)
 	}
 }
+
+// The real 429 of GitLab CE 19.6.2 (throttle_authenticated_api, recorded 2026-11-27): text/plain
+// "Retry later", Retry-After in seconds, plus RateLimit-* headers. The hold-back follows Retry-After.
+func TestRealThrottle429(t *testing.T) {
+	srv, _ := recorder(t, 429, "Retry later", map[string]string{
+		"Content-Type": "text/plain", "Ratelimit-Limit": "30", "Ratelimit-Name": "throttle_authenticated_api",
+		"Ratelimit-Observed": "6", "Ratelimit-Remaining": "0", "Ratelimit-Reset": "1795790380",
+		"Ratelimit-Resettime": "Fri, 27 Nov 2026 14:39:40 GMT", "Retry-After": "2"})
+	now := time.Unix(1795790378, 0)
+	c := &gitlab.Client{BaseURL: srv.URL, Tokens: gitlab.Tokens{Default: "t"}, Now: func() time.Time { return now }}
+	_, err := c.ListRepos(context.Background())
+	var rl *platform.RateLimitError
+	if !errors.As(err, &rl) || !rl.Until.Equal(now.Add(2*time.Second)) {
+		t.Fatalf("err = %v", err)
+	}
+}

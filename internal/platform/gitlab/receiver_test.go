@@ -230,3 +230,30 @@ func TestSignedDeliveryIsDedupedOnWebhookIDAndForgeryIs401(t *testing.T) {
 		t.Fatalf("%d events for one webhook-id delivered twice", n)
 	}
 }
+
+// Recorded from GitLab CE 19.6.2 (hosts-gitlab-gerrit workflow, 2026-11-27), trimmed to the fields
+// the receiver reads: the real Push Hook for a push of two new files to main, sent with
+// X-Gitlab-Token, X-Gitlab-Event "Push Hook", X-Gitlab-Event-Uuid and Idempotency-Key. Note the real
+// header is "Uuid"; header names are case-insensitive, which is why the receiver finds it.
+const realPushBody = `{"object_kind":"push","event_name":"push","before":"6867e0a3ab141883fc27b4ec7896f060298c4b13",` +
+	`"after":"2f32f528217d20d4df8392a5bfc8f20b25880af6","ref":"refs/heads/main","ref_protected":true,` +
+	`"project":{"id":1,"name":"uses-lib","path_with_namespace":"ripple-ci-1795790300/s1/uses-lib","default_branch":"main"},` +
+	`"commits":[{"id":"2f32f528217d20d4df8392a5bfc8f20b25880af6","added":["go.mod","main.go"],"modified":[],"removed":[]}],"total_commits_count":1}`
+
+func TestRealRecordedPushHook(t *testing.T) {
+	hdr := map[string]string{"X-Gitlab-Event": "Push Hook", "X-Gitlab-Token": "s3cret",
+		"X-Gitlab-Event-Uuid": "367601a3-bc3a-4c39-afa6-82f431f275b3", "Idempotency-Key": "aca0ad3b-84c6-4946-93db-ed4fd9c5d757"}
+	w, sink := serve(t, gitlab.Receiver{SecretToken: "s3cret"}, hdr, realPushBody)
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("status %d", w.Code)
+	}
+	e := sink.events()
+	if len(e) != 1 || e[0].Repos[0] != "ripple-ci-1795790300/s1/uses-lib" || e[0].Ref != "refs/heads/main" || e[0].DefaultBranch != "main" ||
+		e[0].Delivery != "aca0ad3b-84c6-4946-93db-ed4fd9c5d757" {
+		t.Fatalf("events = %+v", e)
+	}
+	slices.Sort(e[0].Files)
+	if want := []string{"go.mod", "main.go"}; !slices.Equal(e[0].Files, want) {
+		t.Errorf("files = %v, want %v", e[0].Files, want)
+	}
+}

@@ -135,7 +135,7 @@ Seatbelt is exercised for real: `internal/sandbox` runs commands under it and ch
 the workspace cannot be read or written and that only the named loopback port connects, and
 `internal/e2e` drives a webhook-to-PR dependency update with `go` and `git` confined. Both live in `_darwin_test.go` files, so they do not run on Linux CI.
 
-Bwrap runs for real in the `sandbox-bwrap` CI job (`.github/workflows/bwrap.yml`, on `ubuntu-24.04` and
+Bwrap runs for real in the `sandbox-bwrap` CI job (`.github/workflows/bwrap.yml`, on `ubuntu-22.04`, `ubuntu-24.04` and
 `ubuntu-latest`), never on a developer's Mac: `internal/sandbox/bwrap_live_linux_test.go` (file confinement; no host loopback
 port without a proxy; through the relay only the gate answers, another host port and `1.1.1.1` do not; the exit status
 survives) and `internal/e2e/sandbox_bwrap_linux_test.go` (a webhook-to-PR update with `go mod tidy`, `build`, `vet` and
@@ -144,8 +144,21 @@ bwrap a failure and the job fails on any skipped test. **Ubuntu 24.04 and AppArm
 `bwrap --unshare-all` before the tests and only lifts `kernel.apparmor_restrict_unprivileged_userns` if the probe fails;
 on 2026-11-26 `ubuntu-24.04` (24.04.5, bubblewrap 0.9.0) failed the probe with the sysctl at 1 and passed
 after it was set to 0, while `ubuntu-latest` (26.04, bubblewrap 0.11.1) passed with it at 1. On your own Ubuntu 24.04+ host, check that `bwrap --unshare-all --ro-bind / / true` works for the
-server's user before choosing `bwrap`. Not verified: other distributions, a bwrap older than 0.9, a server running with
-a restricted `/tmp` (the gate socket directory comes from `os.MkdirTemp`), and cgo builds under bwrap.
+server's user before choosing `bwrap`. Also run there: `TestCgoBuildUnderBwrap` (a cgo module builds with the real `gcc` under the confinement, and a C error is a
+failed verification, not a skipped one) and `TestBwrapLiveRelayCarriesLargeTransfersUnchanged` (below). The job logs each
+runner's `bwrap --version`; 22.04 is bubblewrap 0.6.x. Not verified: other distributions and a server running with
+a restricted `/tmp` (the gate socket directory comes from `os.MkdirTemp`).
+
+### Why the relay has no byte limit
+
+The relay copies bytes between the namespace's loopback and the gate's socket and counts none of them. A per-connection
+cap was considered and not added. Legitimate traffic through it is module downloads, and those are large: the biggest
+module zips in a developer's module cache were about 40 MB (`klauspost/compress`) and the Go toolchain zips about
+73 MB, so any cap that does not break builds is above what it could usefully stop. A confined step that wants to push
+data out has nowhere to send it: the gate forwards only to the configured module proxy, so a byte cap on the relay
+would limit nothing the gate does not already refuse. The test above moves 80 MiB down and 8 MiB up through a real
+bwrap and checks every byte arrives. If a limit is wanted (a runaway download filling a disk) it belongs in the gate,
+which knows the request, not in a pipe that does not.
 
 macOS notes: `/usr/bin/git` is an `xcrun` shim that writes a cache outside the workspace, so ripple runs the
 Command Line Tools' own `git` under the sandbox. Temporary files go to the workspace (`TMPDIR`).

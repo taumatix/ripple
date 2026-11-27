@@ -40,6 +40,8 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
 
 - Gitea and Forgejo now run for real in CI (`hosts-gitea.yml`: Gitea 1.27.3, Forgejo 17.0.2, Forgejo 7.0.16 as containers), the full conformance suite plus `TestReal*`, with the answers in `docs/vendor/gitea/real-answers.md`. Two fixes came out of it: ripple now closes a superseded pull request on a real instance (opening one already writes a `pull_push` timeline entry, which the close check counted as a touch, so nothing was ever closed), a label name the repository lacks is logged as "labels not applied" instead of passing silently, and on Forgejo 7 (which takes label ids only and refused every label name with a 422) labels are now applied by id. NOT verified: Forgejo before 7, Gitea before 1.27, PostgreSQL or MySQL back ends, the 429 of a real throttling proxy (no instance throttles; the 429 is injected), a person's label, comment or rename read as a touch, a scheduled merge actually merging, repository deleted and renamed webhook actions (a delete is never announced), and archive. A repository empty at its first discovery is not registered until the next one (ROADMAP 280). SCM-Manager is not yet run for real (ROADMAP 18).
 
+- bwrap now runs for real on `ubuntu-22.04` (bubblewrap 0.6.x) as well as 24.04 and latest, and a cgo build runs under it in CI (`TestCgoBuildUnderBwrap`). The relay stays without a byte limit, with the reasoning and an 80 MiB transfer test in `docs/sandbox.md` (ROADMAP 1)
+
 ## [0.4.0] - 2026-11-25
 
 Additive release: no public API was removed or changed. Opt-in ecosystems: Helm, Bundler, Composer, NuGet, Maven and Terraform

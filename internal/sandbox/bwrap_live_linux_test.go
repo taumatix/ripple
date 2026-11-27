@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -9,7 +10,9 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // These tests run real bwrap. Where it is unavailable they skip, unless
@@ -129,4 +132,67 @@ func TestBwrapLiveReachesOnlyTheGate(t *testing.T) {
 	if _, err := runBwrap(t, p, "/bin/sh", "-c", "exit 3"); err == nil {
 		t.Error("exit status lost")
 	}
+}
+
+// The relay is a transparent TCP pipe with no byte limit, and this test is the evidence for
+// keeping it that way (ROADMAP 1, docs/sandbox.md "Why the relay has no byte limit"): a
+// download larger than the biggest module zip seen through a module proxy while this was
+// written (a 74 MB Go toolchain zip; the biggest ordinary module was 40 MB) and a
+// request body of 8 MiB both cross it byte for byte, in either direction. A limit that let
+// those through would stop nothing, and one that stopped them would break real builds.
+func TestBwrapLiveRelayCarriesLargeTransfersUnchanged(t *testing.T) {
+	const down, up = 80 << 20, 8 << 20
+	var got int64
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			n, _ := io.Copy(io.Discard, r.Body)
+			atomic.StoreInt64(&got, n)
+			return
+		}
+		w.Header().Set("Content-Length", strconv.Itoa(down))
+		chunk := make([]byte, 1<<20)
+		for i := 0; i < down>>20; i++ {
+			w.Write(chunk)
+		}
+	}))
+	defer upstream.Close()
+	g, err := NewGate(upstream.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer g.Close()
+	sockDir, err := os.MkdirTemp("", "gate-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(sockDir)
+	sock := filepath.Join(sockDir, "g.sock")
+	if err := g.ListenUnix(sock); err != nil {
+		t.Fatal(err)
+	}
+	work, _ := filepath.EvalSymlinks(t.TempDir())
+	p := Policy{Workdir: work, LoopbackPorts: []int{g.Port()}, GateSocket: sock}
+	prefix := strings.TrimPrefix(g.URL, "http://"+net.JoinHostPort("127.0.0.1", strconv.Itoa(g.Port())))
+	conn := "exec 3<>/dev/tcp/127.0.0.1/" + strconv.Itoa(g.Port()) + " && "
+
+	start := time.Now()
+	out, err := runBwrap(t, p, "/bin/bash", "-c", conn+"printf 'GET "+prefix+"/big HTTP/1.0\\r\\n\\r\\n' >&3 && cat <&3 | wc -c")
+	if err != nil {
+		t.Fatalf("download through the relay: %v\n%s", err, out)
+	}
+	n, _ := strconv.Atoi(strings.TrimSpace(out))
+	if n < down || n > down+2048 { // the body, plus the response header
+		t.Errorf("download: %d bytes crossed the relay, want %d plus a short header", n, down)
+	}
+	t.Logf("download: %d bytes in %s", n, time.Since(start).Round(time.Millisecond))
+
+	start = time.Now()
+	post := "printf 'POST " + prefix + "/up HTTP/1.0\\r\\nContent-Length: " + strconv.Itoa(up) + "\\r\\n\\r\\n' >&3 && head -c " + strconv.Itoa(up) + " /dev/zero >&3 && cat <&3 >/dev/null"
+	if out, err := runBwrap(t, p, "/bin/bash", "-c", conn+post); err != nil {
+		t.Fatalf("upload through the relay: %v\n%s", err, out)
+	}
+	if n := atomic.LoadInt64(&got); n != up {
+		t.Errorf("upload: the upstream received %d bytes, want %d", n, up)
+	}
+	t.Logf("upload: %d bytes in %s", up, time.Since(start).Round(time.Millisecond))
 }

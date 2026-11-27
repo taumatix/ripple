@@ -438,6 +438,13 @@ func (f *realFixture) Register(t *testing.T, webhook string, paths ...string) {
 	f.fwd.next = webhook
 	f.fwd.mu.Unlock()
 	for _, p := range paths {
+		// The instance prepares a push's webhooks when it finishes processing the push, the same
+		// moment it stops calling the repository empty. A hook created before that receives the
+		// first push late, and ripple (which scanned the repository when it registered it) would
+		// scan it again inside the suite's cost window. So the hook is created once it settled;
+		// the listing itself is still made while the repository may be empty
+		// (TestRealFirstDiscoveryOfAFreshRepository proves that part).
+		f.settled(t, p)
 		f.in.must(t, token(f.tok), http.MethodPost, "/repos/"+p+"/hooks", map[string]any{
 			"type": f.hookType, "active": true, "events": []string{"push"},
 			"config": map[string]string{"url": f.fwd.url(f.in), "content_type": "json", "secret": string(f.secret)}}, nil)

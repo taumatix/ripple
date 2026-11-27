@@ -4,6 +4,7 @@ package scmmanager_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"slices"
 	"strings"
@@ -107,20 +108,14 @@ func (s *scm) bootstrap(t *testing.T) string {
 
 	// API key.
 	code, h, body := s.call(t, http.MethodPost, s.base+"/api/v2/users/"+s.user+"/api_keys", "", mtAPIKey, map[string]string{"displayName": "ripple", "permissionRole": "WRITE"})
-	var k struct {
-		Token string `json:"token"`
+	// Recorded: the 201 body is the key itself, as text/plain, not JSON. Never log it.
+	tok := strings.TrimSpace(string(body))
+	t.Logf("FACT create api key: %d location=%q content-type=%q body is the token as plain text, %d bytes", code, h.Get("Location"), h.Get("Content-Type"), len(tok))
+	if code != http.StatusCreated || tok == "" {
+		t.Fatalf("creating the API key: %d (body withheld, %d bytes)", code, len(tok))
 	}
-	_ = json.Unmarshal(body, &k)
-	redacted := strings.ReplaceAll(string(body), k.Token, "<token>")
-	t.Logf("FACT create api key: %d location=%q content-type=%q body=%s token-length>0=%v", code, h.Get("Location"), h.Get("Content-Type"), clip([]byte(redacted)), k.Token != "")
-	if k.Token == "" && code == http.StatusCreated {
-		// The key may come back as the body itself.
-		k.Token = strings.TrimSpace(string(body))
-	}
-	if code != http.StatusCreated || k.Token == "" {
-		t.Fatalf("creating the API key: %d %s", code, redacted)
-	}
-	return k.Token
+	fmt.Printf("::add-mask::%s\n", tok)
+	return tok
 }
 
 // TestRealBootstrapAndKeyUse records how an API key is presented: Bearer header, the cookie the docs

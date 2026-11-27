@@ -1,0 +1,12 @@
+<Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- an Update after its Include sets the version dotnet restores (ROADMAP 262); the
+         Include's own 11.0.2 is dead -->
+    <PackageVersion Include="Newtonsoft.Json" Version="11.0.2" />
+    <PackageVersion Update="Newtonsoft.Json" Version="12.0.3" />
+    <PackageVersion Include="Serilog" Version="3.0.0" />
+  </ItemGroup>
+</Project>

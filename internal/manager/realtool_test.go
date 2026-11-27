@@ -608,6 +608,32 @@ func TestRealtoolNugetVersionOverride(t *testing.T) {
 	}.run(t)
 }
 
+// TestRealtoolNugetPackageVersionUpdate settles the readable half of ROADMAP 262 with real
+// dotnet under central package management: a `PackageVersion Update` after its Include sets
+// the version restore holds (the Include's own is dead), and ripple's edit of the Update's
+// digits is what restore then holds. List and wildcard Updates stay unread.
+func TestRealtoolNugetPackageVersionUpdate(t *testing.T) {
+	realtool{
+		fixture: "nuget-cpm-update", manifest: "Directory.Packages.props", manager: Nuget{Dir: "/"},
+		bumps: []bump{{"Newtonsoft.Json", "12.0.3", "13.0.3"}},
+		env:   []string{"DOTNET_NOLOGO=1", "DOTNET_CLI_TELEMETRY_OPTOUT=1"},
+		steps: [][]string{{"dotnet", "restore"}, {"dotnet", "build", "--no-restore"}},
+		local: []string{"dotnet build --no-restore"},
+		before: func(t *testing.T, dir string) {
+			mustContain(t, dir, "obj/project.assets.json", "Newtonsoft.Json/12.0.3") // the Update wins
+			if b, err := os.ReadFile(filepath.Join(dir, "obj/project.assets.json")); err != nil {
+				t.Fatal(err)
+			} else if strings.Contains(string(b), "Newtonsoft.Json/11.0.2") {
+				t.Errorf("the Include's 11.0.2 was restored although a later Update sets 12.0.3")
+			}
+		},
+		after: func(t *testing.T, dir string) {
+			mustContain(t, dir, "obj/project.assets.json", "Newtonsoft.Json/13.0.3")
+			mustContain(t, dir, "Directory.Packages.props", `Include="Newtonsoft.Json" Version="11.0.2"`) // the dead Include is untouched
+		},
+	}.run(t)
+}
+
 func TestRealtoolTerraform(t *testing.T) {
 	realtool{
 		fixture: "terraform", manifest: "main.tf", manager: Terraform{Dir: "/"},

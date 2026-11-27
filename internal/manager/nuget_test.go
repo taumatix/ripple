@@ -118,6 +118,16 @@ const csprojForms = `<Project Sdk="Microsoft.NET.Sdk">
     <PackageReference Include="Open"><Version>2.2.2</Version>
     <PackageReference Include="After" Version="1.0.1" />
     <PackageVersion Update="Central" Version="4.0.0" />
+    <PackageVersion Include="Cen2" Version="1.0.0" />
+    <PackageVersion Update="Cen2" Version="2.0.0" />
+    <PackageVersion Include="CenA" Version="1.0.0" />
+    <PackageVersion Include="CenB" Version="1.0.0" />
+    <PackageVersion Update="CenA;CenB" Version="3.0.0" />
+    <PackageVersion Update="Cen*" Version="4.0.0" />
+    <PackageReference Include="WildRef" Version="1.0.0" />
+    <PackageReference Update="Wild*" Version="2.0.0" />
+    <PackageReference Include="Mix" Version="1.0.0" />
+    <PackageVersion Update="Mix" Version="2.0.0" />
     <PackageReference Include="Ov" VersionOverride="9.0.0" />
     <PackageReference Include="OvBoth" Version="1.0.0" VersionOverride="2.0.0" />
     <PackageReference Update="Ov" VersionOverride="9.5.0" />
@@ -143,7 +153,12 @@ func TestNugetExtractItemForms(t *testing.T) {
 	// A VersionOverride is the version the project restores under central package management, so
 	// "Ov" is read; beside a Version (OvBoth, NU1008), an Update, on a PackageVersion or with a
 	// `<Version>` child (OverrideToo) it is not.
-	want := "Early@1.0.0 Late@2.0.0 Bare@3.0.0 ChildFirst@4.0.0 Kid@6.0.0 Both@1.2.0 After@1.0.1 Ov@9.0.0"
+	want := "Early@1.0.0 Late@2.0.0 Bare@3.0.0 ChildFirst@4.0.0 Kid@6.0.0 Both@1.2.0 After@1.0.1 Mix@1.0.0 Ov@9.0.0"
+	// A PackageVersion Update does not touch a PackageReference (Mix). An Update naming a list
+	// or a wildcard is not read itself, but it may override any earlier item it matches, so
+	// CenA, CenB and Cen2 (and its Update), then WildRef, are left alone: the live version is
+	// unknown. A PackageVersion Update on its own Include (Cen2 without the wildcard) is
+	// readable, see TestNugetPackageVersionUpdate.
 	if strings.Join(got, " ") != want {
 		t.Errorf("got %q, want %q", strings.Join(got, " "), want)
 	}
@@ -173,5 +188,41 @@ func TestNugetApplyItemForms(t *testing.T) {
 		if _, err := (Nuget{}).Apply([]byte(csprojForms), dep, "", "9.9.9"); !errors.Is(err, ErrStale) {
 			t.Errorf("%s %s is not a declaration dotnet uses: want ErrStale, got %v", tc.pkg, tc.spec, err)
 		}
+	}
+}
+
+const propsUpdate = `<Project>
+  <ItemGroup>
+    <PackageVersion Include="Newtonsoft.Json" Version="11.0.2" />
+    <PackageVersion Update="Newtonsoft.Json" Version="12.0.3" />
+    <PackageVersion Include="Serilog" Version="3.0.0" />
+  </ItemGroup>
+</Project>
+`
+
+func TestNugetPackageVersionUpdate(t *testing.T) {
+	deps, err := Nuget{}.Extract("Directory.Packages.props", []byte(propsUpdate))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, d := range deps {
+		got = append(got, d.Package+"@"+d.Version)
+	}
+	// the Include's 11.0.2 is dead under the Update, so only the Update is read
+	if want := "Newtonsoft.Json@12.0.3 Serilog@3.0.0"; strings.Join(got, " ") != want {
+		t.Errorf("got %q, want %q", strings.Join(got, " "), want)
+	}
+	dep := model.Dependency{File: "Directory.Packages.props", Package: "Newtonsoft.Json", Version: "12.0.3"}
+	out, err := Nuget{}.Apply([]byte(propsUpdate), dep, "", "13.0.3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := strings.Replace(propsUpdate, `Update="Newtonsoft.Json" Version="12.0.3"`, `Update="Newtonsoft.Json" Version="13.0.3"`, 1); string(out) != want {
+		t.Errorf("only the Update's digits move:\n%s", out)
+	}
+	dead := model.Dependency{File: "Directory.Packages.props", Package: "Newtonsoft.Json", Version: "11.0.2"}
+	if _, err := (Nuget{}).Apply([]byte(propsUpdate), dead, "", "13.0.3"); !errors.Is(err, ErrStale) {
+		t.Errorf("the dead Include is not a declaration dotnet uses: want ErrStale, got %v", err)
 	}
 }

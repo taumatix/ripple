@@ -279,6 +279,72 @@ func renamed(t *testing.T, f Fixture) {
 	}
 }
 
+// A host that reports deletions: once a repository is deleted and discovery has run, the
+// store no longer has it nor its dependencies, and a release opens nothing for it.
+func deleted(t *testing.T, f Fixture) {
+	rd, ok := f.(ReportsDeletes)
+	if !ok {
+		return // allowed; returning keeps CI's "no test may skip" check
+	}
+	e := newEnv(t, f, opts{})
+	e.stub("example.com/lib", "v1.0.0", "v1.1.0")
+	e.addRepo("gone", libRepo("example.com/gone", nil))
+	e.addRepo("kept", libRepo("example.com/kept", nil))
+	e.register("gone", "kept")
+	gone, kept := e.name("gone"), e.name("kept")
+	ctx := context.Background()
+
+	rd.DeleteRepo(t, e.hook, f.Path("gone"))
+	e.app.Discover(ctx)
+	e.eventually("repo forgotten", func() bool {
+		_, ok, err := e.st.GetRepo(ctx, gone)
+		return err == nil && !ok
+	})
+	if d, err := e.st.ListRepoDependencies(ctx, gone); err != nil || len(d) != 0 {
+		t.Errorf("a deleted repo kept its dependencies: %+v %v", d, err)
+	}
+	if _, ok, err := e.st.GetRepo(ctx, kept); err != nil || !ok {
+		t.Fatalf("the other repo was forgotten: found=%v err=%v", ok, err)
+	}
+	e.clock.Advance(time.Minute)
+	e.publish("example.com/lib", "v1.1.0")
+	e.tick()
+	if n := len(e.prs("gone")); n != 0 {
+		t.Errorf("%d PRs opened on a deleted repo", n)
+	}
+}
+
+// A host that announces a created repository before its first push: the event queues a scan of
+// a repository with nothing in it, and the repository must still end up registered once, with
+// its dependencies, after the first push and a discovery (ROADMAP 283).
+func createdEmpty(t *testing.T, f Fixture) {
+	ac, ok := f.(AnnouncesCreates)
+	if !ok {
+		return // allowed; returning keeps CI's "no test may skip" check
+	}
+	e := newEnv(t, f, opts{})
+	e.stub("example.com/lib", "v1.0.0", "v1.1.0")
+	ctx := context.Background()
+	path := f.Path("fresh")
+	name := e.name("fresh")
+
+	ac.CreateEmptyRepo(t, e.hook, path)
+	e.app.Discover(ctx) // the scan of the empty repository may run; it must not break the next one
+	ac.FirstPush(t, path, libRepo("example.com/fresh", nil))
+	e.app.Discover(ctx)
+	e.eventually("repo registered with its dependencies", func() bool {
+		if _, ok, err := e.st.GetRepo(ctx, name); err != nil || !ok {
+			return false
+		}
+		d, err := e.st.ListRepoDependencies(ctx, name)
+		return err == nil && len(d) > 0 && e.app.Engine.RepoIdle(name)
+	})
+	e.tick()
+	e.publish("example.com/lib", "v1.1.0")
+	e.tick()
+	e.eventually("one PR for the release", func() bool { return len(e.prs("fresh")) == 1 })
+}
+
 // A host that reports archives: the archived repo keeps its index and pending job and
 // opens nothing; unarchived, the deferred job runs and the index is as it was.
 func archived(t *testing.T, f Fixture) {

@@ -71,6 +71,8 @@ type Gitea struct {
 	// LabelIDsOnly makes labelling by name answer 422 and accept only label ids, as Forgejo
 	// 7.0.16 does (Gitea 1.27.3 and Forgejo 17.0.2 accept names).
 	LabelIDsOnly bool
+	// LabelCreateForbidden makes POST .../labels answer 403.
+	LabelCreateForbidden bool
 	// emptyLeft is, per repository, how many more reads of GET /repos/{o}/{r} still answer
 	// empty=true (SetEmpty); emptyReads counts the reads.
 	emptyLeft, emptyReads map[string]int
@@ -118,6 +120,26 @@ func (g *Gitea) AddLabel(repo, name string) {
 		g.known = map[string]int{}
 	}
 	g.known[repo+"\x00"+name] = len(g.known) + 1
+}
+
+// createLabel answers POST /repos/{o}/{r}/labels (CreateLabelOption: name and color, both required;
+// 201 with the label), or 403 when LabelCreateForbidden.
+func (g *Gitea) createLabel(w http.ResponseWriter, r *http.Request, repo string) {
+	var in struct{ Name, Color string }
+	if json.NewDecoder(r.Body).Decode(&in) != nil || in.Name == "" || in.Color == "" {
+		g.fail(w, http.StatusUnprocessableEntity, "a label needs a name and a color")
+		return
+	}
+	if g.LabelCreateForbidden {
+		g.fail(w, http.StatusForbidden, "token may not create labels")
+		return
+	}
+	g.AddLabel(repo, in.Name)
+	g.mu.Lock()
+	id := g.known[repo+"\x00"+in.Name]
+	g.mu.Unlock()
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(map[string]any{"id": id, "name": in.Name, "color": strings.TrimPrefix(in.Color, "#")})
 }
 
 // repoLabels answers GET /repos/{o}/{r}/labels.
@@ -195,6 +217,20 @@ func (g *Gitea) Show(repos ...string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.visible = append(g.visible, repos...)
+}
+
+// Hide removes a repository from GET /user/repos, as deleting it does. It announces nothing:
+// no instance sends a repository webhook for a deletion (docs/platform-gitea.md).
+func (g *Gitea) Hide(repo string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	kept := g.visible[:0:0]
+	for _, v := range g.visible {
+		if !strings.EqualFold(v, repo) {
+			kept = append(kept, v)
+		}
+	}
+	g.visible = kept
 }
 
 // SetArchived archives or unarchives a repository; the listing reports it in `archived`.
@@ -396,6 +432,8 @@ func (g *Gitea) handleRepo(w http.ResponseWriter, r *http.Request, parts []strin
 		g.labels(w, r, repo, parts[3])
 	case parts[2] == "labels" && len(parts) == 3 && r.Method == http.MethodGet:
 		g.repoLabels(w, repo)
+	case parts[2] == "labels" && len(parts) == 3 && r.Method == http.MethodPost:
+		g.createLabel(w, r, repo)
 	default:
 		g.fail(w, http.StatusNotFound, "unknown route %s %s", r.Method, r.URL.Path)
 	}

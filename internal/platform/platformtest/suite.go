@@ -98,6 +98,25 @@ type ReportsArchives interface {
 	SetArchived(t *testing.T, webhook, path string, archived bool)
 }
 
+// ReportsDeletes is implemented by a Fixture whose host lets ripple notice that a
+// repository was deleted, by an event or because the listing no longer has it.
+// DeleteRepo deletes the repository in the fake (or real instance) and, for an event host,
+// delivers the event to webhook; the suite runs discovery after it. A host that cannot
+// leaves this out and a deletion goes unseen.
+type ReportsDeletes interface {
+	DeleteRepo(t *testing.T, webhook, path string)
+}
+
+// AnnouncesCreates is implemented by a Fixture whose host announces a created repository
+// before its first push (Gitea's and Forgejo's `repository` event), and which can show it
+// against a real instance. CreateEmptyRepo creates the repository with no commit and
+// delivers the created event to webhook, returning once the receiver has answered;
+// FirstPush then makes its first commit. A fixture over a fake leaves this out.
+type AnnouncesCreates interface {
+	CreateEmptyRepo(t *testing.T, webhook, path string)
+	FirstPush(t *testing.T, path string, files map[string]string)
+}
+
 // Run runs every conformance test against f.
 func Run(t *testing.T, f Fixture) {
 	t.Run("ReleaseOpensOnePRInExactlyTheImportingRepos", func(t *testing.T) { releaseFanOut(t, f) })
@@ -110,6 +129,8 @@ func Run(t *testing.T, f Fixture) {
 	t.Run("DependencyDashboardOnlyWhereTheHostHasIssues", func(t *testing.T) { dashboard(t, f) })
 	t.Run("ArchivePausesAndUnarchiveResumes", func(t *testing.T) { archived(t, f) })
 	t.Run("RenameKeepsTheIndexWithoutAScan", func(t *testing.T) { renamed(t, f) })
+	t.Run("DeleteForgetsTheRepo", func(t *testing.T) { deleted(t, f) })
+	t.Run("CreatedBeforeTheFirstPushStillRegistersOnce", func(t *testing.T) { createdEmpty(t, f) })
 }
 
 // 2026-11-23 is a Monday.

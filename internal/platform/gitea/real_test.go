@@ -334,8 +334,14 @@ func TestRealCreatePRLabels(t *testing.T) {
 	}
 	in.must(t, token(f.tok), http.MethodGet, fmt.Sprintf("/repos/%s/issues/%d/labels", path, pr.Number), nil, &got)
 	t.Logf("FACT labels on the pull request after CreatePR: %v", got)
-	if len(got) != 1 || got[0].Name != "dependencies" {
-		t.Errorf("labels on the pull request = %v, want only dependencies", got)
+	// nosuchlabel did not exist: CreatePR creates it (ROADMAP 281) and applies it, by name or, on
+	// Forgejo 7, by id.
+	names := map[string]bool{}
+	for _, l := range got {
+		names[l.Name] = true
+	}
+	if len(got) != 2 || !names["dependencies"] || !names["nosuchlabel"] {
+		t.Errorf("labels on the pull request = %v, want dependencies and the created nosuchlabel", got)
 	}
 }
 

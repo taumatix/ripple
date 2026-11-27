@@ -183,6 +183,10 @@ case-insensitive is assumed, not documented); like Local it rejects an empty str
 partition value or sort-key bound, which an older fake accepted; item and page sizes are an approximation of
 the documented accounting.
 
+**Burst.** `TestDynamoBurstOfRegistrationsOnOneHotPackage` registers one package from 150 repos at once (adaptive
+shards, 4 counter stripes) and requires every write to succeed, a complete `ListDependents` straight after and no
+counter drift. Unverified: real throttling and real index lag (neither the fake nor Local produces them; ROADMAP 333).
+
 **Parity check.** CI runs `scripts/check-dynamo-parity.sh test.log`, which compares the `fake` and
 `dynamodb-local` subtest of every Dynamo test and fails when one passes and the other fails, skips or is missing.
 That is how a gap in the fake becomes a visible failure instead of a silent one. It only compares

@@ -38,6 +38,10 @@ A job that pushed its branch and died before opening the PR is rerun by the new 
 push of the same branch name, and `execute` first looks for an open PR on that head and marks the job done when
 one exists, so the outcome is one branch and one PR.
 
+## A refused CreatePR
+
+The lease and `Fence()` stop a replica that lost the repo long before `CreatePR`, but not one that loses it in the moments around the call. When `CreatePR` fails, the run lists the open PRs again and, if one has the branch as head, finishes its jobs against that PR (`pull request already open`) and logs `pull request was opened by another replica meanwhile; using it`. This depends on the host refusing a second open PR for one head and base: SCM-Manager does (409, observed on a real 3.11.0), GitHub's 422 is assumed and unverified (ROADMAP 332).
+
 ## Clocks
 
 Lease times are written and compared by the store where it has a clock: Postgres uses `now()` in the
@@ -54,7 +58,7 @@ local clock.
 | Dies between branch push and PR | Takeover re-pushes the same branch and opens the one PR (or finds it open). |
 | Lease lost while the job is slow | Renewal is refused, the job's context is cancelled with `ErrLeaseLost`, the job is left for the new holder and not marked failed. `Fence()` before `CreatePR` closes the window up to that call. |
 | Store blip during renewal | Tolerated until the lease's own expiry; after that treated as lost. |
-| Clock skew | Postgres: none (store time). DynamoDB: absorbed up to the skew margin; beyond it a lease may be taken early, which is safe by the idempotent PR but wasteful. |
+| Clock skew | Postgres: none (store time). DynamoDB: absorbed up to the skew margin; beyond it a lease may be taken early. The takeover can fall between a run's listing of open PRs and its `CreatePR` (after its fence), so two replicas may both try to open the branch's PR: the host refuses the second and the run adopts the PR that exists (see "A refused CreatePR"), which is wasteful but ends with one PR. |
 | Same event delivered to two replicas | The second fails to take `event:<id>` and holds the entry for ttl/3, then finds it gone and drops it. |
 | Stale listing of due jobs | Re-read under the lease; finished jobs are skipped. |
 | Two replicas poll the release feed | One replica is elected (lease `feed:<name>`, ttl twice the poll interval) and polls; the others skip and take over once its claim lapses or it steps down on shutdown. Safe even if two poll: enqueueing a job is insert-if-absent. The toolchain, GitHub Actions, Docker, npm, Cargo and pip pollers are elected the same way, each on its own lease (`feed:go-toolchain`, `feed:github-actions`, `feed:docker`, `feed:npm`, `feed:cargo`, `feed:pip`, `feed:osv`), so two replicas starting together may split the sources between them. The OSV advisory poll is elected too, with a claim of twice `RIPPLE_OSV_INTERVAL`. |
@@ -69,8 +73,17 @@ every store, plus the fenced job update, the older-event query and a contention 
 exactly one holder at a time and no lost update); `internal/e2e/replicas_test.go` runs two engines on one store
 and one fake GitHub, asserts one PR per repo, kills a replica between push and PR to assert takeover with exactly
 one PR, and stalls a replica past its lease to assert its late job write is refused and it opens no second PR. `internal/e2e/replicas_feed_test.go` asserts that of two replicas one polls the feed and the other takes over when it steps down; the engine and app tests assert that a stale replica cannot write cursors, advance an advisory job or finish an event. Those run on the
-memory store and the in-process DynamoDB locally; Postgres runs in CI. Not verified: a real Postgres or
-DynamoDB under real contention, or real clock skew.
+memory store and the in-process DynamoDB locally; Postgres and DynamoDB Local run in CI.
+
+The replica soak (`internal/e2e/replicas_soak_test.go`, workflow `soak.yml`, sized by `RIPPLE_SOAK_REPOS`,
+`RIPPLE_SOAK_ROUNDS` and `RIPPLE_SOAK_EVENTS`) runs three replicas, each with its own store handle and its own clock, on the
+in-process fake, Postgres 17 and DynamoDB Local. With clocks within the lease skew, and with clocks 3 and 6 seconds
+apart (`store.WithClock` offsets a DynamoDB handle's clock; Postgres uses the database's), every repo ends with exactly one PR and a
+done job. Beyond the skew a replica ahead takes live leases early: one run of 12 repos on the fake saw 11 takeovers and
+56 platform calls against 0 and 36 within the margin, and still one PR per repo. A second test enqueues events of one
+repo through handles 5 seconds apart and checks that `Seq` follows arrival order, is unique, and that `HasOlderEvent`
+agrees from every handle while the queue drains. Not verified: a real AWS DynamoDB, separate OS processes, a
+network partition (ROADMAP 330).
 
 ## Observing replicas
 

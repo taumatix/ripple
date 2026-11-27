@@ -46,8 +46,12 @@ func ghesClient(h *testutil.GHES, v *github.Versions) *github.Client {
 }
 
 func openPR(t *testing.T, c *github.Client) platform.PR {
+	return openPRFrom(t, c, "ripple/x")
+}
+
+func openPRFrom(t *testing.T, c *github.Client, head string) platform.PR {
 	t.Helper()
-	pr, err := c.CreatePR(context.Background(), ghesRepo, platform.PRSpec{Head: "ripple/x", Base: "main", Title: "t"})
+	pr, err := c.CreatePR(context.Background(), ghesRepo, platform.PRSpec{Head: head, Base: "main", Title: "t"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,8 +110,9 @@ func TestGHESOlderReleaseGetsTheFallbackVersionOnce(t *testing.T) {
 	addRepo(h.GitHub)
 	v := &github.Versions{}
 	c := ghesClient(h, v)
-	openPR(t, c)
-	openPR(t, c)
+	h.CommitOn("acme/r", "ripple/y", map[string]string{"y.txt": "y\n"})
+	openPRFrom(t, c, "ripple/x")
+	openPRFrom(t, c, "ripple/y") // a second PR for the same head is refused by the host
 	if h.Gone() != 1 {
 		t.Errorf("410s = %d, want exactly 1 (then the version is remembered); seen %v", h.Gone(), h.VersionsSeen())
 	}

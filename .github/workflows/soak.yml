@@ -1,0 +1,58 @@
+name: soak
+# The replica soak (ROADMAP 101, docs/replicas.md): three replicas, each with its own store handle and
+# its own clock, on a real Postgres 17 and DynamoDB Local, with clocks that agree and clocks seconds
+# apart. Every repo must end with exactly one PR; the event queue's Seq must follow arrival order
+# whatever the handles' clocks say. Larger than the soak ci.yml already runs inside the e2e suite
+# (12 repos once); typical wall time a few minutes. Deterministic: a failure here blocks the merge.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "41 4 * * 1"
+  pull_request:
+    paths:
+      - ".github/workflows/soak.yml"
+      - "internal/store/**"
+      - "internal/engine/**"
+      - "internal/e2e/replicas*"
+      - "internal/testutil/stores.go"
+permissions:
+  contents: read
+jobs:
+  replicas:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: ripple
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+      dynamodb:
+        image: amazon/dynamodb-local
+        ports: ["8000:8000"]
+    env:
+      RIPPLE_REQUIRE_SERVICES: "1"
+      RIPPLE_TEST_POSTGRES_DSN: postgres://postgres:ripple@localhost:5432/postgres?sslmode=disable
+      RIPPLE_TEST_DYNAMODB_ENDPOINT: http://localhost:8000
+      AWS_ACCESS_KEY_ID: local
+      AWS_SECRET_ACCESS_KEY: local
+      AWS_REGION: us-east-1
+      RIPPLE_SOAK_REPOS: "60"
+      RIPPLE_SOAK_ROUNDS: "4"
+      RIPPLE_SOAK_EVENTS: "50"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: replica soak on Postgres and DynamoDB Local
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -race -count=1 -v -timeout 25m -run 'TestReplicaSoak' ./internal/e2e/ | tee soak.log
+      - name: no skipped run, and what the clocks cost
+        run: |
+          if grep -E -- '--- SKIP' soak.log; then echo "a soak backend was skipped"; exit 1; fi
+          grep -E 'lease takeovers' soak.log || true

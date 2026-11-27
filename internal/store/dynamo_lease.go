@@ -19,6 +19,19 @@ const DefaultLeaseSkew = 5 * time.Second
 // WithLeaseSkew sets the margin; replicas' wall clocks must agree to within it.
 func WithLeaseSkew(d time.Duration) DynamoOption { return func(x *Dynamo) { x.leaseSkew = d } }
 
+// WithClock replaces the wall clock this handle stamps leases, replica heartbeats and
+// registration times with (default time.Now). DynamoDB has no server time, so this is the
+// clock replicas must keep within the lease skew of each other; the option exists so a test
+// can give each replica's handle its own offset and prove what skew does.
+func WithClock(now func() time.Time) DynamoOption { return func(x *Dynamo) { x.clock = now } }
+
+func (d *Dynamo) now() time.Time {
+	if d.clock != nil {
+		return d.clock()
+	}
+	return time.Now()
+}
+
 // Leases are PK=LEASE#<name> SK=META with Owner, Token and Expires. DynamoDB has no
 // server clock to compare against, so Expires is the grantor's wall clock plus ttl and a
 // contender must see now > Expires + skew. Every change is conditional on the item being
@@ -39,7 +52,7 @@ func (d *Dynamo) AcquireLease(ctx context.Context, name, owner string, ttl time.
 	if err != nil {
 		return Lease{}, false, wrapD("acquire lease", err)
 	}
-	now := time.Now()
+	now := d.now()
 	want := leaseAttrs{item: item{PK: "LEASE#" + name, SK: "META"}, Owner: owner, Token: 1, Expires: ts(now.Add(ttl))}
 	var cond string
 	var vals map[string]types.AttributeValue
@@ -73,7 +86,7 @@ func (d *Dynamo) AcquireLease(ctx context.Context, name, owner string, ttl time.
 }
 
 func (d *Dynamo) RenewLease(ctx context.Context, l Lease, ttl time.Duration) (Lease, bool, error) {
-	exp := time.Now().Add(ttl)
+	exp := d.now().Add(ttl)
 	_, err := d.db.UpdateItem(ctx, &dynamodb.UpdateItemInput{
 		TableName: &d.table, Key: leaseKey(l.Name),
 		UpdateExpression:          aws.String("SET #e = :e"),

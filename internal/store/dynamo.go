@@ -64,6 +64,9 @@ type Dynamo struct {
 	scanPause time.Duration
 	// leaseSkew is the clock-skew margin of lease takeover (see dynamo_lease.go).
 	leaseSkew time.Duration
+	// clock is the wall clock lease, heartbeat and registration-window times are taken from
+	// (WithClock); nil is time.Now.
+	clock func() time.Time
 	// marksBuilt is set once every live event is known to have its marker (dynamo_eventmarks.go).
 	marksBuilt atomic.Bool
 }
@@ -452,7 +455,7 @@ func (d *Dynamo) ReplaceDependencies(ctx context.Context, repo string, deps []mo
 	deps = append([]model.Dependency(nil), deps...)
 	SortDependencies(deps)
 	rows := map[string]bool{}
-	now := time.Now()
+	now := d.now()
 	for _, dep := range deps {
 		dep.Repo = repo
 		base := pkgBase(dep.Datasource, dep.Package)

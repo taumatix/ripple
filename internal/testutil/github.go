@@ -547,6 +547,16 @@ func (g *GitHub) handleRepo(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		g.mu.Lock()
+		// GitHub refuses a second open pull request for the same head and base with a 422
+		// ("A pull request already exists for owner:branch"; assumed, unverified: the REST
+		// docs do not state it, ROADMAP 332). Two replicas that both reach CreatePR depend on it.
+		for _, o := range g.prs[repo] {
+			if !o.Closed && o.Head == in.Head && o.Base == in.Base {
+				g.mu.Unlock()
+				g.fail(w, http.StatusUnprocessableEntity, "A pull request already exists for %s:%s.", strings.Split(repo, "/")[0], in.Head)
+				return
+			}
+		}
 		p := &PR{Repo: repo, Head: in.Head, Base: in.Base, Title: in.Title, Body: in.Body, Draft: in.Draft, Number: len(g.prs[repo]) + 1}
 		g.prs[repo] = append(g.prs[repo], p)
 		resp := g.withHeadSHA(repo, p, prJSON(repo, p))

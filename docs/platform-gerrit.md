@@ -22,8 +22,8 @@ and `/`; any other project is skipped with a log line.
 The account needs read and push to `refs/for/*` on each project, and ideally permission to set WIP and hashtags.
 
 **Author email.** Gerrit rejects a pushed commit whose author email is not registered on the pushing account
-unless the account holds "Forge Author" (recorded: `email address ... is not registered in your account, and you
-lack 'forge author' permission`), and its validator refuses to register the default's `.invalid` domain (`PUT
+unless the account holds "Forge Author" and "Forge Committer" (recorded: `email address ... is not registered in your account, and you
+lack 'forge committer' permission`; Gerrit checks the committer identity, which ripple sets to the same email), and its validator refuses to register the default's `.invalid` domain (`PUT
 /accounts/self/emails/...` answers 400 `invalid email address`). Either grant Forge Author and Forge Committer on `refs/heads/*` (recorded on Gerrit 3.15.0: with only Forge Author the push is then refused with `... you lack 'forge committer' permission` for ripple's committer identity) or
 register an address on the account and set `RIPPLE_GERRIT_AUTHOR_EMAIL` to it. When Gerrit refuses a push for this
 reason, ripple's error says so and names `RIPPLE_GERRIT_AUTHOR_EMAIL`. The default is unchanged (additive only).

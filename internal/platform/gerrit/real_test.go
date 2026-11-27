@@ -306,10 +306,10 @@ func TestRealDefaultAuthorEmail(t *testing.T) {
 	}
 	err := proposeAs(t, e, bu, bp, "")
 	if err == nil {
-		t.Fatal("an account without Forge Author and without the email registered was allowed to push")
+		t.Fatal("an account without Forge Author and Forge Committer and without the email registered was allowed to push")
 	}
 	t.Logf("FACT refusal: %v", err)
-	for _, want := range []string{"forge author", "RIPPLE_GERRIT_AUTHOR_EMAIL"} {
+	for _, want := range []string{"forge committer", "RIPPLE_GERRIT_AUTHOR_EMAIL"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error lacks %q: %v", want, err)
 		}

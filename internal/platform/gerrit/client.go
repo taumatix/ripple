@@ -615,7 +615,7 @@ func (w *forgeHintWorkspace) CommitAndPush(ctx context.Context, branch, message 
 		if email == "" {
 			email = gitws.AuthorEmail(gitws.Options{})
 		}
-		err = fmt.Errorf("%w\nhint: Gerrit does not accept the commit email %q for this account: grant it Forge Author on the branch, or register an address on the account (Settings, Email Addresses) and set RIPPLE_GERRIT_AUTHOR_EMAIL to it (docs/platform-gerrit.md, \"Author email\")", err, email)
+		err = fmt.Errorf("%w\nhint: Gerrit does not accept the commit email %q for this account: grant it Forge Author and Forge Committer on the branch, or register an address on the account (Settings, Email Addresses) and set RIPPLE_GERRIT_AUTHOR_EMAIL to it (docs/platform-gerrit.md, \"Author email\")", err, email)
 	}
 	return pushed, err
 }

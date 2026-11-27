@@ -64,7 +64,7 @@ func TestForgeAuthorRefusalNamesTheSettingThatFixesIt(t *testing.T) {
 	if err == nil {
 		t.Fatal("push accepted")
 	}
-	for _, want := range []string{"forge author", "ripple@users.noreply.invalid", "RIPPLE_GERRIT_AUTHOR_EMAIL"} {
+	for _, want := range []string{"forge committer", "ripple@users.noreply.invalid", "RIPPLE_GERRIT_AUTHOR_EMAIL"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error lacks %q: %v", want, err)
 		}

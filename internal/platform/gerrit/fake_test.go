@@ -86,7 +86,7 @@ while read old new ref; do
     refs/for/*)
       if [ -f "$GIT_DIR/registered-email" ]; then
         author=$(git log -1 --format=%ae "$new")
-        [ "$author" = "$(cat "$GIT_DIR/registered-email")" ] || { echo "email address $author is not registered in your account, and you lack 'forge author' permission" >&2; exit 1; }
+        [ "$author" = "$(cat "$GIT_DIR/registered-email")" ] || { echo "email address $author is not registered in your account, and you lack 'forge committer' permission" >&2; exit 1; }
       fi
       git log -1 --format=%B "$new" | grep -Eq '^Change-Id: I[0-9a-f]{40}$' || { echo "missing Change-Id in commit message" >&2; exit 1; }
       ;;

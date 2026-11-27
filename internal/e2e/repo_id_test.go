@@ -84,9 +84,11 @@ func TestPushWithRecreatedRepoIDIsResolvedByTheHost(t *testing.T) {
 		e.pushPayload("acme/uses-lib", "refs/heads/main", "main", 13, []string{"go.mod"}, "")
 		e.eventually("id replaced", func() bool { return e.storedRepoID("acme/uses-lib") == 13 })
 		e.eventually("push scanned", func() bool { return e.scans("acme/uses-lib") > calls })
-		if v, _ := e.st.GetCursor(context.Background(), "repoid|11"); v != "" {
-			t.Fatalf("the old id still points at %q", v)
-		}
+		// The old id's entry is deleted after the new id is stored, so wait for it too.
+		e.eventually("old id forgotten", func() bool {
+			v, _ := e.st.GetCursor(context.Background(), "repoid|11")
+			return v == ""
+		})
 		if v, _ := e.st.GetCursor(context.Background(), "repoid|13"); v != "acme/uses-lib" {
 			t.Fatalf("the new id points at %q", v)
 		}

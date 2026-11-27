@@ -106,7 +106,12 @@ func (s *scm) bootstrap(t *testing.T) string {
 	code, _, body = s.call(t, http.MethodGet, s.base+"/api/v2/plugins/pending", mtPlugins, "", nil)
 	t.Logf("FACT pending plugins after the restart: %d %s", code, clip(body))
 
-	// API key.
+	return s.newKey(t)
+}
+
+// newKey creates an API key for the user s authenticates as.
+func (s *scm) newKey(t *testing.T) string {
+	t.Helper()
 	code, h, body := s.call(t, http.MethodPost, s.base+"/api/v2/users/"+s.user+"/api_keys", "", mtAPIKey, map[string]string{"displayName": "ripple", "permissionRole": "WRITE"})
 	// Recorded: the 201 body is the key itself, as text/plain, not JSON. Never log it.
 	tok := strings.TrimSpace(string(body))

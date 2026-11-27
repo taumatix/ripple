@@ -19,7 +19,7 @@ Version="1.2.3" />` and (central package management) `<PackageVersion Include="I
 - the version attribute is three numeric segments, `1.2.3`. A NuGet version attribute is a minimum version, so this plain
   form is what "pin to this release" looks like;
 - the id is a valid package id (letters, digits, `.`, `_`, `-`);
-- the tag has no `VersionOverride=` attribute and is not inside an XML comment.
+- the tag is not inside an XML comment.
 
 Also read, both settled by running real `dotnet restore` (`TestRealtoolNugetItemForms`, CI `realtool / nuget`,
 2026-11-27, .NET 8 SDK on `Newtonsoft.Json`) and only inside this opt-in ecosystem:
@@ -46,7 +46,16 @@ Two consequences, both from what dotnet restored (`TestRealtoolNugetItemForms`) 
 
 An item whose version cannot be told (several `<Version>` children, or one with a `Condition`) is skipped, and so is an
 Include that such an Update overrides, because the live version is unknown. Not read yet, each on the ROADMAP: an Update
-in another file than its Include, `PackageVersion Update=`, and `VersionOverride=` (261 to 263).
+in another file than its Include and `PackageVersion Update=` (261, 262).
+
+`<PackageReference Include="Id" VersionOverride="1.2.3" />` (central package management) is read, and its digits are
+edited: `TestRealtoolNugetVersionOverride` (CI, `nuget-cpm` fixture) asserts that real `dotnet restore` holds the
+override over the `PackageVersion` of `Directory.Packages.props`, and holds the new version after ripple's edit. Not
+read: a `VersionOverride` beside a `Version` attribute or an Update, with a `<Version>` child, or on a `PackageVersion`.
+The central `PackageVersion` of the same package is still a separate entry and moves on its own; a project that
+overrides it is not affected by that move, so a central bump can leave the overriding project behind, which is
+intended. Not verified: `CentralPackageVersionOverrideEnabled=false` (the override is then an error, and ripple would
+still edit it).
 
 Skipped: ranges (`[1.0,2.0)`, `(,1.0]`), floating versions (`1.*`), properties (`$(Ver)`), prereleases (`1.0.0-beta`),
 two- and four-segment versions, `packages.config`, and `.props` files other than `Directory.Packages.props`.

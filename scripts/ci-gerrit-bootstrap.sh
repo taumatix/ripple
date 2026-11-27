@@ -30,11 +30,17 @@ curl -fsS "$base/config/server/version" | strip
 echo "--- become the image's own administrator (account 1000000, offered by the dev login page)"
 curl -sS -c "$jar" -o "$work/login.out" -w 'login: %{http_code}\n' -L "$base/login/%23%2F?account_id=1000000" || true
 grep -q GerritAccount "$jar" || { echo "no GerritAccount cookie: $(head -c 300 "$work/login.out")"; exit 1; }
+echo "--- cookie jar names: $(awk 'NF>=7{print $6}' "$jar" | tr '\n' ' ')"
+curl -sS -b "$jar" -c "$jar" -o /dev/null -w 'GET accounts/self (cookie): %{http_code}\n' "$base/accounts/self"
+echo "--- cookie jar names after a REST call: $(awk 'NF>=7{print $6}' "$jar" | tr '\n' ' ')"
 xsrf=$(awk '$6=="XSRF_TOKEN"{print $7}' "$jar")
 
 echo "--- mint an HTTP password"
-curl -fsS -b "$jar" -H "X-Gerrit-Auth: $xsrf" -H 'Content-Type: application/json' -X PUT \
-  -d '{"generate":true}' "$base/accounts/self/password.http" | strip | tr -d '"' > "$work/pass"
+code=$(curl -sS -b "$jar" -H "X-Gerrit-Auth: $xsrf" -H 'Content-Type: application/json' -X PUT \
+  -d '{"generate":true}' -o "$work/pass.out" -w '%{http_code}' "$base/accounts/self/password.http")
+echo "PUT password.http: $code"
+if [ "$code" != 200 ]; then echo "body: $(head -c 300 "$work/pass.out")"; exit 1; fi
+strip < "$work/pass.out" | tr -d '"' > "$work/pass"
 pass=$(cat "$work/pass")
 [ -n "$pass" ] || { echo "empty password"; exit 1; }
 echo "::add-mask::$pass"

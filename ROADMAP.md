@@ -47,12 +47,6 @@ auth model, rate limits); the notes below are what I expect, **unverified** unti
     WIP, hashtag and abandon permission for an ordinary (non-admin) account, "no new changes" on identical re-push,
     merge-commit file lists. Residuals: auto-merge through submit-on-label if the docs ever support it,
     `stream-events` as an alternative to webhooks, learning default branches at discovery.
-290. **Gerrit: run the real job as an ordinary account.** The CI account is an administrator with push on
-    `refs/heads/*`; give it only read and push to `refs/for/*` plus Forge Author and rerun, so WIP, hashtag and
-    abandon permission and the minimum grant the docs state are checked rather than assumed.
-291. **Gerrit: default author email.** The default `ripple@users.noreply.invalid` cannot be registered on a real Gerrit
-    (`.invalid` is refused) and needs Forge Author; `RIPPLE_GERRIT_AUTHOR_EMAIL` is the way out. Decide whether the
-    default should change (additive only: a breaking default needs a deprecation) or startup should warn.
 292. **GitLab: auto-merge with a real pipeline.** The CI project has no runner, so merge-when-pipeline-succeeds was only
     asked for, never seen to merge. Add a runner container and a `.gitlab-ci.yml` that passes and one that fails, and
     check the merge happens, and the abort note ("aborted the automatic merge") for the failure.

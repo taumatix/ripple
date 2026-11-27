@@ -594,7 +594,7 @@ func (f *realFixture) CreateEmptyRepo(t *testing.T, webhook, path string) {
 	}
 	admin := basic(f.in.adminUser, f.in.adminPass)
 	f.in.must(t, admin, http.MethodPost, "/admin/hooks", map[string]any{
-		"type": f.hookType, "active": true, "events": []string{"repository"},
+		"type": f.hookType, "active": true, "events": []string{"repository", "push"},
 		"config": map[string]string{"url": f.fwd.url(f.in), "content_type": "json", "secret": string(f.secret)}}, &hook)
 	t.Cleanup(func() { f.in.call(t, admin, http.MethodDelete, fmt.Sprintf("/admin/hooks/%d", hook.ID), nil, nil) })
 	before := len(f.fwd.deliveries())

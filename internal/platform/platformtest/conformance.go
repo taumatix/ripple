@@ -309,8 +309,10 @@ func deleted(t *testing.T, f Fixture) {
 	e.clock.Advance(time.Minute)
 	e.publish("example.com/lib", "v1.1.0")
 	e.tick()
-	if n := len(e.prs("gone")); n != 0 {
-		t.Errorf("%d PRs opened on a deleted repo", n)
+	// Only the kept repo can be asked: a real host answers 404 for the deleted one's pull
+	// requests. Exactly one PR there shows the release ran and was not spent on the deleted repo.
+	if n := len(e.prs("kept")); n != 1 {
+		t.Errorf("want 1 PR on the kept repo after the release, got %d", n)
 	}
 }
 

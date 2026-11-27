@@ -581,6 +581,33 @@ func TestRealtoolMavenParent(t *testing.T) {
 	}.run(t)
 }
 
+// TestRealtoolNugetVersionOverride settles ROADMAP 263 with real dotnet under central package
+// management: a PackageReference's VersionOverride beats the PackageVersion of
+// Directory.Packages.props for that project (so the override's digits are the ones to move),
+// and ripple's edit of them is what restore then holds.
+func TestRealtoolNugetVersionOverride(t *testing.T) {
+	realtool{
+		fixture: "nuget-cpm", manifest: "realtool.csproj", manager: Nuget{Dir: "/"},
+		bumps: []bump{{"Newtonsoft.Json", "13.0.1", "13.0.3"}},
+		env:   []string{"DOTNET_NOLOGO=1", "DOTNET_CLI_TELEMETRY_OPTOUT=1"},
+		steps: [][]string{{"dotnet", "restore"}, {"dotnet", "build", "--no-restore"}},
+		local: []string{"dotnet build --no-restore"},
+		before: func(t *testing.T, dir string) {
+			mustContain(t, dir, "obj/project.assets.json", "Newtonsoft.Json/13.0.1") // the override wins
+			mustContain(t, dir, "obj/project.assets.json", "Serilog/3.0.0")          // no override: the central version
+			if b, err := os.ReadFile(filepath.Join(dir, "obj/project.assets.json")); err != nil {
+				t.Fatal(err)
+			} else if strings.Contains(string(b), "Newtonsoft.Json/12.0.3") {
+				t.Errorf("the central 12.0.3 was restored although the project overrides it")
+			}
+		},
+		after: func(t *testing.T, dir string) {
+			mustContain(t, dir, "obj/project.assets.json", "Newtonsoft.Json/13.0.3")
+			mustContain(t, dir, "obj/project.assets.json", "Serilog/3.0.0")
+		},
+	}.run(t)
+}
+
 func TestRealtoolTerraform(t *testing.T) {
 	realtool{
 		fixture: "terraform", manifest: "main.tf", manager: Terraform{Dir: "/"},

@@ -19,8 +19,9 @@ import (
 // attribute is a minimum, so a plain `1.2.3` is the whole form.
 //
 // Left alone: a version that is a range (`[1.0,2.0)`), a floating one (`1.*`), a property
-// (`$(Ver)`), a prerelease or four-segment version, a version given as a `<Version>` child
-// element, `Update=` and `VersionOverride=` forms, and anything inside an XML comment.
+// (`$(Ver)`), a prerelease or four-segment version, an unreadable `<Version>` child, a
+// `VersionOverride=` beside a `Version` or an Update, and anything inside an XML comment. A
+// PackageReference's `VersionOverride="1.2.3"` is read like a version (see scanNuget).
 // ripple reads only nuget.org and does not read NuGet.Config, so a package served from a
 // private feed under the same id would be looked up on nuget.org: see docs/nuget.md.
 type Nuget struct {
@@ -115,7 +116,9 @@ func scanNugetItems(content string) []nugetItem {
 		attrsOff := m[4]
 		attrs := masked[m[4]:m[5]]
 		var name, update, spec string
-		specStart, haveName, haveSpec, bad := 0, false, false, false
+		var override string
+		overrideStart := 0
+		specStart, haveName, haveSpec, haveOverride := 0, false, false, false
 		for _, a := range nugetAttrRE.FindAllStringSubmatchIndex(attrs, -1) {
 			key := attrs[a[2]:a[3]]
 			vs, ve := a[6], a[7]
@@ -131,11 +134,23 @@ func scanNugetItems(content string) []nugetItem {
 			case "Update":
 				update = val
 			case "VersionOverride":
-				bad = true
+				override, overrideStart, haveOverride = val, attrsOff+vs, true
 			}
 		}
-		if bad {
-			continue
+		if haveOverride {
+			// Central package management: the override is the version the project restores, so
+			// its digits are what moves. It is not read beside a Version attribute or an Update
+			// (an error to NuGet, NU1008), on a PackageVersion (where it means nothing), or with
+			// a `<Version>` child.
+			if tag != "PackageReference" || haveSpec || update != "" || !haveName {
+				continue
+			}
+			if !(m[1] >= 2 && masked[m[1]-2] == '/') {
+				if _, _, n := nugetChild(masked, m[1], tag); n != 0 {
+					continue
+				}
+			}
+			spec, specStart, haveSpec = override, overrideStart, true
 		}
 		isUpdate := tag == "PackageReference" && update != "" && !haveName
 		if update != "" && !isUpdate {

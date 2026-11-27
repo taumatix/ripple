@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- central package management: Serilog takes the version of Directory.Packages.props,
+         Newtonsoft.Json overrides it for this project (ROADMAP 263) -->
+    <PackageReference Include="Newtonsoft.Json" VersionOverride="13.0.1" />
+    <PackageReference Include="Serilog" />
+  </ItemGroup>
+
+</Project>

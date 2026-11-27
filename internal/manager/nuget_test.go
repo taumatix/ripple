@@ -49,7 +49,7 @@ func TestNugetExtract(t *testing.T) {
 	}
 	// "Child" is a <Version> child element, read since real dotnet restore resolved it; the
 	// "Update" of "Other" has no earlier Include to update, so dotnet ignores it and so do we.
-	want := "Newtonsoft.Json@13.0.1 Serilog@3.1.0 Multi.Line@2.0.0 Child@1.0.0 Central@4.5.6"
+	want := "Newtonsoft.Json@13.0.1 Serilog@3.1.0 Multi.Line@2.0.0 Child@1.0.0 Over@1.0.0 Central@4.5.6"
 	if strings.Join(got, " ") != want {
 		t.Errorf("got %q, want %q", strings.Join(got, " "), want)
 	}
@@ -118,6 +118,10 @@ const csprojForms = `<Project Sdk="Microsoft.NET.Sdk">
     <PackageReference Include="Open"><Version>2.2.2</Version>
     <PackageReference Include="After" Version="1.0.1" />
     <PackageVersion Update="Central" Version="4.0.0" />
+    <PackageReference Include="Ov" VersionOverride="9.0.0" />
+    <PackageReference Include="OvBoth" Version="1.0.0" VersionOverride="2.0.0" />
+    <PackageReference Update="Ov" VersionOverride="9.5.0" />
+    <PackageVersion Include="OvCentral" VersionOverride="3.0.0" />
     <PackageReference Include="OverrideToo" VersionOverride="1.0.0"><Version>1.0.0</Version></PackageReference>
   </ItemGroup>
 </Project>
@@ -136,7 +140,10 @@ func TestNugetExtractItemForms(t *testing.T) {
 	// an Include that a later Update overrides: only the Update is read. Both reads the child,
 	// which dotnet uses over the attribute. "Open" is never closed before the next reference and
 	// "Twice" and "CondChild" have children that cannot be told.
-	want := "Early@1.0.0 Late@2.0.0 Bare@3.0.0 ChildFirst@4.0.0 Kid@6.0.0 Both@1.2.0 After@1.0.1"
+	// A VersionOverride is the version the project restores under central package management, so
+	// "Ov" is read; beside a Version (OvBoth, NU1008), an Update, on a PackageVersion or with a
+	// `<Version>` child (OverrideToo) it is not.
+	want := "Early@1.0.0 Late@2.0.0 Bare@3.0.0 ChildFirst@4.0.0 Kid@6.0.0 Both@1.2.0 After@1.0.1 Ov@9.0.0"
 	if strings.Join(got, " ") != want {
 		t.Errorf("got %q, want %q", strings.Join(got, " "), want)
 	}
@@ -148,6 +155,7 @@ func TestNugetApplyItemForms(t *testing.T) {
 		{"Bare", "3.0.0", "3.1.0", `Update="Bare" Version="3.0.0"`, `Update="Bare" Version="3.1.0"`},
 		{"ChildFirst", "4.0.0", "4.2.0", "<Version>4.0.0</Version>", "<Version>4.2.0</Version>"},
 		{"Kid", "6.0.0", "6.0.9", "<Version>6.0.0</Version>", "<Version>6.0.9</Version>"},
+		{"Ov", "9.0.0", "9.1.0", `VersionOverride="9.0.0"`, `VersionOverride="9.1.0"`},
 		{"Both", "1.2.0", "1.2.5", "<Version>1.2.0</Version>", "<Version>1.2.5</Version>"},
 	} {
 		dep := model.Dependency{File: "app.csproj", Package: tc.pkg, Version: tc.spec}

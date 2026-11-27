@@ -178,7 +178,10 @@ func newCountingProxy(t *testing.T, base string) *countingProxy {
 			if len(segs) > 0 && segs[0] == "config" {
 				skip = 2
 			}
-			if len(segs) >= skip+2 {
+			// Head reads belong to discovery polling (ListRepoHeads), not to a scan or a push, so the
+			// suite's per-repo count leaves them out, as the fake's does.
+			headRead := len(segs) >= 4 && segs[0] == "repositories" && segs[3] == "branches"
+			if len(segs) >= skip+2 && !headRead {
 				key := strings.ToLower(segs[skip] + "/" + segs[skip+1])
 				c.mu.Lock()
 				c.n[key]++
@@ -410,12 +413,21 @@ func (f *realFixture) SetArchived(t *testing.T, _, path string, archived bool) {
 	if code != http.StatusOK {
 		t.Fatalf("reading %s: %d %s", path, code, clip(body))
 	}
-	var repo map[string]any
+	var repo struct {
+		Links links `json:"_links"`
+	}
 	_ = json.Unmarshal(body, &repo)
-	repo["archived"] = archived
-	code, _, body = f.user.call(t, http.MethodPut, u, "", mtRepo, repo)
-	t.Logf("FACT archive %s=%v: %d %s", path, archived, code, clip(body))
-	if code != http.StatusNoContent {
-		t.Fatalf("updating %s: %d %s", path, code, clip(body))
+	t.Logf("FACT repository links: %v", repo.Links.names())
+	// Recorded: a PUT of the object with archived=true is accepted, but with archived=false it is
+	// refused (403 "repository is archived"): leaving the archive takes the unarchive resource.
+	verb := map[bool]string{true: "archive", false: "unarchive"}[archived]
+	href := repo.Links.href(verb)
+	if href == "" {
+		t.Fatalf("no %s link on %s: %v", verb, path, repo.Links.names())
+	}
+	code, _, body = f.user.call(t, http.MethodPost, href, "", "", nil)
+	t.Logf("FACT %s %s: %d %s", verb, path, code, clip(body))
+	if code != http.StatusNoContent && code != http.StatusOK {
+		t.Fatalf("%s %s: %d %s", verb, path, code, clip(body))
 	}
 }

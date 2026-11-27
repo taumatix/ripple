@@ -575,3 +575,50 @@ func (f *realFixture) RateLimitNextPR() bool {
 func (f *realFixture) SetArchived(t *testing.T, _, path string, archived bool) {
 	f.in.must(t, token(f.tok), http.MethodPatch, "/repos/"+path, map[string]any{"archived": archived}, nil)
 }
+
+// DeleteRepo deletes the repository. The instance announces nothing (TestRealRepositoryWebhook), so
+// the suite's discovery is what notices.
+func (f *realFixture) DeleteRepo(t *testing.T, _, path string) {
+	f.in.must(t, token(f.tok), http.MethodDelete, "/repos/"+path, nil, nil)
+}
+
+// CreateEmptyRepo creates a repository with no commit, with a system webhook for `repository`
+// events forwarded to ripple, and returns once ripple's receiver has answered the created event.
+func (f *realFixture) CreateEmptyRepo(t *testing.T, webhook, path string) {
+	t.Helper()
+	f.fwd.mu.Lock()
+	f.fwd.next = webhook
+	f.fwd.mu.Unlock()
+	var hook struct {
+		ID int `json:"id"`
+	}
+	admin := basic(f.in.adminUser, f.in.adminPass)
+	f.in.must(t, admin, http.MethodPost, "/admin/hooks", map[string]any{
+		"type": f.hookType, "active": true, "events": []string{"repository", "push"},
+		"config": map[string]string{"url": f.fwd.url(f.in), "content_type": "json", "secret": string(f.secret)}}, &hook)
+	t.Cleanup(func() { f.in.call(t, admin, http.MethodDelete, fmt.Sprintf("/admin/hooks/%d", hook.ID), nil, nil) })
+	before := len(f.fwd.deliveries())
+	_, short, _ := strings.Cut(path, "/")
+	f.in.must(t, token(f.tok), http.MethodPost, "/user/repos", map[string]any{"name": short, "private": true, "auto_init": false, "default_branch": "main"}, nil)
+	d := f.fwd.await(t, before, "the created event of "+path, func(d delivery) bool {
+		_, repo, action := d.payload()
+		return d.event() == "repository" && action == "created" && strings.EqualFold(repo, path)
+	})
+	t.Logf("FACT created event for an empty repository answered %d by ripple's receiver", d.Status)
+	if d.Status >= 300 {
+		t.Fatalf("ripple's receiver answered the created event %d", d.Status)
+	}
+}
+
+// FirstPush makes the first commit of a repository CreateEmptyRepo made.
+func (f *realFixture) FirstPush(t *testing.T, path string, files map[string]string) {
+	t.Helper()
+	dir := t.TempDir()
+	f.dirs[path] = dir
+	writeFiles(t, dir, files)
+	f.git(t, dir, "init", "-q", "-b", "main")
+	f.git(t, dir, "add", "-A")
+	f.git(t, dir, "commit", "-q", "-m", "initial")
+	f.git(t, dir, "push", "-q", f.in.url+"/"+path+".git", "main")
+	f.probeEmpty(t, path)
+}

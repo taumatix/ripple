@@ -333,10 +333,25 @@ func (c *Client) CreatePR(ctx context.Context, repo model.Repo, s platform.PRSpe
 		// (Gitea 1.27.3, Forgejo 17.0.2), so the answer is read and the gap logged.
 		// Forgejo 7.0.16 (Gitea 1.21) takes ids only and answers 422 to names, so a 422
 		// is retried with the ids found in GET .../labels.
-		applied, err := c.postLabels(ctx, repo, o, n, pr.Number, s.Labels)
-		var se *statusError
-		if errors.As(err, &se) && se.status == http.StatusUnprocessableEntity {
-			applied, err = c.postLabelIDs(ctx, repo, o, n, pr.Number, s.Labels)
+		applied, err := c.applyLabels(ctx, repo, o, n, pr.Number, s.Labels)
+		if err == nil {
+			// A label the repository lacks is created (POST .../labels, a name and a
+			// colour) and applied; one that cannot be created stays a warning.
+			var made []string
+			for _, name := range notIn(s.Labels, applied) {
+				if cerr := c.createLabel(ctx, repo, o, n, name); cerr != nil {
+					if c.Log != nil {
+						c.Log.Warn("creating label failed", "repo", repo.FullName, "label", name, "err", cerr)
+					}
+					continue
+				}
+				made = append(made, name)
+			}
+			if len(made) > 0 {
+				var more []labelJSON
+				more, err = c.applyLabels(ctx, repo, o, n, pr.Number, made)
+				applied = append(applied, more...)
+			}
 		}
 		if c.Log != nil {
 			if err != nil {
@@ -347,6 +362,27 @@ func (c *Client) CreatePR(ctx context.Context, repo model.Repo, s platform.PRSpe
 		}
 	}
 	return pr, nil
+}
+
+// applyLabels labels the pull request by name, or by id where the instance refuses names.
+func (c *Client) applyLabels(ctx context.Context, repo model.Repo, o, n string, pr int, names []string) ([]labelJSON, error) {
+	applied, err := c.postLabels(ctx, repo, o, n, pr, names)
+	var se *statusError
+	if errors.As(err, &se) && se.status == http.StatusUnprocessableEntity {
+		applied, err = c.postLabelIDs(ctx, repo, o, n, pr, names)
+	}
+	return applied, err
+}
+
+// newLabelColor is the colour of a label ripple creates.
+const newLabelColor = "#0075ca"
+
+// createLabel makes the repository a label of that name (POST .../labels takes a name and a
+// colour; hosts-gitea.yml TestRealLabelByName). Where the token may not, the caller logs and carries on.
+func (c *Client) createLabel(ctx context.Context, repo model.Repo, o, n, name string) error {
+	_, err := c.do(ctx, repo, http.MethodPost, c.api(fmt.Sprintf("/repos/%s/%s/labels", o, n)),
+		map[string]any{"name": name, "color": newLabelColor}, nil)
+	return err
 }
 
 type labelJSON struct {

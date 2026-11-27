@@ -104,17 +104,26 @@ func TestRealPullPushTimeline(t *testing.T) {
 	f := scene(t, in)
 	path := f.Path("facts")
 	n := f.branchPR(t, "facts", "ripple/go/tl")
-	t.Logf("FACT timeline of a fresh pull request: %v", f.timelineTypes(t, path, n))
+	// Literal values read from Gitea 1.27.3, Forgejo 17.0.2 and Forgejo 7.0.16 (hosts-gitea.yml):
+	// every push to the branch, the first included, adds one pull_push entry.
+	want := func(when string, got []string, n int) {
+		t.Helper()
+		t.Logf("FACT timeline %s: %v", when, got)
+		if strings.Join(got, ",") != strings.TrimSuffix(strings.Repeat("pull_push,", n), ",") {
+			t.Errorf("timeline %s = %v, want %d x pull_push", when, got, n)
+		}
+	}
+	want("of a fresh pull request", f.timelineTypes(t, path, n), 1)
 	dir := f.dirs[path]
 	f.git(t, dir, "checkout", "-q", "ripple/go/tl")
 	writeFiles(t, dir, map[string]string{"more.txt": "more\n"})
 	f.git(t, dir, "add", "-A")
 	f.git(t, dir, "commit", "-q", "-m", "more")
 	f.git(t, dir, "push", "-q", in.url+"/"+path+".git", "ripple/go/tl")
-	t.Logf("FACT timeline after one more commit: %v", waitTimeline(t, f, path, n, 2))
+	want("after one more commit", waitTimeline(t, f, path, n, 2), 2)
 	f.git(t, dir, "commit", "-q", "--amend", "-m", "amended")
 	f.git(t, dir, "push", "-q", "--force", in.url+"/"+path+".git", "ripple/go/tl")
-	t.Logf("FACT timeline after a force-push: %v", waitTimeline(t, f, path, n, 3))
+	want("after a force-push", waitTimeline(t, f, path, n, 3), 3)
 }
 
 // waitTimeline polls (the entry is written after the push returns) until at least want entries exist.

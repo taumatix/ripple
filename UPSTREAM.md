@@ -143,8 +143,9 @@ ripple is bound to two external contracts. The block below is the source of trut
   used: [GET /api/v1/version, GET /api/v1/user/repos, GET and POST /repos/{owner}/{repo}/pulls (draft is a "WIP:" title prefix), POST /repos/{owner}/{repo}/pulls/{n}/merge ("do" and merge_when_checks_succeed), POST /repos/{owner}/{repo}/issues/{n}/labels]
   webhooks: [push, repository, "signature X-Gitea-Signature = hex HMAC-SHA256(body), no prefix; also X-Hub-Signature-256 = sha256=..."]
   auth: "Authorization: token <access token>"
-  unverified: "rate-limit response shape (undocumented; Retry-After and IETF RateLimit t= assumed); status code of a scheduled merge; labels by name on create; git basic-auth username; the fake is written from docs, not recorded"
-  checked: 2026-11-23
+  verified-live: "2026-11-27 Gitea 1.27.3 run for real (hosts-gitea.yml, docs/vendor/gitea/real-answers.md): scheduled merge 201/409, labels by name dropped with 200 [], any git basic-auth user, no rate limit, repository webhook created only"
+  unverified: "Gitea before 1.27; what a throttling proxy's 429 carries; repository deleted and renamed webhook actions; archive"
+  checked: 2026-11-27
 - name: forgejo
   kind: http-api
   url: https://forgejo.org/docs/latest/user/api-usage/
@@ -152,8 +153,9 @@ ripple is bound to two external contracts. The block below is the source of trut
   vendored: docs/vendor/forgejo/
   used: [same endpoints as gitea; merge body key is "Do" (capital D); flavour detected by "+gitea-" in the version string, Forgejo 7 and later]
   webhooks: [push, repository, "signature X-Forgejo-Signature = hex HMAC-SHA256(body); X-Gitea-* and X-Hub-Signature-256 also accepted"]
-  unverified: "whether Forgejo sends X-Hub-Signature-256 (documented sample shows only X-Forgejo-Signature); Forgejo before 7 detection; rate-limit shape; the fake is written from docs, not recorded"
-  checked: 2026-11-23
+  verified-live: "2026-11-27 Forgejo 17.0.2+gitea-1.22.0 and 7.0.16+gitea-1.21.11 run for real: both send X-Hub-Signature-256, both detected as Forgejo, same answers as Gitea"
+  unverified: "Forgejo before 7 (undetectable); what a throttling proxy's 429 carries; repository deleted and renamed webhook actions; archive"
+  checked: 2026-11-27
 - name: gitlab-rest-api
   kind: http-api
   url: https://docs.gitlab.com/api/rest/

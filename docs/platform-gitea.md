@@ -42,18 +42,45 @@ touched, and never on doubt: if any read fails it is left open and the error is 
   commit's author or committer is not ripple's commit identity;
 - a review or an issue comment;
 - a timeline entry other than ripple's own (a label, a scheduled or cancelled auto-merge). That is how a rename
-  (`change_title`) and a push to the branch after it opened (`pull_push`, a force-push included) show up;
+  (`change_title`) shows up. A push after the pull request opened shows up as a second `pull_push`: opening the
+  pull request already writes the first one, so exactly one is ripple's own and more than one is a touch (a
+  force-push counts, it adds one too);
 - on Gitea, a `content_version` other than 0, which an edited description raises.
 
 Not detected: on Forgejo, an edited description (its pull request has no `content_version`); a label added by a person
 (the timeline's `label` entries are taken as ripple's own); an assignee or milestone change is read as a touch. The
 timeline's type names are from Gitea's source, not its API document, so a wrong name makes ripple close less, never
-more. All of this is verified only against the fake; the excerpts it relies on are in
+more. Run for real on Gitea 1.27.3, Forgejo 17.0.2 and Forgejo 7.0.16 (`TestRealCloseUntouchedPR`,
+`TestRealPullPushTimeline`): an untouched pull request is closed, and the timeline is one `pull_push` when opened,
+two after a second commit, three after a force-push. A label or comment added by a person, a rename and an edited
+description on a real instance are still verified only against the fake. The excerpts it relies on are in
 `docs/vendor/gitea/supersede-excerpts.md` and `docs/vendor/forgejo/supersede-excerpts.md`.
 
 ## Unverified
 
-No real Gitea or Forgejo instance has been tested; the fake in `internal/testutil/gitea.go` is written
-from the docs. Unconfirmed: the rate-limit response shape (undocumented by both), the status code of a
-scheduled merge, whether Forgejo also sends `X-Hub-Signature-256`, label creation by name, the git
-basic-auth username, detection of Forgejo before 7, and `repository` webhook events.
+## Real instances
+
+`.github/workflows/hosts-gitea.yml` runs the whole conformance suite (`platformtest.Run`, including push to exactly one
+pull request, supersede and the injected 429) and the `TestReal*` tests against Gitea 1.27.3, Forgejo 17.0.2 and
+Forgejo 7.0.16, as containers with SQLite and no secrets, on every pull request touching the host, weekly and on
+demand. The recorded answers are in `docs/vendor/gitea/real-answers.md`; the tests assert them. What reality changed:
+
+- A repository reports `empty=true` for up to about 2 s after its first push, and discovery skips an empty
+  repository. A repository whose first push races a discovery is not registered until a later discovery, and nothing
+  re-runs discovery for it (ROADMAP 280).
+- A fresh pull request already has one `pull_push` (see above); the first version closed nothing.
+- A label name the repository lacks is dropped with `200 []`; the client now logs "labels not applied" naming them.
+- No instance rate-limits by default, so the 429 path is exercised through the fixture's proxy only; what a
+  throttling reverse proxy in front of a real instance sends is not recorded.
+- The git basic-auth user is irrelevant (any is accepted); the token is what authenticates.
+- Both Forgejo releases send `X-Hub-Signature-256` as well as `X-Forgejo-Signature`.
+- A system webhook announces a created repository but never a deleted one, so the receiver's removal path is proven
+  against the fake only; a deleted repository is noticed by discovery.
+- Forgejo 7.0.16 is detected as Forgejo (`+gitea-1.21.11`). Forgejo before 7 was not run and is still undetectable.
+
+## Unverified
+
+Not run for real: Forgejo before 7, Gitea before 1.27, the Gitea SSH and PostgreSQL/MySQL configurations, a person's
+label or comment on a pull request counted as a touch, `merge_when_checks_succeed` actually merging once checks pass
+(only the scheduling was recorded), the 429 headers a real proxy would send, the `repository` webhook's `deleted`
+and `renamed` actions, and archive (`archived` in `/user/repos` was not flipped on a real instance).

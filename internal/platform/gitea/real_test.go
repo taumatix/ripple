@@ -158,6 +158,11 @@ func TestRealRateLimit(t *testing.T) {
 		}
 	}
 	t.Logf("FACT burst of 600 authenticated reads: statuses %v, rate-limit headers on the last answer %v", statuses, rl)
+	// Gitea 1.27.3, Forgejo 17.0.2 and 7.0.16 never throttle: no 429 and no rate-limit header, which
+	// is why the conformance fixture injects its own 429 (docs/platform-gitea.md).
+	if statuses[200] != 600 || len(rl) != 0 {
+		t.Errorf("the instance now rate-limits (statuses %v, headers %v); the fixture's injected 429 is no longer the only source", statuses, rl)
+	}
 }
 
 // TestRealScheduledMerge: the status of "merge when checks succeed", the body key case on each
@@ -187,6 +192,11 @@ func TestRealScheduledMerge(t *testing.T) {
 			map[string]any{key: "squash", "merge_when_checks_succeed": true}, nil)
 		t.Logf("FACT merge key=%q: status %d body %q; pr state=%s merged=%v; timeline %v; second request %d %q",
 			key, st, strings.TrimSpace(string(body)), pr.State, pr.Merged, types, st2, strings.TrimSpace(string(body2)))
+		// Literal answers of Gitea 1.27.3, Forgejo 17.0.2 and 7.0.16, either key case.
+		if st != http.StatusCreated || pr.State != "open" || pr.Merged || strings.Join(types, ",") != "pull_push,pull_scheduled_merge" ||
+			st2 != http.StatusConflict || !strings.Contains(string(body2), "already scheduled to auto merge") {
+			t.Errorf("scheduled merge with key %q: first %d, state %s merged %v, timeline %v, second %d %q", key, st, pr.State, pr.Merged, types, st2, body2)
+		}
 	}
 }
 
@@ -199,9 +209,15 @@ func TestRealLabelByName(t *testing.T) {
 	n := f.branchPR(t, "facts", "ripple/go/label")
 	st, _, body := in.call(t, token(f.tok), http.MethodPost, fmt.Sprintf("/repos/%s/issues/%d/labels", path, n), map[string]any{"labels": []string{"dependencies"}}, nil)
 	t.Logf("FACT label by name, label absent: %d %q", st, strings.TrimSpace(string(body)))
+	if st != http.StatusOK || strings.TrimSpace(string(body)) != "[]" {
+		t.Errorf("an absent label by name: %d %q, want 200 []", st, body)
+	}
 	in.must(t, token(f.tok), http.MethodPost, "/repos/"+path+"/labels", map[string]any{"name": "dependencies", "color": "#0075ca"}, nil)
 	st, _, body = in.call(t, token(f.tok), http.MethodPost, fmt.Sprintf("/repos/%s/issues/%d/labels", path, n), map[string]any{"labels": []string{"dependencies"}}, nil)
 	t.Logf("FACT label by name, label exists: %d %q", st, strings.TrimSpace(string(body)))
+	if st != http.StatusOK || !strings.Contains(string(body), `"name":"dependencies"`) {
+		t.Errorf("an existing label by name: %d %q, want 200 listing it", st, body)
+	}
 }
 
 // TestRealGitBasicAuthUser: which basic-auth user names git accepts with the token as the
@@ -209,11 +225,21 @@ func TestRealLabelByName(t *testing.T) {
 func TestRealGitBasicAuthUser(t *testing.T) {
 	in := realInstance(t)
 	f := scene(t, in)
+	// The repository is private, so "accepted" proves the token authenticated. Any user name works
+	// (Gitea 1.27.3, Forgejo 17.0.2 and 7.0.16), which is what Client's "ripple" relies on.
 	for _, u := range []string{"ripple", "oauth2", "x-access-token", "", f.user} {
-		t.Logf("FACT git ls-remote as user %q with the token as password: %s", u, lsRemote(in, f, url.UserPassword(u, f.tok)))
+		got := lsRemote(in, f, url.UserPassword(u, f.tok))
+		t.Logf("FACT git ls-remote as user %q with the token as password: %s", u, got)
+		if !strings.HasPrefix(got, "accepted") {
+			t.Errorf("user %q with the token: %s", u, got)
+		}
 	}
 	t.Logf("FACT git ls-remote with the token as the user and no password: %s", lsRemote(in, f, url.UserPassword(f.tok, "")))
-	t.Logf("FACT git ls-remote with a wrong token: %s", lsRemote(in, f, url.UserPassword("ripple", "nottoken")))
+	wrong := lsRemote(in, f, url.UserPassword("ripple", "nottoken"))
+	t.Logf("FACT git ls-remote with a wrong token: %s", wrong)
+	if !strings.HasPrefix(wrong, "refused") {
+		t.Errorf("a wrong token was accepted: %s", wrong)
+	}
 }
 
 func lsRemote(in *instance, f *realFixture, u *url.Userinfo) string {
@@ -280,6 +306,11 @@ func TestRealRepositoryWebhook(t *testing.T) {
 			seen = append(seen, d.event())
 		}
 		t.Logf("FACT no repository webhook within 15s of deleting the repository; deliveries: %v", seen)
+	}
+	// Gitea 1.27.3, Forgejo 17.0.2 and 7.0.16 announce a created repository and never a deleted one,
+	// so Discover (not the webhook) is what notices a deletion.
+	if action != "created" && found {
+		t.Errorf("a delete is now announced (action %q): the Receiver's repos_removed path can be proven for real", action)
 	}
 	for _, e := range sink.events() {
 		t.Logf("FACT receiver event kind=%v repos=%v", e.Kind, e.Repos)

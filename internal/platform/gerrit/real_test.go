@@ -263,7 +263,7 @@ func (f *realGerrit) AddRepo(t *testing.T, path string, files map[string]string)
 	f.proxy.mu.Lock()
 	f.proxy.n[path] = 0
 	f.proxy.mu.Unlock()
-	f.api.must("PUT", "projects/"+url.PathEscape(path), map[string]any{"description": "ripple CI"})
+	f.api.must("PUT", "projects/"+url.PathEscape(path), map[string]any{"description": "ripple CI", "branches": []string{"main"}, "create_empty_commit": true})
 	f.api.must("PUT", "projects/"+url.PathEscape(path)+"/HEAD", map[string]any{"ref": "refs/heads/main"})
 	f.pushFiles(t, path, files)
 }

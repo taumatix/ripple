@@ -3,7 +3,8 @@
 ripple works against gitlab.com and self-managed GitLab. It opens merge requests, can ask GitLab to merge
 them when the pipeline succeeds, and learns about pushes from a project or group webhook.
 
-**Status: written from GitLab's documentation, never run against a real GitLab.** See
+**Status: written from GitLab'"'"'s documentation and run against a real GitLab CE 19.6.2** (the `hosts-gitlab-gerrit`
+workflow: conformance suite plus `TestReal*`). See [Real instance](#real-instance) and
 [What is unverified](#what-is-unverified). The docs it follows are vendored in
 [docs/vendor/gitlab](vendor/gitlab) and pinned in [UPSTREAM.md](../UPSTREAM.md).
 
@@ -29,7 +30,9 @@ rejects a timestamp more than five minutes from now.
 Any of a personal, project or group access token works; ripple sends it as `Authorization: Bearer <token>`
 over the API and as the password (user `oauth2`) for git over HTTPS.
 Give it the `api` scope (merge requests, listing) and `write_repository` (push the branch); the role must be
-Developer or higher, and the target branch must allow that user's merge requests.
+**Maintainer**: on a real GitLab a Developer token opens the merge request but is answered `401 Unauthorized` when it
+asks for auto-merge on a protected default branch (the default for a new project), so the host would open MRs and
+never auto-merge them.
 
 Project and group tokens reach only their project or group, which is what `RIPPLE_GITLAB_TOKENS` is for: one
 token per group, or per project where a group token is not allowed. Each token is its own bot user and has its
@@ -98,24 +101,35 @@ round. The branch reads are not counted as scan cost by the conformance suite. T
 deliberately not used as a stand-in: it moves on issues, comments and merge requests, including ripple's own, which
 would re-scan every project it touched. Verified against the fake only.
 
+## Real instance
+
+`.github/workflows/hosts-gitlab-gerrit.yml` starts `gitlab/gitlab-ce:latest` (host network, the documented low-memory
+configuration: `puma['worker_processes']=0`, `sidekiq['concurrency']=10`, monitoring and usage ping off), waits on
+`/-/readiness` and `/users/sign_in`, creates a root token with `gitlab-rails runner`, and runs
+`go test -tags gitlab ./internal/platform/gitlab` (`real_test.go`). Webhooks come from real project hooks through a relay
+that records each delivery and forwards it to ripple's receiver. Recorded on GitLab 19.6.2 (2026-11-27):
+
+- `Authorization: Bearer` is accepted for personal, project and group access tokens, over the API and, as
+  `oauth2:<token>`, for git over HTTPS. A project token lists exactly its project.
+- A Push Hook carries `X-Gitlab-Token`, `X-Gitlab-Event: Push Hook`, `X-Gitlab-Event-Uuid`, `Idempotency-Key` and the
+  Standard Webhooks `Webhook-Id` and `Webhook-Timestamp`; a trimmed delivery is a receiver test.
+- A 429 (`throttle_authenticated_api`) is `text/plain` "Retry later" with `Retry-After` in seconds and `RateLimit-*`
+  headers; ripple's hold-back follows `Retry-After`. The instance caches throttle settings for about a minute.
+- A branch pushed a moment ago is invisible to merge-request creation for 1 to 2 s (`400 {"source_branch":["does not
+  exist"]}`); `CreatePR` asks again, a bounded number of times.
+- `Draft: ` in the title makes a draft (`draft: true`); labels containing no comma are created and applied.
+- `auto_merge` on a project with no pipelines is accepted and sets the MR's merge-when-pipeline-succeeds state; with
+  "pipelines must succeed" and none present it is also accepted.
+- Archive and unarchive move a project between the `archived=false` and `archived=true` membership listings.
+- The membership listing shows a new project within 100 ms.
+
 ## What is unverified
 
-No GitLab instance was available when this was written. Everything below is from the vendored docs and is
-exercised only against the fake GitLab in `internal/testutil/gitlab.go`, which is itself written from those docs:
-
-- the exact response shapes of the merge request and project listing endpoints (only `iid`, `web_url`,
-  `source_branch` and `path_with_namespace` are read);
-- that `Authorization: Bearer` is accepted for project and group access tokens on every supported version
-  (the docs say so; an older instance may want `PRIVATE-TOKEN`);
-- `auto_merge` and the draft title prefix behaving as documented, and the error when a project forbids merging
-  when the pipeline succeeds;
-- the `Retry-After` handling of a real 429, and how often GitLab.com limits these calls;
-- the signature scheme: the test vector was computed with openssl from the documented algorithm, not taken from
-  a delivery GitLab made;
-- clone over HTTPS with `oauth2:<token>` for project and group tokens (the git transport is tested against local
-  repositories, not GitLab's).
-
-What the tests do cover end to end: the shared conformance suite (release fan-out, push re-scan, config,
-auto-merge, rate limit) through the real app against the fake, with every repo in a subgroup; wire formats with
-literals from the docs; per-scope tokens and rate limits; receiver authentication, including secret token,
-signature, stale timestamp and tampering.
+- the signing-token scheme (`whsec_`, Standard Webhooks): the headers are present, but the vector was computed with
+  openssl, and the CI webhooks use a secret token;
+- discovery by system hook (`project_create`, `project_destroy`), and a group-level webhook (Premium);
+- gitlab.com's throttle values and how often it limits these calls (the CI instance was throttled by hand);
+- auto-merge when a pipeline really runs and later fails or passes (the CI project has no runner);
+- older GitLab versions: only 19.6.2 ran;
+- the fake in `internal/testutil/gitlab.go` does not model roles (it accepts auto-merge from any token), the branch
+  visibility delay, or the `RateLimit-*` headers of the real 429.

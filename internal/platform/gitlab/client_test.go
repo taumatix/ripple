@@ -81,6 +81,61 @@ func TestCreatePRWireFormat(t *testing.T) {
 	}
 }
 
+// A real GitLab CE 18.x answers 400 {"message":{"source_branch":["does not exist"]}} for a branch
+// pushed 1-2 s earlier (recorded by the hosts-gitlab-gerrit workflow); CreatePR asks again, and a
+// branch that never shows up is still an error after the bounded retries.
+func TestCreatePRRetriesABranchNotYetVisible(t *testing.T) {
+	const lag = `{"message":{"source_branch":["does not exist"]}}`
+	for _, tc := range []struct {
+		name     string
+		failures int
+		wantErr  bool
+		calls    int
+	}{{"recovers", 2, false, 3}, {"never", 100, true, 6}} {
+		t.Run(tc.name, func(t *testing.T) {
+			var mu sync.Mutex
+			n := 0
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mu.Lock()
+				n++
+				fail := n <= tc.failures
+				mu.Unlock()
+				if fail {
+					w.WriteHeader(400)
+					_, _ = w.Write([]byte(lag))
+					return
+				}
+				w.WriteHeader(201)
+				_, _ = w.Write([]byte(`{"iid":3,"web_url":"https://gitlab.example/g/app/-/merge_requests/3"}`))
+			}))
+			defer srv.Close()
+			var slept []time.Duration
+			c := &gitlab.Client{BaseURL: srv.URL, Tokens: gitlab.Tokens{Default: "t"},
+				RetrySleep: func(_ context.Context, d time.Duration) error { slept = append(slept, d); return nil }}
+			pr, err := c.CreatePR(context.Background(), repo("g/app"), platform.PRSpec{Head: "ripple/x", Base: "main", Title: "t"})
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, tc.wantErr)
+			}
+			if !tc.wantErr && pr.Number != 3 {
+				t.Errorf("pr = %+v", pr)
+			}
+			if n != tc.calls {
+				t.Errorf("%d calls, want %d", n, tc.calls)
+			}
+			if len(slept) != tc.calls-1 {
+				t.Errorf("slept %v", slept)
+			}
+		})
+	}
+	// Another 400 is not retried.
+	srv, got := recorder(t, 400, `{"message":{"title":["can't be blank"]}}`, nil)
+	c := &gitlab.Client{BaseURL: srv.URL, Tokens: gitlab.Tokens{Default: "t"},
+		RetrySleep: func(context.Context, time.Duration) error { t.Error("slept"); return nil }}
+	if _, err := c.CreatePR(context.Background(), repo("g/app"), platform.PRSpec{Head: "h", Base: "main"}); err == nil || len(got()) != 1 {
+		t.Errorf("err = %v after %d calls", err, len(got()))
+	}
+}
+
 // api_merge_requests.md "Merge a merge request": PUT /projects/:id/merge_requests/:merge_request_iid/merge
 // with `auto_merge` (current) and `merge_when_pipeline_succeeds` (deprecated name).
 func TestRequestAutoMergeWireFormat(t *testing.T) {
@@ -281,5 +336,21 @@ func TestCredentialIsOAuth2UserAndToken(t *testing.T) {
 	got, err := tk.Credential(context.Background(), repo("g/sub/app"))
 	if err != nil || got.Username != "oauth2" || got.Secret != "glpat-s" {
 		t.Errorf("credential = %+v, err %v", got, err)
+	}
+}
+
+// The real 429 of GitLab CE 19.6.2 (throttle_authenticated_api, recorded 2026-11-27): text/plain
+// "Retry later", Retry-After in seconds, plus RateLimit-* headers. The hold-back follows Retry-After.
+func TestRealThrottle429(t *testing.T) {
+	srv, _ := recorder(t, 429, "Retry later", map[string]string{
+		"Content-Type": "text/plain", "Ratelimit-Limit": "30", "Ratelimit-Name": "throttle_authenticated_api",
+		"Ratelimit-Observed": "6", "Ratelimit-Remaining": "0", "Ratelimit-Reset": "1795790380",
+		"Ratelimit-Resettime": "Fri, 27 Nov 2026 14:39:40 GMT", "Retry-After": "2"})
+	now := time.Unix(1795790378, 0)
+	c := &gitlab.Client{BaseURL: srv.URL, Tokens: gitlab.Tokens{Default: "t"}, Now: func() time.Time { return now }}
+	_, err := c.ListRepos(context.Background())
+	var rl *platform.RateLimitError
+	if !errors.As(err, &rl) || !rl.Until.Equal(now.Add(2*time.Second)) {
+		t.Fatalf("err = %v", err)
 	}
 }

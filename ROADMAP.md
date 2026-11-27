@@ -9,13 +9,10 @@ exactly the importing repos, and zero API calls for the rest). Every platform en
 fetching and vendoring that platform's own documentation (webhook events and signatures, PR API,
 auth model, rate limits); the notes below are what I expect, **unverified** until then.
 
-11. **GitLab, verified against a real instance.** The host is written from the vendored docs and has never
-   run against gitlab.com or a self-managed instance ([docs/platform-gitlab.md](docs/platform-gitlab.md) lists
-   what is unverified). Run a pass against a real project with a project token and with a group token, record
-   one real push webhook, one 429 and one auto-merge answer, and replace the fake's guesses.
-   Residuals: discover repos by system-hook `project_create`/`project_destroy` instead of the periodic
-   membership listing (needs admin and is not in the vendored docs); rate-limit headers other than
-   `Retry-After`/`RateLimit-Reset`; `merge_request` events to close ripple MRs; GitLab labels with commas.
+11. ~~**GitLab, verified against a real instance.**~~ Shipped: `hosts-gitlab-gerrit.yml` runs the conformance suite and
+   `TestReal*` against GitLab CE 19.6.2 ([docs/platform-gitlab.md](docs/platform-gitlab.md) "Real instance"). Left:
+   ROADMAP 292 to 294; discover repos by system-hook `project_create`/`project_destroy` instead of the periodic
+   membership listing (needs admin); `merge_request` events to close ripple MRs; GitLab labels with commas.
 12. ~~**Gitea/Forgejo against real instances.**~~ Shipped: `hosts-gitea.yml` runs the conformance suite and `TestReal*`
     against Gitea 1.27.3, Forgejo 17.0.2 and Forgejo 7.0.16 ([docs/platform-gitea.md](docs/platform-gitea.md) "Real
     instances", recorded answers in `docs/vendor/gitea/real-answers.md`). Left: Forgejo before 7 still cannot be
@@ -56,6 +53,13 @@ auth model, rate limits); the notes below are what I expect, **unverified** unti
 291. **Gerrit: default author email.** The default `ripple@users.noreply.invalid` cannot be registered on a real Gerrit
     (`.invalid` is refused) and needs Forge Author; `RIPPLE_GERRIT_AUTHOR_EMAIL` is the way out. Decide whether the
     default should change (additive only: a breaking default needs a deprecation) or startup should warn.
+292. **GitLab: auto-merge with a real pipeline.** The CI project has no runner, so merge-when-pipeline-succeeds was only
+    asked for, never seen to merge. Add a runner container and a `.gitlab-ci.yml` that passes and one that fails, and
+    check the merge happens, and the abort note ("aborted the automatic merge") for the failure.
+293. **GitLab: roles in the fake.** The fake accepts auto-merge from any token; a real Developer is refused with 401 on a
+    protected default branch. Model roles and the branch visibility delay so the unit tests can reach those paths.
+294. **GitLab: signing token and a group webhook.** The CI hooks use a secret token; run a webhook with a signing token
+    (`whsec_`) and, where a licence allows, a group hook, and record the deliveries.
 18. **SCM-Manager against a real instance.** The host shipped from vendored docs, the plugins' source and a
     fake only (see [docs/platform-scmmanager.md](docs/platform-scmmanager.md)). Verify on a real SCM-Manager 3.x
     with the Review and Webhook plugins: `Authorization: Bearer <api key>` on the REST API, git basic auth with

@@ -147,7 +147,7 @@ jobs:
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_wrapper: false
-      - run: scripts/realtool.sh TestRealtoolTerraform
+      - run: scripts/realtool.sh TestRealtoolTerraform TestRealtoolTerraformConstraintMeaning
   github-actions:
     runs-on: ubuntu-latest
     timeout-minutes: 30

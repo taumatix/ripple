@@ -32,7 +32,10 @@ release whose X.Y is the one declared (1.2.9 for `~> 1.2`) is not proposed, beca
 
 Skipped: a floor, range or other operator (`>= 1.0`, `> 1.0`, `< 2.0`, `!= 1.0.0`, `>= 1.0.0, < 2.0.0`: the page's best
 practices have a reusable module constrain "only [its] minimum allowed versions", so a floor says what the module needs,
-not which release to use, and raising it would change what it supports; ROADMAP 250), a two-segment version after no
+not which release to use, and raising it would change what it supports; `TestRealtoolTerraformConstraintMeaning`
+checks in CI that real terraform locks the newest release under a floor whatever its value, so a floor edit installs
+nothing new, and that only a ceiling holds an install back, so widening one is a policy change, not an update; ROADMAP
+250), a two-segment version after no
 operator or `=`, an interpolated value, a module with no
 `version`, a provider with no `source` (the legacy `aws = "~> 4.0"` form), a source with a registry host, attributes
 declared twice, and anything in a `#`, `//` or `/* */` comment or in a heredoc.

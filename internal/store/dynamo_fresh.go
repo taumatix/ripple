@@ -41,7 +41,7 @@ func freshItem(base, repo, depSK string, at time.Time) freshAttrs {
 
 // freshDependents reads the rows registered under base inside the window.
 func (d *Dynamo) freshDependents(ctx context.Context, base string) ([]depAttrs, error) {
-	cutoff := ts(time.Now().Add(-freshDepWindow))
+	cutoff := ts(d.now().Add(-freshDepWindow))
 	var keys, stale []map[string]types.AttributeValue
 	err := d.query(ctx, &dynamodb.QueryInput{
 		ConsistentRead:            aws.Bool(true),

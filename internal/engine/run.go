@@ -571,6 +571,20 @@ func (r *runner) execute(plans []*prPlan, deps []model.Dependency) {
 	}
 }
 
+// openPRForHead is the open ripple PR whose head is branch, read fresh from the host.
+func (r *runner) openPRForHead(branch string) (platform.PR, bool) {
+	open, err := r.e.Platform.ListOpenPRs(r.ctx, r.repo, BranchPrefix)
+	if err != nil {
+		return platform.PR{}, false
+	}
+	for _, pr := range open {
+		if pr.Head == branch {
+			return pr, true
+		}
+	}
+	return platform.PR{}, false
+}
+
 // openPR applies a plan in a clean checkout, pushes its branch and opens the PR.
 // It returns nil, nil when every job turned out to be a no-op.
 func (r *runner) openPR(p *prPlan) (*platform.PR, error) {
@@ -718,7 +732,23 @@ func (r *runner) openPR(p *prPlan) (*platform.PR, error) {
 	}
 	pr, err := e.Platform.CreatePR(r.ctx, r.repo, platform.PRSpec{Head: p.branch, Base: r.ws.DefaultBranch(), Title: title, Body: body, Draft: draft, Labels: labelsFor(applied)})
 	if err != nil {
-		return nil, err
+		// A replica that took the repo over early (a clock beyond the lease skew, a long stall)
+		// can open this branch's PR between this run's listing of open PRs and now; hosts
+		// refuse a second PR for one head, so the PR to use is the one that already exists.
+		// Any other failure stays a failure.
+		var rl *platform.RateLimitError
+		if errors.As(err, &rl) {
+			return nil, err
+		}
+		existing, ok := r.openPRForHead(p.branch)
+		if !ok {
+			return nil, err
+		}
+		e.log().Info("pull request was opened by another replica meanwhile; using it", "repo", r.repo.FullName, "pr", existing.URL, "create_err", err)
+		for _, it := range applied {
+			r.finish(it.job, model.JobDone, "pull request already open", existing.URL)
+		}
+		return nil, nil
 	}
 	auto := !draft
 	for _, it := range applied {

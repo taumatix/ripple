@@ -147,9 +147,23 @@ Everything else:
     message), so a message edit there is invisible to the comparison; a second read of the change's messages would
     close it. A label, assignee or reviewer change on GitLab and Gerrit stays outside it. The comparison guards
     the closer only: ripple never force-pushes an open PR's branch today, so there is no second site to guard.
-101. **Replicas: soak against real databases.** The shared suite races goroutines on one store handle and the
-    e2e runs two replicas; neither is a real multi-node Postgres or DynamoDB under load, or with a skewed clock.
-    Run three replicas against both with a clock offset and check one PR per job and ordered events.
+330. **Replicas: a soak across real processes and a real AWS table.** The soak (`soak.yml`) runs three replicas as
+    goroutines in one test process, each with its own store handle and clock, on Postgres 17 and DynamoDB Local;
+    clocks agree or differ by seconds and the outcome is one PR per repo. What is still not exercised: separate OS
+    processes (one `ripple` binary per replica against one fake GitHub, killed with SIGKILL mid-job), a network
+    partition between a replica and the store, and a real AWS DynamoDB table (out of scope without an account).
+331. **Replicas on DynamoDB: skew beyond the margin costs takeovers.** With handles 3 and 6 seconds apart (margin
+    250ms) the soak sees roughly one early lease takeover per repo and, since the adoption of an existing PR on a
+    refused CreatePR, one PR; the cost is repeated
+    platform calls, not a wrong outcome. A heartbeat-based check could log when `replicas_live` shows
+    two replicas whose `Seen` times disagree by more than the margin, so an operator learns of the skew before
+    it costs calls. Not built.
+332. **Duplicate-PR refusal per host.** The adoption of a PR a refused `CreatePR` finds open on the branch relies on
+    the host refusing a second open PR for one head and base. SCM-Manager does (409, real instance); the GitHub
+    answer (422 `A pull request already exists`) is assumed, unverified, and the fake copies it; GitLab, Gitea and
+    Forgejo, Gerrit (a change per Change-Id), Bitbucket, Azure DevOps and CodeCommit are unread. Read each from a real
+    instance (the `hosts-*` jobs) and record it. A host that accepts duplicates leaves the early-takeover window open:
+    then two PRs for one branch are possible after a clock beyond the skew or a stall past the lease.
 113. **DynamoDB: throttling and index lag against a real table.** `ThrottleNext` and `HoldIndex` model the errors and
     the stale reads, not their timing or frequency. DynamoDB Local and the AWS Emulator (verified 2026-11-24, see
     [docs/aws-emulator.md](docs/aws-emulator.md)) both pass the whole store suite but neither throttles nor lags

@@ -33,7 +33,7 @@ type replicaAttrs struct {
 
 // Heartbeat is store.ReplicaTable.
 func (d *Dynamo) Heartbeat(ctx context.Context, r ReplicaInfo, ttl time.Duration) error {
-	now := time.Now()
+	now := d.now()
 	return wrapD("heartbeat", d.put(ctx, replicaAttrs{
 		item:      item{PK: replicasPK, SK: "R#" + r.ID},
 		Takeovers: r.Takeovers, FeedPoller: r.FeedPoller, Polled: r.Polled, Configured: r.Configured, Seen: ts(now), Expires: ts(now.Add(ttl)),
@@ -42,7 +42,7 @@ func (d *Dynamo) Heartbeat(ctx context.Context, r ReplicaInfo, ttl time.Duration
 
 // LiveReplicas is store.ReplicaTable.
 func (d *Dynamo) LiveReplicas(ctx context.Context) ([]ReplicaInfo, error) {
-	now := time.Now()
+	now := d.now()
 	var out []ReplicaInfo
 	var stale []string
 	err := d.query(ctx, &dynamodb.QueryInput{

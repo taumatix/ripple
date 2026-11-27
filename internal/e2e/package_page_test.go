@@ -75,7 +75,12 @@ func TestPackagePollReadsOnlyItsSliceThroughThePagedListing(t *testing.T) {
 		// state is shared, so each form must resume exactly where the other stopped.
 		var order []string
 		for i, s := range []store.Store{paging, calls, paging, paging, calls, paging} {
+			// Swap the store only while the app is stopped: the app's own goroutines read
+			// Engine.Store (a write under them is a data race), and stopApp waits for them.
+			e.stopApp()
 			e.app.Engine.Store = s
+			e.startApp()
+			seen = len(reg.Requests())
 			calls.whole, calls.paged = 0, 0
 			e.tick()
 			_, isPaging := s.(pagingCalls)

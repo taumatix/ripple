@@ -64,10 +64,21 @@ func TestAppleContainerReapAfterClientKilled(t *testing.T) {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
 		b.(Reaper).Reap(w)
-		time.Sleep(2 * time.Second) // let the service settle before looking
-		out, _ := exec.Command(bin, "ls", "-a").CombinedOutput()
-		if strings.Contains(string(out), name) {
-			t.Errorf("run %d: Reap left %s behind:\n%s", i, name, out)
+		// The service removes a container asynchronously and slows down when other containers
+		// share the host (the machine's other sessions, parallel packages' tests), so a fixed
+		// two-second look failed there. Poll for a bound, as the shared check does; only this
+		// run's own container counts, matched by name at the start of a line.
+		start := time.Now()
+		var out []byte
+		for {
+			out, _ = exec.Command(bin, listAll(FlavourApple)...).CombinedOutput()
+			if !listsContainer(out, name) || time.Since(start) > reapSettle {
+				break
+			}
+			time.Sleep(250 * time.Millisecond)
+		}
+		if listsContainer(out, name) {
+			t.Errorf("run %d: Reap left %s behind after %s:\n%s", i, name, reapSettle, out)
 		}
 	}
 }

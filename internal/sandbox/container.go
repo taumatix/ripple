@@ -195,12 +195,33 @@ func (c container) Reap(argv []string) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	_ = exec.CommandContext(ctx, c.bin, "kill", name).Run()
-	// --rm is carried out by the client, which a timeout has just killed, so every
-	// flavour needs the explicit remove: with Apple's CLI about half of the containers
-	// killed this way stayed behind "stopped" (TestAppleContainerReapAfterClientKilled).
-	_ = exec.CommandContext(ctx, c.bin, "rm", "-f", name).Run()
+	for attempt := 0; ; attempt++ {
+		killed := exec.CommandContext(ctx, c.bin, "kill", name).Run() == nil
+		// --rm is carried out by the client, which a timeout has just killed, so every
+		// flavour needs the explicit remove: with Apple's CLI about half of the containers
+		// killed this way stayed behind "stopped" (TestAppleContainerReapAfterClientKilled).
+		removed := exec.CommandContext(ctx, c.bin, "rm", "-f", name).Run() == nil
+		if killed || removed || attempt == reapLateAttempts {
+			return
+		}
+		// Neither call found the container: it is already gone, or the runtime has not created it
+		// yet because the timeout killed the client first (the request was sent, the daemon is
+		// still starting the container). Look again for a bounded time, so a container that
+		// appears late is not left running for the rest of its sleep (ROADMAP 270).
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(reapLateDelay):
+		}
+	}
 }
+
+// reapLateAttempts and reapLateDelay bound the second look Reap takes for a container its
+// first kill and remove could not find: reapLateAttempts more tries, reapLateDelay apart.
+var (
+	reapLateAttempts = 4
+	reapLateDelay    = 500 * time.Millisecond
+)
 
 // mountSet drops duplicates and any path inside another, keeping a stable order.
 func mountSet(paths []string) []string {

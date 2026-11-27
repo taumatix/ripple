@@ -344,6 +344,7 @@ func (a *App) Run(ctx context.Context, ln net.Listener) error {
 // Tick runs one feed poll and one pass over due jobs; exported for tests and for
 // operators who drive it from cron.
 func (a *App) Tick(ctx context.Context) {
+	a.init()
 	a.Discover(ctx)
 	if n, err := a.Watcher.Poll(ctx); err != nil {
 		a.Log.Error("feed poll", "err", err)
@@ -942,6 +943,7 @@ func (a *App) claimDelivery(ctx context.Context, key string) (fresh bool, releas
 // nil Now, so calling it first orders this read after that write even when a delivery arrives
 // while Queue.Run is still starting.
 func (a *App) nowTime() time.Time {
+	a.init() // App.init writes the queue's fields under the Once; read them only after it
 	a.Queue.init()
 	if a.Queue.Now != nil {
 		return a.Queue.Now()

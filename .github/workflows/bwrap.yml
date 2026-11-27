@@ -10,12 +10,13 @@ permissions:
   contents: read
 jobs:
   bwrap:
+    # 22.04 carries bubblewrap 0.6.x, the oldest the matrix covers (no AppArmor restriction there);
     # 24.04 is where AppArmor first restricted unprivileged user namespaces; latest is what the
     # runner image currently is (26.04 on 2026-11-26). The probe step records what each needs.
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, ubuntu-latest]
+        os: [ubuntu-22.04, ubuntu-24.04, ubuntu-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     env:
@@ -28,8 +29,9 @@ jobs:
       - name: install bubblewrap
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y bubblewrap
+          sudo apt-get install -y bubblewrap gcc libc6-dev
           bwrap --version
+          gcc --version | head -1
           cat /etc/os-release | head -3
           sysctl kernel.unprivileged_userns_clone kernel.apparmor_restrict_unprivileged_userns || true
       - name: probe, unprivileged user namespaces as the runner leaves them
@@ -50,6 +52,6 @@ jobs:
       - name: no skipped test, and the bwrap tests ran
         run: |
           if grep -E -- '--- SKIP' bwrap.log; then echo "tests were skipped"; exit 1; fi
-          for t in TestBwrapLiveFilesystem TestBwrapLiveReachesOnlyTheGate TestDependencyUpdateUnderBwrap; do
+          for t in TestBwrapLiveFilesystem TestBwrapLiveReachesOnlyTheGate TestBwrapLiveRelayCarriesLargeTransfersUnchanged TestDependencyUpdateUnderBwrap TestCgoBuildUnderBwrap; do
             grep -q -- "--- PASS: $t " bwrap.log || { echo "$t did not run"; exit 1; }
           done

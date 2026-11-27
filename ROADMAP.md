@@ -2,7 +2,6 @@
 
 Ordered by how much each entry limits real deployments. The top is next.
 
-1. **Sandbox coverage beyond one Ubuntu image.** bwrap is verified on the hosted Ubuntu runners only (`docs/sandbox.md`, "What is verified"). Cover a bwrap older than 0.9 and a cgo build under bwrap, and decide whether the in-sandbox relay needs a per-connection byte limit.
 
 Platforms (code hosts). The goal is the whole list Renovate supports, each behind the one `Platform`
 interface, each with the same end-to-end test (a push or release event leads to exactly one PR in

@@ -62,6 +62,19 @@ type Gitea struct {
 	// events are timeline entries beyond the ones derived from a PR's fields, by "repo#n".
 	events   map[string][]string
 	requests []string
+	// known is the labels each repository has, "repo\x00name" (AddLabel).
+	known map[string]bool
+}
+
+// AddLabel gives the repository a label of that name; labelling a pull request by a name
+// the repository lacks applies nothing, as on a real instance.
+func (g *Gitea) AddLabel(repo, name string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.known == nil {
+		g.known = map[string]bool{}
+	}
+	g.known[repo+"\x00"+name] = true
 }
 
 func NewGitea(t *testing.T, forgejo bool) *Gitea {
@@ -413,8 +426,17 @@ func (g *Gitea) labels(w http.ResponseWriter, r *http.Request, repo, num string)
 	defer g.mu.Unlock()
 	for _, p := range g.prs[repo] {
 		if p.Number == n {
-			p.Labels = append(p.Labels, in.Labels...)
-			_ = json.NewEncoder(w).Encode([]any{})
+			// A name the repository has no label for is dropped, and the answer lists
+			// only the labels now on the issue: 200 with `[]` when none matched (Gitea
+			// 1.27.3 and Forgejo 17.0.2, hosts-gitea.yml TestRealLabelByName).
+			applied := []map[string]any{}
+			for _, name := range in.Labels {
+				if g.known[repo+"\x00"+name] {
+					p.Labels = append(p.Labels, name)
+					applied = append(applied, map[string]any{"name": name})
+				}
+			}
+			_ = json.NewEncoder(w).Encode(applied)
 			return
 		}
 	}
@@ -572,7 +594,10 @@ func (g *Gitea) timeline(w http.ResponseWriter, r *http.Request, repo, num strin
 		g.fail(w, http.StatusNotFound, "no issue %s", num)
 		return
 	}
-	var types []string
+	// Opening a pull request records the push that created its head: the first entry of a
+	// fresh one on Gitea 1.27.3 and Forgejo 17.0.2 is a pull_push (hosts-gitea.yml,
+	// docs/platform-gitea.md "Real instances"). A person's later push adds another.
+	types := []string{"pull_push"}
 	for range p.Labels {
 		types = append(types, "label")
 	}

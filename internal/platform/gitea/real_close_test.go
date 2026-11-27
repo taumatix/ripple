@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/taumatix/ripple/internal/model"
 	"github.com/taumatix/ripple/internal/platform"
@@ -80,4 +81,52 @@ func snippet(b []byte, n int) string {
 		s = s[:n] + "..."
 	}
 	return s
+}
+
+func (f *realFixture) timelineTypes(t *testing.T, path string, n int) []string {
+	t.Helper()
+	var tl []struct {
+		Type string `json:"type"`
+	}
+	f.in.must(t, token(f.tok), http.MethodGet, fmt.Sprintf("/repos/%s/issues/%d/timeline?limit=50", path, n), nil, &tl)
+	var types []string
+	for _, e := range tl {
+		types = append(types, e.Type)
+	}
+	return types
+}
+
+// TestRealPullPushTimeline: which timeline entries a pull request carries when it opens, after
+// one more commit on its branch and after a force-push that keeps the commit's author. The
+// ownTimeline allow-list and the refusal to close a touched pull request depend on it.
+func TestRealPullPushTimeline(t *testing.T) {
+	in := realInstance(t)
+	f := scene(t, in)
+	path := f.Path("facts")
+	n := f.branchPR(t, "facts", "ripple/go/tl")
+	t.Logf("FACT timeline of a fresh pull request: %v", f.timelineTypes(t, path, n))
+	dir := f.dirs[path]
+	f.git(t, dir, "checkout", "-q", "ripple/go/tl")
+	writeFiles(t, dir, map[string]string{"more.txt": "more\n"})
+	f.git(t, dir, "add", "-A")
+	f.git(t, dir, "commit", "-q", "-m", "more")
+	f.git(t, dir, "push", "-q", in.url+"/"+path+".git", "ripple/go/tl")
+	t.Logf("FACT timeline after one more commit: %v", waitTimeline(t, f, path, n, 2))
+	f.git(t, dir, "commit", "-q", "--amend", "-m", "amended")
+	f.git(t, dir, "push", "-q", "--force", in.url+"/"+path+".git", "ripple/go/tl")
+	t.Logf("FACT timeline after a force-push: %v", waitTimeline(t, f, path, n, 3))
+}
+
+// waitTimeline polls (the entry is written after the push returns) until at least want entries exist.
+func waitTimeline(t *testing.T, f *realFixture, path string, n, want int) []string {
+	t.Helper()
+	var got []string
+	for i := 0; i < 50; i++ {
+		got = f.timelineTypes(t, path, n)
+		if len(got) >= want {
+			return got
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	return got
 }

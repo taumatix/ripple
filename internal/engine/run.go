@@ -786,6 +786,20 @@ func (r *runner) apply(it item) (bool, error) {
 				continue
 			}
 		}
+		if d.Datasource == model.DatasourceMaven {
+			why, err := r.mavenGuard(d, it.job.Version)
+			if err != nil {
+				return false, err
+			}
+			if why != "" {
+				why += r.mavenRetarget(it.job, d)
+				if r.skipReasons == nil {
+					r.skipReasons = map[string]string{}
+				}
+				r.skipReasons[it.job.Key] = why
+				continue
+			}
+		}
 		if d.Datasource == model.DatasourceNpm {
 			if why := r.npmGuard(d); why != "" {
 				if r.skipReasons == nil {

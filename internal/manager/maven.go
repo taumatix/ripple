@@ -24,11 +24,11 @@ import (
 //
 // Left alone: a range (`[1.0,2.0)`), a qualified version (`1.0.0-SNAPSHOT`, `1.0-beta`,
 // `1.0.0.RELEASE`), one with one or more than three numeric segments, a property that is not
-// defined once in the pom's own `<properties>` or is used for anything but the version of one
-// package, a dependency with no version (managed by a parent or a BOM), anything in an XML
+// defined once in the pom's own `<properties>` or is used for anything but a dependency's version, a dependency with no version (managed by a parent or a BOM), anything in an XML
 // comment, and every dependency of a pom that declares `<repositories>` or `<pluginRepositories>`
-// (the artifact may come from there, and ripple reads Maven Central only). Parents and BOMs are
-// not followed and Maven's own settings.xml mirrors are not read: see docs/maven.md.
+// (the artifact may come from there, and ripple reads Maven Central only). A property used by
+// several dependencies is one entry under the first of them, the rest listed in with (see MavenSharing);
+// the `<parent>` version is read as a dependency. A parent's properties and BOMs are not followed and Maven's own settings.xml mirrors are not read: see docs/maven.md.
 type Maven struct {
 	Dir string
 }
@@ -47,6 +47,9 @@ func ParseMavenSpec(s string) bool { return mavenSpecRE.MatchString(s) }
 type mavenEntry struct {
 	pkg, spec  string
 	start, end int
+	// with lists, sorted, the other artifacts whose `<version>` is the same `${property}` when
+	// this entry is that property's value: moving it moves them too (ROADMAP 248).
+	with []string
 }
 
 var (
@@ -58,6 +61,8 @@ var (
 	mavenArtRE     = regexp.MustCompile(`<artifactId>\s*([^<\s]*)\s*</artifactId>`)
 	mavenVerRE     = regexp.MustCompile(`<version>\s*([^<\s]*)\s*</version>`)
 	mavenPropUseRE = regexp.MustCompile(`^\$\{([^${}\s<>]+)\}$`)
+	mavenParentRE  = regexp.MustCompile(`(?s)<parent>(.*?)</parent>`)
+	mavenRelPathRE = regexp.MustCompile(`<relativePath>\s*[^<\s][^<]*</relativePath>`)
 )
 
 // blank replaces every match with spaces (newlines kept), so every offset survives.
@@ -83,6 +88,7 @@ func scanMaven(content string) []mavenEntry {
 	type propUse struct{ pkg, name string }
 	var out []mavenEntry
 	var uses []propUse
+	var lead = map[string]string{} // property name -> the first artifact that uses it, in source order
 	for _, m := range mavenDepRE.FindAllStringSubmatchIndex(masked, -1) {
 		body := masked[m[2]:m[3]]
 		g, a, v := mavenGroupRE.FindStringSubmatchIndex(body), mavenArtRE.FindStringSubmatchIndex(body), mavenVerRE.FindStringSubmatchIndex(body)
@@ -95,9 +101,26 @@ func scanMaven(content string) []mavenEntry {
 		}
 		if ParseMavenSpec(spec) {
 			start := m[2] + v[2]
-			out = append(out, mavenEntry{group + ":" + artifact, spec, start, start + len(spec)})
+			out = append(out, mavenEntry{group + ":" + artifact, spec, start, start + len(spec), nil})
 		} else if p := mavenPropUseRE.FindStringSubmatch(spec); p != nil {
 			uses = append(uses, propUse{group + ":" + artifact, p[1]})
+			if lead[p[1]] == "" {
+				lead[p[1]] = group + ":" + artifact
+			}
+		}
+	}
+	// The pom's own <parent>: an artifact on the repository like any other, whose version is the
+	// text that moves (ROADMAP 249). A parent given a <relativePath> is a file of this repository, not a
+	// release, and is left alone; an omitted one defaults to ../pom.xml, which Maven tries first.
+	if m := mavenParentRE.FindStringSubmatchIndex(masked); m != nil && !mavenRelPathRE.MatchString(masked[m[2]:m[3]]) {
+		body := masked[m[2]:m[3]]
+		g, a, v := mavenGroupRE.FindStringSubmatchIndex(body), mavenArtRE.FindStringSubmatchIndex(body), mavenVerRE.FindStringSubmatchIndex(body)
+		if g != nil && a != nil && v != nil {
+			group, artifact, spec := body[g[2]:g[3]], body[a[2]:a[3]], body[v[2]:v[3]]
+			if maven.ValidCoordinate(group, artifact) && ParseMavenSpec(spec) {
+				start := m[2] + v[2]
+				out = append(out, mavenEntry{group + ":" + artifact, spec, start, start + len(spec), nil})
+			}
 		}
 	}
 	if len(uses) > 0 {
@@ -116,12 +139,19 @@ func scanMaven(content string) []mavenEntry {
 		}
 		for name, ps := range pkgs {
 			p, ok := props[name]
-			if !ok || len(ps) != 1 || strings.Count(text, "${"+name+"}") != count[name] {
+			if !ok || strings.Count(text, "${"+name+"}") != count[name] {
 				continue
 			}
+			// One entry per property, under the artifact that uses it first: the other users are
+			// carried in with, so the engine can move the property only to a release they all have.
+			var others []string
 			for pkg := range ps {
-				out = append(out, mavenEntry{pkg, p.value, p.start, p.end})
+				if pkg != lead[name] {
+					others = append(others, pkg)
+				}
 			}
+			sort.Strings(others)
+			out = append(out, mavenEntry{lead[name], p.value, p.start, p.end, others})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].start < out[j].start })
@@ -227,6 +257,66 @@ func (m Maven) Extract(p string, content []byte) ([]model.Dependency, error) {
 		}
 	}
 	return out, nil
+}
+
+// MavenSharing lists, sorted and without pkg, the other artifacts that take their version from a
+// property Apply would move for pkg at version: the declarations of pkg at that version that are
+// a shared `${property}`. Empty when none is. The engine moves such a property only to a release
+// every one of them has (ROADMAP 248).
+func MavenSharing(content []byte, pkg, version string) []string {
+	set := map[string]bool{}
+	for _, e := range scanMaven(string(content)) {
+		if e.pkg == pkg && e.spec == version {
+			for _, o := range e.with {
+				set[o] = true
+			}
+		}
+	}
+	var out []string
+	for o := range set {
+		out = append(out, o)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// Skipped says, one line per property, which `${name}` dependency versions of the pom were left
+// unread and why (ROADMAP 248: a skipped property used to be invisible).
+func (Maven) Skipped(p string, content []byte) []string {
+	masked := blank(mavenMaskRE, string(content))
+	if mavenReposRE.MatchString(masked) {
+		return nil
+	}
+	props := scanMavenProperties(string(content))
+	text := blank(mavenCommentRE, string(content))
+	users := map[string][]string{}
+	var names []string
+	for _, m := range mavenDepRE.FindAllStringSubmatchIndex(masked, -1) {
+		body := masked[m[2]:m[3]]
+		g, a, v := mavenGroupRE.FindStringSubmatchIndex(body), mavenArtRE.FindStringSubmatchIndex(body), mavenVerRE.FindStringSubmatchIndex(body)
+		if g == nil || a == nil || v == nil {
+			continue
+		}
+		pm := mavenPropUseRE.FindStringSubmatch(body[v[2]:v[3]])
+		if pm == nil || !maven.ValidCoordinate(body[g[2]:g[3]], body[a[2]:a[3]]) {
+			continue
+		}
+		if users[pm[1]] == nil {
+			names = append(names, pm[1])
+		}
+		users[pm[1]] = append(users[pm[1]], body[g[2]:g[3]]+":"+body[a[2]:a[3]])
+	}
+	var out []string
+	for _, name := range names {
+		prop, ok := props[name]
+		switch {
+		case !ok:
+			out = append(out, fmt.Sprintf("%s: property ${%s} (used by %s) is not a plain X.Y[.Z] value declared once in <project><properties> (inherited from a parent, defined in a profile, qualified, or absent)", p, name, strings.Join(users[name], ", ")))
+		case strings.Count(text, "${"+name+"}") != len(users[name]):
+			out = append(out, fmt.Sprintf("%s: property ${%s} = %s is also used outside a dependency's <version>", p, name, prop.value))
+		}
+	}
+	return out
 }
 
 func (m Maven) Apply(content []byte, dep model.Dependency, newPackage, newVersion string) ([]byte, error) {

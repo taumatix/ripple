@@ -19,6 +19,12 @@ type Manager interface {
 	Apply(content []byte, dep model.Dependency, newPackage, newVersion string) ([]byte, error)
 }
 
+// Skipper is implemented by managers that can say what they saw in a file and left unread, so a
+// declaration that never produces a pull request is not invisible. One line per declaration.
+type Skipper interface {
+	Skipped(filePath string, content []byte) []string
+}
+
 // Build returns one manager per update entry of cfg, in file order.
 func Build(cfg *config.Repo) ([]Manager, error) {
 	var out []Manager

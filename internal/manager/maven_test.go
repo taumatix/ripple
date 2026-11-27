@@ -62,8 +62,9 @@ func TestMavenExtract(t *testing.T) {
 		}
 		got = append(got, d.Package+"@"+d.Version)
 	}
-	// org.junit:junit is the ${junit.version} property (read from <properties>); a.b:two is `1.2`.
-	want := "org.junit:junit@5.9.0 com.google.guava:guava@32.1.2 org.apache.commons:commons-lang3@3.12.0 a.b:two@1.2 a.b:spaced@2.0.0"
+	// The <parent> comes first (ROADMAP 249); org.junit:junit is the ${junit.version} property (read from
+	// <properties>); a.b:two is `1.2`.
+	want := "org.springframework.boot:spring-boot-starter-parent@3.1.0 org.junit:junit@5.9.0 com.google.guava:guava@32.1.2 org.apache.commons:commons-lang3@3.12.0 a.b:two@1.2 a.b:spaced@2.0.0"
 	if strings.Join(got, " ") != want {
 		t.Errorf("got %q, want %q", strings.Join(got, " "), want)
 	}
@@ -78,7 +79,7 @@ func TestMavenRepositoriesLeaveFileAlone(t *testing.T) {
 	}
 	// A repository under distributionManagement is where it publishes, not where it reads.
 	pom := strings.Replace(pomXML, "<properties>", "<distributionManagement><repository><id>x</id><url>u</url></repository></distributionManagement>\n  <properties>", 1)
-	if deps, _ := (Maven{}).Extract("pom.xml", []byte(pom)); len(deps) != 5 {
+	if deps, _ := (Maven{}).Extract("pom.xml", []byte(pom)); len(deps) != 6 {
 		t.Errorf("distributionManagement must not hide the file, got %v", deps)
 	}
 }

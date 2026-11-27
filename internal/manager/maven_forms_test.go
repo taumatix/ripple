@@ -113,8 +113,6 @@ func TestMavenPropertyAndLiteralOfOnePackageMoveTogether(t *testing.T) {
 func TestMavenPropertyLeftAlone(t *testing.T) {
 	use := dep("a.b", "c", "${v}")
 	for name, pom := range map[string]string{
-		"used by another package too":             pomWith("<properties><v>1.2.3</v></properties>\n", use+dep("a.b", "other", "${v}")),
-		"used by the same group's other artifact": pomWith("<properties><v>1.2.3</v></properties>\n", use+dep("a.b", "sibling", "${v}")),
 		"used by a plugin version": `<project><properties><v>1.2.3</v></properties>
 <build><plugins><plugin><groupId>p</groupId><artifactId>q</artifactId><version>${v}</version></plugin></plugins></build>
 <dependencies>` + use + `</dependencies></project>`,
@@ -166,15 +164,62 @@ func TestMavenPropertyWhitespaceAndMalformedXML(t *testing.T) {
 	}
 }
 
-func TestMavenApplyRefusesAChangedPropertyUse(t *testing.T) {
-	pom := pomWith("<properties><v>1.2.3</v></properties>\n", dep("a.b", "c", "${v}"))
-	if _, err := applyMaven(t, pom, "a.b:c", "1.2.3", "1.2.4"); err != nil {
-		t.Fatal(err)
+// A property several artifacts share is one entry, under the artifact that uses it first, and says who
+// else uses it (ROADMAP 248): the engine moves it only to a release all of them have.
+func TestMavenSharedPropertyIsOneEntryWithItsSharers(t *testing.T) {
+	props := "<properties><jackson.version>2.15.0</jackson.version></properties>\n"
+	pom := pomWith(props, dep("com.fasterxml.jackson.core", "jackson-databind", "${jackson.version}")+
+		dep("com.fasterxml.jackson.core", "jackson-core", "${jackson.version}")+
+		dep("a.b", "literal", "1.0.0"))
+	if got := extractMaven(t, pom); strings.Join(got, " ") != "com.fasterxml.jackson.core:jackson-databind@2.15.0 a.b:literal@1.0.0" {
+		t.Fatalf("got %v", got)
 	}
-	// A second package begins to use the property after the poll: the job is stale.
-	changed := strings.Replace(pom, "</dependencies>", dep("a.b", "other", "${v}")+"</dependencies>", 1)
-	if _, err := applyMaven(t, changed, "a.b:c", "1.2.3", "1.2.4"); !errors.Is(err, ErrStale) {
-		t.Errorf("got %v", err)
+	want := "com.fasterxml.jackson.core:jackson-core"
+	if got := MavenSharing([]byte(pom), "com.fasterxml.jackson.core:jackson-databind", "2.15.0"); strings.Join(got, " ") != want {
+		t.Errorf("sharers %v, want %s", got, want)
+	}
+	if got := MavenSharing([]byte(pom), "a.b:literal", "1.0.0"); len(got) != 0 {
+		t.Errorf("a literal has no sharers: %v", got)
+	}
+	out, err := applyMaven(t, pom, "com.fasterxml.jackson.core:jackson-databind", "2.15.0", "2.15.4")
+	if err != nil || out != strings.Replace(pom, "<jackson.version>2.15.0<", "<jackson.version>2.15.4<", 1) {
+		t.Errorf("only the property's value moves: %v\n%s", err, out)
+	}
+	// Used both in a dependencyManagement and a dependency by the same two artifacts: still one entry.
+	managed := `<project>
+  ` + props + `<dependencyManagement><dependencies>
+` + dep("g", "a", "${jackson.version}") + dep("g", "b", "${jackson.version}") + `</dependencies></dependencyManagement>
+<dependencies>` + dep("g", "a", "${jackson.version}") + `</dependencies>
+</project>
+`
+	if got := MavenSharing([]byte(managed), "g:a", "2.15.0"); strings.Join(got, " ") != "g:b" {
+		t.Errorf("sharers %v", got)
+	}
+}
+
+func TestMavenSharedPropertyUsedOutsideDependenciesStaysUnread(t *testing.T) {
+	pom := pomWith("<properties><v>1.2.3</v></properties>\n", dep("a.b", "c", "${v}")+dep("a.b", "d", "${v}"))
+	pom = strings.Replace(pom, "</project>", "<description>built with ${v}</description></project>", 1)
+	if got := extractMaven(t, pom); len(got) != 0 {
+		t.Errorf("got %v", got)
+	}
+}
+
+func TestMavenSkippedSaysWhichPropertiesWereLeftAlone(t *testing.T) {
+	pom := pomWith("<properties><read.v>1.2.3</read.v><used.v>1.2.3</used.v><qual.v>1.2.3-beta</qual.v></properties>\n",
+		dep("a.b", "ok", "${read.v}")+dep("a.b", "outside", "${used.v}")+dep("a.b", "qual", "${qual.v}")+dep("a.b", "inherited", "${parent.v}"))
+	pom = strings.Replace(pom, "</project>", "<description>${used.v}</description></project>", 1)
+	got := Maven{}.Skipped("svc/pom.xml", []byte(pom))
+	if len(got) != 3 {
+		t.Fatalf("one line per property left alone, got %q", got)
+	}
+	for i, frag := range []string{"${used.v} = 1.2.3 is also used outside", "${qual.v} (used by a.b:qual)", "${parent.v} (used by a.b:inherited)"} {
+		if !strings.Contains(got[i], frag) || !strings.HasPrefix(got[i], "svc/pom.xml: ") {
+			t.Errorf("line %d = %q, want it to mention %q", i, got[i], frag)
+		}
+	}
+	if got := (Maven{}).Skipped("pom.xml", []byte(pomWith("", dep("a", "b", "1.0.0")))); len(got) != 0 {
+		t.Errorf("a literal is read: %q", got)
 	}
 }
 
@@ -189,5 +234,47 @@ func TestMavenRealtoolFixtureIsRead(t *testing.T) {
 	want := "org.slf4j:slf4j-api@2.0.0 org.apache.commons:commons-lang3@3.12.0 junit:junit@4.13" // the property is declared first
 	if strings.Join(got, " ") != want {
 		t.Errorf("got %v, want %q", got, want)
+	}
+}
+
+// ROADMAP 249: the pom's <parent> is an artifact like any other, and its version moves (the project's
+// own <version> and a parent with a local <relativePath> do not).
+func TestMavenParentVersion(t *testing.T) {
+	parent := func(extra string) string {
+		return `<project>
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>3.2.0</version>
+` + extra + `  </parent>
+  <groupId>example</groupId>
+  <artifactId>app</artifactId>
+  <version>1.0.0</version>
+</project>
+`
+	}
+	for name, tc := range map[string]struct {
+		pom  string
+		want string
+	}{
+		"explicit empty relativePath": {parent("    <relativePath/>\n"), "org.springframework.boot:spring-boot-starter-parent@3.2.0"},
+		"empty element relativePath":  {parent("    <relativePath></relativePath>\n"), "org.springframework.boot:spring-boot-starter-parent@3.2.0"},
+		"no relativePath":             {parent(""), "org.springframework.boot:spring-boot-starter-parent@3.2.0"},
+		"local relativePath":          {parent("    <relativePath>../parent/pom.xml</relativePath>\n"), ""},
+		"commented out":               {"<project><!-- <parent><groupId>a</groupId><artifactId>b</artifactId><version>1.2.3</version></parent> --></project>", ""},
+		"qualified parent":            {strings.Replace(parent(""), "3.2.0", "3.2.0-SNAPSHOT", 1), ""},
+		"repositories declared":       {strings.Replace(parent(""), "<groupId>example", "<repositories><repository><id>x</id><url>u</url></repository></repositories><groupId>example", 1), ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := strings.Join(extractMaven(t, tc.pom), " "); got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+	pom := parent("    <relativePath/>\n")
+	out, err := applyMaven(t, pom, "org.springframework.boot:spring-boot-starter-parent", "3.2.0", "3.2.5")
+	if err != nil || out != strings.Replace(pom, "<version>3.2.0</version>", "<version>3.2.5</version>", 1) {
+		t.Errorf("only the parent's version moves, the project's own 1.0.0 stays: %v\n%s", err, out)
 	}
 }

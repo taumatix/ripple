@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -140,4 +141,83 @@ func (w *MavenWatcher) Poll(ctx context.Context) (int, error) {
 		}
 	}
 	return n, nil
+}
+
+// mavenReleasesOf reads the release versions of one artifact. ok is false when Maven Central does
+// not answer for it anonymously (a private or unknown coordinate); any other failure is an error,
+// so a flaky read retries the job instead of skipping it.
+func (r *runner) mavenReleasesOf(pkg string) (rel []string, ok bool, err error) {
+	if r.e.Maven == nil {
+		return nil, false, nil
+	}
+	vs, err := r.e.Maven.Versions(r.ctx, pkg)
+	if errors.Is(err, maven.ErrDenied) || errors.Is(err, maven.ErrNotFound) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("read releases of %s: %w", pkg, err)
+	}
+	return maven.Releases(vs), true, nil
+}
+
+// mavenGuard is called before a pom.xml dependency is rewritten. A property that several artifacts
+// share moves them all at once, so a non-empty reason means the release is missing for one of them
+// (or that one cannot be read) and the update must not be proposed (ROADMAP 248). A read failure is an
+// error and retries the job.
+func (r *runner) mavenGuard(d model.Dependency, target string) (string, error) {
+	content, err := r.ws.ReadFile(d.File)
+	if err != nil {
+		return "", err
+	}
+	for _, s := range manager.MavenSharing(content, d.Package, d.Version) {
+		rel, ok, err := r.mavenReleasesOf(s)
+		if err != nil {
+			return "", err
+		}
+		if !ok {
+			return fmt.Sprintf("%s shares a property with %s, which Maven Central does not list anonymously: ripple cannot tell it has %s", d.Package, s, target), nil
+		}
+		if !slices.Contains(rel, target) {
+			return fmt.Sprintf("%s shares a property with %s, which has no release %s: ripple moves the property only to a release all of its users have", d.Package, s, target), nil
+		}
+	}
+	return "", nil
+}
+
+// mavenRetarget runs after the guard refused job's release: it queues a job for the newest older
+// release that d's artifact and every artifact sharing its property have, when that is still an
+// update for d and the repo's rules allow it. It returns text for the skip reason.
+func (r *runner) mavenRetarget(job model.Job, d model.Dependency) string {
+	content, err := r.ws.ReadFile(d.File)
+	if err != nil {
+		return ""
+	}
+	common, ok, err := r.mavenReleasesOf(d.Package)
+	if err != nil || !ok {
+		return ""
+	}
+	for _, s := range manager.MavenSharing(content, d.Package, d.Version) {
+		rel, ok, err := r.mavenReleasesOf(s)
+		if err != nil || !ok {
+			return ""
+		}
+		common = slices.DeleteFunc(common, func(v string) bool { return !slices.Contains(rel, v) })
+	}
+	common = slices.DeleteFunc(common, func(v string) bool { return semver.Compare("v"+v, "v"+job.Version) >= 0 })
+	for _, c := range mavenTargets(common, d, d.Package) {
+		dec, ok := r.e.decide(&repoState{found: true, cfg: r.cfg}, d, c.typ, job.ReleasedAt)
+		if !ok || !dec.Enabled {
+			continue
+		}
+		if _, err := r.e.Store.EnqueueJob(r.ctx, model.Job{
+			Key: model.JobKey(job.Repo, model.DatasourceMaven, job.Package, c.version), Repo: job.Repo,
+			Datasource: model.DatasourceMaven, Package: job.Package, Version: c.version,
+			ReleasedAt: job.ReleasedAt, State: model.JobPending, NotBefore: dec.NotBefore,
+		}); err != nil {
+			r.e.log().Warn("retargeted job not queued", "repo", job.Repo, "package", job.Package, "version", c.version, "err", err)
+			return ""
+		}
+		return "; retargeted to " + c.version + ", the newest release all of them have"
+	}
+	return ""
 }

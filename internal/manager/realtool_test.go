@@ -513,6 +513,73 @@ func TestRealtoolMaven(t *testing.T) {
 	}.run(t)
 }
 
+const mvnList = "org.apache.maven.plugins:maven-dependency-plugin:3.8.1:list"
+
+// TestRealtoolMavenSharedProperty settles ROADMAP 248: one <properties> entry used by two
+// dependencies moves as one entry, and Maven resolves both artifacts to the new release.
+// It also records the fact the Skipped/guard text rests on: a -D on the command line beats
+// the property, so a pom edit would change nothing for a build that passes one.
+func TestRealtoolMavenSharedProperty(t *testing.T) {
+	const list = "mvn"
+	realtool{
+		fixture: "maven-shared", manifest: "pom.xml", manager: Maven{Dir: "/"},
+		bumps: []bump{{"com.fasterxml.jackson.core:jackson-databind", "2.15.0", "2.15.4"}},
+		steps: [][]string{{list, "-B", "-q", "--no-transfer-progress", mvnList, "-DoutputFile=deps.txt"}},
+		env:   []string{"MAVEN_OPTS=-Dmaven.wagon.http.retryHandler.count=3"},
+		before: func(t *testing.T, dir string) {
+			mustContain(t, dir, "deps.txt", "jackson-databind:jar:2.15.0")
+			mustContain(t, dir, "deps.txt", "jackson-core:jar:2.15.0")
+			// A command-line property wins over the one in the pom.
+			cmd := exec.Command("mvn", "-B", "-q", "--no-transfer-progress", mvnList, "-DoutputFile=over.txt", "-Djackson.version=2.15.1")
+			cmd.Dir = dir
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("override run: %v\n%s", err, out)
+			}
+			mustContain(t, dir, "over.txt", "jackson-databind:jar:2.15.1")
+		},
+		after: func(t *testing.T, dir string) {
+			mustContain(t, dir, "deps.txt", "jackson-databind:jar:2.15.4")
+			mustContain(t, dir, "deps.txt", "jackson-core:jar:2.15.4") // the sharer moved with the lead
+			mustContain(t, dir, "pom.xml", "<jackson.version>2.15.4</jackson.version>")
+		},
+	}.run(t)
+}
+
+// TestRealtoolMavenParent settles ROADMAP 249: a <parent> version is edited and Maven
+// resolves the dependency the parent manages to the new parent's choice.
+func TestRealtoolMavenParent(t *testing.T) {
+	var managedBefore string
+	managed := func(t *testing.T, dir string) string {
+		t.Helper()
+		b, err := os.ReadFile(filepath.Join(dir, "deps.txt"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, l := range strings.Split(string(b), "\n") {
+			if i := strings.Index(l, "org.slf4j:slf4j-api:jar:"); i >= 0 {
+				return strings.TrimSpace(l[i:])
+			}
+		}
+		t.Fatalf("slf4j-api not in deps.txt:\n%s", b)
+		return ""
+	}
+	realtool{
+		fixture: "maven-parent", manifest: "pom.xml", manager: Maven{Dir: "/"},
+		bumps: []bump{{"org.springframework.boot:spring-boot-starter-parent", "3.2.0", "3.2.5"}},
+		steps: [][]string{{"mvn", "-B", "-q", "--no-transfer-progress", mvnList, "-DoutputFile=deps.txt"}},
+		env:   []string{"MAVEN_OPTS=-Dmaven.wagon.http.retryHandler.count=3"},
+		before: func(t *testing.T, dir string) {
+			managedBefore = managed(t, dir)
+		},
+		after: func(t *testing.T, dir string) {
+			mustContain(t, dir, "pom.xml", "<version>3.2.5</version>")
+			if got := managed(t, dir); got == managedBefore {
+				t.Errorf("managed slf4j-api did not change with the parent: %s", got)
+			}
+		},
+	}.run(t)
+}
+
 func TestRealtoolTerraform(t *testing.T) {
 	realtool{
 		fixture: "terraform", manifest: "main.tf", manager: Terraform{Dir: "/"},

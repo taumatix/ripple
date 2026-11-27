@@ -133,6 +133,9 @@ type Client struct {
 	Sandbox                 sandbox.Backend
 	// Now is the clock a Retry-After is counted from; nil means time.Now.
 	Now func() time.Time
+	// RetrySleep waits between attempts that GitLab's own lag causes (a pushed branch not yet
+	// visible to merge-request creation); nil sleeps for real, honouring ctx.
+	RetrySleep func(ctx context.Context, d time.Duration) error
 
 	mu      sync.Mutex
 	limited map[string]time.Time
@@ -310,9 +313,29 @@ func (c *Client) ListOpenPRs(ctx context.Context, repo model.Repo, prefix string
 	return out, nil
 }
 
+const (
+	branchVisibleRetries = 5
+	branchVisibleWait    = 2 * time.Second
+)
+
+func (c *Client) sleep(ctx context.Context, d time.Duration) error {
+	if c.RetrySleep != nil {
+		return c.RetrySleep(ctx, d)
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
+}
+
 // CreatePR opens a merge request. A draft is a title prefix; labels travel in the
 // same call as a comma-separated list and GitLab creates the ones that do not exist.
-// A label containing a comma cannot be expressed and is dropped.
+// A label containing a comma cannot be expressed and is dropped. A 400 "source_branch does
+// not exist" for a branch that was just pushed is retried a few times (see branchVisibleRetries).
 func (c *Client) CreatePR(ctx context.Context, repo model.Repo, s platform.PRSpec) (platform.PR, error) {
 	title := s.Title
 	if s.Draft {
@@ -329,8 +352,19 @@ func (c *Client) CreatePR(ctx context.Context, repo model.Repo, s platform.PRSpe
 		payload["labels"] = strings.Join(labels, ",")
 	}
 	var m mrJSON
-	if _, err := c.doRepo(ctx, repo, http.MethodPost, c.projectURL(repo.FullName, "/merge_requests"), payload, &m); err != nil {
-		return platform.PR{}, err
+	for attempt := 0; ; attempt++ {
+		status, err := c.doRepo(ctx, repo, http.MethodPost, c.projectURL(repo.FullName, "/merge_requests"), payload, &m)
+		if err == nil {
+			break
+		}
+		// A branch pushed a moment ago is not yet visible to this call (a real GitLab CE 400s with
+		// {"source_branch":["does not exist"]} for 1-2 s); the branch is there, so ask again.
+		if status != http.StatusBadRequest || !strings.Contains(err.Error(), "does not exist") || attempt >= branchVisibleRetries {
+			return platform.PR{}, err
+		}
+		if err := c.sleep(ctx, branchVisibleWait); err != nil {
+			return platform.PR{}, err
+		}
 	}
 	pr := m.pr()
 	pr.Head = s.Head

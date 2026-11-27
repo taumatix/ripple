@@ -302,7 +302,7 @@ func (f *realGitLab) Host(t *testing.T, g gitws.Options, now func() time.Time) *
 		Token string `json:"token"`
 	}
 	f.api.mustJSON("POST", fmt.Sprintf("groups/%d/access_tokens", sub.ID), map[string]any{
-		"name": "ripple", "scopes": []string{"api", "write_repository"}, "access_level": 30, "expires_at": expiry()}, &tok)
+		"name": "ripple", "scopes": []string{"api", "write_repository"}, "access_level": 40, "expires_at": expiry()}, &tok)
 	f.token = tok.Token
 	f.proxy = &countingTransport{n: map[string]int{}}
 	theRelay.setTarget("")
@@ -352,7 +352,35 @@ func (f *realGitLab) pushFiles(t *testing.T, path, branch string, files map[stri
 	return f.e.gitIn(t, "root", f.e.root, dir, "rev-parse", "HEAD")
 }
 
-func (f *realGitLab) Register(_ *testing.T, webhook string, _ ...string) { theRelay.setTarget(webhook) }
+// Register points the relay at the app. Discovery is one listing, so a project the credential's
+// membership listing does not show yet would never register; wait for it to appear (and log how
+// long, as a fact) before the suite runs Discover.
+func (f *realGitLab) Register(t *testing.T, webhook string, paths ...string) {
+	theRelay.setTarget(webhook)
+	for _, p := range paths {
+		start := time.Now()
+		var seen string
+		for time.Since(start) < 60*time.Second {
+			req, _ := http.NewRequest("GET", f.e.base+"/api/v4/projects?membership=true&archived=false&simple=true&per_page=100", nil)
+			req.Header.Set("Authorization", "Bearer "+f.token)
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			seen = fmt.Sprintf("HTTP %d %s", resp.StatusCode, raw)
+			if strings.Contains(string(raw), `"path_with_namespace":"`+p+`"`) {
+				t.Logf("FACT: project %s visible in the membership listing after %v", p, time.Since(start).Round(100*time.Millisecond))
+				break
+			}
+			time.Sleep(time.Second)
+		}
+		if time.Since(start) >= 60*time.Second {
+			t.Fatalf("project %s never appeared in the membership listing: %s", p, seen)
+		}
+	}
+}
 
 func (f *realGitLab) Push(t *testing.T, webhook, path string, files map[string]string) {
 	t.Helper()
@@ -479,6 +507,20 @@ func TestRealDraftAndAutoMerge(t *testing.T) {
 	t.Logf("FACT auto_merge on a project without pipelines: error=%v", err)
 	t.Logf("FACT MR after the auto-merge request: %s", rawMR(t, f, repo.FullName, pr.Number))
 
+	// The role the token needs: a Developer token on the protected default branch.
+	var dev struct {
+		Token string `json:"token"`
+	}
+	f.api.mustJSON("POST", "projects/"+url.PathEscape(repo.FullName)+"/access_tokens", map[string]any{
+		"name": "ripple-developer", "scopes": []string{"api", "write_repository"}, "access_level": 30, "expires_at": expiry()}, &dev)
+	f.pushFiles(t, repo.FullName, "ripple/dev", map[string]string{"dev.txt": "v\n"})
+	dc := &gitlab.Client{BaseURL: f.e.base, Tokens: gitlab.Tokens{Default: dev.Token}}
+	dpr, err := dc.CreatePR(ctx, repo, platform.PRSpec{Head: "ripple/dev", Base: "main", Title: "Update w"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("FACT a Developer token opened MR !%d; auto_merge by it: error=%v", dpr.Number, dc.RequestAutoMerge(ctx, repo, dpr))
+
 	f.api.must("PUT", "projects/"+url.PathEscape(repo.FullName), map[string]any{"only_allow_merge_if_pipeline_succeeds": true})
 	f.pushFiles(t, repo.FullName, "ripple/gated", map[string]string{"gated.txt": "g\n"})
 	g, err := f.client.CreatePR(ctx, repo, platform.PRSpec{Head: "ripple/gated", Base: "main", Title: "Update z"})
@@ -496,7 +538,7 @@ func TestRealTokensAreBearer(t *testing.T) {
 		Token string `json:"token"`
 	}
 	f.api.mustJSON("POST", "projects/"+url.PathEscape(repo.FullName)+"/access_tokens", map[string]any{
-		"name": "ripple-project", "scopes": []string{"api", "write_repository"}, "access_level": 30, "expires_at": expiry()}, &proj)
+		"name": "ripple-project", "scopes": []string{"api", "write_repository"}, "access_level": 40, "expires_at": expiry()}, &proj)
 	for name, tok := range map[string]string{"group access token": f.token, "project access token": proj.Token, "personal access token": f.e.root} {
 		a := restAPI{t: t, e: f.e, token: tok}
 		st, _, body := a.do("GET", "projects/"+url.PathEscape(repo.FullName), nil)

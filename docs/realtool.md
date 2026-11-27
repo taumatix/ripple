@@ -27,6 +27,7 @@ Run one locally (from the repository root; `-tags realtool` is added for you):
 | `TestRealtoolComposer`, `TestRealtoolComposerTwoSegment` | `composer validate`, `composer update --dry-run`, `composer update --no-install` | php, composer |
 | `TestRealtoolComposerConstraintMeaning` | `composer update --no-install` on one constraint (`~1`, `^1`, `~1.2`, `^1.2`, `~0.3`, `^0.3`, `^0.7`, `^0.8`, `^0.9`, `^0`) and the version it locks | php, composer |
 | `TestRealtoolNuget` | `dotnet restore`, `dotnet build --no-restore` | dotnet 8 |
+| `TestRealtoolNugetItemForms` | `dotnet restore` on a project written one way (`Version` attribute, `<Version>` child, `Update=` before or after its `Include`, both attribute and child) and which `Newtonsoft.Json` version `obj/project.assets.json` holds | dotnet 8 |
 | `TestRealtoolMaven` | `mvn validate`, `dependency:resolve`, `compile` | mvn, JDK 17 |
 | `TestRealtoolTerraform` | `terraform init -backend=false`, `terraform validate` | terraform |
 | `TestRealtoolGitHubActions` | `actionlint`, plus `git ls-remote` that the new tag exists | actionlint, git |

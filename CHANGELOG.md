@@ -34,6 +34,8 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
 
 - Composer (opt-in `ecosystem: composer` only; a `composer.json` outside it is never read): `"~0.3"` and the one-segment `"^1"`, `"~1"` and `"^0"` are now read. Real Composer 2 locks `~0.3` to mockery 0.9.11 and `^1`/`~1` to monolog 1.27.1, so only a release of a later major moves them, written as its first two segments (`~1.2`) or its major alone (`^2`). Verified by `TestRealtoolComposerConstraintMeaning` against real composer (CI `realtool / composer`) and by the fake-host e2e test.
 
+- NuGet (opt-in `ecosystem: nuget` only; a project file outside it is never read): a `PackageReference`'s `<Version>` child element, and a `PackageReference Update="Id"` that follows an `Include="Id"` in the same file, are now read and their version digits edited. Real `dotnet restore` resolved each form (`TestRealtoolNugetItemForms`, CI `realtool / nuget`) and the fake-host e2e test drives the PRs. Not read yet, and listed in `docs/nuget.md`: an Update in another file, `PackageVersion Update=`, `VersionOverride=`; an Include that a later Update overrides is still proposed.
+
 ## [0.4.0] - 2026-11-25
 
 Additive release: no public API was removed or changed. Opt-in ecosystems: Helm, Bundler, Composer, NuGet, Maven and Terraform

@@ -108,3 +108,59 @@ func TestNugetDeniedPackageIsLeftAlone(t *testing.T) {
 		}
 	})
 }
+
+const csprojFormsE2E = `<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="Kid">
+      <Version>1.0.0</Version>
+    </PackageReference>
+    <PackageReference Include="Pinned" />
+    <PackageReference Update="Pinned" Version="2.0.0" />
+    <PackageReference Update="Orphan" Version="3.0.0" />
+  </ItemGroup>
+</Project>
+`
+
+// What real dotnet restore resolved (TestRealtoolNugetItemForms): a <Version> child counts, an
+// Update after its Include sets the version, an Update with no Include does nothing.
+func TestNugetChildAndUpdateForms(t *testing.T) {
+	forEach(t, func(t *testing.T, st store.Store) {
+		e, reg := nugetEnv(t, st)
+		reg.Publish("Kid", "1.0.0")
+		reg.Publish("Pinned", "2.0.0")
+		reg.Publish("Orphan", "3.0.0")
+		e.gh.AddRepo("acme/app", map[string]string{".ripple.yaml": nugetConfig, "App.csproj": csprojFormsE2E})
+		start(t, e, "acme/app")
+		e.clock.Advance(time.Minute)
+		reg.Publish("Kid", "1.1.0")
+		reg.Publish("Pinned", "2.1.0")
+		reg.Publish("Orphan", "3.1.0")
+		e.tick()
+		e.tick()
+
+		prs := e.gh.PRs("acme/app")
+		if len(prs) != 2 {
+			t.Fatalf("Kid (child) and Pinned (the Update) only, got %d", len(prs))
+		}
+		for _, pr := range prs {
+			got, _ := e.gh.FileAt("acme/app", pr.Head, "App.csproj")
+			from, to := "", ""
+			switch {
+			case strings.Contains(strings.ToLower(pr.Head), "kid"):
+				from, to = `<Version>1.0.0</Version>`, `<Version>1.1.0</Version>`
+			case strings.Contains(strings.ToLower(pr.Head), "pinned"):
+				from, to = `Update="Pinned" Version="2.0.0"`, `Update="Pinned" Version="2.1.0"`
+			default:
+				t.Fatalf("unexpected branch %q", pr.Head)
+			}
+			if want := strings.Replace(csprojFormsE2E, from, to, 1); got != want {
+				t.Errorf("%s: only that version moves:\n%s", pr.Head, got)
+			}
+		}
+		for _, r := range reg.Requests() {
+			if strings.Contains(r.Path, "orphan") {
+				t.Errorf("an Update with no Include was asked for: %s", r.Path)
+			}
+		}
+	})
+}

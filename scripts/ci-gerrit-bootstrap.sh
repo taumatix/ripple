@@ -32,7 +32,18 @@ if ! grep -q GerritAccount "$jar"; then
   echo "GET login set no cookie; trying POST"
   curl -sS -c "$jar" -o "$work/login.out" -w 'login: %{http_code}\n' -L -d "user_name=$user" "$base/login/%23%2F" || true
 fi
-grep -q GerritAccount "$jar" || { echo "no GerritAccount cookie"; head -c 600 "$work/login.out"; exit 1; }
+if ! grep -q GerritAccount "$jar"; then
+  echo "unknown user_name answers: $(head -c 300 "$work/login.out")"
+  echo "--- the dev login page"
+  curl -sS "$base/login/%23%2F" | head -c 4000
+  echo
+  echo "--- probe: create via POST create_account"
+  curl -sS -c "$jar" -o "$work/login.out" -w 'login: %{http_code}\n' -L -d "user_name=$user&action=create_account" "$base/login/%23%2F" || true
+  head -c 300 "$work/login.out"; echo
+  curl -sS -c "$jar" -o "$work/login.out" -w 'login: %{http_code}\n' -L "$base/login/%23%2F?action=create_account&user_name=$user" || true
+  head -c 300 "$work/login.out"; echo
+fi
+grep -q GerritAccount "$jar" || { echo "no GerritAccount cookie"; exit 1; }
 xsrf=$(awk '$6=="XSRF_TOKEN"{print $7}' "$jar")
 
 echo "--- mint an HTTP password"

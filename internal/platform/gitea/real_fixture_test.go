@@ -399,18 +399,22 @@ func (f *realFixture) AddRepo(t *testing.T, path string, files map[string]string
 func (f *realFixture) settled(t *testing.T, path string) {
 	t.Helper()
 	deadline := time.Now().Add(30 * time.Second)
+	polls := 0
 	for {
 		var r struct {
 			Empty bool `json:"empty"`
 		}
 		st, _, _ := f.in.call(t, token(f.tok), http.MethodGet, "/repos/"+path, nil, &r)
 		if st == http.StatusOK && !r.Empty {
+			if polls > 0 {
+				t.Logf("FACT %s was still empty=true for %d polls (200ms apart) after the first push returned", path, polls)
+			}
 			return
 		}
+		polls++
 		if time.Now().After(deadline) {
 			t.Fatalf("%s still empty (status %d) 30s after the push", path, st)
 		}
-		t.Logf("FACT %s: status %d empty=%v right after the first push", path, st, r.Empty)
 		time.Sleep(200 * time.Millisecond)
 	}
 }

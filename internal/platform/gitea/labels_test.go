@@ -54,6 +54,29 @@ func TestCreatePRQuietWhenEveryLabelIsApplied(t *testing.T) {
 	}
 }
 
+// Forgejo 7.0.16 (Gitea 1.21 underneath) takes label ids only: POST .../issues/{n}/labels with names
+// answers 422 "cannot unmarshal ... of type int64" (hosts-gitea.yml, TestRealLabelByName). The client
+// then looks the ids up (GET .../labels) and posts those.
+func TestCreatePRFallsBackToLabelIDsWhereNamesAreRefused(t *testing.T) {
+	var logs bytes.Buffer
+	g := newLabelEnv(t, true)
+	g.LabelIDsOnly = true
+	g.AddLabel(supRepo, "security")
+	c := client(g)
+	c.Log = slog.New(slog.NewTextHandler(&logs, nil))
+	if _, err := c.CreatePR(context.Background(), model.Repo{FullName: supRepo}, platform.PRSpec{
+		Head: supBranch, Base: "main", Title: "t", Labels: []string{"security", "dependencies"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := g.PRs(supRepo)[0].Labels; strings.Join(got, ",") != "security" {
+		t.Errorf("applied labels %v, want the one the repository has", got)
+	}
+	out := logs.String()
+	if !strings.Contains(out, "labels not applied") || !strings.Contains(out, "dependencies") || strings.Contains(out, "labelling pull request failed") {
+		t.Errorf("want one warning naming the missing label only, got %q", out)
+	}
+}
+
 func newLabelEnv(t *testing.T, forgejo bool) *testutil.Gitea {
 	t.Helper()
 	g := testutil.NewGitea(t, forgejo)

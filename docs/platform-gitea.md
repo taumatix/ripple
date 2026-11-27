@@ -70,6 +70,8 @@ demand. The recorded answers are in `docs/vendor/gitea/real-answers.md`; the tes
   re-runs discovery for it (ROADMAP 280).
 - A fresh pull request already has one `pull_push` (see above); the first version closed nothing.
 - A label name the repository lacks is dropped with `200 []`; the client now logs "labels not applied" naming them.
+- Forgejo 7.0.16 refuses label names (`422`, ids only). Labelling never worked there. The client now retries a 422 with the
+  ids from `GET .../labels` (first 50 labels), so `labels:` works on 7.x; `TestRealCreatePRLabels` proves it on each leg.
 - No instance rate-limits by default, so the 429 path is exercised through the fixture's proxy only; what a
   throttling reverse proxy in front of a real instance sends is not recorded.
 - The git basic-auth user is irrelevant (any is accepted); the token is what authenticates.

@@ -322,31 +322,69 @@ func (c *Client) CreatePR(ctx context.Context, repo model.Repo, s platform.PRSpe
 		// Label names are accepted here (IssueLabelsOption). A name the repository lacks
 		// is dropped silently: the answer is 200 with the labels now on the issue
 		// (Gitea 1.27.3, Forgejo 17.0.2), so the answer is read and the gap logged.
-		var applied []struct {
-			Name string `json:"name"`
+		// Forgejo 7.0.16 (Gitea 1.21) takes ids only and answers 422 to names, so a 422
+		// is retried with the ids found in GET .../labels.
+		applied, err := c.postLabels(ctx, repo, o, n, pr.Number, s.Labels)
+		var se *statusError
+		if errors.As(err, &se) && se.status == http.StatusUnprocessableEntity {
+			applied, err = c.postLabelIDs(ctx, repo, o, n, pr.Number, s.Labels)
 		}
-		_, err := c.do(ctx, repo, http.MethodPost, c.api(fmt.Sprintf("/repos/%s/%s/issues/%d/labels", o, n, pr.Number)),
-			map[string]any{"labels": s.Labels}, &applied)
-		switch {
-		case err != nil && c.Log != nil:
-			c.Log.Warn("labelling pull request failed", "repo", repo.FullName, "pr", pr.Number, "err", err)
-		case err == nil && c.Log != nil:
-			have := map[string]bool{}
-			for _, l := range applied {
-				have[l.Name] = true
-			}
-			var missing []string
-			for _, name := range s.Labels {
-				if !have[name] {
-					missing = append(missing, name)
-				}
-			}
-			if len(missing) > 0 {
+		if c.Log != nil {
+			if err != nil {
+				c.Log.Warn("labelling pull request failed", "repo", repo.FullName, "pr", pr.Number, "err", err)
+			} else if missing := notIn(s.Labels, applied); len(missing) > 0 {
 				c.Log.Warn("labels not applied: the repository has no label of that name", "repo", repo.FullName, "pr", pr.Number, "labels", missing)
 			}
 		}
 	}
 	return pr, nil
+}
+
+type labelJSON struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
+func (c *Client) postLabels(ctx context.Context, repo model.Repo, o, n string, pr int, labels any) ([]labelJSON, error) {
+	var applied []labelJSON
+	_, err := c.do(ctx, repo, http.MethodPost, c.api(fmt.Sprintf("/repos/%s/%s/issues/%d/labels", o, n, pr)),
+		map[string]any{"labels": labels}, &applied)
+	return applied, err
+}
+
+// postLabelIDs resolves names to ids (the first 50 labels of the repository) and posts the ids.
+func (c *Client) postLabelIDs(ctx context.Context, repo model.Repo, o, n string, pr int, names []string) ([]labelJSON, error) {
+	var all []labelJSON
+	if _, err := c.do(ctx, repo, http.MethodGet, c.api(fmt.Sprintf("/repos/%s/%s/labels?limit=50", o, n)), nil, &all); err != nil {
+		return nil, err
+	}
+	var ids []int64
+	for _, l := range all {
+		for _, name := range names {
+			if l.Name == name {
+				ids = append(ids, l.ID)
+			}
+		}
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	return c.postLabels(ctx, repo, o, n, pr, ids)
+}
+
+// notIn returns the names that no applied label carries.
+func notIn(names []string, applied []labelJSON) []string {
+	have := map[string]bool{}
+	for _, l := range applied {
+		have[l.Name] = true
+	}
+	var missing []string
+	for _, name := range names {
+		if !have[name] {
+			missing = append(missing, name)
+		}
+	}
+	return missing
 }
 
 // RequestAutoMerge schedules a squash merge for when the checks succeed

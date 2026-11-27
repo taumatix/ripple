@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/taumatix/ripple/internal/model"
 	"github.com/taumatix/ripple/internal/platform"
 	"github.com/taumatix/ripple/internal/platform/gitea"
 	"github.com/taumatix/ripple/internal/platform/platformtest"
@@ -207,16 +208,64 @@ func TestRealLabelByName(t *testing.T) {
 	f := scene(t, in)
 	path := f.Path("facts")
 	n := f.branchPR(t, "facts", "ripple/go/label")
+	var v struct {
+		Version string `json:"version"`
+	}
+	in.must(t, nil, http.MethodGet, "/version", nil, &v)
+	// Forgejo 7.0.16 sits on Gitea 1.21, whose IssueLabelsOption.Labels is []int64: names are a 422.
+	idsOnly := strings.HasPrefix(v.Version, "7.")
 	st, _, body := in.call(t, token(f.tok), http.MethodPost, fmt.Sprintf("/repos/%s/issues/%d/labels", path, n), map[string]any{"labels": []string{"dependencies"}}, nil)
-	t.Logf("FACT label by name, label absent: %d %q", st, strings.TrimSpace(string(body)))
-	if st != http.StatusOK || strings.TrimSpace(string(body)) != "[]" {
+	t.Logf("FACT label by name, label absent: %d %q (version %s)", st, strings.TrimSpace(string(body)), v.Version)
+	if idsOnly {
+		if st != http.StatusUnprocessableEntity || !strings.Contains(string(body), "int64") {
+			t.Errorf("a label by name on %s: %d %q, want 422 naming int64", v.Version, st, body)
+		}
+	} else if st != http.StatusOK || strings.TrimSpace(string(body)) != "[]" {
 		t.Errorf("an absent label by name: %d %q, want 200 []", st, body)
 	}
-	in.must(t, token(f.tok), http.MethodPost, "/repos/"+path+"/labels", map[string]any{"name": "dependencies", "color": "#0075ca"}, nil)
-	st, _, body = in.call(t, token(f.tok), http.MethodPost, fmt.Sprintf("/repos/%s/issues/%d/labels", path, n), map[string]any{"labels": []string{"dependencies"}}, nil)
-	t.Logf("FACT label by name, label exists: %d %q", st, strings.TrimSpace(string(body)))
+	var made labelJSON
+	in.must(t, token(f.tok), http.MethodPost, "/repos/"+path+"/labels", map[string]any{"name": "dependencies", "color": "#0075ca"}, &made)
+	var labels any = []string{"dependencies"}
+	if idsOnly {
+		labels = []int64{made.ID}
+	}
+	st, _, body = in.call(t, token(f.tok), http.MethodPost, fmt.Sprintf("/repos/%s/issues/%d/labels", path, n), map[string]any{"labels": labels}, nil)
+	t.Logf("FACT label (by id on 7.x), label exists: %d %q", st, strings.TrimSpace(string(body)))
 	if st != http.StatusOK || !strings.Contains(string(body), `"name":"dependencies"`) {
-		t.Errorf("an existing label by name: %d %q, want 200 listing it", st, body)
+		t.Errorf("an existing label: %d %q, want 200 listing it", st, body)
+	}
+}
+
+type labelJSON struct {
+	ID int64 `json:"id"`
+}
+
+// TestRealCreatePRLabels drives Client.CreatePR with one label the repository has and one it lacks,
+// whichever way the instance takes labels (names, or ids on Forgejo 7), and reads the pull request back.
+func TestRealCreatePRLabels(t *testing.T) {
+	in := realInstance(t)
+	f := scene(t, in)
+	path := f.Path("facts")
+	dir := f.dirs[path]
+	f.git(t, dir, "checkout", "-q", "-b", "ripple/go/lbl")
+	writeFiles(t, dir, map[string]string{"lbl.txt": "x\n"})
+	f.git(t, dir, "add", "-A")
+	f.git(t, dir, "commit", "-q", "-m", "lbl")
+	f.git(t, dir, "push", "-q", in.url+"/"+path+".git", "ripple/go/lbl")
+	in.must(t, token(f.tok), http.MethodPost, "/repos/"+path+"/labels", map[string]any{"name": "dependencies", "color": "#0075ca"}, nil)
+	c := &gitea.Client{APIBase: in.url, GitBase: in.url, Credentials: platform.StaticCredential{Username: "ripple", Secret: f.tok}}
+	pr, err := c.CreatePR(context.Background(), model.Repo{FullName: path, DefaultBranch: "main"}, platform.PRSpec{
+		Head: "ripple/go/lbl", Base: "main", Title: "t", Labels: []string{"dependencies", "nosuchlabel"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []struct {
+		Name string `json:"name"`
+	}
+	in.must(t, token(f.tok), http.MethodGet, fmt.Sprintf("/repos/%s/issues/%d/labels", path, pr.Number), nil, &got)
+	t.Logf("FACT labels on the pull request after CreatePR: %v", got)
+	if len(got) != 1 || got[0].Name != "dependencies" {
+		t.Errorf("labels on the pull request = %v, want only dependencies", got)
 	}
 }
 

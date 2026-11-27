@@ -114,9 +114,10 @@ const csprojFormsE2E = `<Project Sdk="Microsoft.NET.Sdk">
     <PackageReference Include="Kid">
       <Version>1.0.0</Version>
     </PackageReference>
-    <PackageReference Include="Pinned" />
+    <PackageReference Include="Pinned" Version="1.0.0" />
     <PackageReference Update="Pinned" Version="2.0.0" />
     <PackageReference Update="Orphan" Version="3.0.0" />
+    <PackageReference Include="Both" Version="1.0.0"><Version>2.0.0</Version></PackageReference>
   </ItemGroup>
 </Project>
 `
@@ -129,18 +130,20 @@ func TestNugetChildAndUpdateForms(t *testing.T) {
 		reg.Publish("Kid", "1.0.0")
 		reg.Publish("Pinned", "2.0.0")
 		reg.Publish("Orphan", "3.0.0")
+		reg.Publish("Both", "2.0.0")
 		e.gh.AddRepo("acme/app", map[string]string{".ripple.yaml": nugetConfig, "App.csproj": csprojFormsE2E})
 		start(t, e, "acme/app")
 		e.clock.Advance(time.Minute)
 		reg.Publish("Kid", "1.1.0")
 		reg.Publish("Pinned", "2.1.0")
 		reg.Publish("Orphan", "3.1.0")
+		reg.Publish("Both", "2.1.0")
 		e.tick()
 		e.tick()
 
 		prs := e.gh.PRs("acme/app")
-		if len(prs) != 2 {
-			t.Fatalf("Kid (child) and Pinned (the Update) only, got %d", len(prs))
+		if len(prs) != 3 {
+			t.Fatalf("Kid (child), Pinned (the Update, not the dead Include) and Both (the child) only, got %d", len(prs))
 		}
 		for _, pr := range prs {
 			got, _ := e.gh.FileAt("acme/app", pr.Head, "App.csproj")
@@ -150,6 +153,8 @@ func TestNugetChildAndUpdateForms(t *testing.T) {
 				from, to = `<Version>1.0.0</Version>`, `<Version>1.1.0</Version>`
 			case strings.Contains(strings.ToLower(pr.Head), "pinned"):
 				from, to = `Update="Pinned" Version="2.0.0"`, `Update="Pinned" Version="2.1.0"`
+			case strings.Contains(strings.ToLower(pr.Head), "both"):
+				from, to = `<Version>2.0.0</Version></PackageReference>`, `<Version>2.1.0</Version></PackageReference>`
 			default:
 				t.Fatalf("unexpected branch %q", pr.Head)
 			}

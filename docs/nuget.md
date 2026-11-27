@@ -35,10 +35,18 @@ Also read, both settled by running real `dotnet restore` (`TestRealtoolNugetItem
   nothing for an Update with no Include. So an Update before its Include, or with none, is not read. The Update's own
   digits are what is edited.
 
-Known gaps, each on the ROADMAP: the Include that a later Update overrides is still read and proposed (an edit with no
-effect, 260); when an Include has both a `Version` attribute and a child, dotnet uses the child but ripple still
-reads and edits the attribute (260); an Update in another file than its Include, `PackageVersion Update=`, and
-`VersionOverride=` stay unread (261 to 263).
+Two consequences, both from what dotnet restored (`TestRealtoolNugetItemForms`) and both round-tripped through real
+`dotnet restore` after the edit (`TestRealtoolNugetItemFormsEdit`):
+
+- **An item that a later Update overrides is dead and is skipped.** For `Include="X" Version="1.0.0"` followed by
+  `Update="X" Version="2.0.0"` only the Update (2.0.0) is read and edited; proposing the Include would change nothing.
+  The engine has no per-skip report channel, so the skipped Include is silent: no PR opens for it.
+- **An Include with both a `Version` attribute and a `<Version>` child is edited at the child**, the one dotnet uses; the
+  attribute is left alone.
+
+An item whose version cannot be told (several `<Version>` children, or one with a `Condition`) is skipped, and so is an
+Include that such an Update overrides, because the live version is unknown. Not read yet, each on the ROADMAP: an Update
+in another file than its Include, `PackageVersion Update=`, and `VersionOverride=` (261 to 263).
 
 Skipped: ranges (`[1.0,2.0)`, `(,1.0]`), floating versions (`1.*`), properties (`$(Ver)`), prereleases (`1.0.0-beta`),
 two- and four-segment versions, `packages.config`, and `.props` files other than `Directory.Packages.props`.

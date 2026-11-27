@@ -132,9 +132,11 @@ func TestNugetExtractItemForms(t *testing.T) {
 	for _, d := range deps {
 		got = append(got, d.Package+"@"+d.Version)
 	}
-	// Early's Update comes before its Include: not read, the Include is. Both reads the attribute
-	// as before. "Open" is never closed before the next reference and "Twice" has two children.
-	want := "Early@1.0.0 Late@1.0.0 Late@2.0.0 Bare@3.0.0 ChildFirst@1.0.0 ChildFirst@4.0.0 Kid@6.0.0 Both@1.1.0 After@1.0.1"
+	// Early's Update comes before its Include: not read, the Include is. Late and ChildFirst have
+	// an Include that a later Update overrides: only the Update is read. Both reads the child,
+	// which dotnet uses over the attribute. "Open" is never closed before the next reference and
+	// "Twice" and "CondChild" have children that cannot be told.
+	want := "Early@1.0.0 Late@2.0.0 Bare@3.0.0 ChildFirst@4.0.0 Kid@6.0.0 Both@1.2.0 After@1.0.1"
 	if strings.Join(got, " ") != want {
 		t.Errorf("got %q, want %q", strings.Join(got, " "), want)
 	}
@@ -146,7 +148,7 @@ func TestNugetApplyItemForms(t *testing.T) {
 		{"Bare", "3.0.0", "3.1.0", `Update="Bare" Version="3.0.0"`, `Update="Bare" Version="3.1.0"`},
 		{"ChildFirst", "4.0.0", "4.2.0", "<Version>4.0.0</Version>", "<Version>4.2.0</Version>"},
 		{"Kid", "6.0.0", "6.0.9", "<Version>6.0.0</Version>", "<Version>6.0.9</Version>"},
-		{"Both", "1.1.0", "1.1.5", `Version="1.1.0"`, `Version="1.1.5"`},
+		{"Both", "1.2.0", "1.2.5", "<Version>1.2.0</Version>", "<Version>1.2.5</Version>"},
 	} {
 		dep := model.Dependency{File: "app.csproj", Package: tc.pkg, Version: tc.spec}
 		out, err := Nuget{}.Apply([]byte(csprojForms), dep, "", tc.to)
@@ -157,7 +159,8 @@ func TestNugetApplyItemForms(t *testing.T) {
 			t.Errorf("%s: only that version moves, got:\n%s", tc.pkg, out)
 		}
 	}
-	for _, tc := range []struct{ pkg, spec string }{{"Orphan", "5.0.0"}, {"Early", "9.0.0"}, {"Twice", "7.0.0"}, {"Open", "2.2.2"}} {
+	for _, tc := range []struct{ pkg, spec string }{{"Orphan", "5.0.0"}, {"Early", "9.0.0"}, {"Twice", "7.0.0"}, {"Open", "2.2.2"},
+		{"Late", "1.0.0"}, {"ChildFirst", "1.0.0"}, {"Both", "1.1.0"}} {
 		dep := model.Dependency{File: "app.csproj", Package: tc.pkg, Version: tc.spec}
 		if _, err := (Nuget{}).Apply([]byte(csprojForms), dep, "", "9.9.9"); !errors.Is(err, ErrStale) {
 			t.Errorf("%s %s is not a declaration dotnet uses: want ErrStale, got %v", tc.pkg, tc.spec, err)

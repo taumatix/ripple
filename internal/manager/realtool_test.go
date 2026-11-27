@@ -573,3 +573,26 @@ func TestRealtoolDocker(t *testing.T) {
 		},
 	}.run(t)
 }
+
+// The edit, not only the reading, goes through real dotnet: a child that beats a Version
+// attribute, an Update that overrides its Include, and a multi-line child element are each
+// edited where dotnet looks, so restore holds the new version (the attribute 11.0.2 and the
+// overridden Include 2.10.0 are not touched, which assertOnlyBumped checks line by line).
+func TestRealtoolNugetItemFormsEdit(t *testing.T) {
+	realtool{
+		fixture: "nuget-forms", manifest: "realtool.csproj", manager: Nuget{Dir: "/"},
+		bumps: []bump{
+			{"Newtonsoft.Json", "12.0.3", "13.0.3"},
+			{"Serilog", "3.0.0", "3.1.1"},
+			{"Humanizer.Core", "2.13.14", "2.14.1"},
+		},
+		env:   []string{"DOTNET_NOLOGO=1", "DOTNET_CLI_TELEMETRY_OPTOUT=1"},
+		steps: [][]string{{"dotnet", "restore"}, {"dotnet", "build", "--no-restore"}},
+		local: []string{"dotnet build --no-restore"},
+		after: func(t *testing.T, dir string) {
+			for _, want := range []string{"Newtonsoft.Json/13.0.3", "Serilog/3.1.1", "Humanizer.Core/2.14.1"} {
+				mustContain(t, dir, "obj/project.assets.json", want)
+			}
+		},
+	}.run(t)
+}

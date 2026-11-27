@@ -8,6 +8,8 @@ on:
       - ".github/workflows/hosts-gitlab-gerrit.yml"
       - "scripts/ci-gerrit-bootstrap.sh"
       - "internal/platform/gerrit/**"
+      - "scripts/ci-gitlab-bootstrap.sh"
+      - "internal/platform/gitlab/**"
       - "internal/platform/platformtest/**"
       - "internal/platform/gitws/**"
   push:
@@ -16,6 +18,8 @@ on:
       - ".github/workflows/hosts-gitlab-gerrit.yml"
       - "scripts/ci-gerrit-bootstrap.sh"
       - "internal/platform/gerrit/**"
+      - "scripts/ci-gitlab-bootstrap.sh"
+      - "internal/platform/gitlab/**"
 permissions:
   contents: read
 jobs:
@@ -75,3 +79,66 @@ jobs:
             gerrit-bootstrap.log
             gerrit-image.txt
             gerrit-records
+  gitlab:
+    name: gitlab (real gitlab/gitlab-ce, low-memory config)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: start GitLab CE
+        run: |
+          set -euo pipefail
+          # Host networking: GitLab posts webhooks to the test's relay on 127.0.0.1:18999 and the test reaches
+          # GitLab on 127.0.0.1:8929. The settings are the low-memory ones docs.gitlab.com/omnibus/settings/memory_constrained_envs
+          # lists: one puma process, a small sidekiq, and no bundled monitoring. (The container's own sshd finds
+          # port 22 taken by the runner's and keeps retrying; nothing here uses it.)
+          docker run -d --name gitlab --network host --shm-size 256m \
+            -e GITLAB_ROOT_PASSWORD="$(head -c 18 /dev/urandom | od -An -tx1 | tr -d ' \n')" \
+            -e GITLAB_OMNIBUS_CONFIG="external_url 'http://127.0.0.1:8929'; puma['worker_processes'] = 0; sidekiq['concurrency'] = 10; prometheus_monitoring['enable'] = false; gitlab_rails['usage_ping_enabled'] = false" \
+            gitlab/gitlab-ce:latest
+          docker image inspect gitlab/gitlab-ce:latest --format '{{index .RepoDigests 0}}' | tee gitlab-image.txt
+      - name: wait for GitLab's readiness endpoint
+        run: |
+          # No fixed sleep: poll /-/readiness (docs.gitlab.com/administration/monitoring/health_check) until it
+          # answers 200, and fail with the container log if it never does. A first boot takes several minutes.
+          for i in $(seq 180); do
+            if curl -sf http://127.0.0.1:8929/-/readiness >/dev/null && curl -sf -o /dev/null http://127.0.0.1:8929/users/sign_in; then
+              echo "ready after $((i * 10)) s at most"; curl -s http://127.0.0.1:8929/-/readiness; echo; exit 0
+            fi
+            sleep 10
+          done
+          docker logs gitlab 2>&1 | tail -n 80
+          exit 1
+      - name: bootstrap the root token and webhook settings
+        run: bash scripts/ci-gitlab-bootstrap.sh 2>&1 | tee gitlab-bootstrap.log
+        shell: bash
+      - name: GitLab host against the real server
+        shell: bash
+        run: |
+          set -o pipefail
+          export RIPPLE_GITLAB_RECORD_DIR="$PWD/gitlab-records"
+          go test -count=1 -v -tags gitlab -timeout 35m -run Real ./internal/platform/gitlab 2>&1 | tee gitlab-test.log
+      - name: only the rate-limit conformance test may skip
+        run: |
+          # The suite's injected 429 has no real counterpart on demand; TestRealZRateLimit drives a real one instead.
+          if grep -E -- '--- SKIP' gitlab-test.log | grep -v RateLimitHoldsBackTheHostThenRetries; then echo "unexpected skip"; exit 1; fi
+      - name: recorded facts
+        if: always()
+        run: grep -E 'FACT' gitlab-test.log || true
+      - name: GitLab log
+        if: always()
+        run: |
+          docker logs gitlab 2>&1 | tail -n 60 || true
+          docker exec gitlab sh -c 'tail -n 60 /var/log/gitlab/gitlab-rails/production.log' || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hosts-gitlab-logs
+          path: |
+            gitlab-test.log
+            gitlab-bootstrap.log
+            gitlab-image.txt
+            gitlab-records

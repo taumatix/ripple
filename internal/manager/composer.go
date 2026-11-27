@@ -24,11 +24,13 @@ import (
 //
 // Left alone besides: platform requirements (php, ext-*, lib-*), a range, several
 // constraints (`">=1.0 <2.0"`, `"^1.0 || ^2.0"`), a wildcard, a stability flag, a `dev-`
-// branch, a one-segment or four-segment version, `"~0.3"` and a string with a JSON escape in it.
+// branch, a bare-major `"1"`, a four-segment version and a string with a JSON escape in it.
 //
-// A two-segment `"^1.2"`, `"~1.2"` or `"^0.3"` is read too: it already allows every later
-// release of its line, so only a release beyond the line (a later major, or for `^0.Y` a later
-// minor) is an update, and the text becomes the new release's first two segments (`"^2.1"`).
+// A two-segment `"^1.2"`, `"~1.2"`, `"~0.3"` or `"^0.3"` is read too: it already allows every
+// later release of its line, so only a release beyond the line (a later major, or for `^0.Y` a
+// later minor) is an update, and the text becomes the new release's first two segments (`"^2.1"`).
+// A one-segment `"^1"`, `"~1"` or `"^0"` is read the same way, moves on a later major only
+// and becomes the new major alone (`"^2"`).
 type Composer struct {
 	Dir string
 }
@@ -45,11 +47,12 @@ type ComposerSpec struct {
 	Version string
 }
 
-var composerSpecRE = regexp.MustCompile(`^((?:[\^~=][ \t]*)?v?)(?:([0-9]+\.[0-9]+\.[0-9]+)|([0-9]+\.[0-9]+))$`)
+var composerSpecRE = regexp.MustCompile(`^((?:[\^~=][ \t]*)?v?)(?:([0-9]+\.[0-9]+\.[0-9]+)|([0-9]+\.[0-9]+)|([0-9]+))$`)
 
 // ParseComposerSpec reads a package's version text. A two-segment text is read for "^X.Y" and
-// for "~X.Y" with X of 1 or more only: docs/vendor/packagist/composer-versions.md gives "~1.2"
-// as ">=1.2 <2.0.0" and "^0.3" as ">=0.3.0 <0.4.0", and says nothing of "~0.3".
+// "~X.Y", a one-segment text for "^X" and "~X" only. Composer 2 (run in CI, TestRealtoolComposerConstraintMeaning)
+// locks "~0.3" to mockery 0.9.11, "^1" and "~1" to monolog 1.27.1 and "^0" to mockery 0.9.11:
+// "~0.3" is >=0.3 <1.0, and a bare major X is >=X <X+1 even for 0.
 func ParseComposerSpec(s string) (ComposerSpec, bool) {
 	m := composerSpecRE.FindStringSubmatch(s)
 	if m == nil {
@@ -58,18 +61,29 @@ func ParseComposerSpec(s string) (ComposerSpec, bool) {
 	if m[2] != "" {
 		return ComposerSpec{Prefix: m[1], Version: m[2]}, true
 	}
-	switch {
-	case strings.HasPrefix(m[1], "^"):
-	case strings.HasPrefix(m[1], "~") && !strings.HasPrefix(m[3], "0."):
-	default:
+	if !strings.HasPrefix(m[1], "^") && !strings.HasPrefix(m[1], "~") {
 		return ComposerSpec{}, false
 	}
-	return ComposerSpec{Prefix: m[1], Version: m[3]}, true
+	return ComposerSpec{Prefix: m[1], Version: m[3] + m[4]}, true
 }
 
 // TwoSegment reports a "^X.Y" or "~X.Y" constraint, which already allows every later release
 // of its line, so only a release beyond the line is an update.
 func (s ComposerSpec) TwoSegment() bool { return strings.Count(s.Version, ".") == 1 }
+
+// Partial reports a constraint of fewer than three segments ("^1.2", "~0.3", "^1"): it already
+// allows every later release inside its major (inside its minor for "^0.Y"), so only a release
+// beyond that is an update.
+func (s ComposerSpec) Partial() bool { return strings.Count(s.Version, ".") < 2 }
+
+// Floor is the version padded to three segments ("1" is "1.0.0"), the release the constraint starts at.
+func (s ComposerSpec) Floor() string {
+	v := s.Version
+	for strings.Count(v, ".") < 2 {
+		v += ".0"
+	}
+	return v
+}
 
 func atoiParts(v string) (major, minor int) {
 	a, rest, _ := strings.Cut(v, ".")
@@ -87,13 +101,16 @@ func (s ComposerSpec) Moves(release string) bool {
 	if rm != cm {
 		return rm > cm
 	}
-	return cm == 0 && strings.Contains(s.Prefix, "^") && rn > cn
+	return s.TwoSegment() && cm == 0 && strings.Contains(s.Prefix, "^") && rn > cn
 }
 
-// twoSegmentTarget is the text a two-segment constraint takes to follow release nv: its first
-// two segments, and false when the constraint already allows nv or nv is older.
-func (s ComposerSpec) twoSegmentTarget(nv string) (string, bool) {
+// partialTarget is the text a partial constraint takes to follow release nv: its first two
+// segments (the major alone for "^1"), and false when the constraint already allows nv or nv is older.
+func (s ComposerSpec) partialTarget(nv string) (string, bool) {
 	major, rest, _ := strings.Cut(nv, ".")
+	if !s.TwoSegment() {
+		return major, s.Moves(nv)
+	}
 	minor, _, _ := strings.Cut(rest, ".")
 	return major + "." + minor, s.Moves(nv)
 }
@@ -221,13 +238,13 @@ func (c Composer) Apply(content []byte, dep model.Dependency, newPackage, newVer
 		return nil, fmt.Errorf("%w: %q is not a version ripple moves", ErrUnsupported, dep.Version)
 	}
 	nv := strings.TrimPrefix(newVersion, "v")
-	if r, ok := ParseComposerSpec(nv); !ok || r.TwoSegment() {
+	if r, ok := ParseComposerSpec(nv); !ok || r.Partial() {
 		return nil, fmt.Errorf("%w: %q is not a release version", ErrUnsupported, newVersion)
 	}
 	text := nv
-	if cur.TwoSegment() {
+	if cur.Partial() {
 		var later bool
-		if text, later = cur.twoSegmentTarget(nv); !later {
+		if text, later = cur.partialTarget(nv); !later {
 			return nil, fmt.Errorf("%w: %q already allows %s", ErrUnsupported, dep.Version, nv)
 		}
 	}

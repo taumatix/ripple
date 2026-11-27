@@ -32,6 +32,8 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
 
 - Bundler (opt-in `ecosystem: bundler` only; a `Gemfile` outside it is never read): a one-segment `gem "x", "~> 1"` is now read. Real `bundle lock` resolves it inside 1.x (same as `~> 1.0`), so only a release of a later major moves it, to that release's major alone (`~> 2`). Verified by `TestRealtoolBundlerOneSegment` against real bundler (CI `realtool / bundler`) and by the fake-host e2e test; `~> 0` is read the same way and is covered by the unit and engine tests only.
 
+- Composer (opt-in `ecosystem: composer` only; a `composer.json` outside it is never read): `"~0.3"` and the one-segment `"^1"`, `"~1"` and `"^0"` are now read. Real Composer 2 locks `~0.3` to mockery 0.9.11 and `^1`/`~1` to monolog 1.27.1, so only a release of a later major moves them, written as its first two segments (`~1.2`) or its major alone (`^2`). Verified by `TestRealtoolComposerConstraintMeaning` against real composer (CI `realtool / composer`) and by the fake-host e2e test.
+
 ## [0.4.0] - 2026-11-25
 
 Additive release: no public API was removed or changed. Opt-in ecosystems: Helm, Bundler, Composer, NuGet, Maven and Terraform

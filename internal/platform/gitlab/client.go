@@ -359,7 +359,7 @@ func (c *Client) CreatePR(ctx context.Context, repo model.Repo, s platform.PRSpe
 		}
 		// A branch pushed a moment ago is not yet visible to this call (a real GitLab CE 400s with
 		// {"source_branch":["does not exist"]} for 1-2 s); the branch is there, so ask again.
-		if status != http.StatusBadRequest || !strings.Contains(err.Error(), "does not exist") || attempt >= branchVisibleRetries {
+		if status != http.StatusBadRequest || !strings.Contains(err.Error(), `"source_branch":["does not exist"]`) || attempt >= branchVisibleRetries {
 			return platform.PR{}, err
 		}
 		if err := c.sleep(ctx, branchVisibleWait); err != nil {

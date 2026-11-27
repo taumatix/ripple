@@ -29,7 +29,20 @@ Sources are vendored in `docs/vendor/` (see its README).
 
 ## Archive
 
-ripple pauses a repo on archive and resumes it on unarchive (no scan, pending jobs kept). Gitea's and Forgejo's webhook documentation list no archive event (checked 2026-11-23 against docs/vendor/gitea/webhooks.md and docs/vendor/forgejo/webhooks.md, both vendored), so ripple reads the `archived` flag of each repository in `GET /user/repos` on every discovery: a repo whose flag flips is paused or resumed, not removed or added. It is seen within one discovery interval. Not verified against a real Gitea or Forgejo; only the fake has run.
+ripple pauses a repo on archive and resumes it on unarchive (no scan, pending jobs kept). Gitea's and Forgejo's webhook documentation list no archive event (checked 2026-11-23 against docs/vendor/gitea/webhooks.md and docs/vendor/forgejo/webhooks.md, both vendored), so ripple reads the `archived` flag of each repository in `GET /user/repos` on every discovery: a repo whose flag flips is paused or resumed, not removed or added. It is seen within one discovery interval. Run for real on Gitea 1.27.3, Forgejo 17.0.2 and Forgejo 7.0.16 (`ArchivePausesAndUnarchiveResumes` in `hosts-gitea.yml`, 2026-11-27): archiving through `PATCH /repos/{o}/{r}` with `archived: true` pauses the repository at the next discovery and unarchiving resumes it, and the pending job then opens its pull request.
+
+## Head polling
+
+A push webhook can be lost (ripple down, the hook deleted, a created repository whose first push had no push hook).
+`Client.ListRepoHeads` (`app.HeadLister`) reads the commit each repository's default branch points at, so the next
+discovery re-scans a repository whose head moved. The repository listing carries no commit, so it is one
+`GET /repos/{o}/{r}/branches/{default}` per repository, reading `commit.id` (vendored swagger excerpts
+`docs/vendor/gitea/swagger-branch.json` and `docs/vendor/forgejo/swagger-branch.json`, fetched 2026-11-27). A 429 ends
+the round with the rate-limit error and the app keeps what it remembered; another failure leaves that repository out of the
+round. Run for real (`TestRealListRepoHeads`): the reported head equals the commit git pushed, and a second push moves
+it. Cost is one request per repository per discovery, which grows with the number of repositories ripple can see: a
+batch read does not exist in the API. Not verified: the time it takes at hundreds of repositories, and what a branch
+protected or renamed after the listing answers (a failure leaves the repository out for the round).
 
 ## Superseded pull requests
 
@@ -72,7 +85,7 @@ demand. The recorded answers are in `docs/vendor/gitea/real-answers.md`; the tes
   ripple answers it 202 and scans the empty clone, which fails cleanly (`git ls-tree: Not a valid object name HEAD`), falls
   back to a full checkout and records 0 dependencies. The first push then arrives as a `push` event and the repository is
   registered once, with its dependencies, and gets one PR for a release. Without a push webhook nothing rescans it
-  until head polling exists for Gitea (ROADMAP 247).
+  until the head poll sees the moved head (see "Head polling").
 - A fresh pull request already has one `pull_push` (see above); the first version closed nothing.
 - A label name the repository lacks is dropped with `200 []`. The client now creates it (`POST /repos/{o}/{r}/labels`
   with a name and the colour `#0075ca`) and applies it, so `labels:` works on a fresh repository: the real tests find
@@ -95,4 +108,5 @@ demand. The recorded answers are in `docs/vendor/gitea/real-answers.md`; the tes
 Not run for real: Forgejo before 7, Gitea before 1.27, the Gitea SSH and PostgreSQL/MySQL configurations, a person's
 label or comment on a pull request counted as a touch, `merge_when_checks_succeed` actually merging once checks pass
 (only the scheduling was recorded), the 429 headers a real proxy would send, the `repository` webhook's `deleted`
-and `renamed` actions, and archive (`archived` in `/user/repos` was not flipped on a real instance).
+and `renamed` actions, and a push whose head poll (not its webhook) rescans a repository, end to end on a real instance
+(only the head read itself and the app's comparison against the fake were run).

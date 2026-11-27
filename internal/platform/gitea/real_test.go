@@ -126,6 +126,39 @@ func (f *realFixture) branchPR(t *testing.T, short, branch string) int {
 	return pr.Number
 }
 
+// TestRealListRepoHeads: ripple's own ListRepoHeads against the instance. The commit it reports for
+// the default branch must be the one git pushed, and a second push must move it (ROADMAP 247).
+func TestRealListRepoHeads(t *testing.T) {
+	in := realInstance(t)
+	f := scene(t, in)
+	path := f.Path("facts")
+	c := &gitea.Client{APIBase: in.url, GitBase: in.url, Flavour: in.flavour,
+		Credentials: platform.StaticCredential{Username: "ripple", Secret: f.tok}}
+	dir := f.dirs[path]
+	want := strings.TrimSpace(f.git(t, dir, "rev-parse", "HEAD"))
+	heads, err := c.ListRepoHeads(context.Background())
+	if err != nil {
+		t.Fatalf("ListRepoHeads: %v", err)
+	}
+	t.Logf("FACT head of %s read from branches/main: %q, pushed %q", path, heads[path], want)
+	if heads[path] != want {
+		t.Fatalf("head = %q, want the pushed %q", heads[path], want)
+	}
+
+	writeFiles(t, dir, map[string]string{"more.txt": "more\n"})
+	f.git(t, dir, "add", "-A")
+	f.git(t, dir, "commit", "-q", "-m", "second")
+	f.git(t, dir, "push", "-q", in.url+"/"+path+".git", "main")
+	want2 := strings.TrimSpace(f.git(t, dir, "rev-parse", "HEAD"))
+	heads, err = c.ListRepoHeads(context.Background())
+	if err != nil {
+		t.Fatalf("ListRepoHeads after the second push: %v", err)
+	}
+	if want2 == want || heads[path] != want2 {
+		t.Fatalf("head after the second push = %q, want %q (first was %q)", heads[path], want2, want)
+	}
+}
+
 // TestRealVersionAndFlavour: GET /version and whether DetectFlavour reads the flavour the job
 // started from it (ROADMAP 12, "Forgejo before 7 cannot be detected").
 func TestRealVersionAndFlavour(t *testing.T) {

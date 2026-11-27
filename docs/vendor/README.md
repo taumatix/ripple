@@ -10,6 +10,8 @@ Fetched 2026-11-23 and read before `internal/platform/gitea` was written. Each f
 | `gitea/swagger-excerpt.json` | gitea.com/swagger.v1.json | merge body (`do`, `merge_when_checks_succeed`), PR, repo, labels |
 | `forgejo/webhooks.md` | forgejo.org/docs/latest/user/webhooks | `X-Forgejo-*` headers, `X-Forgejo-Signature` in the PHP example |
 | `forgejo/numbering-scheme.md` | forgejo.org/docs/latest/user/api/versions | `X.Y.Z+gitea-A.B.C`; `+gitea-` marks Forgejo |
+| `gitea/swagger-branch.json` | gitea.com/swagger.v1.json | `GET /repos/{o}/{r}/branches/{b}`, `commit.id` (head polling) |
+| `forgejo/swagger-branch.json` | codeberg.org/swagger.v1.json | the same call on Forgejo |
 | `forgejo/swagger-excerpt.json` | codeberg.org/swagger.v1.json | merge body key is `Do` (capital) |
 | `*/config-excerpt.txt` | config cheat sheets | `MAX_RESPONSE_ITEMS` 50, default page 30, `WORK_IN_PROGRESS_PREFIXES` |
 

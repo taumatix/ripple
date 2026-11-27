@@ -601,6 +601,47 @@ func (c *Client) ListArchivedRepos(ctx context.Context) ([]model.Repo, error) {
 	return c.listRepos(ctx, true)
 }
 
+// ListRepoHeads is the commit each listed repository's default branch points at, for the app's
+// head comparison (app.HeadLister), so a push whose webhook never arrived is caught by the next
+// discovery. The listing carries no commit, so it is one `GET /repos/{o}/{r}/branches/{default}`
+// per repository and its `commit.id` (docs/vendor/gitea/swagger-branch.json,
+// docs/vendor/forgejo/swagger-branch.json), one at a time. A 429 ends the listing with the
+// rate-limit error (the app keeps what it remembered); another failure leaves that repository out
+// for the round, and a repository with no default branch is left out.
+func (c *Client) ListRepoHeads(ctx context.Context) (map[string]string, error) {
+	repos, err := c.ListRepos(ctx)
+	if err != nil {
+		return nil, err
+	}
+	heads := map[string]string{}
+	for _, r := range repos {
+		o, n, err := checkRepo(r)
+		if err != nil || r.DefaultBranch == "" {
+			continue
+		}
+		var b struct {
+			Commit struct {
+				ID string `json:"id"`
+			} `json:"commit"`
+		}
+		path := "/repos/" + url.PathEscape(o) + "/" + url.PathEscape(n) + "/branches/" + url.PathEscape(r.DefaultBranch)
+		if _, err := c.do(ctx, r, http.MethodGet, c.api(path), nil, &b); err != nil {
+			var rl *platform.RateLimitError
+			if errors.As(err, &rl) {
+				return nil, err
+			}
+			if c.Log != nil {
+				c.Log.Info("gitea head unreadable", "repo", r.FullName, "err", err)
+			}
+			continue
+		}
+		if b.Commit.ID != "" {
+			heads[r.FullName] = b.Commit.ID
+		}
+	}
+	return heads, nil
+}
+
 func (c *Client) listRepos(ctx context.Context, archived bool) ([]model.Repo, error) {
 	var out, empty []model.Repo
 	err := c.paged(ctx, model.Repo{}, "/user/repos", func(raw json.RawMessage) (int, error) {

@@ -319,14 +319,72 @@ func (c *Client) CreatePR(ctx context.Context, repo model.Repo, s platform.PRSpe
 	pr := p.pr()
 	pr.Head = s.Head
 	if len(s.Labels) > 0 {
-		// Label names are accepted here (IssueLabelsOption); a name the repository
-		// lacks fails, which is only logged.
-		if _, err := c.do(ctx, repo, http.MethodPost, c.api(fmt.Sprintf("/repos/%s/%s/issues/%d/labels", o, n, pr.Number)),
-			map[string]any{"labels": s.Labels}, nil); err != nil && c.Log != nil {
-			c.Log.Warn("labelling pull request failed", "repo", repo.FullName, "pr", pr.Number, "err", err)
+		// Label names are accepted here (IssueLabelsOption). A name the repository lacks
+		// is dropped silently: the answer is 200 with the labels now on the issue
+		// (Gitea 1.27.3, Forgejo 17.0.2), so the answer is read and the gap logged.
+		// Forgejo 7.0.16 (Gitea 1.21) takes ids only and answers 422 to names, so a 422
+		// is retried with the ids found in GET .../labels.
+		applied, err := c.postLabels(ctx, repo, o, n, pr.Number, s.Labels)
+		var se *statusError
+		if errors.As(err, &se) && se.status == http.StatusUnprocessableEntity {
+			applied, err = c.postLabelIDs(ctx, repo, o, n, pr.Number, s.Labels)
+		}
+		if c.Log != nil {
+			if err != nil {
+				c.Log.Warn("labelling pull request failed", "repo", repo.FullName, "pr", pr.Number, "err", err)
+			} else if missing := notIn(s.Labels, applied); len(missing) > 0 {
+				c.Log.Warn("labels not applied: the repository has no label of that name", "repo", repo.FullName, "pr", pr.Number, "labels", missing)
+			}
 		}
 	}
 	return pr, nil
+}
+
+type labelJSON struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
+func (c *Client) postLabels(ctx context.Context, repo model.Repo, o, n string, pr int, labels any) ([]labelJSON, error) {
+	var applied []labelJSON
+	_, err := c.do(ctx, repo, http.MethodPost, c.api(fmt.Sprintf("/repos/%s/%s/issues/%d/labels", o, n, pr)),
+		map[string]any{"labels": labels}, &applied)
+	return applied, err
+}
+
+// postLabelIDs resolves names to ids (the first 50 labels of the repository) and posts the ids.
+func (c *Client) postLabelIDs(ctx context.Context, repo model.Repo, o, n string, pr int, names []string) ([]labelJSON, error) {
+	var all []labelJSON
+	if _, err := c.do(ctx, repo, http.MethodGet, c.api(fmt.Sprintf("/repos/%s/%s/labels?limit=50", o, n)), nil, &all); err != nil {
+		return nil, err
+	}
+	var ids []int64
+	for _, l := range all {
+		for _, name := range names {
+			if l.Name == name {
+				ids = append(ids, l.ID)
+			}
+		}
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	return c.postLabels(ctx, repo, o, n, pr, ids)
+}
+
+// notIn returns the names that no applied label carries.
+func notIn(names []string, applied []labelJSON) []string {
+	have := map[string]bool{}
+	for _, l := range applied {
+		have[l.Name] = true
+	}
+	var missing []string
+	for _, name := range names {
+		if !have[name] {
+			missing = append(missing, name)
+		}
+	}
+	return missing
 }
 
 // RequestAutoMerge schedules a squash merge for when the checks succeed
@@ -360,9 +418,10 @@ var ownTimeline = map[string]bool{"label": true, "pull_scheduled_merge": true, "
 // CloseUntouchedPR closes pr and comments on it unless a person touched it. Touched
 // means: the head branch is not in this repository; the pull request has other than
 // exactly one commit, or that commit's author or committer is not ripple's identity;
-// it has a review, an issue comment, or a timeline entry other than ownTimeline (which
-// is how Gitea and Forgejo report a rename, "change_title", and a push to the branch
-// after it opened, "pull_push", force-pushes included); or, on Gitea, a non-zero
+// it has a review, an issue comment, a timeline entry other than ownTimeline (which is
+// how Gitea and Forgejo report a rename, "change_title"), or more than one "pull_push"
+// (the first records the push that opened it; a later push or force-push adds another,
+// which the real instances confirm only for the first); or, on Gitea, a non-zero
 // content_version, which an edited description raises (Forgejo reports no such field,
 // so a description edit goes unnoticed there). Every read must succeed and nothing is
 // closed on a failed one. The pull request is closed first and the comment is best
@@ -430,6 +489,7 @@ func (c *Client) CloseUntouchedPR(ctx context.Context, repo model.Repo, pr platf
 		}
 	}
 	// swagger issueGetCommentsAndTimeline: TimelineComment.type.
+	pushes := 0
 	if err := c.paged(ctx, repo, issue+"/timeline", func(raw json.RawMessage) (int, error) {
 		var items []struct {
 			Type string `json:"type"`
@@ -438,13 +498,19 @@ func (c *Client) CloseUntouchedPR(ctx context.Context, repo model.Repo, pr platf
 			return 0, err
 		}
 		for _, it := range items {
+			if it.Type == "pull_push" {
+				// Opening the pull request records the push that created its head, so one
+				// is ripple's own; a second is a later push or a force-push (hosts-gitea.yml).
+				pushes++
+				continue
+			}
 			touched = touched || !ownTimeline[it.Type]
 		}
 		return len(items), nil
 	}); err != nil {
 		return false, err
 	}
-	if touched {
+	if touched || pushes > 1 {
 		return false, nil
 	}
 	// swagger repoEditPullRequest: state closed.

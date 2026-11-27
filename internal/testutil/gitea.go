@@ -62,6 +62,35 @@ type Gitea struct {
 	// events are timeline entries beyond the ones derived from a PR's fields, by "repo#n".
 	events   map[string][]string
 	requests []string
+	// known is the labels each repository has, "repo\x00name" (AddLabel).
+	known map[string]int
+	// LabelIDsOnly makes labelling by name answer 422 and accept only label ids, as Forgejo
+	// 7.0.16 does (Gitea 1.27.3 and Forgejo 17.0.2 accept names).
+	LabelIDsOnly bool
+}
+
+// AddLabel gives the repository a label of that name; labelling a pull request by a name
+// the repository lacks applies nothing, as on a real instance.
+func (g *Gitea) AddLabel(repo, name string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.known == nil {
+		g.known = map[string]int{}
+	}
+	g.known[repo+"\x00"+name] = len(g.known) + 1
+}
+
+// repoLabels answers GET /repos/{o}/{r}/labels.
+func (g *Gitea) repoLabels(w http.ResponseWriter, repo string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	out := []map[string]any{}
+	for k, id := range g.known {
+		if strings.HasPrefix(k, repo+"\x00") {
+			out = append(out, map[string]any{"id": id, "name": strings.TrimPrefix(k, repo+"\x00")})
+		}
+	}
+	_ = json.NewEncoder(w).Encode(out)
 }
 
 func NewGitea(t *testing.T, forgejo bool) *Gitea {
@@ -313,6 +342,8 @@ func (g *Gitea) handleRepo(w http.ResponseWriter, r *http.Request, parts []strin
 		g.merge(w, r, repo, parts[3])
 	case parts[2] == "issues" && len(parts) == 5 && parts[4] == "labels" && r.Method == http.MethodPost:
 		g.labels(w, r, repo, parts[3])
+	case parts[2] == "labels" && len(parts) == 3 && r.Method == http.MethodGet:
+		g.repoLabels(w, repo)
 	default:
 		g.fail(w, http.StatusNotFound, "unknown route %s %s", r.Method, r.URL.Path)
 	}
@@ -403,7 +434,7 @@ func (g *Gitea) merge(w http.ResponseWriter, r *http.Request, repo, num string) 
 }
 
 func (g *Gitea) labels(w http.ResponseWriter, r *http.Request, repo, num string) {
-	var in struct{ Labels []string }
+	var in struct{ Labels []any }
 	n, err := strconv.Atoi(num)
 	if err != nil || json.NewDecoder(r.Body).Decode(&in) != nil {
 		g.fail(w, http.StatusUnprocessableEntity, "bad labels request")
@@ -413,8 +444,31 @@ func (g *Gitea) labels(w http.ResponseWriter, r *http.Request, repo, num string)
 	defer g.mu.Unlock()
 	for _, p := range g.prs[repo] {
 		if p.Number == n {
-			p.Labels = append(p.Labels, in.Labels...)
-			_ = json.NewEncoder(w).Encode([]any{})
+			// A name the repository has no label for is dropped, and the answer lists
+			// only the labels now on the issue: 200 with `[]` when none matched (Gitea
+			// 1.27.3 and Forgejo 17.0.2, hosts-gitea.yml TestRealLabelByName).
+			applied := []map[string]any{}
+			for _, l := range in.Labels {
+				name, byName := l.(string)
+				if byName && g.LabelIDsOnly {
+					// Forgejo 7.0.16 (Gitea 1.21): the labels are int64 ids.
+					g.fail(w, http.StatusUnprocessableEntity, "[]: json: cannot unmarshal string into Go struct field IssueLabelsOption.Labels of type int64")
+					return
+				}
+				if !byName {
+					id, _ := l.(float64)
+					for k, v := range g.known {
+						if v == int(id) && strings.HasPrefix(k, repo+"\x00") {
+							name = strings.TrimPrefix(k, repo+"\x00")
+						}
+					}
+				}
+				if name != "" && g.known[repo+"\x00"+name] != 0 {
+					p.Labels = append(p.Labels, name)
+					applied = append(applied, map[string]any{"name": name})
+				}
+			}
+			_ = json.NewEncoder(w).Encode(applied)
 			return
 		}
 	}
@@ -572,7 +626,10 @@ func (g *Gitea) timeline(w http.ResponseWriter, r *http.Request, repo, num strin
 		g.fail(w, http.StatusNotFound, "no issue %s", num)
 		return
 	}
-	var types []string
+	// Opening a pull request records the push that created its head: the first entry of a
+	// fresh one on Gitea 1.27.3 and Forgejo 17.0.2 is a pull_push (hosts-gitea.yml,
+	// docs/platform-gitea.md "Real instances"). A person's later push adds another.
+	types := []string{"pull_push"}
 	for range p.Labels {
 		types = append(types, "label")
 	}

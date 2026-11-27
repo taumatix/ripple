@@ -1,0 +1,96 @@
+name: hosts-gitea
+# ripple's Gitea/Forgejo host against REAL instances (public images, started with `docker run`, no secrets):
+# the platformtest conformance suite plus the recorded-fact tests in internal/platform/gitea/real_test.go
+# (build tag giteareal). What each leg proves and does not is in docs/platform-gitea.md, "Real instances".
+# Typical wall time per leg: a few minutes (image pull and first start dominate); stated in the PR that added it.
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/hosts-gitea.yml'
+      - 'internal/platform/**'
+      - 'internal/testutil/gitea.go'
+      - 'internal/app/host_gitea.go'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hosts-gitea.yml'
+      - 'internal/platform/**'
+  workflow_dispatch:
+  schedule:
+    # Weekly, so a new upstream release that changes an answer shows up without a code change.
+    - cron: '17 4 * * 1'
+permissions:
+  contents: read
+jobs:
+  gitea-forgejo:
+    name: ${{ matrix.flavour }} ${{ matrix.tag }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {flavour: gitea,   image: 'docker.io/gitea/gitea',                 tag: '1.27', cli: gitea,   prefix: GITEA}
+          - {flavour: forgejo, image: 'data.forgejo.org/forgejo/forgejo',      tag: '17',   cli: forgejo, prefix: FORGEJO}
+          # Forgejo 7 is the oldest release DetectFlavour claims (the "+gitea-" version suffix starts there).
+          - {flavour: forgejo, image: 'data.forgejo.org/forgejo/forgejo',      tag: '7',    cli: forgejo, prefix: FORGEJO}
+    env:
+      RIPPLE_REAL_GITEA_URL: http://127.0.0.1:3000
+      RIPPLE_REAL_GITEA_ADMIN_USER: rippleadmin
+      RIPPLE_REAL_GITEA_FLAVOUR: ${{ matrix.flavour }}
+      RIPPLE_REAL_RECORD_DIR: ${{ github.workspace }}/real-record
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: start ${{ matrix.flavour }} ${{ matrix.tag }}
+        run: |
+          set -euo pipefail
+          # A throwaway password for a throwaway instance; masked so it never reaches a log.
+          pw="pw-$(openssl rand -hex 12)"
+          echo "::add-mask::$pw"
+          echo "RIPPLE_REAL_GITEA_ADMIN_PASSWORD=$pw" >> "$GITHUB_ENV"
+          p=${{ matrix.prefix }}
+          # ALLOWED_HOST_LIST=*: webhooks go to this runner (a private address), which the instance refuses by default.
+          docker run -d --name instance -p 127.0.0.1:3000:3000 \
+            --add-host host.docker.internal:host-gateway \
+            -e "${p}__security__INSTALL_LOCK=true" \
+            -e "${p}__server__ROOT_URL=http://127.0.0.1:3000/" \
+            -e "${p}__server__DISABLE_SSH=true" \
+            -e "${p}__webhook__ALLOWED_HOST_LIST=*" \
+            -e "${p}__security__ALLOWED_HOST_LIST=*" \
+            -e "${p}__database__DB_TYPE=sqlite3" \
+            -e "${p}__service__DISABLE_REGISTRATION=true" \
+            -e "${p}__log__LEVEL=Info" \
+            "${{ matrix.image }}:${{ matrix.tag }}"
+          for i in $(seq 120); do
+            curl -sf http://127.0.0.1:3000/api/v1/version && break
+            sleep 2
+          done
+          echo
+          curl -sf http://127.0.0.1:3000/api/v1/version | tee instance-version.json
+          docker exec -u git instance ${{ matrix.cli }} admin user create --admin \
+            --username "$RIPPLE_REAL_GITEA_ADMIN_USER" --password "$pw" \
+            --email admin@example.invalid --must-change-password=false
+      - name: conformance suite and recorded facts against the real instance
+        run: |
+          set -o pipefail
+          go test -tags giteareal -count=1 -v -timeout 30m ./internal/platform/gitea -run 'Real' 2>&1 | tee real-test.log
+      - name: facts the run recorded
+        if: always()
+        run: grep -E 'FACT|--- (FAIL|PASS|SKIP)' real-test.log || true
+      - name: no real test was skipped
+        run: |
+          if grep -E -- '--- SKIP' real-test.log; then echo "a real-instance test was skipped"; exit 1; fi
+      - name: instance log
+        if: always()
+        run: docker logs --tail 150 instance 2>&1 | sed -E 's/(token|password)=[^ &]+/\1=<redacted>/g' || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hosts-gitea-${{ matrix.flavour }}-${{ matrix.tag }}
+          path: |
+            real-test.log
+            instance-version.json
+            real-record

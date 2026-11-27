@@ -17,12 +17,10 @@ auth model, rate limits); the notes below are what I expect, **unverified** unti
    Residuals: discover repos by system-hook `project_create`/`project_destroy` instead of the periodic
    membership listing (needs admin and is not in the vendored docs); rate-limit headers other than
    `Retry-After`/`RateLimit-Reset`; `merge_request` events to close ripple MRs; GitLab labels with commas.
-12. **Gitea/Forgejo against real instances.** The host shipped from vendored docs and a fake only
-    (docs/platform-gitea.md "Unverified"). Run the conformance flow against a real Gitea and a real Forgejo
-    (no containers on the agent host: use codeberg.org or a CI service container), recording the real rate-limit
-    answer, the scheduled-merge status code, whether Forgejo sends `X-Hub-Signature-256`, labels by name on create,
-    and the git basic-auth user. Also: Forgejo before 7 cannot be detected (set `RIPPLE_GITEA_FLAVOUR`), and
-    `repository` created/deleted webhooks are parsed but unproven.
+12. ~~**Gitea/Forgejo against real instances.**~~ Shipped: `hosts-gitea.yml` runs the conformance suite and `TestReal*`
+    against Gitea 1.27.3, Forgejo 17.0.2 and Forgejo 7.0.16 ([docs/platform-gitea.md](docs/platform-gitea.md) "Real
+    instances", recorded answers in `docs/vendor/gitea/real-answers.md`). Left: Forgejo before 7 still cannot be
+    detected (set `RIPPLE_GITEA_FLAVOUR`); the rest is ROADMAP 280 to 282.
 13. **Bitbucket Cloud against a real workspace.** The host shipped from vendored docs and a fake only
     (docs/platform-bitbucket.md "Unverified"). Record the 429 headers, the 202 of a queued merge, `x-token-auth`
     with an API token, and merge-commit diffstats. Also: auto-merge exists only through merge queues, so a
@@ -454,3 +452,6 @@ Everything else:
 261. **NuGet: `Update=` in another file than its `Include`.** Only an Update after its Include in the same file is read. An Include in `Directory.Build.props` or an imported `.props` and an Update in the project is real MSBuild usage; reading it needs the import graph (`Import`, `Directory.Build.props` lookup), which ripple does not evaluate. Ask `dotnet` which file wins with a two-file fixture before deciding how far to follow imports.
 262. **NuGet: `Update=` of a `PackageVersion`, and wildcard Updates.** `Directory.Packages.props` central package management uses `PackageVersion Include`, and the vendored pages show `Update=` there once. Not run through `dotnet` yet, so `PackageVersion Update=`, `Update="A;B"` and `Update="A*"` stay unread. Add a realtool case for each, then read what it confirms.
 263. **NuGet: `VersionOverride`.** `<PackageReference Include="X" VersionOverride="2.0.0" />` overrides a central `PackageVersion`. It makes the tag unread today. Ask `dotnet` with a central-package-management fixture, then edit the override or the central version.
+280. **Gitea/Forgejo: a repository empty at its first discovery is never registered.** Real instances report `empty=true` for up to about 2 s after the first push (`docs/vendor/gitea/real-answers.md`), discovery skips empty repositories, and the `repository` created webhook arrives before the push. Nothing re-runs discovery for such a repository, so it waits for the next periodic discovery. The conformance fixture now waits for `empty=false` before it registers, which hides this from the suite. Decide: re-discover once shortly after a `repository` created event, or treat a push event for an unknown repository as a discovery trigger. Prove it with the real-instance job by removing the fixture's wait for one test.
+281. **Gitea/Forgejo: create a missing label, and prove a deletion is noticed.** A label the repository lacks is dropped (`200 []`) and only logged; creating it (`POST /repos/{o}/{r}/labels`, needs write access) would make `labels:` work on a fresh repository. Separately, no instance announces a deleted repository (the system webhook sends `created` only), so removal relies on discovery: add a real-instance test that deletes a repository and waits for ripple to drop it.
+282. **Gitea/Forgejo: what the real job does not cover.** Forgejo before 7 and Gitea before 1.27 (older Gitea images may differ in the auto-merge key and timeline), PostgreSQL and MySQL back ends, the 429 a real throttling proxy sends (no instance throttles; only the injected one is tested), a person's label, comment or rename on a pull request being read as a touch, a scheduled merge actually merging when checks pass, and archive flipping in `/user/repos`. Add legs or tests as each is wanted; `hosts-gitea.yml`'s matrix is the place.

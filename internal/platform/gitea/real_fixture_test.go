@@ -300,7 +300,7 @@ func newCountingProxy(t *testing.T, in *instance) *countingProxy {
 	rp := httputil.NewSingleHostReverseProxy(target)
 	c := &countingProxy{n: map[string]int{}, seen: map[string][]string{}, t: t}
 	c.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if m := repoPath.FindStringSubmatch(r.URL.Path); m != nil {
+		if m := repoPath.FindStringSubmatch(r.URL.Path); m != nil && !isHeadRead(r) {
 			c.mu.Lock()
 			c.n[strings.ToLower(m[1])]++
 			c.seen[strings.ToLower(m[1])] = append(c.seen[strings.ToLower(m[1])], r.Method+" "+strings.TrimPrefix(r.URL.Path, "/api/v1"))
@@ -319,6 +319,12 @@ func newCountingProxy(t *testing.T, in *instance) *countingProxy {
 	}))
 	t.Cleanup(c.srv.Close)
 	return c
+}
+
+// isHeadRead is the per-repository branch read of head polling, which discovery makes on every
+// round and which is not scan cost (the fake gitea does not count it either).
+func isHeadRead(r *http.Request) bool {
+	return r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/branches/")
 }
 
 func (c *countingProxy) calls(path string) int {

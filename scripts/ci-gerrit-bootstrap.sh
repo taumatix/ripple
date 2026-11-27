@@ -6,14 +6,15 @@
 # writes to $GITHUB_ENV belongs to a container that is gone when the job ends.
 #
 #   GERRIT_URL      server root, default http://127.0.0.1:8080
-#   GERRIT_USER     account to create, default ripple-admin
+#   GERRIT_USER     username of account 1000000, which the image ships (the dev login page lists it as
+#                   "admin"); it is in Administrators
 #   RELAY_URL       URL the webhooks plugin posts every project's events to (docs/platform-gerrit.md)
 #   HOOK_TOKEN      the ?token= the plugin appends, the secret ripple's receiver checks
 #   AUTHOR_EMAIL    ripple's commit email, registered on the account so Gerrit accepts its commits
 set -euo pipefail
 
 base=${GERRIT_URL:-http://127.0.0.1:8080}
-user=${GERRIT_USER:-ripple-admin}
+user=${GERRIT_USER:-admin}
 relay=${RELAY_URL:-http://127.0.0.1:18999/hook}
 token=${HOOK_TOKEN:-ci-hook-secret}
 email=${AUTHOR_EMAIL:-ripple@users.noreply.invalid}
@@ -26,24 +27,9 @@ strip() { sed -e "1{/^)]}'/d}"; }
 echo "--- version"
 curl -fsS "$base/config/server/version" | strip
 
-echo "--- become a new account ($user); the first account is an administrator"
-curl -sS -c "$jar" -o "$work/login.out" -w 'login: %{http_code}\n' -L "$base/login/%23%2F?user_name=$user" || true
-if ! grep -q GerritAccount "$jar"; then
-  echo "GET login set no cookie; trying POST"
-  curl -sS -c "$jar" -o "$work/login.out" -w 'login: %{http_code}\n' -L -d "user_name=$user" "$base/login/%23%2F" || true
-fi
-if ! grep -q GerritAccount "$jar"; then
-  echo "unknown user_name answers: $(head -c 300 "$work/login.out")"
-  echo "--- the dev login page"
-  curl -sS "$base/login/%23%2F" | head -c 4000
-  echo
-  echo "--- probe: create via POST create_account"
-  curl -sS -c "$jar" -o "$work/login.out" -w 'login: %{http_code}\n' -L -d "user_name=$user&action=create_account" "$base/login/%23%2F" || true
-  head -c 300 "$work/login.out"; echo
-  curl -sS -c "$jar" -o "$work/login.out" -w 'login: %{http_code}\n' -L "$base/login/%23%2F?action=create_account&user_name=$user" || true
-  head -c 300 "$work/login.out"; echo
-fi
-grep -q GerritAccount "$jar" || { echo "no GerritAccount cookie"; exit 1; }
+echo "--- become the image's own administrator (account 1000000, offered by the dev login page)"
+curl -sS -c "$jar" -o "$work/login.out" -w 'login: %{http_code}\n' -L "$base/login/%23%2F?account_id=1000000" || true
+grep -q GerritAccount "$jar" || { echo "no GerritAccount cookie: $(head -c 300 "$work/login.out")"; exit 1; }
 xsrf=$(awk '$6=="XSRF_TOKEN"{print $7}' "$jar")
 
 echo "--- mint an HTTP password"

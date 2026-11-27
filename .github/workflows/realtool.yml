@@ -117,7 +117,7 @@ jobs:
           path: ~/.nuget/packages
           key: realtool-nuget-${{ runner.os }}-${{ hashFiles('internal/manager/testdata/realtool/nuget/realtool.csproj') }}
           restore-keys: realtool-nuget-${{ runner.os }}-
-      - run: scripts/realtool.sh TestRealtoolNuget
+      - run: scripts/realtool.sh TestRealtoolNuget TestRealtoolNugetItemForms TestRealtoolNugetItemFormsEdit
   maven:
     runs-on: ubuntu-latest
     timeout-minutes: 30

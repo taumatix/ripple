@@ -434,6 +434,64 @@ func TestRealtoolNuget(t *testing.T) {
 	}.run(t)
 }
 
+// Which version real `dotnet restore` resolves for each way an item can declare it (ROADMAP 237): the
+// facts ripple's reading of `<Version>` child elements and `Update=` items rests on. MSBuild's own
+// pages say metadata is a child element (docs/vendor/msbuild/msbuild-items.md, "Item metadata") and that
+// `Update` changes the existing metadata of items evaluated earlier ("Updating metadata on items");
+// whether NuGet's restore sees the result is what this asks the tool. assets "" means the package is
+// not restored at all.
+func TestRealtoolNugetItemForms(t *testing.T) {
+	const pkg = "Newtonsoft.Json"
+	for _, tc := range []struct{ name, items, assets string }{
+		{"attribute", `<PackageReference Include="Newtonsoft.Json" Version="12.0.3" />`, "12.0.3"},
+		{"child element", `<PackageReference Include="Newtonsoft.Json"><Version>13.0.3</Version></PackageReference>`, "13.0.3"},
+		{"update after include", `<PackageReference Include="Newtonsoft.Json" Version="12.0.3" />
+    <PackageReference Update="Newtonsoft.Json" Version="13.0.3" />`, "13.0.3"},
+		{"update before include", `<PackageReference Update="Newtonsoft.Json" Version="13.0.3" />
+    <PackageReference Include="Newtonsoft.Json" Version="12.0.3" />`, "12.0.3"},
+		{"update gives a versionless include its version", `<PackageReference Include="Newtonsoft.Json" />
+    <PackageReference Update="Newtonsoft.Json" Version="13.0.3" />`, "13.0.3"},
+		{"update with nothing to update", `<PackageReference Update="Newtonsoft.Json" Version="13.0.3" />`, ""},
+		{"update with a child element", `<PackageReference Include="Newtonsoft.Json" Version="12.0.3" />
+    <PackageReference Update="Newtonsoft.Json"><Version>13.0.3</Version></PackageReference>`, "13.0.3"},
+		{"attribute and child element together", `<PackageReference Include="Newtonsoft.Json" Version="12.0.3"><Version>13.0.3</Version></PackageReference>`, "13.0.3"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			csproj := `<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    ` + tc.items + `
+  </ItemGroup>
+</Project>
+`
+			if err := os.WriteFile(filepath.Join(dir, "forms.csproj"), []byte(csproj), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			realtool{
+				env:   []string{"DOTNET_NOLOGO=1", "DOTNET_CLI_TELEMETRY_OPTOUT=1"},
+				steps: [][]string{{"dotnet", "restore"}},
+			}.steps0(t, dir, tc.name)
+			assets, err := os.ReadFile(filepath.Join(dir, "obj", "project.assets.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.assets == "" {
+				if strings.Contains(string(assets), pkg+"/") {
+					t.Errorf("%s was restored though nothing declares it:\n%s", pkg, assets)
+				}
+				return
+			}
+			if want := `"` + pkg + "/" + tc.assets + `"`; !strings.Contains(string(assets), want) {
+				t.Errorf("project.assets.json lacks %s:\n%s", want, assets)
+			}
+		})
+	}
+}
+
 func TestRealtoolMaven(t *testing.T) {
 	// The dependency plugin is named by full coordinates: a short prefix is resolved by
 	// reading plugin-group metadata from Maven Central, the lookup that flaked in CI.
@@ -512,6 +570,29 @@ func TestRealtoolDocker(t *testing.T) {
 				}
 				return nil
 			})
+		},
+	}.run(t)
+}
+
+// The edit, not only the reading, goes through real dotnet: a child that beats a Version
+// attribute, an Update that overrides its Include, and a multi-line child element are each
+// edited where dotnet looks, so restore holds the new version (the attribute 11.0.2 and the
+// overridden Include 2.10.0 are not touched, which assertOnlyBumped checks line by line).
+func TestRealtoolNugetItemFormsEdit(t *testing.T) {
+	realtool{
+		fixture: "nuget-forms", manifest: "realtool.csproj", manager: Nuget{Dir: "/"},
+		bumps: []bump{
+			{"Newtonsoft.Json", "12.0.3", "13.0.3"},
+			{"Serilog", "3.0.0", "3.1.1"},
+			{"Humanizer.Core", "2.13.14", "2.14.1"},
+		},
+		env:   []string{"DOTNET_NOLOGO=1", "DOTNET_CLI_TELEMETRY_OPTOUT=1"},
+		steps: [][]string{{"dotnet", "restore"}, {"dotnet", "build", "--no-restore"}},
+		local: []string{"dotnet build --no-restore"},
+		after: func(t *testing.T, dir string) {
+			for _, want := range []string{"Newtonsoft.Json/13.0.3", "Serilog/3.1.1", "Humanizer.Core/2.14.1"} {
+				mustContain(t, dir, "obj/project.assets.json", want)
+			}
 		},
 	}.run(t)
 }

@@ -89,3 +89,13 @@ and `terraform/dependency-lock.txt` are the text of the matching pages on https:
 (internals/module-registry-protocol, internals/provider-registry-protocol, language/expressions/version-constraints,
 language/files/dependency-lock) with the HTML tags stripped, fetched 2026-11-25. The raw docs paths on GitHub returned
 404, so they were not used. No real registry answer is vendored; the fake is written from the protocol text alone.
+
+## msbuild
+
+`msbuild/msbuild-items.md` and `msbuild/build-process-overview.md` are copies of `docs/msbuild/msbuild-items.md` and
+`docs/msbuild/build-process-overview.md` from https://github.com/MicrosoftDocs/visualstudio-docs (the Microsoft Learn
+source), fetched 2026-11-27. `msbuild-items.md` states that item metadata can be a child element (around line 105) and
+describes `Update` (lines 391 to 560); `build-process-overview.md` states that items are processed in the order they
+appear (line 91). Neither page says how `PackageReference Update=` combines with an earlier `Include` of the same id, or which of an
+attribute and a child element wins: those two answers are `dotnet restore`'s, recorded by `TestRealtoolNugetItemForms`
+(docs/nuget.md).

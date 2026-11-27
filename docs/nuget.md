@@ -19,11 +19,37 @@ Version="1.2.3" />` and (central package management) `<PackageVersion Include="I
 - the version attribute is three numeric segments, `1.2.3`. A NuGet version attribute is a minimum version, so this plain
   form is what "pin to this release" looks like;
 - the id is a valid package id (letters, digits, `.`, `_`, `-`);
-- the tag has no `Update=` or `VersionOverride=` attribute and is not inside an XML comment.
+- the tag has no `VersionOverride=` attribute and is not inside an XML comment.
+
+Also read, both settled by running real `dotnet restore` (`TestRealtoolNugetItemForms`, CI `realtool / nuget`,
+2026-11-27, .NET 8 SDK on `Newtonsoft.Json`) and only inside this opt-in ecosystem:
+
+- a `PackageReference`'s `<Version>1.2.3</Version>` child element (with no `Version` attribute). MSBuild item metadata may
+  be a child element (the vendored [items page](vendor/msbuild/msbuild-items.md)); dotnet restored 13.0.3 from
+  `<Version>13.0.3</Version>`. Only the digits inside the element are edited. Exactly one plain `<Version>` child is read:
+  two of them, one with a `Condition`, and an element not closed before the next reference are left alone;
+- `<PackageReference Update="Id" Version="1.2.3" />` (or the child form) **when an `Include="Id"` PackageReference comes
+  before it in the same file**. MSBuild processes items in order of appearance and `Update` changes the metadata of
+  items already evaluated (vendored pages); dotnet restored the Update's 13.0.3 over the Include's 12.0.3, restored the
+  Include's own 12.0.3 when the Update came first, gave an Include with no version the Update's version, and restored
+  nothing for an Update with no Include. So an Update before its Include, or with none, is not read. The Update's own
+  digits are what is edited.
+
+Two consequences, both from what dotnet restored (`TestRealtoolNugetItemForms`) and both round-tripped through real
+`dotnet restore` after the edit (`TestRealtoolNugetItemFormsEdit`):
+
+- **An item that a later Update overrides is dead and is skipped.** For `Include="X" Version="1.0.0"` followed by
+  `Update="X" Version="2.0.0"` only the Update (2.0.0) is read and edited; proposing the Include would change nothing.
+  The engine has no per-skip report channel, so the skipped Include is silent: no PR opens for it.
+- **An Include with both a `Version` attribute and a `<Version>` child is edited at the child**, the one dotnet uses; the
+  attribute is left alone.
+
+An item whose version cannot be told (several `<Version>` children, or one with a `Condition`) is skipped, and so is an
+Include that such an Update overrides, because the live version is unknown. Not read yet, each on the ROADMAP: an Update
+in another file than its Include, `PackageVersion Update=`, and `VersionOverride=` (261 to 263).
 
 Skipped: ranges (`[1.0,2.0)`, `(,1.0]`), floating versions (`1.*`), properties (`$(Ver)`), prereleases (`1.0.0-beta`),
-two- and four-segment versions, a version given as a `<Version>` child element, `packages.config`, and `.props`
-files other than `Directory.Packages.props`.
+two- and four-segment versions, `packages.config`, and `.props` files other than `Directory.Packages.props`.
 
 ## What is proposed
 

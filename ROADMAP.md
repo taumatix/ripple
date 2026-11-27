@@ -392,12 +392,11 @@ Everything else:
 237. **NuGet: the unread forms.** The datasource, manager and docs are written from the vendored Microsoft Learn pages
     ([docs/vendor/nuget](docs/vendor/nuget)); a `-tags live` test (`internal/nuget`, `.github/workflows/live.yml`) reads
     the real nuget.org and a `-tags realtool` test ([docs/realtool.md](docs/realtool.md)) checks an edited project with
-    `dotnet`. Not covered by either: rate limits and redirects. `<Version>` child elements and `Update=` items were
-    considered (2026-11-26) and left unread: the vendored pages carry no `<Version>` child of a `PackageReference`
-    (their `<PackageVersion>` is the project's own version, a different thing) and show `Update=` once, in a
-    `Directory.Packages.props` example with no statement of how it combines with the `Include` item it updates, so
-    which declaration a bump should edit is not settled by the docs. Vendor the MSBuild item `Update` and
-    metadata pages first, then add them. The forms skipped today: ranges and floating versions, property-indirected versions,
+    `dotnet`. Not covered by either: rate limits and redirects. A `PackageReference`'s `<Version>` child element and a
+    `PackageReference Update="Id"` that follows its `Include` in the same file are read (2026-11-27), after
+    `TestRealtoolNugetItemForms` asked real `dotnet restore` what each resolves ([docs/nuget.md](docs/nuget.md)); the
+    MSBuild item pages are vendored at [docs/vendor/msbuild](docs/vendor/msbuild). The follow-ups are 261 to 263. The forms
+    skipped today: ranges and floating versions, property-indirected versions,
     prerelease and four-segment versions, `packages.config`, and `NuGet.Config` sources with package source mapping
     (today a private id is looked up on nuget.org only; see the dependency-confusion note in docs/nuget.md).
 238. **NuGet: refresh `packages.lock.json`.** The lock is reported stale in the PR body, not rewritten. Rewriting it
@@ -451,3 +450,7 @@ Everything else:
 252. **Bundler: `>=`/`>` floors.** A single `gem "x", ">= 1.0"` allows every later release, so there is nothing to write and ripple reads it as unread on purpose (asserted in `TestBundlerExtract`). Revisit only if users want the floor raised to the newest release, which is a policy choice (it narrows what the Gemfile allows) and needs an opt-in knob, not a default.
 254. **Composer: `||` alternatives.** `"^1.0 || ^2.0"` is OR with AND binding tighter (vendored versions article), so the constraint allows each alternative's range. Reading it is easy; the open question is the edit policy, which is a human decision: raise the alternative that holds the newest release, append a new alternative (`|| ^3.0`), or replace the whole string. None is in the docs. Decide, then implement the chosen form opt-in.
 256. **Fix two flaky postgres tests that fail CI on main.** Both were seen failing `ci` on unrelated PRs and are test-side races, not product bugs. `TestPushWithRecreatedRepoIDIsResolvedByTheHost/postgres` fails with `repo_id_test.go:88: the old id still points at "acme/uses-lib"`: it waits for the new repo id to be stored, then reads the old id's cursor entry without waiting for its deletion (also failed on main run 45721720774). `TestPackagePollReadsOnlyItsSliceThroughThePagedListing/postgres` reports `WARNING: DATA RACE`: `package_page_test.go:78` writes `e.app.Engine.Store` while `app.(*App).Run` reads it (`harness_test.go:262`); the test came from #185. Fix both by waiting on the condition (poll the store) and by setting the store before `Run` starts, then show a few thousand `-race` runs clean, as was done for `TestFailedEventIsRetriedThenDeadLettered`.
+
+261. **NuGet: `Update=` in another file than its `Include`.** Only an Update after its Include in the same file is read. An Include in `Directory.Build.props` or an imported `.props` and an Update in the project is real MSBuild usage; reading it needs the import graph (`Import`, `Directory.Build.props` lookup), which ripple does not evaluate. Ask `dotnet` which file wins with a two-file fixture before deciding how far to follow imports.
+262. **NuGet: `Update=` of a `PackageVersion`, and wildcard Updates.** `Directory.Packages.props` central package management uses `PackageVersion Include`, and the vendored pages show `Update=` there once. Not run through `dotnet` yet, so `PackageVersion Update=`, `Update="A;B"` and `Update="A*"` stay unread. Add a realtool case for each, then read what it confirms.
+263. **NuGet: `VersionOverride`.** `<PackageReference Include="X" VersionOverride="2.0.0" />` overrides a central `PackageVersion`. It makes the tag unread today. Ask `dotnet` with a central-package-management fixture, then edit the override or the central version.

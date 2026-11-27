@@ -60,13 +60,12 @@ auth model, rate limits); the notes below are what I expect, **unverified** unti
     protected default branch. Model roles and the branch visibility delay so the unit tests can reach those paths.
 294. **GitLab: signing token and a group webhook.** The CI hooks use a secret token; run a webhook with a signing token
     (`whsec_`) and, where a licence allows, a group hook, and record the deliveries.
-18. **SCM-Manager against a real instance.** The host shipped from vendored docs, the plugins' source and a
-    fake only (see [docs/platform-scmmanager.md](docs/platform-scmmanager.md)). Verify on a real SCM-Manager 3.x
-    with the Review and Webhook plugins: `Authorization: Bearer <api key>` on the REST API, git basic auth with
-    an API key, the webhook plugin's custom-header table and `branches` in its changesets, the 201 `Location`,
-    modifications of a merge commit, `shouldDeleteSourceBranch`, and what a rate limit looks like if any.
-    Then: create the webhook through the plugin's REST API instead of by hand (not yet read), and confirm one
-    global webhook with `${repository.namespace}` in the URL works.
+18. ~~**SCM-Manager against a real instance.**~~ Shipped: `hosts-scmmanager.yml` runs the conformance suite and
+    `TestReal*` against SCM-Manager 3.11.0, plugins installed through the plugin API, the global webhook created
+    through the Webhook plugin's REST resource with `${repository.namespace}` in its URL (see
+    [docs/platform-scmmanager.md](docs/platform-scmmanager.md) "Real instance",
+    [docs/vendor/scm-manager/real-answers.md](docs/vendor/scm-manager/real-answers.md)). Merge-commit
+    modifications, `shouldDeleteSourceBranch` and a real 429 are ROADMAP 284 to 286.
 
 Everything else:
 
@@ -458,3 +457,13 @@ Everything else:
 282. **Gitea/Forgejo: what the real job does not cover.** Forgejo before 7 and Gitea before 1.27 (older Gitea images may differ in the auto-merge key and timeline), PostgreSQL and MySQL back ends, the 429 a real throttling proxy sends (no instance throttles; only the injected one is tested), a person's label, comment or rename on a pull request being read as a touch, a scheduled merge actually merging when checks pass, and archive flipping in `/user/repos`. Add legs or tests as each is wanted; `hosts-gitea.yml`'s matrix is the place.
 270. **`container-runtimes`: if the reaped container is listed again.** `Reap` now looks again (four more tries, half a second apart) when its kill and remove find nothing, and the live check polls for 15s and logs `inspect` of what is still there. The one failure on record (run 45391499375) was never explained, so the retry is a fix for a plausible cause, not a proven one. If the check fails again, the log's `inspect` says which: still running means the runtime created the container later than the retries wait (lengthen, or have the engine Reap again once the client has exited); removing or exited means the list is slow and the test's bound is the thing to raise.
 283. **Gitea/Forgejo: a `repository` created webhook for a repository that is still empty.** A system webhook announces `created` before the first push, and the event queues a scan of a repository with nothing in it. What the scan does with an empty clone, and whether the next discovery then rescans it once the push lands, is unconfirmed on a real instance (the listing path is fixed and proved, ROADMAP 280). Drive it: a system webhook to a real ripple, create and push in quick succession, assert one registration with its dependencies.
+284. **SCM-Manager: modifications of a merge commit.** `PushFiles` asks the modifications resource per changeset;
+    which parent a merge commit's modifications are against is unobserved on a real 3.11.0. Push a merge of a
+    branch that touches `go.mod` and assert the file is reported (or that a re-scan is chosen), in `TestReal*`.
+285. **SCM-Manager: `shouldDeleteSourceBranch` at merge.** The pull request is created with the flag, and the
+    real instance's honouring of it when a person merges is unobserved. Merge through the review plugin's merge
+    resource in `TestReal*` and read the branch list.
+286. **SCM-Manager: the 429 a throttling proxy sends, and older plugins.** No instance throttles, so the
+    rate-limit case is injected at a proxy and the `Retry-After` form is assumed. Add a matrix leg with an older
+    SCM-Manager 3.x and the plugin releases it installs, and record whether the custom-header table and
+    `branches` are present there.

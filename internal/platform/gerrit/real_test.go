@@ -228,10 +228,12 @@ func (c *countingTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	if u, err := url.PathUnescape(s); err == nil {
 		s = u
 	}
+	// Head reads belong to discovery polling (ListRepoHeads: "Get HEAD" + "Get Branch" per project on
+	// every round), not to a scan or a push; the fake leaves them out of Calls and so does this.
+	polling := strings.HasSuffix(r.URL.Path, "/HEAD") || strings.Contains(r.URL.Path, "/branches/")
 	for p := range c.n {
-		if strings.Contains(s, p) {
+		if !polling && strings.Contains(s, p) {
 			c.n[p]++
-			fmt.Fprintf(os.Stderr, "counted %s %s\n", r.Method, s)
 		}
 	}
 	c.mu.Unlock()

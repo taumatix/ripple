@@ -3,7 +3,8 @@
 Ripple can propose dependency updates to a Gerrit instance. Gerrit has changes, not pull requests, so ripple
 maps its flow onto Gerrit's: a push to `refs/for/<branch>` creates or updates a change. This host is written
 from Gerrit's documentation, vendored in [vendor/gerrit](vendor/gerrit), and tested against a fake plus a real git
-server; it has **not** been run against a real Gerrit (see Unverified).
+server. Since 2026-11-27 the conformance suite also runs against a real Gerrit 3.15.0 container with the bundled
+webhooks plugin (`.github/workflows/hosts-gitlab-gerrit.yml`, `go test -tags gerrit`), see Verified and Unverified.
 
 Repositories are Gerrit project names, stored as `gerrit:<project>`. Names may use letters, digits, `.`, `_`, `-`
 and `/`; any other project is skipped with a log line.
@@ -16,8 +17,15 @@ and `/`; any other project is skipped with a log line.
 | `RIPPLE_GERRIT_USER`, `RIPPLE_GERRIT_TOKEN` | the account and its HTTP password (Settings, HTTP Credentials), used for REST under `/a/` and for git (required) |
 | `RIPPLE_GERRIT_WEBHOOK_SECRET` | secret of the webhook URL (required; see below) |
 | `RIPPLE_GERRIT_PROJECT_PREFIX` | list only projects whose name starts with this |
+| `RIPPLE_GERRIT_AUTHOR_EMAIL` | commit email of ripple's changes (default `ripple@users.noreply.invalid`); see below |
 
 The account needs read and push to `refs/for/*` on each project, and ideally permission to set WIP and hashtags.
+
+**Author email.** Gerrit rejects a pushed commit whose author email is not registered on the pushing account
+unless the account holds "Forge Author" (recorded: `email address ... is not registered in your account, and you
+lack 'forge author' permission`), and its validator refuses to register the default's `.invalid` domain (`PUT
+/accounts/self/emails/...` answers 400 `invalid email address`). Either grant Forge Author on `refs/for/*` or
+register an address on the account and set `RIPPLE_GERRIT_AUTHOR_EMAIL` to it.
 
 ## How it maps
 
@@ -51,7 +59,7 @@ what it remembered; another failure leaves that project out for the round. The f
 already reports every head (the app lists once more in that round to get the branches just learned), so a head that
 moved while ripple was down is re-scanned on the first round. Gerrit has no call that names the default branch
 of many projects at once (`GET /projects/?b=<branch>` needs the branch name), so the two reads per project stay.
-The two reads are not counted as scan cost by the conformance suite. Verified against the fake only.
+The two reads are not counted as scan cost by the conformance suite. Verified against a real Gerrit 3.15.0 (the project state PUT, `GET /projects/?state=READ_ONLY`).
 
 ## Not supported
 
@@ -63,12 +71,26 @@ The two reads are not counted as scan cost by the conformance suite. Verified ag
 - The default branch of a project is learned at its first scan or its first head listing, not by the project listing.
 - A draft is marked WIP after the push, so for a moment it is ready for review.
 
+## Verified on a real Gerrit 3.15.0
+
+The `gerrit` job of `hosts-gitlab-gerrit.yml` runs `gerritcodereview/gerrit` (image digest in the job's `gerrit-image.txt`
+artifact) with its bundled webhooks plugin, as the image's administrator, and drives `platformtest.Run` through ripple's
+own host: a release opens exactly one change in each importing project and none elsewhere; a push to a default branch
+is rescanned; the `refs/for` push with `%topic` and the Change-Id footer; `go.mod` content on the change's revision;
+the change URL `/c/<project>/+/<n>`; the clone URL `/a/<project>`; a superseded change abandoned with the new version
+as its message; READ_ONLY pausing and ACTIVE resuming; the dependency dashboard skipped (no issues); no auto-merge.
+The webhooks plugin posts `ref-updated` to the configured URL with the `?token=` query intact; its body is exactly
+the shape the receiver reads (`internal/platform/gerrit/testdata/real-ref-updated-*.json`, recorded and trimmed to
+what the plugin sent), including events for `refs/changes/*` and `refs/meta/config`, which the receiver ignores.
+The workflow starts the image with `GERRIT_INIT_ARGS=--install-plugin=webhooks`; the plugin is also bundled in the image.
+
 ## Unverified
 
-Everything here was written from the docs and a fake, not recorded from a real server: the webhooks payload shape
-and whether the URL token reaches ripple through the plugin; a `Retry-After` on 429 (assumed one minute otherwise);
-the clone URL `/a/<project>` and the change URL `/c/<project>/+/<n>`; WIP and hashtag permissions; the "no new
-changes" refusal; file lists of merge commits; first-parent walking of multi-commit pushes.
+Not checked against a real server (the CI run is as an administrator on a throwaway install): a `Retry-After` on
+429 (assumed one minute otherwise; Gerrit cannot be made to rate-limit on demand); WIP, hashtag and abandon
+permission for an ordinary account; the "no new changes" refusal; file lists of merge commits; first-parent
+walking of multi-commit pushes; `batch-ref-updated` and `project-created` events (the CI hook subscribes to
+`ref-updated` only).
 
 ## Archive
 
@@ -90,5 +112,6 @@ nothing is abandoned.
 
 **Not detected:** a patch set a person uploaded under ripple's own commit identity, a reviewer added without a
 message or vote, hashtags, the attention set, and a message from a tool that tags itself `autogenerated:` (the
-API's only marker, so it is treated as system activity). All of this is verified only against the fake, written
-from the vendored docs; the abandon message and permission to abandon are unverified on a real server.
+API's only marker, so it is treated as system activity). The abandon and its message are verified on a real Gerrit 3.15.0 as an administrator; the rest of this
+list is verified only against the fake, written from the vendored docs, and permission to abandon for an ordinary
+account is unverified.

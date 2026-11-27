@@ -28,3 +28,13 @@ func TestGerritHostNeedsItsWholeConfiguration(t *testing.T) {
 		t.Fatalf("configured: %v, %v", h, err)
 	}
 }
+
+func TestGerritAuthorEmailDefaultsAndIsOverridable(t *testing.T) {
+	get := func(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
+	if got := gerritAuthorEmail(get(nil)); got != "ripple@users.noreply.invalid" {
+		t.Errorf("default %q", got)
+	}
+	if got := gerritAuthorEmail(get(map[string]string{"RIPPLE_GERRIT_AUTHOR_EMAIL": "bot@example.com"})); got != "bot@example.com" {
+		t.Errorf("override %q", got)
+	}
+}

@@ -1,0 +1,77 @@
+name: hosts-gitlab-gerrit
+# The Gerrit and GitLab hosts run against the real servers (public images, no secrets), not the in-process
+# fakes: the conformance suite plus a push -> exactly-one-PR flow. Typical wall time: gerrit ~2 min (measured: about 70 s of job time plus image pull).
+# Path-filtered so it does not slow every PR; a change to the hosts, their fakes, or this job runs it.
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/hosts-gitlab-gerrit.yml"
+      - "scripts/ci-gerrit-bootstrap.sh"
+      - "internal/platform/gerrit/**"
+      - "internal/platform/platformtest/**"
+      - "internal/platform/gitws/**"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/hosts-gitlab-gerrit.yml"
+      - "scripts/ci-gerrit-bootstrap.sh"
+      - "internal/platform/gerrit/**"
+permissions:
+  contents: read
+jobs:
+  gerrit:
+    name: gerrit (real gerritcodereview/gerrit + webhooks plugin)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: start Gerrit
+        run: |
+          set -euo pipefail
+          # Host networking: Gerrit reaches the test's webhook relay on 127.0.0.1:18999 and the test
+          # reaches Gerrit on 127.0.0.1:8080. The image's auth is DEVELOPMENT_BECOME_ANY_ACCOUNT.
+          docker run -d --name gerrit --network host \
+            -e CANONICAL_WEB_URL=http://127.0.0.1:8080/ \
+            -e GERRIT_INIT_ARGS=--install-plugin=webhooks \
+            gerritcodereview/gerrit:latest
+          docker image inspect gerritcodereview/gerrit:latest --format '{{index .RepoDigests 0}}' | tee gerrit-image.txt
+      - name: wait for Gerrit's health endpoint
+        run: |
+          # No fixed sleep: poll the version endpoint (docs/vendor/gerrit/rest-api-config.md "Get Version")
+          # until it answers, and fail with the container log if it never does.
+          for i in $(seq 120); do
+            if curl -sf http://127.0.0.1:8080/config/server/version; then echo; exit 0; fi
+            sleep 3
+          done
+          docker logs gerrit | tail -n 80
+          exit 1
+      - name: bootstrap an admin account, permissions and the webhook
+        run: bash scripts/ci-gerrit-bootstrap.sh 2>&1 | tee gerrit-bootstrap.log
+        shell: bash
+      - name: Gerrit host against the real server
+        shell: bash
+        run: |
+          set -o pipefail
+          export RIPPLE_GERRIT_RECORD_DIR="$PWD/gerrit-records"
+          go test -count=1 -v -tags gerrit -timeout 25m -run Real ./internal/platform/gerrit 2>&1 | tee gerrit-test.log
+      - name: only the rate-limit conformance test may skip
+        run: |
+          # Gerrit has no quota to exhaust on demand (docs/platform-gerrit.md); any other skip is a lie.
+          if grep -E -- '--- SKIP' gerrit-test.log | grep -v RateLimitHoldsBackTheHostThenRetries; then echo "unexpected skip"; exit 1; fi
+      - name: Gerrit log
+        if: always()
+        run: |
+          docker logs gerrit 2>&1 | tail -n 150 || true
+          docker exec gerrit sh -c 'tail -n 100 /var/gerrit/logs/error_log' || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hosts-gerrit-logs
+          path: |
+            gerrit-test.log
+            gerrit-bootstrap.log
+            gerrit-image.txt
+            gerrit-records

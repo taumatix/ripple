@@ -128,12 +128,18 @@ func (r *relay) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 // await waits for the forwarded push event that moved ref of project to sha.
 func (r *relay) await(t *testing.T, project, ref, sha string) {
+	r.awaitDelivery(t, project, ref, sha, true)
+}
+
+// awaitDelivery waits for GitLab to deliver the push (whether or not it was forwarded): a delivery
+// arrives 1-2 s after the push, so one left unawaited lands in the next test.
+func (r *relay) awaitDelivery(t *testing.T, project, ref, sha string, forwarded bool) {
 	t.Helper()
 	deadline := time.Now().Add(90 * time.Second)
 	for time.Now().Before(deadline) {
 		r.mu.Lock()
 		for _, d := range r.got {
-			if d.Project == project && d.Ref == ref && d.After == sha && d.Forwarded {
+			if d.Project == project && d.Ref == ref && d.After == sha && (d.Forwarded || !forwarded) {
 				r.mu.Unlock()
 				return
 			}
@@ -326,7 +332,8 @@ func (f *realGitLab) AddRepo(t *testing.T, path string, files map[string]string)
 		"initialize_with_readme": true, "default_branch": "main"})
 	f.api.must("POST", "projects/"+url.PathEscape(path)+"/hooks", map[string]any{
 		"url": "http://" + relayAddr + "/hook", "token": hookSecret, "push_events": true, "enable_ssl_verification": false})
-	f.pushFiles(t, path, "main", files)
+	head := f.pushFiles(t, path, "main", files)
+	theRelay.awaitDelivery(t, path, "refs/heads/main", head, false)
 }
 
 // pushFiles clones the project, commits files on branch (created from main when new) and pushes it, as root.

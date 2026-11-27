@@ -389,33 +389,21 @@ func (f *realFixture) AddRepo(t *testing.T, path string, files map[string]string
 	f.git(t, dir, "add", "-A")
 	f.git(t, dir, "commit", "-q", "-m", "initial")
 	f.git(t, dir, "push", "-q", f.in.url+"/"+path+".git", "main")
-	f.settled(t, path)
+	f.probeEmpty(t, path)
 }
 
-// settled waits until the instance lists the repository as non-empty. The first push is
-// processed after the git command returns: until then `empty` is still true, /user/repos
-// holds the repository back (the client skips empty ones) and creating a pull request
-// answers 404 (the first CI run of this suite, docs/platform-gitea.md "Real instances").
-func (f *realFixture) settled(t *testing.T, path string) {
+// probeEmpty reads the repository once, right after the first push, and logs whether the
+// instance still calls it empty. It does not wait: the first push is processed after the git
+// command returns, and the suite goes on to register the repository at once, which is the case
+// ListRepos has to survive (ROADMAP 280, `Client.EmptySettle`). It used to wait here, which
+// hid the finding from the suite.
+func (f *realFixture) probeEmpty(t *testing.T, path string) {
 	t.Helper()
-	deadline := time.Now().Add(30 * time.Second)
-	polls := 0
-	for {
-		var r struct {
-			Empty bool `json:"empty"`
-		}
-		st, _, _ := f.in.call(t, token(f.tok), http.MethodGet, "/repos/"+path, nil, &r)
-		if st == http.StatusOK && !r.Empty {
-			if polls > 0 {
-				t.Logf("FACT %s was still empty=true for %d polls (200ms apart) after the first push returned", path, polls)
-			}
-			return
-		}
-		polls++
-		if time.Now().After(deadline) {
-			t.Fatalf("%s still empty (status %d) 30s after the push", path, st)
-		}
-		time.Sleep(200 * time.Millisecond)
+	var r struct {
+		Empty bool `json:"empty"`
+	}
+	if st, _, _ := f.in.call(t, token(f.tok), http.MethodGet, "/repos/"+path, nil, &r); st == http.StatusOK {
+		t.Logf("FACT %s right after the first push returned: empty=%v", path, r.Empty)
 	}
 }
 

@@ -60,13 +60,28 @@ func (s *scm) installed(t *testing.T) []string {
 func (s *scm) bootstrap(t *testing.T) string {
 	t.Helper()
 	plugins := []string{"scm-review-plugin", "scm-webhook-plugin"}
+	// installWithRestart restarts at once, so a second install in the same breath meets a dead server
+	// (recorded: EOF). Queue both with plain install, then execute the pending set once.
 	for _, p := range plugins {
-		code, h, body := s.call(t, http.MethodPost, s.base+"/api/v2/plugins/available/"+p+"/install?restart=true", "", "", nil)
-		t.Logf("FACT install %s with restart: %d location=%q %s", p, code, h.Get("Location"), clip(body))
+		code, h, body := s.call(t, http.MethodPost, s.base+"/api/v2/plugins/available/"+p+"/install", "", "", nil)
+		t.Logf("FACT install %s without restart: %d location=%q %s", p, code, h.Get("Location"), clip(body))
 		if code != http.StatusOK && code != http.StatusAccepted && code != http.StatusNoContent && code != http.StatusCreated {
 			t.Fatalf("installing %s: %d %s", p, code, body)
 		}
 	}
+	code, _, body := s.call(t, http.MethodGet, s.base+"/api/v2/plugins/pending", mtPlugins, "", nil)
+	t.Logf("FACT pending plugins before the restart: %d %s", code, clip(body))
+	var pend struct {
+		Links links `json:"_links"`
+	}
+	_ = json.Unmarshal(body, &pend)
+	t.Logf("FACT pending link names: %v", pend.Links.names())
+	exec := pend.Links.href("execute")
+	if exec == "" {
+		t.Fatalf("no execute link on the pending plugins: %s", clip(body))
+	}
+	code, _, body = s.call(t, http.MethodPost, exec, "", "", nil)
+	t.Logf("FACT execute pending plugins: %d %s", code, clip(body))
 	// The restart is in-process: wait on the REST index and the installed list, not on a sleep.
 	start := time.Now()
 	down := 0
@@ -87,7 +102,7 @@ func (s *scm) bootstrap(t *testing.T) string {
 		}
 		time.Sleep(2 * time.Second)
 	}
-	code, _, body := s.call(t, http.MethodGet, s.base+"/api/v2/plugins/pending", mtPlugins, "", nil)
+	code, _, body = s.call(t, http.MethodGet, s.base+"/api/v2/plugins/pending", mtPlugins, "", nil)
 	t.Logf("FACT pending plugins after the restart: %d %s", code, clip(body))
 
 	// API key.

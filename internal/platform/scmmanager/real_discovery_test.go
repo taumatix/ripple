@@ -104,9 +104,12 @@ func TestRealDiscovery(t *testing.T) {
 	defer srv.Close()
 	_, port, _ := net.SplitHostPort(ln.Addr().String())
 	pattern := "http://host.docker.internal:" + port + "/hook?namespace=${repository.namespace}&name=${repository.name}"
-	cfg := map[string]any{"webhooks": []map[string]any{{
+	// The first attempt put the fields at the top of the entry and came back as
+	// {"name":null,"unknown":true}: an entry is {name, configuration}, name being the Java class name
+	// of the kind (WebHookDto and WebHook.java in scm-webhook-plugin).
+	cfg := map[string]any{"webhooks": []map[string]any{{"name": "SimpleWebHook", "configuration": map[string]any{
 		"urlPattern": pattern, "method": "AUTO", "executeOnEveryCommit": false, "sendCommitData": true,
-		"headers": []map[string]any{{"key": scmmanager.SecretHeader, "value": "probe-secret", "concealed": true}}}}}
+		"headers": []map[string]any{{"key": scmmanager.SecretHeader, "value": "probe-secret", "concealed": true}}}}}}
 	code, _, body = s.call(t, http.MethodPut, webhookURL, "", "application/json", cfg)
 	t.Logf("FACT PUT global webhook config: %d %s", code, clip(body))
 	code, _, body = s.call(t, http.MethodGet, webhookURL, "application/json", "", nil)

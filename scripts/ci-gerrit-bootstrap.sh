@@ -57,7 +57,7 @@ api() { # api METHOD PATH [JSON]: prints the answer, fails (showing the body) on
     code=$(curl -sS -u "$user:$pass" -X "$m" -o "$work/api.out" -w '%{http_code}' "$base/a$p")
   fi
   strip < "$work/api.out"
-  case $code in 2??) ;; *) echo "$m $p: HTTP $code"; return 1 ;; esac
+  case $code in 2??) ;; *) echo "$m $p: HTTP $code" >&2; strip < "$work/api.out" >&2; return 1 ;; esac
 }
 
 echo "--- who am I"

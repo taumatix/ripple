@@ -36,6 +36,53 @@ func scene(t *testing.T, in *instance) *realFixture {
 	return f
 }
 
+// TestRealRequestAutoMerge drives ripple's own RequestAutoMerge right after the pull request is
+// created, as the engine does, with no wait for the instance's mergeability check: it must end
+// with the auto-merge scheduled, and a repeat must end in the instance's 409, not in a 405.
+func TestRealRequestAutoMerge(t *testing.T) {
+	in := realInstance(t)
+	f := scene(t, in)
+	path := f.Path("facts")
+	c := &gitea.Client{APIBase: in.url, GitBase: in.url, Flavour: in.flavour,
+		Credentials: platform.StaticCredential{Username: "ripple", Secret: f.tok}}
+	repo := model.Repo{FullName: path, DefaultBranch: "main"}
+	n := f.branchPR(t, "facts", "ripple/go/auto")
+	start := time.Now()
+	if err := c.RequestAutoMerge(context.Background(), repo, platform.PR{Number: n}); err != nil {
+		t.Fatalf("first RequestAutoMerge: %v", err)
+	}
+	t.Logf("FACT RequestAutoMerge right after creating the pull request succeeded in %v", time.Since(start))
+	err := c.RequestAutoMerge(context.Background(), repo, platform.PR{Number: n})
+	t.Logf("FACT second RequestAutoMerge: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "409") {
+		t.Fatalf("second RequestAutoMerge: %v, want the instance's 409", err)
+	}
+}
+
+// mergeable waits until the instance has finished checking whether the pull request can merge
+// (GET pulls/{n} `mergeable`). A merge request made while it is still checking is answered
+// 405 {"message":"Please try again later"} (Gitea 1.27.3; seen on the second request of
+// TestRealScheduledMerge, right after the first was accepted), which is not what the test asks.
+// RequestAutoMerge itself waits through that answer; see TestRealRequestAutoMerge.
+func (f *realFixture) mergeable(t *testing.T, path string, n int, when string) {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for polls := 1; ; polls++ {
+		var pr struct {
+			Mergeable bool `json:"mergeable"`
+		}
+		f.in.must(t, token(f.tok), http.MethodGet, fmt.Sprintf("/repos/%s/pulls/%d", path, n), nil, &pr)
+		if pr.Mergeable {
+			t.Logf("FACT %s#%d mergeable after %d reads, %s", path, n, polls, when)
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s#%d still not mergeable after 30s, %s", path, n, when)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
 // branchPR pushes a branch with one new file and opens a pull request for it, as ripple does.
 func (f *realFixture) branchPR(t *testing.T, short, branch string) int {
 	t.Helper()
@@ -174,6 +221,7 @@ func TestRealScheduledMerge(t *testing.T) {
 	path := f.Path("facts")
 	for i, key := range []string{"do", "Do"} {
 		n := f.branchPR(t, "facts", fmt.Sprintf("ripple/go/m%d", i))
+		f.mergeable(t, path, n, "before the first merge request")
 		st, _, body := in.call(t, token(f.tok), http.MethodPost, fmt.Sprintf("/repos/%s/pulls/%d/merge", path, n),
 			map[string]any{key: "squash", "merge_when_checks_succeed": true}, nil)
 		var pr struct {
@@ -189,6 +237,7 @@ func TestRealScheduledMerge(t *testing.T) {
 		for _, e := range tl {
 			types = append(types, e.Type)
 		}
+		f.mergeable(t, path, n, "before the second merge request")
 		st2, _, body2 := in.call(t, token(f.tok), http.MethodPost, fmt.Sprintf("/repos/%s/pulls/%d/merge", path, n),
 			map[string]any{key: "squash", "merge_when_checks_succeed": true}, nil)
 		t.Logf("FACT merge key=%q: status %d body %q; pr state=%s merged=%v; timeline %v; second request %d %q",

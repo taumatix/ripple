@@ -636,7 +636,7 @@ func TestRealZRateLimit(t *testing.T) {
 
 // awaitWebhooks proves project webhooks reach the relay before any test depends on one. The setting that
 // allows local webhook targets is cached by the instance for up to a minute, and a hook fired in that
-// window is dropped for good (GitLab does not retry a blocked URL), so poll a canary project's hook test
+// window is dropped for good (GitLab does not retry a blocked URL), so push to a canary project
 // until the relay sees it.
 func (f *realGitLab) awaitWebhooks(t *testing.T) {
 	t.Helper()
@@ -645,23 +645,22 @@ func (f *realGitLab) awaitWebhooks(t *testing.T) {
 		Path string `json:"path_with_namespace"`
 	}
 	f.api.mustJSON("POST", "projects", map[string]any{"name": "canary", "path": "canary", "namespace_id": topID, "initialize_with_readme": true}, &p)
-	var h struct {
-		ID int `json:"id"`
-	}
-	f.api.mustJSON("POST", fmt.Sprintf("projects/%d/hooks", p.ID), map[string]any{
-		"url": "http://" + relayAddr + "/hook", "token": hookSecret, "push_events": true, "enable_ssl_verification": false}, &h)
+	f.api.must("POST", fmt.Sprintf("projects/%d/hooks", p.ID), map[string]any{
+		"url": "http://" + relayAddr + "/hook", "token": hookSecret, "push_events": true, "enable_ssl_verification": false})
 	start := time.Now()
-	for time.Since(start) < 3*time.Minute {
-		st, _, body := f.api.do("POST", fmt.Sprintf("projects/%d/hooks/%d/test/push_events", p.ID, h.ID), nil)
-		theRelay.mu.Lock()
-		got := slices.ContainsFunc(theRelay.got, func(d *delivered) bool { return d.Project == p.Path })
-		theRelay.mu.Unlock()
-		if got {
-			t.Logf("FACT: the first webhook reached the relay after %v (last hook test: HTTP %d)", time.Since(start).Round(time.Second), st)
-			return
+	for i := 0; time.Since(start) < 3*time.Minute; i++ {
+		// A real push, not the hook-test endpoint: pushes are delivered by a background worker that
+		// can lag the setting behind the web process.
+		head := f.pushFiles(t, p.Path, "main", map[string]string{fmt.Sprintf("canary-%d.txt", i): "x\n"})
+		for end := time.Now().Add(20 * time.Second); time.Now().Before(end); time.Sleep(500 * time.Millisecond) {
+			theRelay.mu.Lock()
+			got := slices.ContainsFunc(theRelay.got, func(d *delivered) bool { return d.Project == p.Path && d.After == head })
+			theRelay.mu.Unlock()
+			if got {
+				t.Logf("FACT: the first push webhook reached the relay after %v and %d push(es)", time.Since(start).Round(time.Second), i+1)
+				return
+			}
 		}
-		t.Logf("canary hook not delivered yet: HTTP %d %s", st, body)
-		time.Sleep(5 * time.Second)
 	}
-	t.Fatal("no webhook reached the relay within 3 minutes")
+	t.Fatal("no push webhook reached the relay within 3 minutes")
 }

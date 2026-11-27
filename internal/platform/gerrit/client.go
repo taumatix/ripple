@@ -610,7 +610,7 @@ type forgeHintWorkspace struct {
 
 func (w *forgeHintWorkspace) CommitAndPush(ctx context.Context, branch, message string) (bool, error) {
 	pushed, err := w.Workspace.CommitAndPush(ctx, branch, message)
-	if err != nil && strings.Contains(strings.ToLower(err.Error()), "forge author") {
+	if err != nil && strings.Contains(strings.ToLower(err.Error()), "forge author") || strings.Contains(strings.ToLower(err.Error()), "forge committer") {
 		email := w.email
 		if email == "" {
 			email = gitws.AuthorEmail(gitws.Options{})

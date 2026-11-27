@@ -85,7 +85,7 @@ rgid=$(api GET /groups/ripple-ci | sed -n 's/.*"id": *"\([^"]*\)".*/\1/p' | head
 api POST /projects/All-Projects/access "{\"add\":{
   \"refs/*\":{\"permissions\":{\"read\":{\"rules\":{\"$rgid\":{\"action\":\"ALLOW\"}}}}},
   \"refs/for/refs/*\":{\"permissions\":{\"push\":{\"rules\":{\"$rgid\":{\"action\":\"ALLOW\"}}}}},
-  \"refs/heads/*\":{\"permissions\":{\"forgeAuthor\":{\"rules\":{\"$rgid\":{\"action\":\"ALLOW\"}}}}}}}" > /dev/null
+  \"refs/heads/*\":{\"permissions\":{\"forgeAuthor\":{\"rules\":{\"$rgid\":{\"action\":\"ALLOW\"}}},\"forgeCommitter\":{\"rules\":{\"$rgid\":{\"action\":\"ALLOW\"}}}}}}}" > /dev/null
 # A second ordinary account with NO Forge Author and no registered email: proves the refusal the docs describe
 # and that the error names the fix (ROADMAP 291).
 bpass=$(head -c 18 /dev/urandom | od -An -tx1 | tr -d ' \n')

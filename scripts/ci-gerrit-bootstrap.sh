@@ -69,7 +69,8 @@ api PUT "/accounts/self/emails/$(printf %s "$email" | sed 's/@/%40/')" '{"no_con
 echo "--- an ordinary account for ripple itself (ROADMAP 290): not an administrator, in group ripple-ci"
 rpass=$(head -c 18 /dev/urandom | od -An -tx1 | tr -d ' \n')
 echo "::add-mask::$rpass"
-api PUT /accounts/ripple "{\"name\":\"ripple\",\"http_password\":\"$rpass\"}" > /dev/null
+api GET /accounts/ripple > /dev/null 2>&1 || api PUT /accounts/ripple '{"name":"ripple"}' > /dev/null
+api PUT /accounts/ripple/password.http "{\"http_password\":\"$rpass\"}" > /dev/null
 api PUT /groups/ripple-ci '{"members":["ripple"]}' > /dev/null
 rgid=$(api GET /groups/ripple-ci | sed -n 's/.*"id": *"\([^"]*\)".*/\1/p' | head -1)
 [ -n "$rgid" ] || { echo "no ripple-ci group id"; exit 1; }
@@ -83,7 +84,8 @@ api POST /projects/All-Projects/access "{\"add\":{
 # and that the error names the fix (ROADMAP 291).
 bpass=$(head -c 18 /dev/urandom | od -An -tx1 | tr -d ' \n')
 echo "::add-mask::$bpass"
-api PUT /accounts/ripple-bare "{\"name\":\"ripple-bare\",\"http_password\":\"$bpass\"}" > /dev/null
+api GET /accounts/ripple-bare > /dev/null 2>&1 || api PUT /accounts/ripple-bare '{"name":"ripple-bare"}' > /dev/null
+api PUT /accounts/ripple-bare/password.http "{\"http_password\":\"$bpass\"}" > /dev/null
 echo "--- ripple's capabilities (must not include administrateServer)"
 curl -fsS -u "ripple:$rpass" "$base/a/accounts/self/capabilities" | strip
 curl -fsS -u "ripple:$rpass" "$base/a/accounts/self/groups" | strip | grep -E '"name"' || true

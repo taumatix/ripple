@@ -84,6 +84,10 @@ const preReceive = `#!/bin/sh
 while read old new ref; do
   case "$ref" in
     refs/for/*)
+      if [ -f "$GIT_DIR/registered-email" ]; then
+        author=$(git log -1 --format=%ae "$new")
+        [ "$author" = "$(cat "$GIT_DIR/registered-email")" ] || { echo "email address $author is not registered in your account, and you lack 'forge author' permission" >&2; exit 1; }
+      fi
       git log -1 --format=%B "$new" | grep -Eq '^Change-Id: I[0-9a-f]{40}$' || { echo "missing Change-Id in commit message" >&2; exit 1; }
       ;;
     *) echo "prohibited by Gerrit: not permitted: create/update $ref (push to refs/for/<branch>)" >&2; exit 1 ;;
@@ -115,6 +119,15 @@ func git(t *testing.T, dir string, args ...string) string {
 		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
 	}
 	return string(out)
+}
+
+// RequireEmail makes project refuse a proposed commit whose author email is not email, as a real Gerrit does for an
+// account without Forge Author (the message is the one recorded on Gerrit 3.15.0).
+func (f *fakeGerrit) RequireEmail(project, email string) {
+	f.t.Helper()
+	if err := os.WriteFile(filepath.Join(f.bare(project), "registered-email"), []byte(email), 0o644); err != nil {
+		f.t.Fatal(err)
+	}
 }
 
 func (f *fakeGerrit) bare(project string) string { return filepath.Join(f.root, project) }

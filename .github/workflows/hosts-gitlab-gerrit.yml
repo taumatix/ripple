@@ -65,6 +65,9 @@ jobs:
         run: |
           # Gerrit has no quota to exhaust on demand (docs/platform-gerrit.md); any other skip is a lie.
           if grep -E -- '--- SKIP' gerrit-test.log | grep -v RateLimitHoldsBackTheHostThenRetries; then echo "unexpected skip"; exit 1; fi
+      - name: recorded facts
+        if: always()
+        run: grep -E 'FACT' gerrit-test.log || true
       - name: Gerrit log
         if: always()
         run: |

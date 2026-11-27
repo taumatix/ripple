@@ -33,6 +33,9 @@ func scene(t *testing.T, in *instance) *realFixture {
 	f := &realFixture{in: in, dirs: map[string]string{}, hooked: map[string]bool{}, cur: t}
 	f.user, f.tok = in.newUser(t)
 	f.AddRepo(t, f.Path("facts"), map[string]string{"README.md": "facts\n"})
+	// These tests call the API directly, as no ripple would: a pull request cannot be created
+	// while the instance still calls the repository empty (404). The conformance suite does not wait.
+	f.settled(t, f.Path("facts"))
 	return f
 }
 

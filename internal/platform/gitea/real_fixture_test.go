@@ -277,6 +277,9 @@ type countingProxy struct {
 	srv *httptest.Server
 	mu  sync.Mutex
 	n   map[string]int
+	t   *testing.T
+	// seen is the "METHOD path" of every request per repository, so a cost the suite flags can be read.
+	seen map[string][]string
 	// limitNext makes the next POST .../pulls answer 429 with Retry-After from the proxy.
 	limitNext bool
 }
@@ -286,11 +289,12 @@ var repoPath = regexp.MustCompile(`^/api/v1/repos/([^/]+/[^/]+)(/|$)`)
 func newCountingProxy(t *testing.T, in *instance) *countingProxy {
 	target, _ := url.Parse(in.url)
 	rp := httputil.NewSingleHostReverseProxy(target)
-	c := &countingProxy{n: map[string]int{}}
+	c := &countingProxy{n: map[string]int{}, seen: map[string][]string{}, t: t}
 	c.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if m := repoPath.FindStringSubmatch(r.URL.Path); m != nil {
 			c.mu.Lock()
 			c.n[strings.ToLower(m[1])]++
+			c.seen[strings.ToLower(m[1])] = append(c.seen[strings.ToLower(m[1])], r.Method+" "+strings.TrimPrefix(r.URL.Path, "/api/v1"))
 			limit := c.limitNext && r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/pulls")
 			if limit {
 				c.limitNext = false
@@ -311,7 +315,9 @@ func newCountingProxy(t *testing.T, in *instance) *countingProxy {
 func (c *countingProxy) calls(path string) int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.n[strings.ToLower(path)]
+	k := strings.ToLower(path)
+	c.t.Logf("calls so far to %s (%d): %v", path, c.n[k], c.seen[k])
+	return c.n[k]
 }
 
 // realFixture is platformtest.Fixture over a real instance: files go in with real git, pull
@@ -404,6 +410,25 @@ func (f *realFixture) probeEmpty(t *testing.T, path string) {
 	}
 	if st, _, _ := f.in.call(t, token(f.tok), http.MethodGet, "/repos/"+path, nil, &r); st == http.StatusOK {
 		t.Logf("FACT %s right after the first push returned: empty=%v", path, r.Empty)
+	}
+}
+
+// settled waits until the instance reports the repository non-empty. Only for tests that call the
+// API themselves; the suite's repositories are never waited for.
+func (f *realFixture) settled(t *testing.T, path string) {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		var r struct {
+			Empty bool `json:"empty"`
+		}
+		if st, _, _ := f.in.call(t, token(f.tok), http.MethodGet, "/repos/"+path, nil, &r); st == http.StatusOK && !r.Empty {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s still empty 30s after the push", path)
+		}
+		time.Sleep(200 * time.Millisecond)
 	}
 }
 

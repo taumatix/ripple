@@ -49,13 +49,15 @@ pass=$(strip < "$work/pass.out" | tr -d '"')
 [ -n "$pass" ] || { echo "empty password"; exit 1; }
 echo "::add-mask::$pass"
 
-api() { # api METHOD PATH [JSON]: prints the answer, fails on an error status
-  local m=$1 p=$2 d=${3:-}
+api() { # api METHOD PATH [JSON]: prints the answer, fails (showing the body) on an error status
+  local m=$1 p=$2 d=${3:-} code
   if [ -n "$d" ]; then
-    curl -fsS -u "$user:$pass" -H 'Content-Type: application/json' -X "$m" -d "$d" "$base/a$p" | strip
+    code=$(curl -sS -u "$user:$pass" -H 'Content-Type: application/json' -X "$m" -d "$d" -o "$work/api.out" -w '%{http_code}' "$base/a$p")
   else
-    curl -fsS -u "$user:$pass" -X "$m" "$base/a$p" | strip
+    code=$(curl -sS -u "$user:$pass" -X "$m" -o "$work/api.out" -w '%{http_code}' "$base/a$p")
   fi
+  strip < "$work/api.out"
+  case $code in 2??) ;; *) echo "$m $p: HTTP $code"; return 1 ;; esac
 }
 
 echo "--- who am I"

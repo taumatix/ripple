@@ -1,0 +1,78 @@
+name: hosts-scmmanager
+# ripple's SCM-Manager host against a REAL SCM-Manager 3.x (public image, started with `docker run`, no
+# secrets): bootstrap through the REST API (plugins, API key) and the recorded-fact tests in
+# internal/platform/scmmanager/real_*_test.go (build tag scmreal). What it proves and does not is in
+# docs/platform-scmmanager.md, "Real instance". Typical wall time: stated in the PR that added it.
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/hosts-scmmanager.yml'
+      - 'internal/platform/**'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hosts-scmmanager.yml'
+      - 'internal/platform/scmmanager/**'
+  workflow_dispatch:
+  schedule:
+    - cron: '47 4 * * 1'
+permissions:
+  contents: read
+jobs:
+  scmmanager:
+    name: scm-manager ${{ matrix.tag }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        tag: ['3.11.0']
+    env:
+      RIPPLE_REAL_SCM_URL: http://127.0.0.1:8080/scm
+      RIPPLE_REAL_SCM_ADMIN_USER: rippleadmin
+      RIPPLE_REAL_RECORD_DIR: ${{ github.workspace }}/real-record
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: start scm-manager ${{ matrix.tag }}
+        run: |
+          set -euo pipefail
+          # A throwaway password for a throwaway instance; masked so it never reaches a log.
+          pw="pw-$(openssl rand -hex 12)"
+          echo "::add-mask::$pw"
+          echo "RIPPLE_REAL_SCM_ADMIN_PASSWORD=$pw" >> "$GITHUB_ENV"
+          docker run -d --name instance -p 127.0.0.1:8080:8080 \
+            --add-host host.docker.internal:host-gateway \
+            -e "SCM_WEBAPP_INITIALUSER=$RIPPLE_REAL_SCM_ADMIN_USER" \
+            -e "SCM_WEBAPP_INITIALPASSWORD=$pw" \
+            "docker.io/scmmanager/scm-manager:${{ matrix.tag }}"
+          # Wait on the REST index: 200 (anonymous) or 401 both mean the web app is up.
+          for i in $(seq 150); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$RIPPLE_REAL_SCM_URL/api/v2/" || true)
+            echo "attempt $i: $code"
+            case "$code" in 200|401|403) break;; esac
+            sleep 2
+          done
+          curl -s -o /dev/null -w 'final: %{http_code}\n' "$RIPPLE_REAL_SCM_URL/api/v2/"
+      - name: recorded facts against the real instance
+        run: |
+          set -o pipefail
+          go test -tags scmreal -count=1 -v -timeout 30m ./internal/platform/scmmanager -run 'Real' 2>&1 | tee real-test.log
+      - name: facts the run recorded
+        if: always()
+        run: grep -E 'FACT|--- (FAIL|PASS|SKIP)' real-test.log || true
+      - name: no real test was skipped
+        run: |
+          if grep -E -- '--- SKIP' real-test.log; then echo "a real-instance test was skipped"; exit 1; fi
+      - name: instance log
+        if: always()
+        run: docker logs --tail 200 instance 2>&1 | sed -E 's/(token|password)=[^ &]+/\1=<redacted>/g' || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hosts-scmmanager-${{ matrix.tag }}
+          path: |
+            real-test.log
+            real-record

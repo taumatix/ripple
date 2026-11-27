@@ -211,8 +211,9 @@ ripple is bound to two external contracts. The block below is the source of trut
   webhooks: ["webhook plugin, JSON {changeset: [...]} per push; no signature exists, ripple authenticates with a shared secret in the custom header X-Ripple-Webhook-Secret, and the repository comes from ?namespace=&name= in the URL"]
   auth: "API key as Authorization: Bearer on the API and as the git basic-auth password (username ignored)"
   capabilities: "no auto-merge (not implemented, reported absent), drafts yes, rate limit undocumented"
-  unverified: "everything: no real SCM-Manager was available. Bearer on the REST API, git basic auth, webhook header support and changeset branches in the deployed plugin, the 201 Location, merge-commit modifications and the 429 answer are from docs and source; the fake in internal/platform/scmmanager is written from them, not recorded"
-  checked: 2026-11-23
+  verified-against: "SCM-Manager 3.11.0 (docker.io/scmmanager/scm-manager:3.11.0) with the plugins its plugin API installs, hosts-scmmanager.yml, 2026-11-27; answers in docs/vendor/scm-manager/real-answers.md"
+  unverified: "merge-commit modifications, shouldDeleteSourceBranch at merge, a real 429 (injected at a proxy), other plugin releases"
+  checked: 2026-11-27
 - name: bitbucket-server
   kind: http-api
   url: https://developer.atlassian.com/server/bitbucket/10.0.swagger.v3.json

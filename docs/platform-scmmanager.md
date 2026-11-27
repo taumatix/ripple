@@ -81,16 +81,20 @@ ripple closes nothing here. A source note is in
 
 ## Unverified
 
-Written from SCM-Manager's own documents and the plugins' public source (`docs/vendor/scm-manager/`,
-`UPSTREAM.md`) against a fake; **no real SCM-Manager was used**. Unconfirmed against a real instance:
+## Real instance
 
-- `Authorization: Bearer <api key>` on the REST API (the source accepts a bearer scheme and Renovate sends it;
-  the docs show only the `X-Bearer-Token` cookie);
-- git basic auth with an API key as password, whatever the username;
-- that the webhook plugin release you run has the custom header table, and sends `branches` in changesets;
-- the 201 `Location` of a created pull request (a missing one falls back to a list lookup);
+`hosts-scmmanager.yml` runs the conformance suite and `TestReal*` (build tag `scmreal`) against SCM-Manager
+3.11.0 in CI, with the Review and Webhook plugins installed through the plugin API (no UI). Verified there,
+recorded in `docs/vendor/scm-manager/real-answers.md`: the headless bootstrap and API key, `Authorization:
+Bearer`, the cookie and git basic auth with an API key (any user name), the webhook plugin's custom header
+and `branches` in changesets, one delivery per push, the 201 `Location` of a pull request, the branch
+resource used for head polling, the modifications resource for a push, and archive and unarchive.
+
+## Unverified
+
+Not observed against a real instance (assumed, unverified):
+
 - the modifications of a merge commit (which parent they are against);
 - `shouldDeleteSourceBranch` honoured at merge;
-- the branch resource used for head polling (`GET repositories/{ns}/{name}/branches/{branch}`, media type
-  `application/vnd.scmm-branch+json;v=2`, a `revision` field): from memory of the API, not vendored;
-- the 429 answer: assumed, nothing documents it.
+- the 429 answer: nothing documents it and no instance throttles; the rate-limit case injects one at a proxy;
+- plugin releases other than the ones 3.11.0 installs.

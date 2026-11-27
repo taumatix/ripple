@@ -46,6 +46,8 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
 
 - GitLab now runs against a real GitLab CE 19.6.2 in CI (`hosts-gitlab-gerrit.yml`, `go test -tags gitlab`): the host conformance suite, real project webhooks (a trimmed Push Hook is a receiver test), Bearer with personal, project and group tokens, the real 429 (a client test), draft and auto-merge answers, and archive. Fixed: creating a merge request right after a push failed with `400 source_branch does not exist` for 1 to 2 s, so `CreatePR` now retries a bounded number of times (`Client.RetrySleep` is the new, optional test seam). Documented: auto-merge needs a Maintainer token on a protected default branch (a Developer token gets 401). Not verified: the signing-token scheme, discovery by system hook, a group webhook, gitlab.com's throttle values, auto-merge with a real pipeline, any GitLab other than 19.6.2, and the fake does not model roles.
 
+- SCM-Manager now runs for real in CI (`hosts-scmmanager.yml`: SCM-Manager 3.11.0 as a container, the Review and Webhook plugins installed through its plugin API, an API key for a fresh user per test): the full conformance suite, including a push that opens exactly one pull request, plus `TestReal*` recording the answers in `docs/vendor/scm-manager/real-answers.md`. Bearer, git basic auth, the webhook's custom header and `branches`, the 201 `Location` and the head-polling resource are now verified; merge-commit modifications, `shouldDeleteSourceBranch` and a real 429 are ROADMAP 284 to 286.
+
 ## [0.4.0] - 2026-11-25
 
 Additive release: no public API was removed or changed. Opt-in ecosystems: Helm, Bundler, Composer, NuGet, Maven and Terraform

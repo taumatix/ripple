@@ -355,6 +355,11 @@ func (f *realFixture) Push(t *testing.T, _ string, path string, files map[string
 	}
 }
 
+// FilelessPushes: the instance's push webhook lists no files (recorded: changesets without paths),
+// so deciding whether a push matters costs one modifications request, which the suite counts as
+// platform calls instead.
+func (f *realFixture) FilelessPushes() {}
+
 func (f *realFixture) t() *testing.T { return f.cur }
 
 func (f *realFixture) PRs(path string) []platformtest.PR {

@@ -28,23 +28,28 @@ are the same version (vendored `docs/vendor/maven/pom-reference.txt`, "Version O
 a three-segment declaration still moves to three-segment releases only, as before.
 
 Properties (`${x.version}`): the property's value is the text that moves, and the dependency keeps `${x.version}`.
-This happens only when all of these hold; otherwise the dependency is left alone, unread (there is no per-file report
-yet; the PR simply never opens):
+This happens only when all of these hold; otherwise the dependency is left alone, unread (the engine logs each such
+declaration with its reason, "declaration left unread"; there is no dashboard report yet, ROADMAP 320):
 - the property is declared exactly once in the whole file, as a direct child of `<project><properties>` (a profile's
   `<properties>` is a different set, and a name declared there as well is ambiguous), and its whole text is a literal
   `X.Y` or `X.Y.Z`;
 - every `${x.version}` in the file, outside comments (CDATA, other properties, plugin versions, descriptions
-  included), is the `<version>` of a dependency, and those dependencies are the same `groupId:artifactId`. A property
-  shared by two artifacts, even of one group (`jackson-core` and `jackson-databind`), is left alone: ripple reads one
-  artifact's releases, so it cannot know the new version exists for the other (ROADMAP);
+  included), is the `<version>` of a dependency. A property shared by several artifacts (`jackson-core` and
+  `jackson-databind`) is one entry, tracked under the first artifact that uses it; when a release is proposed ripple
+  reads the releases of every other user and moves the property only to a release all of them have (the newest common
+  one, if the proposed one is missing for a sharer, else the job is skipped);
 - the name is not one Maven resolves itself (`project.`, `pom.`, `env.`, `settings.` and the Java system properties,
   `pom-reference.txt` "Properties"), and the file is well-formed XML.
 The property is the pom's own: one inherited from a `<parent>` is not followed, and an override on the command line
-(`-Dx.version=...`) is not seen.
+(`-Dx.version=...`) is not seen; real Maven lets it win over the pom (`TestRealtoolMavenSharedProperty`).
+
+The `<parent>` version is tracked as a dependency (`groupId:artifactId` of the parent) and its `<version>` moves like
+any literal. The parent's own properties and managed versions are not read, and bumping a parent changes every version it
+manages (`TestRealtoolMavenParent`), which the PR does not list (ROADMAP 323).
 
 Skipped: a range (`[1.0,2.0)`), a qualified version (`1.0.0-SNAPSHOT`, `1.0.0.RELEASE`, `1.0-beta`), one or four numeric
 segments, a property that does not qualify, a dependency without `<version>` (managed by a parent or a BOM),
-`<exclusion>` elements, the `<parent>` version, plugin versions themselves, and anything in an XML comment or CDATA.
+`<exclusion>` elements, plugin versions themselves, and anything in an XML comment or CDATA.
 
 ## What is proposed
 
@@ -65,7 +70,7 @@ resolve internal coordinates through a mirror that Central could shadow.
 No lock file is involved (Maven has none); the branch prefix is `ripple/maven/`.
 
 See [UPSTREAM.md](../UPSTREAM.md). Verified: the datasource against the real Maven Central (`-tags live`), and the
-edit by `mvn` (`TestRealtoolMaven`, in CI: it moves a literal, a two-segment version and a property). The property rules
+edit by `mvn` (`TestRealtoolMaven`, `TestRealtoolMavenSharedProperty` and `TestRealtoolMavenParent`, in CI: a literal, a two-segment version, a property, a shared property and a parent). The property rules
 are from `docs/vendor/maven/pom-reference.txt` (fetched 2026-11-26); that Maven resolves a property declared once in
 `<project><properties>` the way described, with a command-line override winning, is that page's text, not something
 run here (assumed, unverified beyond the realtool pom).

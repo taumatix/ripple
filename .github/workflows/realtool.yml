@@ -133,9 +133,9 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ~/.m2/repository
-          key: realtool-maven-${{ runner.os }}-${{ hashFiles('internal/manager/testdata/realtool/maven/pom.xml') }}
+          key: realtool-maven-${{ runner.os }}-${{ hashFiles('internal/manager/testdata/realtool/maven*/pom.xml') }}
           restore-keys: realtool-maven-${{ runner.os }}-
-      - run: scripts/realtool.sh TestRealtoolMaven
+      - run: scripts/realtool.sh TestRealtoolMaven TestRealtoolMavenSharedProperty TestRealtoolMavenParent
   terraform:
     runs-on: ubuntu-latest
     timeout-minutes: 30

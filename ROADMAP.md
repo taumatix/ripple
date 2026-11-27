@@ -408,16 +408,8 @@ Everything else:
     only by one artifact are read now (docs/maven.md). The forms skipped today: qualified versions, a property that
     several artifacts share (248), properties and versions managed by a parent or BOM (249), `<repositories>` and
     `settings.xml` mirrors, and Gradle (`build.gradle`, `libs.versions.toml`) as a sibling manager on this datasource.
-248. **Maven: shared properties, and saying what was skipped.** `${jackson.version}` used by `jackson-core` and
-    `jackson-databind` is left alone because ripple reads one artifact's releases and cannot tell the sibling has the new
-    version. Check every artifact that uses the property (one metadata read each, same group) and move it only when all
-    have the release. A skipped property is invisible today (the PR just never opens); report it per file. The
-    command-line override of a property (`-Dx.version=`) is not seen, and Maven resolving a once-declared property as
-    `pom-reference.txt` describes is that page's text, not run beyond the realtool pom.
-249. **Maven: parents and BOMs.** A `<parent>` pom's `<properties>` and `<dependencyManagement>` are not followed, so a
-    dependency whose version comes from `spring-boot-starter-parent` or an imported BOM stays unread. Reading the parent
-    needs its pom from the repository (a second datasource read) and Maven's inheritance rules (vendored
-    `pom-reference.txt` "Inheritance"), and the edit then belongs in the parent's file or is impossible.
+248. ~~**Maven: shared properties, and saying what was skipped.**~~ Shipped: a property used by several artifacts is one entry under its first user and moves only to a release every sharer has (`mavenGuard`, which reads each sharer's releases and retargets to the newest common one); a property used outside a dependency `<version>` stays unread, and the engine logs each left-alone declaration (`Skipper`). Left: 320 (the dashboard report) and 321 (the command-line override).
+249. ~~**Maven: parents and BOMs.**~~ Shipped for the `<parent>` version only: the parent is a tracked dependency and its `<version>` moves. Its `<properties>` and `<dependencyManagement>` are still not followed; imported BOMs are 322.
 240. **Terraform: the unread forms.** The datasource, manager and docs are written from the vendored HashiCorp pages
     ([docs/vendor/terraform](docs/vendor/terraform)); a `-tags live` test (`internal/terraform`,
     `.github/workflows/live.yml`) reads the real registry and a `-tags realtool` test
@@ -467,3 +459,15 @@ Everything else:
     rate-limit case is injected at a proxy and the `Retry-After` form is assumed. Add a matrix leg with an older
     SCM-Manager 3.x and the plugin releases it installs, and record whether the custom-header table and
     `branches` are present there.
+320. **Maven: show what was skipped on the dashboard.** `Maven.Skipped` lists, per pom, each property left unread and
+    why, but only the engine's Info log carries it. Put it in the per-repository view and the PR-less "nothing proposed"
+    answer, so a user sees why a pom never gets a PR.
+321. **Maven: the command-line override.** `mvn -Djackson.version=...` beats the pom's property (`TestRealtoolMavenSharedProperty`
+    proves it), so for a project that passes one the edit changes nothing. Ripple cannot see CI scripts; decide
+    whether to read `.mvn/maven.config` and `.mvn/jvm.config` (which are repository files) and leave a property they set alone.
+322. **Maven: imported BOMs and a local parent's properties.** A `<scope>import</scope>` BOM in `<dependencyManagement>`
+    is tracked as a dependency already; what is not read is a version that a parent in the same repository defines as a
+    property (`<relativePath>` pointing at another pom in the checkout), which needs a multi-file scan.
+323. **Maven: the parent moved, the managed versions with it.** Bumping `spring-boot-starter-parent` changes every
+    managed dependency version silently (`TestRealtoolMavenParent` shows slf4j-api moving). The PR body should say so,
+    and the cooldown check could look at the managed set; today only the one version line is described.

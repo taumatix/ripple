@@ -30,6 +30,8 @@ Run one locally (from the repository root; `-tags realtool` is added for you):
 | `TestRealtoolNugetItemForms` | `dotnet restore` on a project written one way (`Version` attribute, `<Version>` child, `Update=` before or after its `Include`, both attribute and child) and which `Newtonsoft.Json` version `obj/project.assets.json` holds | dotnet 8 |
 | `TestRealtoolNugetItemFormsEdit` | the dead-Include, attribute-plus-child and child-only forms edited by ripple (`nuget-forms` fixture), then `dotnet restore` and `dotnet build`, and the versions in `obj/project.assets.json` | dotnet 8 |
 | `TestRealtoolMaven` | `mvn validate`, `dependency:resolve`, `compile` | mvn, JDK 17 |
+| `TestRealtoolMavenSharedProperty` | `dependency:list` on a pom whose `${jackson.version}` feeds two artifacts, before and after the edit; a `-Djackson.version` override beating the property | mvn, JDK 17 |
+| `TestRealtoolMavenParent` | `dependency:list` before and after a `spring-boot-starter-parent` bump: the managed `slf4j-api` changes | mvn, JDK 17 |
 | `TestRealtoolTerraform` | `terraform init -backend=false`, `terraform validate` | terraform |
 | `TestRealtoolGitHubActions` | `actionlint`, plus `git ls-remote` that the new tag exists | actionlint, git |
 | `TestRealtoolDocker` | `hadolint` (no daemon), plus a Docker Hub check that the new tag exists | hadolint |

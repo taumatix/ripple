@@ -356,6 +356,11 @@ func (e *Engine) scan(ctx context.Context, repo model.Repo) error {
 				e.log().Warn("skip unparsable file", "repo", repo.FullName, "file", h.path, "err", xerr)
 				continue
 			}
+			if sk, ok := m.(manager.Skipper); ok {
+				for _, why := range sk.Skipped(h.path, content) {
+					e.log().Info("declaration left unread", "repo", repo.FullName, "manager", m.Name(), "why", why)
+				}
+			}
 			for _, d := range found {
 				d.Repo = repo.FullName
 				deps = append(deps, d)

@@ -39,13 +39,9 @@ func applicableRubygems(d model.Dependency, pkg, version string) (rules.UpdateTy
 	if !ok {
 		return "", false
 	}
-	cur := spec.Version
-	if spec.TwoSegment() {
-		cur += ".0"
-	}
-	typ, ok := rules.Classify("v"+cur, "v"+to.Version)
-	if ok && spec.TwoSegment() && typ != rules.Major {
-		return "", false // "~> 1.2" already allows every later 1.x: nothing to edit
+	typ, ok := rules.Classify("v"+spec.Floor(), "v"+to.Version)
+	if ok && spec.Partial() && typ != rules.Major {
+		return "", false // "~> 1.2" and "~> 1" already allow every later 1.x: nothing to edit
 	}
 	return typ, ok
 }

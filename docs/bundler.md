@@ -16,14 +16,14 @@ Only `directory` applies (and the shared keys such as cooldown and grouping). Wi
 `gem "name", "<version>"` lines of a `Gemfile`. A gem is tracked when all of these hold:
 
 - the version is one release in the forms `1.2.3`, `= 1.2.3` or `~> 1.2.3` (three numeric segments), or the
-  two-segment pessimistic `~> 1.2`;
+  two-segment pessimistic `~> 1.2` or the one-segment `~> 1`;
 - the line is complete on one line (a trailing comma continues on the next, and is skipped);
 - the gem has no `git:`, `github:`, `path:`, `source:` (or `:git =>` style) option and is not inside a `git`, `path`,
   `github` or `source` block;
 - the file names no `source` other than `https://rubygems.org`. One other source and the whole file is left alone.
 
 Skipped: a gem with no version, several constraints (`">= 1", "< 2"`), a range, a single `">= 1.0"` or `"> 1.0"`
-(it already allows every later release, so there is never anything to write), a one-segment `"~> 1"`, `<`, `<=` and
+(it already allows every later release, so there is never anything to write), `<`, `<=` and
 `!=` constraints (no new text follows from a release alone), four-segment or prerelease versions, `.gemspec` files and
 `gems.rb`.
 
@@ -35,6 +35,14 @@ of the same major is never proposed (a `Gemfile.lock` refresh picks it up). A re
 `major` update (the same `update-types` rules, cooldown and no auto-merge default as every other manager), and the file
 then takes that release's first two segments: `~> 1.2` becomes `~> 2.1` for 2.1.3. The new constraint always allows the
 release it names and never a lower major, so it is never wider than what that release implies.
+
+### The one-segment `~> 1`
+
+The man page does not define `~> 1`. The real tool does: `bundle lock` on a Gemfile with `gem "rack", "~> 1"` locks
+rack 1.6.13, with `~> 2` rack 2.2.26 and with `~> 0` rack 0.9.1 (checked 2026-11-27 against rubygems.org with Bundler's
+own resolver, and asserted on every run by `TestRealtoolBundlerOneSegment`). So `~> 1` is `>= 1, < 2`, the same as
+`~> 1.0`, and is treated like the two-segment form: a release of the same major is never proposed, a release of a later
+major is, and the file takes that release's major alone (`~> 1` becomes `~> 2` for 2.2.26).
 
 ## What is proposed
 

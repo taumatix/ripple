@@ -23,6 +23,12 @@ func TestApplicableRubygemsTwoSegment(t *testing.T) {
 		{"older", "~> 1.2", "1.1.9", "", false},
 		{"next major leaves the constraint", "~> 1.2", "2.0.0", rules.Major, true},
 		{"a major further on", "~> 1.2", "4.7.1", rules.Major, true},
+		// "~> 1" resolved by the real `bundle lock` inside 1.x (TestRealtoolBundlerOneSegment, ROADMAP 253).
+		{"one segment: later minor is already allowed", "~> 1", "1.6.13", "", false},
+		{"one segment: the floor itself", "~> 1", "1.0.0", "", false},
+		{"one segment: older", "~> 2", "1.9.0", "", false},
+		{"one segment: next major leaves it", "~> 1", "2.2.26", rules.Major, true},
+		{"one segment: zero", "~> 0", "1.0.0", rules.Major, true},
 		{"three segments keep their old behaviour: minor", "~> 1.2.3", "1.3.0", rules.Minor, true},
 		{"three segments: patch", "~> 1.2.3", "1.2.4", rules.Patch, true},
 		{"exact pin: patch", "1.2.3", "1.2.4", rules.Patch, true},

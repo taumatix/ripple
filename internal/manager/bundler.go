@@ -22,10 +22,11 @@ import (
 // A two-segment "~> 1.2" is ">= 1.2, < 2.0" (docs/vendor/rubygems/gemfile.md, "Gems >
 // Version"): every later 1.x is already allowed, so only a release of a later major is an
 // update, and it moves the two digits to the new release's major and minor ("~> 2.1" for
-// 2.1.3), which that release satisfies.
+// 2.1.3), which that release satisfies. A one-segment "~> 1" is the same ("~> 1.0": real bundler
+// resolves it inside 1.x) and moves to the later release's major alone ("~> 2").
 //
 // Left alone besides: a gem with no version, a range or several constraints (">= 1", "< 2"),
-// a single ">=" or ">" (it already allows every later release), a one-segment "~> 1", a
+// a single ">=" or ">" (it already allows every later release), a
 // version with other than three numeric segments, a prerelease, and a declaration split
 // over several lines.
 type Bundler struct {
@@ -44,7 +45,7 @@ type BundlerSpec struct {
 	Version string // "X.Y.Z", or "X.Y" after "~> "
 }
 
-var bundlerSpecRE = regexp.MustCompile(`^(?:((?:=|~>)[ \t]*)?([0-9]+\.[0-9]+\.[0-9]+)|(~>[ \t]*)([0-9]+\.[0-9]+))$`)
+var bundlerSpecRE = regexp.MustCompile(`^(?:((?:=|~>)[ \t]*)?([0-9]+\.[0-9]+\.[0-9]+)|(~>[ \t]*)([0-9]+(?:\.[0-9]+)?))$`)
 
 // ParseBundlerSpec reads a gem's version text.
 func ParseBundlerSpec(s string) (BundlerSpec, bool) {
@@ -62,14 +63,29 @@ func ParseBundlerSpec(s string) (BundlerSpec, bool) {
 // major.
 func (s BundlerSpec) TwoSegment() bool { return strings.Count(s.Version, ".") == 1 }
 
-// twoSegmentTarget is the text a "~> X.Y" constraint takes to follow release nv (X.Y.Z): its
-// first two segments, and false when nv is not of a later major than the constraint.
-func (s BundlerSpec) twoSegmentTarget(nv string) (string, bool) {
+// Partial reports a "~> X" or "~> X.Y" constraint: it allows every later release of its major, so
+// only a release of a later major is an update. "~> X" is the same as "~> X.0": the real
+// `bundle lock` resolves "~> 1" inside 1.x (TestRealtoolBundlerOneSegment).
+func (s BundlerSpec) Partial() bool { return strings.Count(s.Version, ".") < 2 }
+
+// Floor is the constraint's version padded to three segments ("1" and "1.2" become "1.0.0" and
+// "1.2.0"), the release it starts from.
+func (s BundlerSpec) Floor() string {
+	return s.Version + strings.Repeat(".0", 2-strings.Count(s.Version, "."))
+}
+
+// partialTarget is the text a "~> X" or "~> X.Y" constraint takes to follow release nv (X.Y.Z): as
+// many leading segments of nv as the constraint has, and false when nv is not of a later major
+// than the constraint.
+func (s BundlerSpec) partialTarget(nv string) (string, bool) {
 	cur, _, _ := strings.Cut(s.Version, ".")
 	major, rest, _ := strings.Cut(nv, ".")
 	minor, _, _ := strings.Cut(rest, ".")
 	a, _ := strconv.Atoi(cur)
 	b, _ := strconv.Atoi(major)
+	if !s.TwoSegment() {
+		return major, b > a
+	}
 	return major + "." + minor, b > a
 }
 
@@ -167,13 +183,13 @@ func (b Bundler) Apply(content []byte, dep model.Dependency, newPackage, newVers
 		return nil, fmt.Errorf("%w: %q is not a version ripple moves", ErrUnsupported, dep.Version)
 	}
 	nv := strings.TrimPrefix(newVersion, "v")
-	if r, ok := ParseBundlerSpec(nv); !ok || r.TwoSegment() {
+	if r, ok := ParseBundlerSpec(nv); !ok || r.Partial() {
 		return nil, fmt.Errorf("%w: %q is not a release version", ErrUnsupported, newVersion)
 	}
 	text := nv
-	if cur.TwoSegment() {
+	if cur.Partial() {
 		var later bool
-		if text, later = cur.twoSegmentTarget(nv); !later {
+		if text, later = cur.partialTarget(nv); !later {
 			return nil, fmt.Errorf("%w: %q already allows %s", ErrUnsupported, dep.Version, nv)
 		}
 	}

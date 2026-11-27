@@ -48,6 +48,9 @@ type realtool struct {
 	// local lists the steps (joined with spaces) that touch no registry; every other
 	// step is retried, see attempts. A local step that fails is a real failure at once.
 	local []string
+	// before runs once the steps pass on the untouched fixture: what the tool says the manifest
+	// as committed means, the fact the edit's rule rests on.
+	before func(t *testing.T, dir string)
 	// after runs once the steps pass on the updated copy.
 	after func(t *testing.T, dir string)
 }
@@ -65,6 +68,9 @@ func (r realtool) run(t *testing.T) {
 	copyTree(t, src, after)
 
 	r.steps0(t, before, "fixture as committed")
+	if r.before != nil {
+		r.before(t, before)
+	}
 
 	manifest := filepath.Join(after, r.manifest)
 	old, err := os.ReadFile(manifest)
@@ -310,17 +316,109 @@ func TestRealtoolBundlerTwoSegment(t *testing.T) {
 	}.run(t)
 }
 
+// A one-segment "~> 1" is ">= 1, < 2": bundler must resolve the untouched Gemfile to a 1.x rack (the
+// fact ripple's rule rests on, ROADMAP 253), ripple moves it to "~> 3" for rack 3.1.0, and bundler
+// must then resolve a 3.x rack.
+func TestRealtoolBundlerOneSegment(t *testing.T) {
+	realtool{
+		fixture: "bundler-onesegment", manifest: "Gemfile", manager: Bundler{Dir: "/"},
+		bumps:  []bump{{"rack", "1", "3.1.0"}},
+		steps:  [][]string{{"bundle", "lock"}},
+		before: func(t *testing.T, dir string) { mustContain(t, dir, "Gemfile.lock", "rack (1.") },
+		after:  func(t *testing.T, dir string) { mustContain(t, dir, "Gemfile.lock", "rack (3.") },
+	}.run(t)
+}
+
 func TestRealtoolComposer(t *testing.T) {
 	realtool{
 		fixture: "composer", manifest: "composer.json", manager: Composer{Dir: "/"},
 		bumps: []bump{{"monolog/monolog", "3.0.0", "3.5.0"}},
-		steps: [][]string{
-			{"composer", "validate", "--no-check-lock", "--no-interaction"},
-			{"composer", "update", "--dry-run", "--no-scripts", "--no-plugins", "--no-interaction"},
-			{"composer", "update", "--no-install", "--no-scripts", "--no-plugins", "--no-interaction"},
-		},
+		steps: composerSteps,
 		after: func(t *testing.T, dir string) { mustContain(t, dir, "composer.lock", `"version": "3.5.0"`) },
 	}.run(t)
+}
+
+// A two-segment "^1.2" is ">=1.2.0 <2.0.0": composer must lock monolog 1.x for the untouched file,
+// ripple moves it to "^3.5" for 3.5.0, and composer must then lock a 3.x release.
+func TestRealtoolComposerTwoSegment(t *testing.T) {
+	realtool{
+		fixture: "composer-twosegment", manifest: "composer.json", manager: Composer{Dir: "/"},
+		bumps: []bump{{"monolog/monolog", "1.2", "3.5.0"}},
+		steps: composerSteps,
+		before: func(t *testing.T, dir string) {
+			mustContain(t, dir, "composer.lock", `"version": "1.27.1"`) // the newest 1.x: monolog 1 is not developed any more
+		},
+		after: func(t *testing.T, dir string) { mustContain(t, dir, "composer.lock", `"version": "3.`) },
+	}.run(t)
+}
+
+var composerSteps = [][]string{
+	{"composer", "validate", "--no-check-lock", "--no-interaction"},
+	{"composer", "update", "--dry-run", "--no-scripts", "--no-plugins", "--no-interaction"},
+	{"composer", "update", "--no-install", "--no-scripts", "--no-plugins", "--no-interaction"},
+}
+
+// What composer itself resolves for the constraints ripple does not read yet (ROADMAP 255), asked of
+// the real tool: the version it locks for one constraint on a package whose releases are known.
+// monolog/monolog 1.x ends at 1.27.1 and mockery/mockery has 0.7.2, 0.8.0 and 0.9.x (to 0.9.11) before 1.0
+// (Packagist, 2026-11-27).
+func TestRealtoolComposerConstraintMeaning(t *testing.T) {
+	for _, tc := range []struct{ pkg, constraint, locks string }{
+		{"monolog/monolog", "~1", "1.27.1"},   // "~1" is ~1.0: >=1.0 <2.0.0
+		{"monolog/monolog", "^1", "1.27.1"},   // ">=1.0.0 <2.0.0"
+		{"monolog/monolog", "~1.2", "1.27.1"}, // the article's own example
+		{"monolog/monolog", "^1.2", "1.27.1"},
+		{"mockery/mockery", "~0.3", "0.9.11"}, // not stated for 0.x: the tool says >=0.3 <1.0
+		{"mockery/mockery", "^0.3", ""},       // ">=0.3.0 <0.4.0": there is no 0.3 release, so nothing locks
+		{"mockery/mockery", "^0.7", "0.7.2"},  // ">=0.7.0 <0.8.0"
+		{"mockery/mockery", "^0.8", "0.8.0"},
+		{"mockery/mockery", "^0.9", "0.9.11"},
+		{"mockery/mockery", "^0", "0.9.11"}, // ">=0.0.0 <1.0.0"
+	} {
+		t.Run(tc.pkg+"@"+tc.constraint, func(t *testing.T) {
+			dir := t.TempDir()
+			json := fmt.Sprintf(`{"require": {%q: %q}, "config": {"platform": {"php": "8.2.0"}}}`, tc.pkg, tc.constraint)
+			if err := os.WriteFile(filepath.Join(dir, "composer.json"), []byte(json), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if tc.locks == "" {
+				out, err := composerUpdate(dir)
+				if err == nil {
+					t.Fatalf("composer locked something for %s %s, which should match no release:\n%s", tc.pkg, tc.constraint, out)
+				}
+				if !strings.Contains(string(out), "could not be found") && !strings.Contains(string(out), "Your requirements could not be resolved") {
+					t.Fatalf("composer failed for another reason:\n%s", out)
+				}
+				return
+			}
+			if out, err := composerUpdate(dir); err != nil {
+				t.Fatalf("%v\n%s", err, out)
+			}
+			mustContain(t, dir, "composer.lock", `"version": "`+tc.locks+`"`)
+		})
+	}
+}
+
+// composerUpdate resolves the constraint without installing: --ignore-platform-reqs because a 0.x
+// mockery asks for hamcrest releases written for php 5.
+func composerUpdate(dir string) ([]byte, error) {
+	if _, err := exec.LookPath("composer"); err != nil {
+		return nil, fmt.Errorf("composer is not installed: the real-tool tests need it (CI installs it); not skipping")
+	}
+	var out []byte
+	var err error
+	for i := 1; i <= attempts; i++ {
+		ctx, cancel := context.WithTimeout(context.Background(), stepTimeout)
+		cmd := exec.CommandContext(ctx, "composer", "update", "--no-install", "--no-scripts", "--no-plugins", "--no-interaction", "--ignore-platform-reqs")
+		cmd.Dir = dir
+		out, err = cmd.CombinedOutput()
+		cancel()
+		if err == nil || strings.Contains(string(out), "could not be found") {
+			return out, err // a real answer from the registry, not a flake
+		}
+		time.Sleep(backoff * time.Duration(i))
+	}
+	return out, err
 }
 
 func TestRealtoolNuget(t *testing.T) {

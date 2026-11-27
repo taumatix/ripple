@@ -82,7 +82,7 @@ jobs:
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: "3.3"
-      - run: scripts/realtool.sh TestRealtoolBundler TestRealtoolBundlerTwoSegment
+      - run: scripts/realtool.sh TestRealtoolBundler TestRealtoolBundlerTwoSegment TestRealtoolBundlerOneSegment
   composer:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -100,7 +100,7 @@ jobs:
           path: ~/.cache/composer
           key: realtool-composer-${{ runner.os }}-${{ hashFiles('internal/manager/testdata/realtool/composer/composer.json') }}
           restore-keys: realtool-composer-${{ runner.os }}-
-      - run: scripts/realtool.sh TestRealtoolComposer
+      - run: scripts/realtool.sh TestRealtoolComposer TestRealtoolComposerTwoSegment TestRealtoolComposerConstraintMeaning
   nuget:
     runs-on: ubuntu-latest
     timeout-minutes: 30

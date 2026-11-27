@@ -1,0 +1,12 @@
+{
+    "name": "taumatix/realtool",
+    "description": "A fixture for ripple's real-tool tests: a two-segment caret constraint",
+    "require": {
+        "monolog/monolog": "^1.2"
+    },
+    "config": {
+        "platform": {
+            "php": "8.2.0"
+        }
+    }
+}

@@ -59,6 +59,7 @@ jobs:
             -e "${p}__server__ROOT_URL=http://127.0.0.1:3000/" \
             -e "${p}__server__DISABLE_SSH=true" \
             -e "${p}__webhook__ALLOWED_HOST_LIST=*" \
+            -e "${p}__security__ALLOWED_HOST_LIST=*" \
             -e "${p}__database__DB_TYPE=sqlite3" \
             -e "${p}__service__DISABLE_REGISTRATION=true" \
             -e "${p}__log__LEVEL=Info" \

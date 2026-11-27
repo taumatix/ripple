@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/taumatix/ripple/internal/platform"
 	"github.com/taumatix/ripple/internal/platform/gitea"
@@ -260,9 +261,26 @@ func TestRealRepositoryWebhook(t *testing.T) {
 	t.Logf("FACT repository webhook on create: action=%q repo=%q headers=%v receiver_status=%d", action, repo, headerNames(d.Headers), d.Status)
 	before = len(f.fwd.deliveries())
 	in.must(t, token(f.tok), http.MethodDelete, "/repos/"+f.Path("watched"), nil, nil)
-	d = f.fwd.await(t, before, "repository deleted", func(d delivery) bool { return d.event() == "repository" })
-	_, repo, action = d.payload()
-	t.Logf("FACT repository webhook on delete: action=%q repo=%q receiver_status=%d", action, repo, d.Status)
+	// Soft wait: whether a delete is announced at all is the question.
+	deadline := time.Now().Add(15 * time.Second)
+	found := false
+	for !found && time.Now().Before(deadline) {
+		for _, d := range f.fwd.deliveries()[before:] {
+			if d.event() == "repository" {
+				_, repo, action = d.payload()
+				t.Logf("FACT repository webhook on delete: action=%q repo=%q receiver_status=%d", action, repo, d.Status)
+				found = true
+			}
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	if !found {
+		var seen []string
+		for _, d := range f.fwd.deliveries()[before:] {
+			seen = append(seen, d.event())
+		}
+		t.Logf("FACT no repository webhook within 15s of deleting the repository; deliveries: %v", seen)
+	}
 	for _, e := range sink.events() {
 		t.Logf("FACT receiver event kind=%v repos=%v", e.Kind, e.Repos)
 	}

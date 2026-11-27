@@ -381,7 +381,7 @@ func writeFiles(t *testing.T, dir string, files map[string]string) {
 func (f *realFixture) AddRepo(t *testing.T, path string, files map[string]string) {
 	t.Helper()
 	_, short, _ := strings.Cut(path, "/")
-	f.in.must(t, token(f.tok), http.MethodPost, "/user/repos", map[string]any{"name": short, "auto_init": false, "default_branch": "main"}, nil)
+	f.in.must(t, token(f.tok), http.MethodPost, "/user/repos", map[string]any{"name": short, "private": true, "auto_init": false, "default_branch": "main"}, nil)
 	dir := t.TempDir()
 	f.dirs[path] = dir
 	writeFiles(t, dir, files)
@@ -389,6 +389,30 @@ func (f *realFixture) AddRepo(t *testing.T, path string, files map[string]string
 	f.git(t, dir, "add", "-A")
 	f.git(t, dir, "commit", "-q", "-m", "initial")
 	f.git(t, dir, "push", "-q", f.in.url+"/"+path+".git", "main")
+	f.settled(t, path)
+}
+
+// settled waits until the instance lists the repository as non-empty. The first push is
+// processed after the git command returns: until then `empty` is still true, /user/repos
+// holds the repository back (the client skips empty ones) and creating a pull request
+// answers 404 (the first CI run of this suite, docs/platform-gitea.md "Real instances").
+func (f *realFixture) settled(t *testing.T, path string) {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		var r struct {
+			Empty bool `json:"empty"`
+		}
+		st, _, _ := f.in.call(t, token(f.tok), http.MethodGet, "/repos/"+path, nil, &r)
+		if st == http.StatusOK && !r.Empty {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s still empty (status %d) 30s after the push", path, st)
+		}
+		t.Logf("FACT %s: status %d empty=%v right after the first push", path, st, r.Empty)
+		time.Sleep(200 * time.Millisecond)
+	}
 }
 
 func (f *realFixture) Register(t *testing.T, webhook string, paths ...string) {

@@ -32,6 +32,8 @@ curl -sS -c "$jar" -o "$work/login.out" -w 'login: %{http_code}\n' -L "$base/log
 grep -q GerritAccount "$jar" || { echo "no GerritAccount cookie: $(head -c 300 "$work/login.out")"; exit 1; }
 echo "--- cookie jar names: $(awk 'NF>=7{print $6}' "$jar" | tr '\n' ' ')"
 curl -sS -b "$jar" -c "$jar" -o /dev/null -w 'GET accounts/self (cookie): %{http_code}\n' "$base/accounts/self"
+# the XSRF_TOKEN cookie is handed out with the web UI's host page, not by the REST servlet (assumed, checked here)
+curl -sS -b "$jar" -c "$jar" -o /dev/null -w 'GET / (cookie): %{http_code}\n' "$base/"
 echo "--- cookie jar names after a REST call: $(awk 'NF>=7{print $6}' "$jar" | tr '\n' ' ')"
 xsrf=$(awk '$6=="XSRF_TOKEN"{print $7}' "$jar")
 

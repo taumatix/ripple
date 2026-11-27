@@ -6,7 +6,10 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 
@@ -256,5 +259,41 @@ func TestRefUpdatedCarriesTheTransitionAsItsDeliveryID(t *testing.T) {
 	}
 	if sink.got[2].Delivery == sink.got[0].Delivery || sink.got[3].Delivery == sink.got[0].Delivery {
 		t.Errorf("distinct updates share an id: %+v", sink.got)
+	}
+}
+
+// The bodies in testdata were posted by a real Gerrit 3.15.0 webhooks plugin to the relay of
+// hosts-gitlab-gerrit.yml and are trimmed to nothing but what the plugin sent (the first line of the
+// recording, the HTTP request line, is dropped). They have the shape the fake and the tests above use.
+func TestReceiverRealPluginPayloads(t *testing.T) {
+	read := func(name string) string {
+		b, err := os.ReadFile(filepath.Join("testdata", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	t.Run("branch push", func(t *testing.T) {
+		sink, files := &sinkRec{}, &filesRec{files: []string{"go.mod"}}
+		h := &gerrit.Receiver{Secret: []byte("s"), Sink: sink, Files: files}
+		if w := serve(h, "/?token=s", read("real-ref-updated-main.json"), nil); w.Code != http.StatusAccepted {
+			t.Fatalf("status %d", w.Code)
+		}
+		if len(sink.got) != 1 || sink.got[0].Kind != platform.Push || sink.got[0].Ref != "refs/heads/main" ||
+			!strings.HasSuffix(sink.got[0].Repos[0], "/also-uses") {
+			t.Errorf("events %+v, want one push on refs/heads/main of .../also-uses", sink.got)
+		}
+	})
+	for _, name := range []string{"real-ref-updated-change-ref.json", "real-ref-updated-meta-config.json"} {
+		t.Run(name, func(t *testing.T) {
+			sink, files := &sinkRec{}, &filesRec{}
+			h := &gerrit.Receiver{Secret: []byte("s"), Sink: sink, Files: files}
+			if w := serve(h, "/?token=s", read(name), nil); w.Code != http.StatusAccepted {
+				t.Fatalf("status %d", w.Code)
+			}
+			if len(sink.got) != 0 || len(files.calls) != 0 {
+				t.Errorf("events %+v, file lookups %v; want none", sink.got, files.calls)
+			}
+		})
 	}
 }

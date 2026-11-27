@@ -45,10 +45,17 @@ auth model, rate limits); the notes below are what I expect, **unverified** unti
     (100 or 150), the EventBridge input shape through SNS, the cn and eusc endpoints, and a shallow
     checkout (the emulator refuses shallow and serves the whole clone and the push, so only real AWS can say that shallow is served). Residuals: one AWS account per ripple, labels and auto-merge do not exist on the
     service, the SNS certificate chain is not validated beyond the signature.
-17. **Gerrit: verify against a real instance.** Built from the docs and a fake ([docs/platform-gerrit.md](docs/platform-gerrit.md)),
-    never run for real. Check the webhooks payload and URL token, 429 headers, clone and change URLs, WIP and hashtag
-    permissions, "no new changes" on identical re-push. Residuals: auto-merge through submit-on-label if the docs
-    ever support it, `stream-events` as an alternative to webhooks, learning default branches at discovery.
+17. **Gerrit: what the real run left open.** The conformance suite now runs against a real Gerrit 3.15.0 in CI
+    ([docs/platform-gerrit.md](docs/platform-gerrit.md), Verified). Still unrecorded: a 429 and its `Retry-After`,
+    WIP, hashtag and abandon permission for an ordinary (non-admin) account, "no new changes" on identical re-push,
+    merge-commit file lists. Residuals: auto-merge through submit-on-label if the docs ever support it,
+    `stream-events` as an alternative to webhooks, learning default branches at discovery.
+290. **Gerrit: run the real job as an ordinary account.** The CI account is an administrator with push on
+    `refs/heads/*`; give it only read and push to `refs/for/*` plus Forge Author and rerun, so WIP, hashtag and
+    abandon permission and the minimum grant the docs state are checked rather than assumed.
+291. **Gerrit: default author email.** The default `ripple@users.noreply.invalid` cannot be registered on a real Gerrit
+    (`.invalid` is refused) and needs Forge Author; `RIPPLE_GERRIT_AUTHOR_EMAIL` is the way out. Decide whether the
+    default should change (additive only: a breaking default needs a deprecation) or startup should warn.
 18. **SCM-Manager against a real instance.** The host shipped from vendored docs, the plugins' source and a
     fake only (see [docs/platform-scmmanager.md](docs/platform-scmmanager.md)). Verify on a real SCM-Manager 3.x
     with the Review and Webhook plugins: `Authorization: Bearer <api key>` on the REST API, git basic auth with

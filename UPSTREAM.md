@@ -231,8 +231,9 @@ ripple is bound to two external contracts. The block below is the source of trut
   auth: "HTTP Basic with the account's HTTP password under /a/ (REST and git)"
   webhooks: [webhooks plugin ref-updated, batch-ref-updated and project-created; no signature is documented, so ripple requires a secret in the hook URL query]
   rate-limits: "429 with no documented Retry-After; one minute assumed"
-  unverified: "everything against a real Gerrit; webhook payload shape and URL token; clone URL /a/<project>; change URL /c/<project>/+/<n>; WIP and hashtag permissions; no-new-changes on identical re-push; merge-commit file lists; the fake is written from the docs, not recorded"
-  checked: 2026-11-23
+  unverified: "429 Retry-After; WIP, hashtag and abandon permission for an ordinary account; no-new-changes on identical re-push; merge-commit file lists; batch-ref-updated and project-created events"
+  verified-live: "Gerrit 3.15.0 (gerritcodereview/gerrit, webhooks plugin v3.15.0) 2026-11-27: conformance suite, webhook payload and URL token, clone and change URLs, abandon message, READ_ONLY state"
+  checked: 2026-11-27
 - name: osv
   kind: http-api
   url: https://ossf.github.io/osv-schema/

@@ -42,6 +42,8 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
 
 - bwrap now runs for real on `ubuntu-22.04` (bubblewrap 0.6.x) as well as 24.04 and latest, and a cgo build runs under it in CI (`TestCgoBuildUnderBwrap`). The relay stays without a byte limit, with the reasoning and an 80 MiB transfer test in `docs/sandbox.md` (ROADMAP 1)
 
+- Gerrit now runs against a real Gerrit 3.15.0 in CI (`hosts-gitlab-gerrit.yml`, `go test -tags gerrit`): the host conformance suite, the webhooks plugin's real `ref-updated` payload and URL token, the change and clone URLs, the abandon message and READ_ONLY archiving. New optional `RIPPLE_GERRIT_AUTHOR_EMAIL` (default unchanged), because a real Gerrit refuses commits whose author email is not registered on the account and refuses to register the default's `.invalid` domain. NOT verified: a 429 and its `Retry-After`; WIP, hashtag and abandon permission for a non-administrator (the CI account is an administrator); "no new changes" on an identical re-push; merge-commit file lists; `batch-ref-updated` and `project-created` events.
+
 ## [0.4.0] - 2026-11-25
 
 Additive release: no public API was removed or changed. Opt-in ecosystems: Helm, Bundler, Composer, NuGet, Maven and Terraform

@@ -76,10 +76,11 @@ func scanNuget(content string) []nugetEntry {
 	liveUpdate := map[string]int{}
 	seenInclude := map[string]bool{}
 	for i, it := range items {
+		key := it.tag + "/" + it.name
 		if !it.update {
-			seenInclude[it.name] = true
-		} else if seenInclude[it.name] && it.versioned {
-			liveUpdate[it.name] = i
+			seenInclude[key] = true
+		} else if seenInclude[key] && it.versioned {
+			liveUpdate[key] = i
 		}
 	}
 	var out []nugetEntry
@@ -87,22 +88,43 @@ func scanNuget(content string) []nugetEntry {
 		if !it.readable {
 			continue
 		}
-		if u, ok := liveUpdate[it.name]; ok && u != i {
+		if u, ok := liveUpdate[it.tag+"/"+it.name]; ok && u != i {
 			continue // overridden by a later Update
+		}
+		if nugetOpaqueUpdateAfter(items, i) {
+			continue // a list or wildcard Update may override it: the live version is unknown
 		}
 		out = append(out, nugetEntry{it.name, it.spec, it.start, it.start + len(it.spec)})
 	}
 	return out
 }
 
+// nugetOpaqueUpdateAfter reports whether a later `Update="A;B"` or `Update="A*"` of the same
+// element kind names items[i]. Such an Update is not read (a package id has no `;` or `*`),
+// but MSBuild applies it to every item it matches, so the Include before it may be dead.
+func nugetOpaqueUpdateAfter(items []nugetItem, i int) bool {
+	for _, u := range items[i+1:] {
+		if !u.opaque || u.tag != items[i].tag {
+			continue
+		}
+		for _, pat := range strings.Split(u.name, ";") {
+			if ok, err := path.Match(strings.TrimSpace(pat), items[i].name); ok || err != nil {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // nugetItem is one PackageReference/PackageVersion element in file order. versioned means it
 // sets a version (attribute or child), readable that the version is one ripple can edit.
 type nugetItem struct {
-	name, spec string
-	start      int
-	update     bool
-	versioned  bool
-	readable   bool
+	opaque          bool // an Update whose name is a list or a wildcard; only its name is set
+	tag, name, spec string
+	start           int
+	update          bool
+	versioned       bool
+	readable        bool
 }
 
 func scanNugetItems(content string) []nugetItem {
@@ -152,22 +174,26 @@ func scanNugetItems(content string) []nugetItem {
 			}
 			spec, specStart, haveSpec = override, overrideStart, true
 		}
-		isUpdate := tag == "PackageReference" && update != "" && !haveName
+		isUpdate := update != "" && !haveName
 		if update != "" && !isUpdate {
-			continue // an Update of a PackageVersion, or both Include and Update: not read
+			continue // both Include and Update: not read
 		}
 		if isUpdate {
 			name = update
-		} else if tag == "PackageReference" && haveName {
-			included[name] = true
+		} else if haveName {
+			included[tag+"/"+name] = true
 		}
-		if isUpdate && !included[name] {
+		if isUpdate && strings.ContainsAny(name, ";*?") {
+			out = append(out, nugetItem{tag: tag, name: name, update: true, opaque: true})
+			continue
+		}
+		if isUpdate && !included[tag+"/"+name] {
 			continue // nothing earlier to update
 		}
 		if !(haveName || isUpdate) || !nuget.ValidName(name) {
 			continue
 		}
-		it := nugetItem{name: name, update: isUpdate, versioned: haveSpec}
+		it := nugetItem{tag: tag, name: name, update: isUpdate, versioned: haveSpec}
 		if tag == "PackageReference" && !(m[1] >= 2 && masked[m[1]-2] == '/') {
 			// a `<Version>` child element wins over the attribute
 			switch s, st, n := nugetChild(masked, m[1], tag); {

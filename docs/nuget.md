@@ -46,7 +46,15 @@ Two consequences, both from what dotnet restored (`TestRealtoolNugetItemForms`) 
 
 An item whose version cannot be told (several `<Version>` children, or one with a `Condition`) is skipped, and so is an
 Include that such an Update overrides, because the live version is unknown. Not read yet, each on the ROADMAP: an Update
-in another file than its Include and `PackageVersion Update=` (261, 262).
+in another file than its Include (261).
+
+`<PackageVersion Update="Id" Version="1.2.3" />` after a `<PackageVersion Include="Id">` of the same file is read like a
+PackageReference Update: the Update is edited and the Include before it is dead (`TestRealtoolNugetPackageVersionUpdate`,
+CI). A PackageVersion Update does not touch a PackageReference of the same id. An Update naming a list (`Update="A;B"`)
+or a wildcard (`Update="A*"`) is not read, and every earlier item of the same kind that it matches is left alone too,
+because MSBuild may have overridden it and the live version is unknown. That the list and wildcard forms really
+override is MSBuild's documented item semantics, assumed, not run here; the case-insensitivity of item identity is
+also unverified (ROADMAP 326).
 
 `<PackageReference Include="Id" VersionOverride="1.2.3" />` (central package management) is read, and its digits are
 edited: `TestRealtoolNugetVersionOverride` (CI, `nuget-cpm` fixture) asserts that real `dotnet restore` holds the

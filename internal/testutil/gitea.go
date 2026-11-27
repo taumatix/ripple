@@ -71,6 +71,42 @@ type Gitea struct {
 	// LabelIDsOnly makes labelling by name answer 422 and accept only label ids, as Forgejo
 	// 7.0.16 does (Gitea 1.27.3 and Forgejo 17.0.2 accept names).
 	LabelIDsOnly bool
+	// emptyLeft is, per repository, how many more reads of GET /repos/{o}/{r} still answer
+	// empty=true (SetEmpty); emptyReads counts the reads.
+	emptyLeft, emptyReads map[string]int
+}
+
+// SetEmpty makes a repository report empty=true, in the listing and in GET /repos/{o}/{r},
+// until that has been read `reads` times: a real instance does so for up to about 2 s after
+// the first push (docs/vendor/gitea/real-answers.md). Zero makes it non-empty again.
+func (g *Gitea) SetEmpty(repo string, reads int) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.emptyLeft == nil {
+		g.emptyLeft, g.emptyReads = map[string]int{}, map[string]int{}
+	}
+	g.emptyLeft[repo] = reads
+}
+
+// EmptyReads is how many times GET /repos/{o}/{r} was read since SetEmpty.
+func (g *Gitea) EmptyReads(repo string) int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.emptyReads[repo]
+}
+
+// repoInfo answers GET /repos/{o}/{r} with the fields the client reads.
+func (g *Gitea) repoInfo(w http.ResponseWriter, repo string) {
+	g.mu.Lock()
+	empty := g.emptyLeft[repo] > 0
+	if empty {
+		g.emptyLeft[repo]--
+	}
+	if g.emptyReads != nil {
+		g.emptyReads[repo]++
+	}
+	g.mu.Unlock()
+	_ = json.NewEncoder(w).Encode(map[string]any{"full_name": repo, "default_branch": "main", "empty": empty})
 }
 
 // AddLabel gives the repository a label of that name; labelling a pull request by a name
@@ -294,17 +330,29 @@ func (g *Gitea) listRepos(w http.ResponseWriter, r *http.Request) {
 	for k, v := range g.archived {
 		arch[k] = v
 	}
+	emptyNow := map[string]bool{}
+	for k, v := range g.emptyLeft {
+		emptyNow[k] = v > 0
+	}
 	g.mu.Unlock()
 	lo, hi := g.page(w, r, len(vis))
 	out := []map[string]any{}
 	for _, n := range vis[lo:hi] {
-		out = append(out, map[string]any{"full_name": n, "default_branch": "main", "archived": arch[n], "empty": false,
+		out = append(out, map[string]any{"full_name": n, "default_branch": "main", "archived": arch[n], "empty": emptyNow[n],
 			"permissions": map[string]bool{"admin": false, "push": true, "pull": true}})
 	}
 	_ = json.NewEncoder(w).Encode(out)
 }
 
 func (g *Gitea) handleRepo(w http.ResponseWriter, r *http.Request, parts []string) {
+	if len(parts) == 2 && r.Method == http.MethodGet {
+		if _, err := os.Stat(g.bare(parts[0] + "/" + parts[1])); err != nil {
+			g.fail(w, http.StatusNotFound, "no such repo %s/%s", parts[0], parts[1])
+			return
+		}
+		g.repoInfo(w, parts[0]+"/"+parts[1])
+		return
+	}
 	if len(parts) < 3 {
 		g.fail(w, http.StatusNotFound, "unknown route %s", r.URL.Path)
 		return

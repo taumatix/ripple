@@ -33,6 +33,9 @@ func scene(t *testing.T, in *instance) *realFixture {
 	f := &realFixture{in: in, dirs: map[string]string{}, hooked: map[string]bool{}, cur: t}
 	f.user, f.tok = in.newUser(t)
 	f.AddRepo(t, f.Path("facts"), map[string]string{"README.md": "facts\n"})
+	// These tests call the API directly, as no ripple would: a pull request cannot be created
+	// while the instance still calls the repository empty (404). The conformance suite does not wait.
+	f.settled(t, f.Path("facts"))
 	return f
 }
 
@@ -82,6 +85,27 @@ func (f *realFixture) mergeRequest(t *testing.T, path string, n int, body map[st
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
+}
+
+// TestRealFirstDiscoveryOfAFreshRepository is ROADMAP 280 on the real instance: a repository is
+// listed straight after its first push, while the instance may still call it empty, and must be
+// in that listing (nothing lists it again until the next discovery).
+func TestRealFirstDiscoveryOfAFreshRepository(t *testing.T) {
+	in := realInstance(t)
+	f := &realFixture{in: in, dirs: map[string]string{}, hooked: map[string]bool{}, cur: t}
+	f.user, f.tok = in.newUser(t)
+	f.AddRepo(t, f.Path("fresh"), map[string]string{"README.md": "fresh\n"}) // no settle
+	c := &gitea.Client{APIBase: in.url, GitBase: in.url, Credentials: platform.StaticCredential{Username: "ripple", Secret: f.tok}}
+	repos, err := c.ListRepos(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range repos {
+		if strings.EqualFold(r.FullName, f.Path("fresh")) {
+			return
+		}
+	}
+	t.Fatalf("listing straight after the first push lacks %s: %v", f.Path("fresh"), repos)
 }
 
 // branchPR pushes a branch with one new file and opens a pull request for it, as ripple does.

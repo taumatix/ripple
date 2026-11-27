@@ -66,8 +66,10 @@ Forgejo 7.0.16, as containers with SQLite and no secrets, on every pull request 
 demand. The recorded answers are in `docs/vendor/gitea/real-answers.md`; the tests assert them. What reality changed:
 
 - A repository reports `empty=true` for up to about 2 s after its first push, and discovery skips an empty
-  repository. A repository whose first push races a discovery is not registered until a later discovery, and nothing
-  re-runs discovery for it (ROADMAP 280).
+  repository, so one whose first push raced a discovery stayed unregistered until a later one. `ListRepos` now polls
+  `GET /repos/{o}/{r}` for a repository it has not seen empty before, for up to `Client.EmptySettle` (5 s), and lists
+  it once it settles; one that stays empty costs a single wait. The suite's fixture no longer waits, so the real
+  legs prove it (ROADMAP 280). Not covered: a `repository` created webhook for a repository still empty (ROADMAP 283).
 - A fresh pull request already has one `pull_push` (see above); the first version closed nothing.
 - A label name the repository lacks is dropped with `200 []`; the client now logs "labels not applied" naming them.
 - Forgejo 7.0.16 refuses label names (`422`, ids only). Labelling never worked there. The client now retries a 422 with the

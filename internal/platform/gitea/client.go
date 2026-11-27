@@ -92,10 +92,15 @@ type Client struct {
 	// again later" (it is still checking whether the pull request can merge). Zero means 15 s;
 	// negative means ask once.
 	MergeSettle time.Duration
+	// EmptySettle is how long ListRepos waits for a repository it has not seen empty before to
+	// stop reporting empty=true: a real instance does so for up to about 2 s after the first
+	// push. Zero means 5 s; negative means do not wait.
+	EmptySettle time.Duration
 
-	mu      sync.Mutex
-	flavour Flavour
-	limited time.Time
+	mu        sync.Mutex
+	seenEmpty map[string]bool
+	flavour   Flavour
+	limited   time.Time
 }
 
 var (
@@ -547,7 +552,8 @@ func (c *Client) CloseUntouchedPR(ctx context.Context, repo model.Repo, pr platf
 	return true, nil
 }
 
-// ListRepos is every repository the token can push to: not archived, not empty.
+// ListRepos is every repository the token can push to: not archived, not empty. A repository
+// that reports empty for the first time is waited for up to EmptySettle (see settled).
 func (c *Client) ListRepos(ctx context.Context) ([]model.Repo, error) {
 	return c.listRepos(ctx, false)
 }
@@ -560,7 +566,7 @@ func (c *Client) ListArchivedRepos(ctx context.Context) ([]model.Repo, error) {
 }
 
 func (c *Client) listRepos(ctx context.Context, archived bool) ([]model.Repo, error) {
-	var out []model.Repo
+	var out, empty []model.Repo
 	err := c.paged(ctx, model.Repo{}, "/user/repos", func(raw json.RawMessage) (int, error) {
 		var rs []struct {
 			FullName      string `json:"full_name"`
@@ -575,14 +581,88 @@ func (c *Client) listRepos(ctx context.Context, archived bool) ([]model.Repo, er
 			return 0, err
 		}
 		for _, r := range rs {
-			if r.Archived != archived || r.Empty || (r.Permissions != nil && !r.Permissions.Push) {
+			if r.Archived != archived || (r.Permissions != nil && !r.Permissions.Push) {
 				continue
 			}
-			out = append(out, model.Repo{FullName: r.FullName, DefaultBranch: r.DefaultBranch})
+			repo := model.Repo{FullName: r.FullName, DefaultBranch: r.DefaultBranch}
+			if r.Empty {
+				empty = append(empty, repo)
+				continue
+			}
+			c.forgetEmpty(r.FullName)
+			out = append(out, repo)
 		}
 		return len(rs), nil
 	})
-	return out, err
+	if err != nil || archived {
+		return out, err
+	}
+	return append(out, c.settled(ctx, empty)...), nil
+}
+
+func (c *Client) forgetEmpty(name string) {
+	c.mu.Lock()
+	delete(c.seenEmpty, name)
+	c.mu.Unlock()
+}
+
+// settled is the repositories among empty that stop reporting empty=true within EmptySettle.
+// A real instance reports a repository empty for up to about 2 s after its first push
+// (docs/vendor/gitea/real-answers.md), and nothing lists it again until the next discovery, so a
+// listing that skipped it left it unregistered (ROADMAP 280). A repository seen empty by an
+// earlier listing is not waited for again: one that really is empty costs a single wait.
+func (c *Client) settled(ctx context.Context, empty []model.Repo) []model.Repo {
+	wait := c.EmptySettle
+	if wait == 0 {
+		wait = 5 * time.Second
+	}
+	var out []model.Repo
+	deadline := time.Now().Add(wait)
+	poll := max(wait/20, 10*time.Millisecond)
+	for _, r := range empty {
+		c.mu.Lock()
+		seen := c.seenEmpty[r.FullName]
+		c.mu.Unlock()
+		if seen || wait < 0 {
+			continue
+		}
+		if c.leavesEmpty(ctx, r, deadline, poll) {
+			c.forgetEmpty(r.FullName)
+			out = append(out, r)
+			continue
+		}
+		c.mu.Lock()
+		if c.seenEmpty == nil {
+			c.seenEmpty = map[string]bool{}
+		}
+		c.seenEmpty[r.FullName] = true
+		c.mu.Unlock()
+	}
+	return out
+}
+
+// leavesEmpty polls the repository until it is not empty or the deadline passes.
+func (c *Client) leavesEmpty(ctx context.Context, r model.Repo, deadline time.Time, poll time.Duration) bool {
+	o, n, err := checkRepo(r)
+	if err != nil {
+		return false
+	}
+	for {
+		var got struct {
+			Empty bool `json:"empty"`
+		}
+		if _, err := c.do(ctx, r, http.MethodGet, c.api("/repos/"+url.PathEscape(o)+"/"+url.PathEscape(n)), nil, &got); err == nil && !got.Empty {
+			return true
+		}
+		if !time.Now().Add(poll).Before(deadline) {
+			return false
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(poll):
+		}
+	}
 }
 
 // Checkout shallow-clones the default branch over HTTP with the token as the basic-auth password.

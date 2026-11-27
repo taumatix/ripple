@@ -149,6 +149,9 @@ type delivery struct {
 	Headers http.Header
 	Body    []byte
 	Status  int // what the forwarded-to receiver answered
+	// Absorbed marks the first push webhook of a repository the fixture hooked before pushing:
+	// the fixture keeps it and does not pass it to the app (see realFixture.AddRepo).
+	Absorbed bool
 }
 
 func (d delivery) event() string {
@@ -181,10 +184,12 @@ type forwarder struct {
 	mu   sync.Mutex
 	got  []delivery
 	next string // the app's receiver URL; empty until Register
+	// absorb are the repositories (lower case) whose first push webhook is kept, not forwarded.
+	absorb map[string]bool
 }
 
 func newForwarder(t *testing.T, in *instance) *forwarder {
-	f := &forwarder{}
+	f := &forwarder{absorb: map[string]bool{}}
 	ln, err := net.Listen("tcp", "0.0.0.0:0")
 	if err != nil {
 		t.Fatal(err)
@@ -194,6 +199,10 @@ func newForwarder(t *testing.T, in *instance) *forwarder {
 		d := delivery{Headers: r.Header.Clone(), Body: body, Status: http.StatusNotFound}
 		f.mu.Lock()
 		next := f.next
+		if ref, repo, _ := d.payload(); d.event() == "push" && ref == "refs/heads/main" && f.absorb[strings.ToLower(repo)] {
+			delete(f.absorb, strings.ToLower(repo))
+			d.Absorbed, d.Status, next = true, http.StatusAccepted, ""
+		}
 		f.mu.Unlock()
 		if next != "" {
 			req, _ := http.NewRequest(r.Method, next, bytes.NewReader(body))
@@ -277,6 +286,9 @@ type countingProxy struct {
 	srv *httptest.Server
 	mu  sync.Mutex
 	n   map[string]int
+	t   *testing.T
+	// seen is the "METHOD path" of every request per repository, so a cost the suite flags can be read.
+	seen map[string][]string
 	// limitNext makes the next POST .../pulls answer 429 with Retry-After from the proxy.
 	limitNext bool
 }
@@ -286,11 +298,12 @@ var repoPath = regexp.MustCompile(`^/api/v1/repos/([^/]+/[^/]+)(/|$)`)
 func newCountingProxy(t *testing.T, in *instance) *countingProxy {
 	target, _ := url.Parse(in.url)
 	rp := httputil.NewSingleHostReverseProxy(target)
-	c := &countingProxy{n: map[string]int{}}
+	c := &countingProxy{n: map[string]int{}, seen: map[string][]string{}, t: t}
 	c.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if m := repoPath.FindStringSubmatch(r.URL.Path); m != nil {
 			c.mu.Lock()
 			c.n[strings.ToLower(m[1])]++
+			c.seen[strings.ToLower(m[1])] = append(c.seen[strings.ToLower(m[1])], r.Method+" "+strings.TrimPrefix(r.URL.Path, "/api/v1"))
 			limit := c.limitNext && r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/pulls")
 			if limit {
 				c.limitNext = false
@@ -311,7 +324,9 @@ func newCountingProxy(t *testing.T, in *instance) *countingProxy {
 func (c *countingProxy) calls(path string) int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.n[strings.ToLower(path)]
+	k := strings.ToLower(path)
+	c.t.Logf("calls so far to %s (%d): %v", path, c.n[k], c.seen[k])
+	return c.n[k]
 }
 
 // realFixture is platformtest.Fixture over a real instance: files go in with real git, pull
@@ -326,6 +341,7 @@ type realFixture struct {
 	secret    []byte
 	dirs      map[string]string
 	hooked    map[string]bool
+	preHook   bool // AddRepo hooks a repository before its first push (the suite's fixture, set by Host)
 	hookType  string
 	cur       *testing.T
 }
@@ -342,6 +358,7 @@ func (f *realFixture) Host(t *testing.T, o gitws.Options, now func() time.Time) 
 	if f.in.flavour == gitea.Forgejo {
 		f.hookType = "forgejo"
 	}
+	f.preHook = true
 	c := &gitea.Client{APIBase: f.proxy.srv.URL, GitBase: f.in.url, Now: now,
 		// The username is arbitrary on purpose: docs/platform-gitea.md records which ones the instance accepts.
 		Credentials: platform.StaticCredential{Username: "ripple", Secret: f.tok},
@@ -382,6 +399,18 @@ func (f *realFixture) AddRepo(t *testing.T, path string, files map[string]string
 	t.Helper()
 	_, short, _ := strings.Cut(path, "/")
 	f.in.must(t, token(f.tok), http.MethodPost, "/user/repos", map[string]any{"name": short, "private": true, "auto_init": false, "default_branch": "main"}, nil)
+	if f.preHook {
+		// The instance prepares a push's webhooks when it finishes processing the push, some
+		// milliseconds to seconds after git returns, and nothing the API shows says when. A hook
+		// created after the push can miss that moment or catch it, and if it catches it, ripple
+		// (which scanned the repository when it registered it) scans it again inside the suite's
+		// cost window. A hook that exists before the push is certain to get that webhook, so the
+		// forwarder keeps it (Register waits for it) instead of passing it on.
+		f.fwd.mu.Lock()
+		f.fwd.absorb[strings.ToLower(path)] = true
+		f.fwd.mu.Unlock()
+		f.createHook(t, path)
+	}
 	dir := t.TempDir()
 	f.dirs[path] = dir
 	writeFiles(t, dir, files)
@@ -389,31 +418,38 @@ func (f *realFixture) AddRepo(t *testing.T, path string, files map[string]string
 	f.git(t, dir, "add", "-A")
 	f.git(t, dir, "commit", "-q", "-m", "initial")
 	f.git(t, dir, "push", "-q", f.in.url+"/"+path+".git", "main")
-	f.settled(t, path)
+	f.probeEmpty(t, path)
 }
 
-// settled waits until the instance lists the repository as non-empty. The first push is
-// processed after the git command returns: until then `empty` is still true, /user/repos
-// holds the repository back (the client skips empty ones) and creating a pull request
-// answers 404 (the first CI run of this suite, docs/platform-gitea.md "Real instances").
+// probeEmpty reads the repository once, right after the first push, and logs whether the
+// instance still calls it empty. It does not wait: the first push is processed after the git
+// command returns, and the suite goes on to register the repository at once, which is the case
+// ListRepos has to survive (ROADMAP 280, `Client.EmptySettle`). It used to wait here, which
+// hid the finding from the suite.
+func (f *realFixture) probeEmpty(t *testing.T, path string) {
+	t.Helper()
+	var r struct {
+		Empty bool `json:"empty"`
+	}
+	if st, _, _ := f.in.call(t, token(f.tok), http.MethodGet, "/repos/"+path, nil, &r); st == http.StatusOK {
+		t.Logf("FACT %s right after the first push returned: empty=%v", path, r.Empty)
+	}
+}
+
+// settled waits until the instance reports the repository non-empty. Only for tests that call the
+// API themselves; the suite's repositories are never waited for.
 func (f *realFixture) settled(t *testing.T, path string) {
 	t.Helper()
 	deadline := time.Now().Add(30 * time.Second)
-	polls := 0
 	for {
 		var r struct {
 			Empty bool `json:"empty"`
 		}
-		st, _, _ := f.in.call(t, token(f.tok), http.MethodGet, "/repos/"+path, nil, &r)
-		if st == http.StatusOK && !r.Empty {
-			if polls > 0 {
-				t.Logf("FACT %s was still empty=true for %d polls (200ms apart) after the first push returned", path, polls)
-			}
+		if st, _, _ := f.in.call(t, token(f.tok), http.MethodGet, "/repos/"+path, nil, &r); st == http.StatusOK && !r.Empty {
 			return
 		}
-		polls++
 		if time.Now().After(deadline) {
-			t.Fatalf("%s still empty (status %d) 30s after the push", path, st)
+			t.Fatalf("%s still empty 30s after the push", path)
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
@@ -425,11 +461,26 @@ func (f *realFixture) Register(t *testing.T, webhook string, paths ...string) {
 	f.fwd.next = webhook
 	f.fwd.mu.Unlock()
 	for _, p := range paths {
-		f.in.must(t, token(f.tok), http.MethodPost, "/repos/"+p+"/hooks", map[string]any{
-			"type": f.hookType, "active": true, "events": []string{"push"},
-			"config": map[string]string{"url": f.fwd.url(f.in), "content_type": "json", "secret": string(f.secret)}}, nil)
-		f.hooked[p] = true
+		if f.hooked[p] {
+			// Hooked before its first push (AddRepo): wait until the instance has sent that push's
+			// webhook, which the forwarder keeps. After this nothing late is coming.
+			f.fwd.await(t, 0, "the first push to "+p, func(d delivery) bool {
+				_, repo, _ := d.payload()
+				return d.Absorbed && strings.EqualFold(repo, p)
+			})
+			continue
+		}
+		f.settled(t, p)
+		f.createHook(t, p)
 	}
+}
+
+func (f *realFixture) createHook(t *testing.T, p string) {
+	t.Helper()
+	f.in.must(t, token(f.tok), http.MethodPost, "/repos/"+p+"/hooks", map[string]any{
+		"type": f.hookType, "active": true, "events": []string{"push"},
+		"config": map[string]string{"url": f.fwd.url(f.in), "content_type": "json", "secret": string(f.secret)}}, nil)
+	f.hooked[p] = true
 }
 
 // Push commits to main with real git and waits for the instance's own push webhook for it, so

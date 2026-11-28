@@ -22,7 +22,7 @@ curl -sS -o /dev/null -w 'GET /-/readiness: %{http_code}\n' "$base/-/readiness"
 echo "--- create the root personal access token"
 docker exec -e RIPPLE_TOKEN="$token" "$ctr" gitlab-rails runner "
 user = User.find_by_username('root')
-t = user.personal_access_tokens.create!(scopes: [:api, :read_repository, :write_repository, :sudo], name: 'ripple-ci', expires_at: 30.days.from_now)
+t = user.personal_access_tokens.create!(scopes: [:api, :read_repository, :write_repository, :sudo, :create_runner], name: 'ripple-ci', expires_at: 30.days.from_now)
 t.set_token(ENV['RIPPLE_TOKEN'])
 t.save!
 puts 'token created'

@@ -118,6 +118,9 @@ jobs:
       - name: bootstrap the root token and webhook settings
         run: bash scripts/ci-gitlab-bootstrap.sh 2>&1 | tee gitlab-bootstrap.log
         shell: bash
+      - name: register a gitlab-runner (shell executor) so merge requests get real pipelines
+        run: bash scripts/ci-gitlab-runner.sh 2>&1 | tee gitlab-runner.log
+        shell: bash
       - name: GitLab host against the real server
         shell: bash
         run: |
@@ -143,5 +146,6 @@ jobs:
           path: |
             gitlab-test.log
             gitlab-bootstrap.log
+            gitlab-runner.log
             gitlab-image.txt
             gitlab-records

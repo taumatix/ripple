@@ -54,6 +54,8 @@ a branch (up to 20) and re-scans only when a file matters; on any doubt it re-sc
 
 ## Head polling
 
+Verified on Gerrit 3.15.0 (2026-11-28, `TestRealListRepoHeads`): the two reads below return the pushed commit for a fresh project and follow a second push. What is not measured is the cost of two reads per project on a large instance.
+
 The client implements `app.HeadLister`, so a project whose default branch moved is re-scanned at the next
 discovery even when its webhook never arrived. The project listing carries no commit, so this is **two extra reads
 per project** each discovery, one project at a time: `GET /projects/<p>/HEAD` (the branch) then
@@ -97,7 +99,7 @@ walking of multi-commit pushes; `batch-ref-updated` and `project-created` events
 
 ## Archive
 
-Only GitHub reports archive and unarchive today (ripple pauses the repo on `archived`, resumes on `unarchived`). Gerrit sends no event for a project's state (the stream/webhook events were not verified to report it, 2026-11-23), but a project set to `READ_ONLY` is the closest thing to an archive and `GET /projects/?state=READ_ONLY` lists it (`docs/vendor/gerrit/rest-api-projects.md`, "State(s)"). The client implements `platform.ArchivedLister` on that listing, so a project that moves between ACTIVE and READ_ONLY is paused (index and pending jobs kept) and resumed instead of forgotten. A HIDDEN project is in neither listing and is forgotten as before. Verified against the fake only.
+Only GitHub reports archive and unarchive today (ripple pauses the repo on `archived`, resumes on `unarchived`). Gerrit sends no event for a project's state (the stream/webhook events were not verified to report it, 2026-11-23), but a project set to `READ_ONLY` is the closest thing to an archive and `GET /projects/?state=READ_ONLY` lists it (`docs/vendor/gerrit/rest-api-projects.md`, "State(s)"). The client implements `platform.ArchivedLister` on that listing, so a project that moves between ACTIVE and READ_ONLY is paused (index and pending jobs kept) and resumed instead of forgotten. A HIDDEN project is in neither listing and is forgotten as before. Run for real on Gerrit 3.15.0 (2026-11-28, `TestRealArchivedListing`, and `ArchivePausesAndUnarchiveResumes` of the conformance suite): a READ_ONLY project is absent from the ACTIVE listing, present in `?state=READ_ONLY`, and returns to ACTIVE when set back. The webhooks plugin delivered **one** event within 10 s of the state change; its type was not recorded, so whether the state change can be told from other events is unverified.
 
 ## Superseded pull requests
 

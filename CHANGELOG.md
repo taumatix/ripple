@@ -81,6 +81,8 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
 
 - SCM-Manager against the real 3.11.0 instance (no behaviour change): an archived repository lists with `archived: true` by default and with `showArchived=true` (`false` hides it), the branch resource answers a 40-hex `revision` equal to the pushed commit, and an open pull request has `sourceRevision: null` before and after a second push, so `PR.HeadSHA` stays empty on this host (documented). Recorded by `TestRealArchivedListing` and `TestRealPullRequestAndBranchFields`. Not verified: the revisions of a merged or rejected pull request, merge-commit modifications, `shouldDeleteSourceBranch` at merge, a real 429, and plugin releases other than 3.11.0.
 
+- Gerrit: head polling and the READ_ONLY archive listing now run against the real Gerrit 3.15.0 in CI (ROADMAP 243, 213; `TestRealListRepoHeads`, `TestRealArchivedListing`): `GET projects/<p>/HEAD` then the branch's `revision` returns the pushed commit and follows a second push, and a READ_ONLY project leaves the ACTIVE listing, shows in `?state=READ_ONLY` and returns. No behaviour change. Not verified: the cost of two reads per project on a large instance, and which webhook event (one arrived) a state change sends.
+
 ## [0.4.0] - 2026-11-25
 
 Additive release: no public API was removed or changed. Opt-in ecosystems: Helm, Bundler, Composer, NuGet, Maven and Terraform

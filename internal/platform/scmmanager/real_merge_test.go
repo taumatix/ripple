@@ -184,8 +184,9 @@ func TestRealMergeDeletesSourceBranch(t *testing.T) {
 			break
 		}
 	}
-	if status == "" || status == "OPEN" {
-		t.Fatalf("the merge call was accepted but the pull request is still %q", status)
+	// Observed on 3.10.3, 3.11.0 and 3.12.3 (CI, 2026-11-28): MERGED, at once, with a closeDate.
+	if status != "MERGED" {
+		t.Fatalf("the merge call was accepted but the pull request status is %q, want MERGED", status)
 	}
 	var exists bool
 	for _, wait := range []time.Duration{0, 2 * time.Second, 5 * time.Second} {

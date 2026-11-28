@@ -63,7 +63,7 @@ delivery. The secret rides in clear unless the webhook URL is https: use https.
   A pull request created with the flag `true`, merged through its `merge` link
   (`POST merge/{ns}/{name}/{id}?strategy=...`, `Content-Type: application/vnd.scmm-mergeCommand+json;v=2`,
   body `{"commitMessage":...,"overrideMessage":false}`, 204; the test then reads the pull request back and requires
-  its status to have left `OPEN`), kept its source branch. The Review plugin's docs say
+  its status to be `MERGED`, as it was at once on 3.10.3, 3.11.0 and 3.12.3), kept its source branch. The Review plugin's docs say
   the same: the merge dialog preselects it and the person can change it. Branches ripple pushed therefore stay
   after a merge unless the merger asked for deletion.
 - **A merge commit's modifications are against its first parent** (`TestRealMergeCommitModifications`): a merge of

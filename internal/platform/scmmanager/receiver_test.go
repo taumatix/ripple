@@ -114,6 +114,23 @@ func TestBodylessAndBareChangesetDeliveries(t *testing.T) {
 	}
 }
 
+// A delivery with no changeset id has nothing that identifies it: no header, no timestamp, no body.
+// Any key made of what is there (the repository, the time, a hash of an empty body) would also
+// match the next, different push, and a dropped push is the one failure a webhook cannot afford,
+// so such a delivery carries no Delivery and is re-scanned every time (a re-scan is idempotent).
+// This pins that decision (ROADMAP 167).
+func TestDeliveryWithoutChangesetIDsIsNeverDeduplicated(t *testing.T) {
+	h, sink := newReceiver(&filesRec{def: "trunk"})
+	for i := 0; i < 2; i++ {
+		if w := do(h, hook, "s3cret", ""); w.Code != http.StatusAccepted {
+			t.Fatalf("delivery %d: %d", i, w.Code)
+		}
+	}
+	if len(sink.got) != 2 || sink.got[0].Delivery != "" || sink.got[1].Delivery != "" {
+		t.Fatalf("two identical bodyless deliveries must both reach the sink with no Delivery key: %+v", sink.got)
+	}
+}
+
 // A push whose branch cannot be told must not be dropped quietly.
 func TestUnknownBranchWithoutADefaultIsRefused(t *testing.T) {
 	for name, files := range map[string]scmmanager.Resolver{"no resolver": nil, "resolver fails": &filesRec{defErr: context.DeadlineExceeded}} {

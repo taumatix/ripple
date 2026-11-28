@@ -50,6 +50,11 @@ delivery. The secret rides in clear unless the webhook URL is https: use https.
   fixture carries the conformance suite's `FilelessPushes` marker.
 - **A delivery with no body or no branch** (method GET, or "send commit data" off) is taken as a push to the
   default branch and re-scanned.
+- **Delivery dedupe needs changeset ids.** A push that carries them is keyed `repo@branch:ids`, so a redelivery
+  is dropped by any replica. A delivery without them has nothing that identifies it (the plugin sends no id,
+  timestamp or signature), and any key built from what is there would also match the next, different push, so it
+  has no key and is re-scanned every time; a re-scan is idempotent and a dropped push is not.
+  `TestDeliveryWithoutChangesetIDsIsNeverDeduplicated` pins it.
 - **Pull requests** are opened with `POST pull-requests/{ns}/{name}`, `status` `DRAFT` or `OPEN`, and the
   source branch deleted on merge. The Review plugin may already hold a pull request for the same branches:
   that answers 409 and surfaces as an error. ripple lists `IN_PROGRESS` (open and draft) pull requests to

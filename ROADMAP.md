@@ -284,9 +284,11 @@ Everything else:
     sandbox image carries. (c) A private index needs per-index credentials and a PEP 503/691 client, and a real index to
     test against; the guard also skips a file that names `https://pypi.org/simple` explicitly. (`Requires-Python` is
     done: a release the repo's lowest Python cannot install is skipped, docs/pip.md.)
-167. **Delivery dedupe: SCM-Manager without changeset ids, and retiring the legacy tombstone name.** GitLab now keys
-    its delivery on `webhook-id` (else `Idempotency-Key`), so a signed redelivery is dropped by any replica; an
-    SCM-Manager payload with no changeset ids still lacks a safe key. Removal tombstones moved to `removed#<name>` and
+167. **Delivery dedupe: retiring the legacy tombstone name.** GitLab now keys
+    its delivery on `webhook-id` (else `Idempotency-Key`), so a signed redelivery is dropped by any replica. An
+    SCM-Manager payload with no changeset ids has no safe key and is decided: it is re-scanned every time
+    (`TestDeliveryWithoutChangesetIDsIsNeverDeduplicated`, [docs/platform-scmmanager.md](docs/platform-scmmanager.md)).
+    Removal tombstones moved to `removed#<name>` and
     the Dynamo sweep is a Query; the legacy `removed|` read path and the `tombstones-legacy` marker can be deleted a
     release after every replica runs a version that no longer writes it (v0.3.0 wrote it; the release after it must
     ship first). The Query of `removed#` on a very large table is unmeasured.
@@ -506,10 +508,13 @@ Everything else:
 305. **SCM-Manager: asking a merge to delete the source branch.** Find the field or query of the merge request that
     deletes the source branch (the plugin's REST docs or a merge made in the UI and read back), so a test proves
     deletion happens when asked and ripple's `ripple/*` branches can be left to a merger who wants them gone.
-286. **SCM-Manager: the 429 a throttling proxy sends, and older plugins.** No instance throttles, so the
-    rate-limit case is injected at a proxy and the `Retry-After` form is assumed. Add a matrix leg with an older
-    SCM-Manager 3.x and the plugin releases it installs, and record whether the custom-header table and
-    `branches` are present there.
+286. **SCM-Manager: older and newer 3.x.** `hosts-scmmanager.yml` now also runs 3.10.3 and 3.12.3 beside
+    3.11.0; the answers on each are in the job's FACT lines (plugin releases installed, custom-header table,
+    `branches`). Record them in [docs/platform-scmmanager.md](docs/platform-scmmanager.md) once the legs have run, and
+    fix or narrow what differs.
+306. **SCM-Manager: the 429 a throttling proxy sends.** No instance throttles, so the rate-limit case is injected
+    at a proxy and the `Retry-After` form is assumed. Put a real throttling proxy (nginx `limit_req`, say) in front
+    of the instance in the real job and record the status and header it sends.
 320. **Maven: show what was skipped on the dashboard.** `Maven.Skipped` lists, per pom, each property left unread and
     why, but only the engine's Info log carries it. Put it in the per-repository view and the PR-less "nothing proposed"
     answer, so a user sees why a pom never gets a PR.

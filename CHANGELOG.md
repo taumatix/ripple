@@ -84,6 +84,8 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
 
 - GitLab: the real CI job now registers a runner (`scripts/ci-gitlab-runner.sh`, shell executor) so merge requests get real pipelines (ROADMAP 292; `TestRealAutoMergeWithAPipeline`, GitLab CE 19.6.2, about 150 s): auto-merge asked while the pipeline runs merges the MR when it passes; when it fails the MR stays open with auto-merge still set and GitLab adds no "aborted the automatic merge" note. No behaviour change. Not verified: other executors, a retried pipeline, approval rules.
 
+- Gerrit: head polling and the READ_ONLY archive listing now run against the real Gerrit 3.15.0 in CI (ROADMAP 243, 213; `TestRealListRepoHeads`, `TestRealArchivedListing`): `GET projects/<p>/HEAD` then the branch's `revision` returns the pushed commit and follows a second push, and a READ_ONLY project leaves the ACTIVE listing, shows in `?state=READ_ONLY` and returns. No behaviour change. Not verified: the cost of two reads per project on a large instance, and which webhook event (one arrived) a state change sends.
+
 ## [0.4.0] - 2026-11-25
 
 Additive release: no public API was removed or changed. Opt-in ecosystems: Helm, Bundler, Composer, NuGet, Maven and Terraform

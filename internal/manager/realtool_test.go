@@ -608,6 +608,28 @@ func TestRealtoolNugetVersionOverride(t *testing.T) {
 	}.run(t)
 }
 
+// TestRealtoolNugetCrossFileUpdate asks real dotnet the question of ROADMAP 261: a
+// PackageVersion Include in Directory.Packages.props and an Update of it in the project.
+// The hypothesis: the project's Update wins, so restore holds 12.0.3, and ripple's edit of
+// the props Include (11.0.2 to 13.0.3) changes nothing restore holds. That is the hazard a
+// per-file scan cannot see, so the test pins it as fact rather than as a feature.
+func TestRealtoolNugetCrossFileUpdate(t *testing.T) {
+	realtool{
+		fixture: "nuget-cross-file", manifest: "Directory.Packages.props", manager: Nuget{Dir: "/"},
+		bumps: []bump{{"Newtonsoft.Json", "11.0.2", "13.0.3"}},
+		env:   []string{"DOTNET_NOLOGO=1", "DOTNET_CLI_TELEMETRY_OPTOUT=1"},
+		steps: [][]string{{"dotnet", "restore"}, {"dotnet", "build", "--no-restore"}},
+		local: []string{"dotnet build --no-restore"},
+		before: func(t *testing.T, dir string) {
+			mustContain(t, dir, "obj/project.assets.json", "Newtonsoft.Json/12.0.3") // the project's Update wins
+		},
+		after: func(t *testing.T, dir string) {
+			mustContain(t, dir, "Directory.Packages.props", `Include="Newtonsoft.Json" Version="13.0.3"`)
+			mustContain(t, dir, "obj/project.assets.json", "Newtonsoft.Json/12.0.3") // ripple's edit moved nothing
+		},
+	}.run(t)
+}
+
 // TestRealtoolNugetPackageVersionUpdate settles the readable half of ROADMAP 262 with real
 // dotnet under central package management: a `PackageVersion Update` after its Include sets
 // the version restore holds (the Include's own is dead), and ripple's edit of the Update's

@@ -1,0 +1,10 @@
+<Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- the Include lives here; an Update of it lives in realtool.csproj (ROADMAP 261) -->
+    <PackageVersion Include="Newtonsoft.Json" Version="11.0.2" />
+    <PackageVersion Include="Serilog" Version="3.0.0" />
+  </ItemGroup>
+</Project>

@@ -51,7 +51,7 @@ const (
 type realEnv struct{ base, user, pass string }
 
 // ripple is the account the host under test runs as: an ordinary one (ROADMAP 290, scripts/ci-gerrit-bootstrap.sh)
-// with read, push to refs/for/* and Forge Author. e.user stays the administrator, which only builds the fixtures.
+// with read, push to refs/for/*, Forge Author and Forge Committer. e.user stays the administrator, which only builds the fixtures.
 func (e realEnv) ripple() (user, pass string) {
 	if u := os.Getenv("RIPPLE_TEST_GERRIT_RIPPLE_USER"); u != "" {
 		return u, os.Getenv("RIPPLE_TEST_GERRIT_RIPPLE_PASSWORD")
@@ -70,6 +70,7 @@ func realConfig(t *testing.T) realEnv {
 
 // delivered is one event the plugin posted, as the relay saw it.
 type delivered struct {
+	Type      string
 	Raw       []byte
 	Project   string
 	Ref       string
@@ -104,7 +105,7 @@ func (r *relay) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		} `json:"refUpdate"`
 	}
 	_ = json.Unmarshal(body, &ev)
-	d := &delivered{Raw: body, Project: ev.RefUpdate.Project, Ref: ev.RefUpdate.RefName, NewRev: ev.RefUpdate.NewRev}
+	d := &delivered{Type: ev.Type, Raw: body, Project: ev.RefUpdate.Project, Ref: ev.RefUpdate.RefName, NewRev: ev.RefUpdate.NewRev}
 	if dir := os.Getenv("RIPPLE_GERRIT_RECORD_DIR"); dir != "" {
 		_ = os.MkdirAll(dir, 0o755)
 		hdr := fmt.Sprintf("%s %s", req.Method, req.URL.Path)

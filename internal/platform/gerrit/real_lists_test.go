@@ -50,7 +50,8 @@ func TestRealListRepoHeads(t *testing.T) {
 }
 
 // TestRealArchivedListing (ROADMAP 213): a READ_ONLY project is absent from the ACTIVE listing and present in
-// the READ_ONLY one, on a real server; and the webhooks plugin sends nothing for the state change.
+// the READ_ONLY one, on a real server. The webhook events seen in the 10 s after the change are recorded as FACTs
+// (ROADMAP 310) and not asserted: what the plugin sends for a state change is unverified.
 func TestRealArchivedListing(t *testing.T) {
 	f := &realGerrit{e: realConfig(t)}
 	f.Host(t, gitws.Options{WorkDir: t.TempDir()}, time.Now)
@@ -72,6 +73,8 @@ func TestRealArchivedListing(t *testing.T) {
 	theRelay.mu.Lock()
 	before := len(theRelay.got)
 	theRelay.mu.Unlock()
+	// a failure below must not leave the project READ_ONLY for the tests that follow
+	t.Cleanup(func() { f.SetArchived(t, "", path, false) })
 	f.SetArchived(t, "", path, true)
 	active, err = c.ListRepos(t.Context())
 	if err != nil {
@@ -87,9 +90,12 @@ func TestRealArchivedListing(t *testing.T) {
 	}
 	time.Sleep(10 * time.Second)
 	theRelay.mu.Lock()
-	n := len(theRelay.got) - before
+	var seen []string
+	for _, d := range theRelay.got[before:] {
+		seen = append(seen, d.Type+" "+d.Project+" "+d.Ref)
+	}
 	theRelay.mu.Unlock()
-	t.Logf("FACT webhook deliveries within 10s of setting the project READ_ONLY: %d", n)
+	t.Logf("FACT webhook deliveries within 10s of setting the project READ_ONLY: %d %q", len(seen), seen)
 
 	f.SetArchived(t, "", path, false)
 	active, err = c.ListRepos(t.Context())

@@ -9,6 +9,7 @@ on:
       - "scripts/ci-gerrit-bootstrap.sh"
       - "internal/platform/gerrit/**"
       - "scripts/ci-gitlab-bootstrap.sh"
+      - "scripts/ci-check-artifacts.sh"
       - "internal/platform/gitlab/**"
       - "internal/platform/platformtest/**"
       - "internal/platform/gitws/**"
@@ -19,6 +20,7 @@ on:
       - "scripts/ci-gerrit-bootstrap.sh"
       - "internal/platform/gerrit/**"
       - "scripts/ci-gitlab-bootstrap.sh"
+      - "scripts/ci-check-artifacts.sh"
       - "internal/platform/gitlab/**"
 permissions:
   contents: read
@@ -53,7 +55,10 @@ jobs:
           docker logs gerrit | tail -n 80
           exit 1
       - name: bootstrap an admin account, permissions and the webhook
-        run: bash scripts/ci-gerrit-bootstrap.sh 2>&1 | tee gerrit-bootstrap.log
+        run: |
+          # fd 3 is the step's real stdout: the runner reads ::add-mask:: from it, the uploaded log never sees it
+          exec 3>&1
+          MASK_FD=3 bash scripts/ci-gerrit-bootstrap.sh 2>&1 | tee gerrit-bootstrap.log
         shell: bash
       - name: Gerrit host against the real server
         shell: bash
@@ -73,6 +78,10 @@ jobs:
         run: |
           docker logs gerrit 2>&1 | tail -n 150 || true
           docker exec gerrit sh -c 'tail -n 100 /var/gerrit/logs/error_log' || true
+      - name: no secret in the files about to be uploaded
+        if: always()
+        shell: bash
+        run: bash scripts/ci-check-artifacts.sh "RIPPLE_TEST_GERRIT_PASSWORD RIPPLE_TEST_GERRIT_RIPPLE_PASSWORD RIPPLE_TEST_GERRIT_BARE_PASSWORD" gerrit-test.log gerrit-bootstrap.log gerrit-image.txt gerrit-records
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -116,10 +125,14 @@ jobs:
           docker logs gitlab 2>&1 | tail -n 80
           exit 1
       - name: bootstrap the root token and webhook settings
-        run: bash scripts/ci-gitlab-bootstrap.sh 2>&1 | tee gitlab-bootstrap.log
+        run: |
+          exec 3>&1
+          MASK_FD=3 bash scripts/ci-gitlab-bootstrap.sh 2>&1 | tee gitlab-bootstrap.log
         shell: bash
       - name: register a gitlab-runner (shell executor) so merge requests get real pipelines
-        run: bash scripts/ci-gitlab-runner.sh 2>&1 | tee gitlab-runner.log
+        run: |
+          exec 3>&1
+          MASK_FD=3 bash scripts/ci-gitlab-runner.sh 2>&1 | tee gitlab-runner.log
         shell: bash
       - name: GitLab host against the real server
         shell: bash
@@ -139,6 +152,10 @@ jobs:
         run: |
           docker logs gitlab 2>&1 | tail -n 60 || true
           docker exec gitlab sh -c 'tail -n 60 /var/log/gitlab/gitlab-rails/production.log' || true
+      - name: no secret in the files about to be uploaded
+        if: always()
+        shell: bash
+        run: bash scripts/ci-check-artifacts.sh "RIPPLE_TEST_GITLAB_TOKEN" gitlab-test.log gitlab-bootstrap.log gitlab-runner.log gitlab-image.txt gitlab-records
       - uses: actions/upload-artifact@v4
         if: always()
         with:

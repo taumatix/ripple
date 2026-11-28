@@ -21,6 +21,10 @@ email=${AUTHOR_EMAIL:-ripple@example.com}
 work=$(mktemp -d)
 jar=$work/jar
 
+# ::add-mask:: goes to MASK_FD (the step's real stdout, see the workflow), never into the tee'd log that is
+# uploaded as an artifact: the command carries the raw value.
+mask() { echo "::add-mask::$1" >&"${MASK_FD:-1}"; }
+
 # body of a Gerrit JSON answer without the )]}' prefix
 strip() { sed -e "1{/^)]}'/d}"; }
 
@@ -47,7 +51,7 @@ echo "PUT password.http with the cookie session: $code"
 [ "$code" = 201 ] || { echo "body: $(head -c 200 "$work/pass.out")"; exit 1; }
 pass=$(strip < "$work/pass.out" | tr -d '"')
 [ -n "$pass" ] || { echo "empty password"; exit 1; }
-echo "::add-mask::$pass"
+mask "$pass"
 
 api() { # api METHOD PATH [JSON]: prints the answer, fails (showing the body) on an error status
   local m=$1 p=$2 d=${3:-} code
@@ -71,7 +75,7 @@ api PUT "/accounts/self/emails/$(printf %s "$email" | sed 's/@/%40/')" '{"no_con
 
 echo "--- an ordinary account for ripple itself (ROADMAP 290): not an administrator, in group ripple-ci"
 rpass=$(head -c 18 /dev/urandom | od -An -tx1 | tr -d ' \n')
-echo "::add-mask::$rpass"
+mask "$rpass"
 api GET /accounts/username:ripple-svc > /dev/null 2>&1 || api PUT /accounts/ripple-svc '{"name":"ripple-svc"}' > /dev/null
 # Recorded: Gerrit resolves a bare id like "ripple" by fuzzy match (it hit the admin through its registered
 # ripple@example.com) and the password update silently landed on the administrator. Guard against a repeat.
@@ -80,16 +84,17 @@ api PUT /accounts/ripple-svc/password.http "{\"http_password\":\"$rpass\"}" > /d
 api PUT /groups/ripple-ci '{"members":["ripple-svc"]}' > /dev/null
 rgid=$(api GET /groups/ripple-ci | sed -n 's/.*"id": *"\([^"]*\)".*/\1/p' | head -1)
 [ -n "$rgid" ] || { echo "no ripple-ci group id"; exit 1; }
-# The documented minimum (docs/platform-gerrit.md): read, push to refs/for/*, and Forge Author, which Gerrit
-# demands for any author email not registered on the account (the default .invalid one cannot be registered).
+# The documented minimum (docs/platform-gerrit.md): read, push to refs/for/*, and Forge Author plus Forge
+# Committer, which Gerrit demands for any author or committer email not registered on the account (the default
+# .invalid one cannot be registered).
 api POST /projects/All-Projects/access "{\"add\":{
   \"refs/*\":{\"permissions\":{\"read\":{\"rules\":{\"$rgid\":{\"action\":\"ALLOW\"}}}}},
   \"refs/for/refs/*\":{\"permissions\":{\"push\":{\"rules\":{\"$rgid\":{\"action\":\"ALLOW\"}}}}},
   \"refs/heads/*\":{\"permissions\":{\"forgeAuthor\":{\"rules\":{\"$rgid\":{\"action\":\"ALLOW\"}}},\"forgeCommitter\":{\"rules\":{\"$rgid\":{\"action\":\"ALLOW\"}}}}}}}" > /dev/null
-# A second ordinary account with NO Forge Author and no registered email: proves the refusal the docs describe
+# A second ordinary account with NO Forge Author or Forge Committer and no registered email: proves the refusal the docs describe
 # and that the error names the fix (ROADMAP 291).
 bpass=$(head -c 18 /dev/urandom | od -An -tx1 | tr -d ' \n')
-echo "::add-mask::$bpass"
+mask "$bpass"
 api GET /accounts/username:ripple-bare > /dev/null 2>&1 || api PUT /accounts/ripple-bare '{"name":"ripple-bare"}' > /dev/null
 api PUT /accounts/ripple-bare/password.http "{\"http_password\":\"$bpass\"}" > /dev/null
 echo "--- ripple's capabilities (must not include administrateServer)"
@@ -111,7 +116,7 @@ api POST /projects/All-Projects/access "{\"add\":{
 
 echo "--- webhooks.config in All-Projects: every project posts to the relay"
 auth=$(printf '%s:%s' "$user" "$pass" | base64 -w0)
-echo "::add-mask::$auth"
+mask "$auth"
 g() { git -C "$work/meta" -c http.extraHeader="Authorization: Basic $auth" "$@"; }
 git init -q "$work/meta"
 g fetch -q "$base/a/All-Projects" refs/meta/config

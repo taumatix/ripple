@@ -71,6 +71,8 @@ type Gitea struct {
 	// LabelIDsOnly makes labelling by name answer 422 and accept only label ids, as Forgejo
 	// 7.0.16 does (Gitea 1.27.3 and Forgejo 17.0.2 accept names).
 	LabelIDsOnly bool
+	// LimitBranches makes every GET of a branch answer 429 with Retry-After: 1.
+	LimitBranches bool
 	// LabelCreateForbidden makes POST .../labels answer 403.
 	LabelCreateForbidden bool
 	// emptyLeft is, per repository, how many more reads of GET /repos/{o}/{r} still answer
@@ -399,11 +401,16 @@ func (g *Gitea) handleRepo(w http.ResponseWriter, r *http.Request, parts []strin
 		return
 	}
 	g.mu.Lock()
-	g.calls[repo]++
+	if !(parts[2] == "branches" && r.Method == http.MethodGet) {
+		g.calls[repo]++ // head polling is not counted as scan cost
+	}
 	g.requests = append(g.requests, r.Method+" "+r.URL.Path)
 	limit := g.RateLimitOnce && r.Method == http.MethodPost && parts[2] == "pulls" && len(parts) == 3
 	if limit {
 		g.RateLimitOnce = false
+	}
+	if g.LimitBranches && r.Method == http.MethodGet && parts[2] == "branches" {
+		limit = true
 	}
 	g.mu.Unlock()
 	if limit {
@@ -430,6 +437,14 @@ func (g *Gitea) handleRepo(w http.ResponseWriter, r *http.Request, parts []strin
 		g.merge(w, r, repo, parts[3])
 	case parts[2] == "issues" && len(parts) == 5 && parts[4] == "labels" && r.Method == http.MethodPost:
 		g.labels(w, r, repo, parts[3])
+	case parts[2] == "branches" && len(parts) >= 4 && r.Method == http.MethodGet:
+		// Branch: `commit.id` is the tip (docs/vendor/gitea/swagger-branch.json).
+		branch := strings.Join(parts[3:], "/")
+		if sha := branchTip(g.bare(repo), branch); sha != "" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"name": branch, "commit": map[string]any{"id": sha}})
+		} else {
+			g.fail(w, http.StatusNotFound, "no branch %s", branch)
+		}
 	case parts[2] == "labels" && len(parts) == 3 && r.Method == http.MethodGet:
 		g.repoLabels(w, repo)
 	case parts[2] == "labels" && len(parts) == 3 && r.Method == http.MethodPost:

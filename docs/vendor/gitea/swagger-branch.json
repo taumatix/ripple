@@ -1,0 +1,114 @@
+{
+  "source": "https://gitea.com/swagger.v1.json fetched 2026-11-27",
+  "path": {
+    "/repos/{owner}/{repo}/branches/{branch}": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "repository"
+        ],
+        "summary": "Retrieve a specific branch from a repository, including its effective branch protection",
+        "operationId": "repoGetBranch",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "owner of the repo",
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the repo",
+            "name": "repo",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "branch to get",
+            "name": "branch",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/Branch"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "Branch": {
+      "description": "Branch represents a repository branch",
+      "type": "object",
+      "properties": {
+        "commit": {
+          "$ref": "#/definitions/PayloadCommit"
+        },
+        "effective_branch_protection_name": {
+          "description": "EffectiveBranchProtectionName is the name of the effective branch protection rule",
+          "type": "string",
+          "x-go-name": "EffectiveBranchProtectionName"
+        },
+        "enable_status_check": {
+          "description": "EnableStatusCheck indicates if status checks are enabled",
+          "type": "boolean",
+          "x-go-name": "EnableStatusCheck"
+        },
+        "name": {
+          "description": "Name is the branch name",
+          "type": "string",
+          "x-go-name": "Name"
+        },
+        "protected": {
+          "description": "Protected indicates if the branch is protected",
+          "type": "boolean",
+          "x-go-name": "Protected"
+        },
+        "required_approvals": {
+          "description": "RequiredApprovals is the number of required approvals for pull requests",
+          "type": "integer",
+          "format": "int64",
+          "x-go-name": "RequiredApprovals"
+        },
+        "status_check_contexts": {
+          "description": "StatusCheckContexts contains the list of required status check contexts",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-go-name": "StatusCheckContexts"
+        },
+        "user_can_merge": {
+          "description": "UserCanMerge indicates if the current user can merge to this branch",
+          "type": "boolean",
+          "x-go-name": "UserCanMerge"
+        },
+        "user_can_push": {
+          "description": "UserCanPush indicates if the current user can push to this branch",
+          "type": "boolean",
+          "x-go-name": "UserCanPush"
+        }
+      },
+      "x-go-package": "gitea.dev/modules/structs"
+    },
+    "PayloadCommit": {
+      "description": "PayloadCommit represents a commit",
+      "properties": {
+        "id": {
+          "description": "sha1 hash of the commit",
+          "type": "string",
+          "x-go-name": "ID"
+        }
+      }
+    }
+  }
+}

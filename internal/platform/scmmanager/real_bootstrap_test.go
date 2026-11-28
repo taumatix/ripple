@@ -130,13 +130,27 @@ func (s *scm) newKey(t *testing.T) string {
 // descriptor named by RIPPLE_REAL_MASK_FD, which the workflow opens as the step's real stdout. Unset, as on
 // a developer machine, it does nothing.
 func maskSecret(v string) {
-	n, err := strconv.Atoi(os.Getenv("RIPPLE_REAL_MASK_FD"))
-	if err != nil || n < 3 {
-		return
-	}
-	if f := os.NewFile(uintptr(n), "mask"); f != nil {
+	if f := maskFile(); f != nil {
 		_, _ = fmt.Fprintf(f, "::add-mask::%s\n", v)
 	}
+}
+
+var (
+	maskOnce sync.Once
+	maskOut  *os.File
+)
+
+// maskFile wraps the descriptor once and keeps it for the life of the process: an *os.File closes its
+// descriptor when it is garbage collected, and a closed number is reused by the next socket the tests open.
+func maskFile() *os.File {
+	maskOnce.Do(func() {
+		n, err := strconv.Atoi(os.Getenv("RIPPLE_REAL_MASK_FD"))
+		if err != nil || n < 3 {
+			return
+		}
+		maskOut = os.NewFile(uintptr(n), "mask")
+	})
+	return maskOut
 }
 
 // TestRealBootstrapAndKeyUse records how an API key is presented: Bearer header, the cookie the docs

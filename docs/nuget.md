@@ -46,7 +46,9 @@ Two consequences, both from what dotnet restored (`TestRealtoolNugetItemForms`) 
 
 An item whose version cannot be told (several `<Version>` children, or one with a `Condition`) is skipped, and so is an
 Include that such an Update overrides, because the live version is unknown. Not read yet, each on the ROADMAP: an Update
-in another file than its Include (261).
+in another file than its Include (261). That one is a fact, not a feature: with an Include in `Directory.Packages.props` and
+a `PackageVersion Update` of it in the project, the project's Update is what `dotnet restore` holds, so ripple's edit of the
+props Include changes nothing restore holds (`TestRealtoolNugetCrossFileUpdate`, run in CI only).
 
 `<PackageVersion Update="Id" Version="1.2.3" />` after a `<PackageVersion Include="Id">` of the same file is read like a
 PackageReference Update: the Update is edited and the Include before it is dead (`TestRealtoolNugetPackageVersionUpdate`,

@@ -170,6 +170,12 @@ Everything else:
     `RecountAllDependents` repairs it (the burst test asserts that). Fix so the first registrations do not lose
     counts (a counter created by one conditional write, recount only when the package already has dependents), then
     make the burst test assert no drift, and make the fake interleave so it can show this.
+335. **`from-pseudo-versions`: check that the release contains the commit.** Found live on `github.com/pkg/errors`: the
+    lowest release published after the commit can be one built from a tag that never merged it (v0.8.1 for
+    `v0.8.1-0.20180217175701-e1ac100e4667`; v0.9.0 is the first that does). The proxy has publish times only. On a
+    github.com module the host's compare endpoint (`commits/<hash>...<tag>`, status `ahead` or `identical`) answers
+    it with the installation token; other hosts keep today's rule and the PR's warning. Needs the compare answer
+    recorded from the real API before it is trusted.
 113. **DynamoDB: throttling and index lag against a real table.** `ThrottleNext` and `HoldIndex` model the errors and
     the stale reads, not their timing or frequency. DynamoDB Local and the AWS Emulator (verified 2026-11-24, see
     [docs/aws-emulator.md](docs/aws-emulator.md)) both pass the whole store suite but neither throttles nor lags
@@ -346,11 +352,6 @@ Everything else:
     results come back non-increasing and that `page_size=100` is honoured, and fail loudly if Hub changes, since ripple
     then silently falls back to the lexical list. Until it exists the option stays off by default. ghcr.io has no
     equivalent listing (OCI tags are lexical only), so `TagFloor` stays its only narrowing.
-216. **`from-pseudo-versions`: real modules, and a "newest" mode.** The opt-in move of a pseudo-version dependency to the first
-    release released after the commit (docs/osv.md) is verified on the fake proxy and index only. It does not check that the
-    release really contains the commit (the proxy does not say; a release from a branch that never merged it passes), and it
-    stops at the first release, so a dependency that wants the newest has to wait for the next ordinary update. Check it
-    on a real pseudo-version dependency, then consider `from-pseudo-versions: newest`.
 218. **pip: what is still left unread on purpose.** `setup.cfg` (`install_requires`, `setup_requires`, `tests_require`,
     `extras_require`) and `==1.*`/`==1.2.*` are read now (docs/pip.md). `setup.py` is never read or run, a lone `<`/`<=`,
     `!=`, a bare `*` and Poetry's array-of-constraints form (one entry per Python or platform) have no single floor to

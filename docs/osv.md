@@ -50,6 +50,12 @@ If the release feed already queued the same bump behind its cooldown, the adviso
   does). Only that first release is proposed, from a new release or from a repo added later (the backfill picks the
   lowest such release, not the newest). The PR says it leaves a pseudo-version and is never automerged. Off by default: a
   pseudo-version is a commit someone chose.
+  Checked against the real proxy (2026-11-28, `TestLivePseudoVersionMoveUsesTheProxysPublishTimes`): for
+  `github.com/pkg/errors` at `v0.8.1-0.20180217175701-e1ac100e4667` the rule accepts `v0.8.1`, published a year after the
+  commit but built from a tag that does not contain it (`git merge-base --is-ancestor`), and so would be the release
+  proposed; `v0.9.0` is the first that contains it. The proxy gives publish times, not containment, so the PR text
+  telling a reviewer to check is the only guard until ROADMAP 335 lands. A `newest` mode is not built: it would move
+  further past commits nobody checked.
 - **Corrected records.** When OSV corrects a record so that it no longer affects the version a repo uses (or withdraws
   it), ripple finishes the job that was waiting for it as skipped, closes the PR it opened for it with a comment saying
   why, and drops its dashboard entry. A PR a person touched stays open, and so does every PR when

@@ -117,7 +117,7 @@ list request and `RIPPLE_OSV_MAX_FETCH` record requests per interval; `RIPPLE_OS
 The client, the list and a whole ripple run were also run against the real service on 2026-11-24 (`go test -tags live`,
 run weekly by `.github/workflows/live.yml`): records parse, querybatch agrees with ripple's own matching, the list is newest
 first and the early stop reads only its head, an unknown id is a 404, and a module with advisories fixed in several releases
-ends with one open PR for the highest fix. No Go query returned a `next_page_token`, so pagination stays covered by the fake only.
+ends with one open PR for the highest fix. No Go query returned a `next_page_token`, so the Go path is covered by the fake only; pagination itself was run live on 2026-11-28 through an unexported ecosystem override against Debian:12 (`chromium`), which pages at 1000 ids and ends, and a query that outlasts the 5-round bound is cut silently at 5000 ids (`maxBatchPageRound`; a Go module has nowhere near that many advisories).
 
 What this has not been verified against, and the pinned contract, are in [UPSTREAM.md](../UPSTREAM.md); OSV's own
 documentation and recorded answers are in [vendor/osv](vendor/osv/).

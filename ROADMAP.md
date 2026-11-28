@@ -83,8 +83,9 @@ Everything else:
     same limits.
 52. **OSV: what a live run still cannot show.** On 2026-11-24 a ripple run pointed at real OSV, the record parser, querybatch
     against ripple's own evaluator, the CSV order and the 404 were all run live (`live.yml`, UPSTREAM.md `verified-live`).
-    Still open: a querybatch result large enough to paginate (no Go query returned `next_page_token`), rate limits and
-    abuse blocking, the delay between an id in the CSV and its record, and withdrawn records.
+    On 2026-11-28 pagination (through Debian:12), the 5-round cut and a withdrawn record were run live too.
+    Still open: rate limits and abuse blocking (none seen), and the delay between an id appearing in the CSV and its record
+    for ids younger than 30 minutes, which one run cannot measure.
 58. **Prove the credentialed container path live.** `RIPPLE_GOPROXY_TOKEN` under a container backend (GOPROXY
     userinfo over https) is covered by argv and refusal tests only, not run against a real container and an
     https proxy. Also offer an image with a C toolchain and headers, and a preflight that checks it for `cgo: true`.

@@ -1,0 +1,1 @@
+{{/* realtool fixture: the subchart is what matters */}}

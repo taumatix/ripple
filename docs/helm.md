@@ -18,7 +18,8 @@ all of these hold:
 
 - `repository` is an `https://` URL. `oci://`, `file://`, `@alias` and `alias:` repositories are skipped.
 - `version` is one exact version, optionally behind `=`, `^`, `~` and a `v` (`1.2.3`, `^1.2.3`, `~v1.2.3`). Ranges
-  (`>=1.0.0`, `1.x`, `1.2.3 - 2.0.0`) and missing versions are skipped.
+  (`>=1.0.0`, `1.x`, `1.2.3 - 2.0.0`) and missing versions are skipped. A `~v3.11.0` was asked of real `helm dependency
+  update` (`TestRealtoolHelmTilde`): it locks a 3.11 chart, and the edited `~v3.12.0` locks a 3.12 one.
 - The entry is written in block style with plain or simply quoted values. Flow style (`{...}`) and values with escapes
   are skipped.
 

@@ -158,13 +158,29 @@ Everything else:
     Forgejo, Gerrit (a change per Change-Id), Bitbucket, Azure DevOps and CodeCommit are unread. Read each from a real
     instance (the `hosts-*` jobs) and record it. A host that accepts duplicates leaves the early-takeover window open:
     then two PRs for one branch are possible after a clock beyond the skew or a stall past the lease.
+333. **DynamoDB on a real AWS on-demand table: throttling, index lag, the registration window.** Needs an AWS
+    account, which this project's CI does not have (real AWS is outside what the live jobs may use). With one
+    bounded run: the SDK retry counts a burst of `TestDynamoBurstOfRegistrationsOnOneHotPackage`'s size causes, the
+    time `gsi1` takes to show a new registration (to size the five-minute window), and a dropped dependency a lagging
+    index still lists. Make the window a setting if the delay exceeds it.
+334. **DynamoDB: counters come out short after a first-registration burst.** DynamoDB Local counted 36 of 150
+    dependents of one package after 150 concurrent first registrations (adaptive shards, 4 stripes); the in-process
+    fake counted all of them, so the fake serialises what Local does not. Cause: each writer that finds the counter
+    missing runs `recountBase`, which zeroes the stripes and does `SET Deps = <its snapshot>`, overwriting the
+    other writers' ADDs (the documented race in `RecountDependents`). Effect: shard growth is delayed, and
+    `RecountAllDependents` repairs it (the burst test asserts that). Fix so the first registrations do not lose
+    counts (a counter created by one conditional write, recount only when the package already has dependents), then
+    make the burst test assert no drift, and make the fake interleave so it can show this.
 113. **DynamoDB: throttling and index lag against a real table.** `ThrottleNext` and `HoldIndex` model the errors and
     the stale reads, not their timing or frequency. DynamoDB Local and the AWS Emulator (verified 2026-11-24, see
     [docs/aws-emulator.md](docs/aws-emulator.md)) both pass the whole store suite but neither throttles nor lags
     its index, so the sharded and striped paths are now checked for correctness against two backends and still for
     behaviour under load against none. Run them against a real on-demand table once (a throwaway account, a
     bounded run) and record the retry counts, the index lag a recount or a `ListDependents` sees, and whether the
-    SDK's three attempts are enough for a burst.
+    SDK's three attempts are enough for a burst. Narrowed: a burst of 150 concurrent registrations of one package
+    (adaptive shards, 4 counter stripes) runs against the fake and DynamoDB Local with no error and a complete
+    `ListDependents` at once (`TestDynamoBurstOfRegistrationsOnOneHotPackage`); Local cannot throttle or lag, so the
+    real-table half is 333. The burst did show counter drift on Local (334).
 114. **DynamoDB: tune and measure counter striping.** `RIPPLE_DYNAMODB_COUNTER_STRIPES` defaults to 1 and the
     estimate that avoids summing the stripes on every write is a heuristic. The emulator proves stripes stay
     correct (TestDynamoCounterStripes* pass against it) but has no throttling model, so it cannot say whether
@@ -269,6 +285,8 @@ Everything else:
     `HoldIndex`, which freezes the index outright. Nobody has measured real GSI propagation delay (or the cost of the extra
     Query and BatchGetItem on a hot package during a mass install) on AWS; make the window a setting if it proves wrong.
     A dependency a lagging index still lists after the repo dropped it is the mirror case and is not covered.
+    Narrowed: the burst test above shows the window loses nothing on Local, where the index has no lag; the real
+    delay is 333.
 192. **Backfill lookup: real proxy spot-checks.** The far-major probe (`RIPPLE_BACKFILL_MAJORS`) and the lookup are
     pinned against the fake proxy only. A prerelease-only real module and a real retraction have not been tried
     against proxy.golang.org, and a raised probe has no measured cost on a repo with hundreds of new dependencies

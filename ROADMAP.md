@@ -47,9 +47,14 @@ auth model, rate limits); the notes below are what I expect, **unverified** unti
     WIP, hashtag and abandon permission for an ordinary (non-admin) account, "no new changes" on identical re-push,
     merge-commit file lists. Residuals: auto-merge through submit-on-label if the docs ever support it,
     `stream-events` as an alternative to webhooks, learning default branches at discovery.
-292. **GitLab: auto-merge with a real pipeline.** The CI project has no runner, so merge-when-pipeline-succeeds was only
-    asked for, never seen to merge. Add a runner container and a `.gitlab-ci.yml` that passes and one that fails, and
-    check the merge happens, and the abort note ("aborted the automatic merge") for the failure.
+292. ~~**GitLab: auto-merge with a real pipeline.**~~ Shipped: the CI job registers a shell-executor runner and
+    `TestRealAutoMergeWithAPipeline` saw a passing pipeline merge the MR. The failing pipeline does not abort the
+    auto-merge or add an "aborted the automatic merge" note: the MR stays `opened`, `ci_must_pass`, auto-merge still set
+    (see [docs/platform-gitlab.md](docs/platform-gitlab.md)). Left: ROADMAP 311.
+311. **GitLab: an auto-merge MR whose pipeline failed stays armed.** On CE 19.6.2 the MR keeps `merge_when_pipeline_succeeds`
+    after the pipeline fails, so a retried or fixed pipeline merges it. Check that ripple's stale-PR and re-request paths
+    are right for that (it may re-request auto-merge on an MR that already has it, and a superseded MR must be closed, not
+    left armed); extend the real test with a retried pipeline.
 294. ~~**GitLab: signing token and a group webhook.**~~ Shipped for the signing token: `TestRealSignedWebhook` runs a
     `whsec_` hook on CE 19.6.2 and the receiver accepts the real signed delivery. Left: a group hook needs a licence
     (CE answers 404, see [docs/platform-gitlab.md](docs/platform-gitlab.md)); nothing to run until one is available.

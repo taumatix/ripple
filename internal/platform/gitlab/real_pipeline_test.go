@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/url"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -23,7 +22,7 @@ const (
 
 // TestRealAutoMergeWithAPipeline drives merge-when-pipeline-succeeds with a real runner
 // (scripts/ci-gitlab-runner.sh): a passing pipeline merges the merge request, a failing one leaves it open
-// with GitLab's "aborted the automatic merge" system note.
+// (GitLab adds no "aborted the automatic merge" note, which the first version of this test assumed).
 func TestRealAutoMergeWithAPipeline(t *testing.T) {
 	if os.Getenv("RIPPLE_TEST_GITLAB_RUNNER") == "" {
 		t.Skip("RIPPLE_TEST_GITLAB_RUNNER is not set: no runner is registered")
@@ -82,28 +81,39 @@ func TestRealAutoMergeWithAPipeline(t *testing.T) {
 	}
 
 	fail := open("ripple/fail", failingCI)
-	var notes []string
+	// The first CI run showed no "aborted the automatic merge" note within 5 minutes of the request, so the
+	// test no longer waits for one: it waits for the pipeline to fail, then records what the MR looks like.
+	var status string
 	for end := time.Now().Add(5 * time.Minute); ; time.Sleep(3 * time.Second) {
-		var ns []struct {
-			Body   string `json:"body"`
-			System bool   `json:"system"`
+		var ps []struct {
+			Status string `json:"status"`
 		}
-		f.api.mustJSON("GET", fmt.Sprintf("projects/%s/merge_requests/%d/notes", pid, fail.Number), nil, &ns)
-		notes = notes[:0]
-		for _, n := range ns {
-			if n.System {
-				notes = append(notes, n.Body)
-			}
+		f.api.mustJSON("GET", "projects/"+pid+"/pipelines?ref="+url.QueryEscape("ripple/fail"), nil, &ps)
+		if len(ps) > 0 {
+			status = ps[0].Status
 		}
-		if strings.Contains(strings.Join(notes, "\n"), "aborted the automatic merge") {
+		if status == "failed" {
 			break
 		}
 		if time.Now().After(end) {
-			t.Fatalf("no abort note within 5 minutes; system notes: %q", notes)
+			t.Fatalf("the ripple/fail pipeline is %q after 5 minutes, want failed", status)
+		}
+	}
+	time.Sleep(20 * time.Second) // time for GitLab to react to the failed pipeline, if it reacts
+	var ns []struct {
+		Body   string `json:"body"`
+		System bool   `json:"system"`
+	}
+	f.api.mustJSON("GET", fmt.Sprintf("projects/%s/merge_requests/%d/notes", pid, fail.Number), nil, &ns)
+	var notes []string
+	for _, n := range ns {
+		if n.System {
+			notes = append(notes, n.Body)
 		}
 	}
 	s, ds := state(fail)
 	t.Logf("FACT a failing pipeline: MR state %s, detailed_merge_status %s, system notes %q", s, ds, notes)
+	t.Logf("FACT failing-pipeline MR as GitLab returns it: %s", rawMR(t, f, repo.FullName, fail.Number))
 	if s != "opened" {
 		t.Errorf("the MR with a failed pipeline is %s, want opened", s)
 	}

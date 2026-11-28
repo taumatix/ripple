@@ -393,7 +393,7 @@ Everything else:
 233. **Bundler: the unread forms.** The datasource, manager and docs are written from the vendored RubyGems guides
     ([docs/vendor/rubygems](docs/vendor/rubygems)). A `-tags live` test reads `rack` and `nokogiri` from the real
     rubygems.org (`internal/rubygems`) and `TestRealtoolBundler` runs `bundle lock` on an edited Gemfile; not covered
-    live: rate limits, yanked versions. Two-segment `"~> 1.2"` and one-segment `"~> 1"` are read (a later major only; `bundle lock` checked both). Still skipped: `>=`/`>` floors (see 252),
+    live: rate limits, yanked versions. Two-segment `"~> 1.2"` and one-segment `"~> 1"` are read (a later major only; `bundle lock` checked both); three-segment `"~> 2.2.4"` is asked of `bundle lock` too (pins the minor, `TestRealtoolBundlerThreeSegment`). Still skipped: `>=`/`>` floors (see 252),
     other constraints, four-segment versions, `gems.rb`, `.gemspec`
     dependencies, a private `source` (credentials), multi-line declarations, and `created_at` for the cooldown.
 234. **Bundler: refresh `Gemfile.lock`.** The lock is reported stale in the PR body, not rewritten. Rewriting a lock

@@ -44,6 +44,12 @@ own resolver, and asserted on every run by `TestRealtoolBundlerOneSegment`). So 
 `~> 1.0`, and is treated like the two-segment form: a release of the same major is never proposed, a release of a later
 major is, and the file takes that release's major alone (`~> 1` becomes `~> 2` for 2.2.26).
 
+### The three-segment `~> 2.2.4`
+
+Asked of real `bundle lock` too (`TestRealtoolBundlerThreeSegment`): `gem "rack", "~> 2.2.4"` locks a 2.2 rack, so the
+constraint pins the minor and every release of another minor is an update. The file takes the whole new version
+(`~> 3.1.0` for 3.1.0), and `bundle lock` then locks a 3.1 rack.
+
 ## What is proposed
 
 The versions of each tracked gem are read from `https://rubygems.org/api/v1/versions/<gem>.json`, once per gem per poll.

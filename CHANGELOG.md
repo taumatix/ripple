@@ -4,6 +4,8 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
 
 ## [Unreleased]
 
+- Bundler: `TestRealtoolBundlerThreeSegment` asks real `bundle lock` what `~> 2.2.4` locks (a 2.2 rack) and that the edited `~> 3.1.0` locks a 3.1 rack; the form was read before but never asked of the tool. No behaviour change.
+
 ### Fixed
 
 - A verified build no longer leaves a binary in the PR: for a repository whose only package is `package main`, the verification `go build ./...` wrote the executable into the checkout and the next `git add -A` committed it. The build now discards its output (`-o` the null device). Verified by an end-to-end test against the fake host and by the image smoke test, which now uses a main-only repository.

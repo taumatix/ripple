@@ -13,7 +13,9 @@ set -euo pipefail
 base=${GITLAB_URL:-http://127.0.0.1:8929}
 ctr=${CONTAINER:-gitlab}
 token=${ROOT_TOKEN:-$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')}
-echo "::add-mask::$token"
+# ::add-mask:: goes to MASK_FD (the step's real stdout, see the workflow), never into the tee'd log that is
+# uploaded as an artifact: the command carries the raw value.
+echo "::add-mask::$token" >&"${MASK_FD:-1}"
 
 echo "--- version (unauthenticated endpoints only)"
 curl -sS -o /dev/null -w 'GET /users/sign_in: %{http_code}\n' "$base/users/sign_in"

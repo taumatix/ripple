@@ -9,7 +9,13 @@ set -euo pipefail
 
 base=${GITLAB_URL:-http://127.0.0.1:8929}
 root=${RIPPLE_TEST_GITLAB_TOKEN:?run ci-gitlab-bootstrap.sh first}
-image=gitlab/gitlab-runner:latest
+# Pinned: a moving tag changes the registration flags under the job. Bump deliberately.
+image=gitlab/gitlab-runner:v19.6.1
+
+# The container and volume are the job's own; remove them when the script fails (a success leaves the runner
+# running for the tests, and the job's VM goes away after).
+cleanup() { docker rm -f runner >/dev/null 2>&1 || true; docker volume rm -f ripple-runner >/dev/null 2>&1 || true; }
+trap 'rc=$?; if [ $rc -ne 0 ]; then cleanup; fi' EXIT
 
 api() { # api METHOD PATH [JSON]: prints the body, fails showing it on a non-2xx
   local m=$1 p=$2 d=${3:-} code out
@@ -26,13 +32,15 @@ api() { # api METHOD PATH [JSON]: prints the body, fails showing it on a non-2xx
 echo "--- create an instance runner (POST /user/runners)"
 resp=$(api POST /user/runners '{"runner_type":"instance_type","description":"ripple-ci","run_untagged":true}')
 tok=$(printf '%s' "$resp" | jq -r .token)
-echo "::add-mask::$tok"
-case $tok in glrt-*) ;; *) echo "no glrt- token in the answer" >&2; exit 1 ;; esac
+# ::add-mask:: goes to MASK_FD (the step's real stdout, see the workflow), never into the tee'd log that is
+# uploaded as an artifact: the command carries the raw value.
+echo "::add-mask::$tok" >&"${MASK_FD:-1}"
+case $tok in glrt-*) ;; *) echo "the answer holds no runner token" >&2; exit 1 ;; esac
 
 echo "--- register it with the shell executor and start it"
 docker volume create ripple-runner >/dev/null
 docker run --rm --network host -v ripple-runner:/etc/gitlab-runner "$image" register --non-interactive \
-  --url "$base" --token "$tok" --executor shell 2>&1 | grep -v "$tok" | tail -n 8
+  --url "$base" --token "$tok" --executor shell 2>&1 | { grep -vF -- "$tok" || true; } | tail -n 8
 docker run -d --name runner --network host -v ripple-runner:/etc/gitlab-runner "$image" >/dev/null
 
 echo "--- wait for the runner to be online"

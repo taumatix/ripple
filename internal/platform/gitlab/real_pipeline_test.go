@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -116,5 +117,22 @@ func TestRealAutoMergeWithAPipeline(t *testing.T) {
 	t.Logf("FACT failing-pipeline MR as GitLab returns it: %s", rawMR(t, f, repo.FullName, fail.Number))
 	if s != "opened" {
 		t.Errorf("the MR with a failed pipeline is %s, want opened", s)
+	}
+	if ds != "ci_must_pass" {
+		t.Errorf("detailed_merge_status = %q, want ci_must_pass", ds)
+	}
+	var armed struct {
+		Armed bool `json:"merge_when_pipeline_succeeds"`
+	}
+	if err := json.Unmarshal([]byte(rawMR(t, f, repo.FullName, fail.Number)), &armed); err != nil {
+		t.Fatal(err)
+	}
+	if !armed.Armed {
+		t.Error("merge_when_pipeline_succeeds is false after the pipeline failed; docs say it stays armed")
+	}
+	for _, n := range notes {
+		if strings.Contains(n, "aborted") {
+			t.Errorf("system note %q: GitLab was recorded adding no abort note", n)
+		}
 	}
 }

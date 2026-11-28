@@ -471,6 +471,9 @@ func (f *fakeGerrit) queryChanges(w http.ResponseWriter, r *http.Request) {
 		if slices.Contains(r.URL.Query()["o"], "CURRENT_REVISION") && len(c.Revisions) > 0 {
 			m["current_revision"] = c.Revisions[len(c.Revisions)-1]
 		}
+		if slices.Contains(r.URL.Query()["o"], "MESSAGES") {
+			m["messages"] = messagesJSON(c)
+		}
 		all = append(all, m)
 	}
 	cap := f.pageCap
@@ -536,20 +539,25 @@ func (f *fakeGerrit) getChange(w http.ResponseWriter, r *http.Request, handle st
 		m["labels"] = map[string]any{"Code-Review": map[string]any{"all": all}}
 	}
 	if opts["MESSAGES"] {
-		var msgs []map[string]any
-		for i, text := range c.Messages {
-			mi := map[string]any{"id": fmt.Sprintf("m%d", i), "message": text, "_revision_number": 1}
-			if c.MessageTags[i] != "" {
-				mi["tag"] = c.MessageTags[i]
-			}
-			if c.MessageAuthors[i] != "" {
-				mi["author"] = map[string]any{"_account_id": 1000097, "username": c.MessageAuthors[i]}
-			}
-			msgs = append(msgs, mi)
-		}
-		m["messages"] = msgs
+		m["messages"] = messagesJSON(c)
 	}
 	writeJSON(w, 200, m)
+}
+
+// messagesJSON is ChangeInfo.messages: ChangeMessageInfo with an author only for a person.
+func messagesJSON(c *fakeChange) []map[string]any {
+	var msgs []map[string]any
+	for i, text := range c.Messages {
+		mi := map[string]any{"id": fmt.Sprintf("m%d", i), "message": text, "_revision_number": 1}
+		if c.MessageTags[i] != "" {
+			mi["tag"] = c.MessageTags[i]
+		}
+		if c.MessageAuthors[i] != "" {
+			mi["author"] = map[string]any{"_account_id": 1000097, "username": c.MessageAuthors[i]}
+		}
+		msgs = append(msgs, mi)
+	}
+	return msgs
 }
 
 // listComments is "List Change Comments": a map of file path to CommentInfo list.
@@ -599,7 +607,13 @@ func (f *fakeGerrit) postChange(w http.ResponseWriter, handle, action string, bo
 			text(w, 400, "bad ReviewInput")
 			return
 		}
-		c.Messages = append(c.Messages, in.Message)
+		// rest-api-changes.md ("Get Change Detail" example) shows a posted message stored as
+		// "Patch Set 1:\n\n<text>"; an empty message adds none.
+		if in.Message != "" {
+			c.Messages = append(c.Messages, fmt.Sprintf("Patch Set %d:\n\n%s", len(c.Revisions), in.Message))
+		} else {
+			c.Messages = append(c.Messages, "")
+		}
 		c.MessageTags = append(c.MessageTags, in.Tag)
 		c.MessageAuthors = append(c.MessageAuthors, f.User)
 		writeJSON(w, 200, map[string]any{})

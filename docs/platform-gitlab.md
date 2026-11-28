@@ -127,7 +127,8 @@ that records each delivery and forwards it to ripple's receiver. Recorded on Git
   `merge_when_pipeline_succeeds: true`, `detailed_merge_status: ci_must_pass` and **no** "aborted the automatic
   merge" note: the only system note is "enabled an automatic merge ... when all merge checks ... pass"
   (read 20 s after the pipeline failed, so a later note is not excluded; `TestRealAutoMergeWithAPipeline`).
-- Archive and unarchive move a project between the `archived=false` and `archived=true` membership listings.
+- Archive and unarchive move a project between the `archived=false` and `archived=true&simple=true` membership
+  listings (the archived one ripple asks for with `simple=true`; `ArchivePausesAndUnarchiveResumes`, GitLab CE 19.6.2).
 - The membership listing shows a new project within 100 ms.
 
 ## What is unverified

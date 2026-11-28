@@ -75,6 +75,8 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
 
 - GitLab: a webhook with a signing token (`whsec_`) now runs against the real instance (ROADMAP 294; `TestRealSignedWebhook`, GitLab CE 19.6.2): GitLab signs a real push delivery (`webhook-id`, `webhook-timestamp`, `webhook-signature` with a `v1,` prefix, no `X-Gitlab-Token`), `gitlab.Receiver{SigningKey}` accepts it and refuses it with the body altered. No code change. A group hook on CE answers `404 {"error":"404 Not Found"}`; a group hook with a licence is not verified.
 
+- GitLab: the real CI job now registers a runner (`scripts/ci-gitlab-runner.sh`, shell executor) so merge requests get real pipelines (ROADMAP 292; `TestRealAutoMergeWithAPipeline`, GitLab CE 19.6.2, about 150 s): auto-merge asked while the pipeline runs merges the MR when it passes; when it fails the MR stays open with auto-merge still set and GitLab adds no "aborted the automatic merge" note. No behaviour change. Not verified: other executors, a retried pipeline, approval rules.
+
 ## [0.4.0] - 2026-11-25
 
 Additive release: no public API was removed or changed. Opt-in ecosystems: Helm, Bundler, Composer, NuGet, Maven and Terraform

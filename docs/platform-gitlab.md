@@ -121,6 +121,12 @@ that records each delivery and forwards it to ripple's receiver. Recorded on Git
 - `Draft: ` in the title makes a draft (`draft: true`); labels containing no comma are created and applied.
 - `auto_merge` on a project with no pipelines is accepted and sets the MR's merge-when-pipeline-succeeds state; with
   "pipelines must succeed" and none present it is also accepted.
+- With a real runner (`scripts/ci-gitlab-runner.sh`: `POST /user/runners`, a `glrt-` token, the shell executor) and
+  "pipelines must succeed", `auto_merge` asked while the pipeline runs is accepted; when the pipeline passes GitLab
+  merges the MR (state `merged`, about 35 s after the request). When it fails the MR stays `opened` with
+  `merge_when_pipeline_succeeds: true`, `detailed_merge_status: ci_must_pass` and **no** "aborted the automatic
+  merge" note: the only system note is "enabled an automatic merge ... when all merge checks ... pass"
+  (read 20 s after the pipeline failed, so a later note is not excluded; `TestRealAutoMergeWithAPipeline`).
 - Archive and unarchive move a project between the `archived=false` and `archived=true` membership listings.
 - The membership listing shows a new project within 100 ms.
 
@@ -130,7 +136,8 @@ that records each delivery and forwards it to ripple's receiver. Recorded on Git
   on CE 19.6.2 answers `404 {"error":"404 Not Found"}` (recorded by `TestRealGroupWebhook`), so a group hook with a
   licence (Premium) was never run;
 - gitlab.com's throttle values and how often it limits these calls (the CI instance was throttled by hand);
-- auto-merge when a pipeline really runs and later fails or passes (the CI project has no runner);
+- auto-merge with a runner other than the shell executor, a pipeline that is retried after failing, and approval rules
+  (the CI run has one instance runner and a project with no approvals);
 - older GitLab versions: only 19.6.2 ran;
 - the fake in `internal/testutil/gitlab.go` models the Developer refusal (`TokenRole`), the branch visibility delay
   (`BranchDelay`) and the 429 headers only as recorded once on 19.6.2; it models no other role rules (a Reporter or

@@ -26,7 +26,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        tag: ['3.11.0']
+        # 3.11.0 is the pinned, documented one; 3.10.3 is the newest 3.10 (the oldest Renovate's
+        # SCM-Manager page names, >= 3.10.0) and 3.12.3 the newest 3.12, both listed on Docker Hub
+        # 2026-11-28. The plugins each installs are whatever the plugin center offers for it.
+        tag: ['3.11.0', '3.10.3', '3.12.3']
     env:
       RIPPLE_REAL_SCM_URL: http://127.0.0.1:8080/scm
       RIPPLE_REAL_SCM_ADMIN_USER: rippleadmin

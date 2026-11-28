@@ -70,6 +70,8 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
 
 - Live checks of the Go proxy for a module whose highest stable tag retracts itself (`github.com/prometheus/common`: `Latest` skips the retracted v1 line and answers v0.74.0 or later) and a prerelease-only module (`github.com/go-git/go-git/v6`: still answered with its newest prerelease), in `live.yml` (ROADMAP 185). Read-only, run against the real proxy on 2026-11-28; no code change. Not verified: a module whose every version is retracted, on the real proxy (unit-tested only).
 
+- GitLab: a webhook with a signing token (`whsec_`) now runs against the real instance (ROADMAP 294; `TestRealSignedWebhook`, GitLab CE 19.6.2): GitLab signs a real push delivery (`webhook-id`, `webhook-timestamp`, `webhook-signature` with a `v1,` prefix, no `X-Gitlab-Token`), `gitlab.Receiver{SigningKey}` accepts it and refuses it with the body altered. No code change. A group hook on CE answers `404 {"error":"404 Not Found"}`; a group hook with a licence is not verified.
+
 ## [0.4.0] - 2026-11-25
 
 Additive release: no public API was removed or changed. Opt-in ecosystems: Helm, Bundler, Composer, NuGet, Maven and Terraform

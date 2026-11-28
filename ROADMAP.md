@@ -50,8 +50,9 @@ auth model, rate limits); the notes below are what I expect, **unverified** unti
 292. **GitLab: auto-merge with a real pipeline.** The CI project has no runner, so merge-when-pipeline-succeeds was only
     asked for, never seen to merge. Add a runner container and a `.gitlab-ci.yml` that passes and one that fails, and
     check the merge happens, and the abort note ("aborted the automatic merge") for the failure.
-294. **GitLab: signing token and a group webhook.** The CI hooks use a secret token; run a webhook with a signing token
-    (`whsec_`) and, where a licence allows, a group hook, and record the deliveries.
+294. ~~**GitLab: signing token and a group webhook.**~~ Shipped for the signing token: `TestRealSignedWebhook` runs a
+    `whsec_` hook on CE 19.6.2 and the receiver accepts the real signed delivery. Left: a group hook needs a licence
+    (CE answers 404, see [docs/platform-gitlab.md](docs/platform-gitlab.md)); nothing to run until one is available.
 18. ~~**SCM-Manager against a real instance.**~~ Shipped: `hosts-scmmanager.yml` runs the conformance suite and
     `TestReal*` against SCM-Manager 3.11.0, plugins installed through the plugin API, the global webhook created
     through the Webhook plugin's REST resource with `${repository.namespace}` in its URL (see

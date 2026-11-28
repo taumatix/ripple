@@ -280,10 +280,10 @@ Everything else:
     A dependency a lagging index still lists after the repo dropped it is the mirror case and is not covered.
     Narrowed: the burst test above shows the window loses nothing on Local, where the index has no lag; the real
     delay is 333.
-192. **Backfill lookup: real proxy spot-checks.** The far-major probe (`RIPPLE_BACKFILL_MAJORS`) and the lookup are
-    pinned against the fake proxy only. A prerelease-only real module and a real retraction have not been tried
-    against proxy.golang.org, and a raised probe has no measured cost on a repo with hundreds of new dependencies
-    (each far major is one proxy request of the 20 a scan allows).
+192. **Backfill lookup: far probe at scale.** The far-major probe is checked against the real proxy for one skipped
+    major and its cost (2 requests per unknown path, 3 per known one, so the 20 asks of a scan are 40 to 60
+    requests); prerelease-only and retracted modules are covered by 185. Not measured: a repo with hundreds of new
+    dependencies each probed with a raised `RIPPLE_BACKFILL_MAJORS`, i.e. whether the proxy rate-limits that burst.
 193. **Generators: regenerate in the PR?** The rewritten `//go:generate` lines are now proven runnable with the real
     mockgen (go.uber.org/mock v0.6.0, github.com/golang/mock v1.6.0) and stringer (`-tags live`), but ripple does not
     run `go generate` after a bump, so a checked-in mock or `_string.go` stays as the old major produced it. Running

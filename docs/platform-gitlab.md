@@ -131,5 +131,6 @@ that records each delivery and forwards it to ripple's receiver. Recorded on Git
 - gitlab.com's throttle values and how often it limits these calls (the CI instance was throttled by hand);
 - auto-merge when a pipeline really runs and later fails or passes (the CI project has no runner);
 - older GitLab versions: only 19.6.2 ran;
-- the fake in `internal/testutil/gitlab.go` does not model roles (it accepts auto-merge from any token), the branch
-  visibility delay, or the `RateLimit-*` headers of the real 429.
+- the fake in `internal/testutil/gitlab.go` models the Developer refusal (`TokenRole`), the branch visibility delay
+  (`BranchDelay`) and the 429 headers only as recorded once on 19.6.2; it models no other role rules (a Reporter or
+  Guest, a non-protected default branch where a Developer may auto-merge) and the delay is a count, not a duration.

@@ -50,8 +50,6 @@ auth model, rate limits); the notes below are what I expect, **unverified** unti
 292. **GitLab: auto-merge with a real pipeline.** The CI project has no runner, so merge-when-pipeline-succeeds was only
     asked for, never seen to merge. Add a runner container and a `.gitlab-ci.yml` that passes and one that fails, and
     check the merge happens, and the abort note ("aborted the automatic merge") for the failure.
-293. **GitLab: roles in the fake.** The fake accepts auto-merge from any token; a real Developer is refused with 401 on a
-    protected default branch. Model roles and the branch visibility delay so the unit tests can reach those paths.
 294. **GitLab: signing token and a group webhook.** The CI hooks use a secret token; run a webhook with a signing token
     (`whsec_`) and, where a licence allows, a group hook, and record the deliveries.
 18. ~~**SCM-Manager against a real instance.**~~ Shipped: `hosts-scmmanager.yml` runs the conformance suite and

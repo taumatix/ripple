@@ -330,6 +330,19 @@ func TestRealtoolBundlerOneSegment(t *testing.T) {
 	}.run(t)
 }
 
+// A three-segment "~> 2.2.4" is ">= 2.2.4, < 2.3": bundler must resolve the untouched Gemfile to
+// a 2.2 rack (so the constraint pins the minor, unlike the two-segment form), ripple moves it to
+// "~> 3.1.0" for rack 3.1.0, and bundler must then resolve a 3.1 rack (ROADMAP 233).
+func TestRealtoolBundlerThreeSegment(t *testing.T) {
+	realtool{
+		fixture: "bundler-threesegment", manifest: "Gemfile", manager: Bundler{Dir: "/"},
+		bumps:  []bump{{"rack", "2.2.4", "3.1.0"}},
+		steps:  [][]string{{"bundle", "lock"}},
+		before: func(t *testing.T, dir string) { mustContain(t, dir, "Gemfile.lock", "rack (2.2.") },
+		after:  func(t *testing.T, dir string) { mustContain(t, dir, "Gemfile.lock", "rack (3.1.") },
+	}.run(t)
+}
+
 func TestRealtoolComposer(t *testing.T) {
 	realtool{
 		fixture: "composer", manifest: "composer.json", manager: Composer{Dir: "/"},

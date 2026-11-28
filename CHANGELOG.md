@@ -75,6 +75,8 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
 
 - GitLab: a webhook with a signing token (`whsec_`) now runs against the real instance (ROADMAP 294; `TestRealSignedWebhook`, GitLab CE 19.6.2): GitLab signs a real push delivery (`webhook-id`, `webhook-timestamp`, `webhook-signature` with a `v1,` prefix, no `X-Gitlab-Token`), `gitlab.Receiver{SigningKey}` accepts it and refuses it with the body altered. No code change. A group hook on CE answers `404 {"error":"404 Not Found"}`; a group hook with a licence is not verified.
 
+- SCM-Manager against the real 3.11.0 instance (no behaviour change): an archived repository lists with `archived: true` by default and with `showArchived=true` (`false` hides it), the branch resource answers a 40-hex `revision` equal to the pushed commit, and an open pull request has `sourceRevision: null` before and after a second push, so `PR.HeadSHA` stays empty on this host (documented). Recorded by `TestRealArchivedListing` and `TestRealPullRequestAndBranchFields`. Not verified: the revisions of a merged or rejected pull request, merge-commit modifications, `shouldDeleteSourceBranch` at merge, a real 429, and plugin releases other than 3.11.0.
+
 ## [0.4.0] - 2026-11-25
 
 Additive release: no public API was removed or changed. Opt-in ecosystems: Helm, Bundler, Composer, NuGet, Maven and Terraform

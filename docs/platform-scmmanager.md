@@ -39,7 +39,9 @@ delivery. The secret rides in clear unless the webhook URL is https: use https.
 - **Head polling**: the client implements `app.HeadLister`, so a repository whose default branch moved is
   re-scanned at the next discovery even when its webhook never arrived. The listing carries no commit, so this is
   **one extra read per repository** each discovery, one at a time: `GET repositories/{ns}/{name}/branches/{default}`
-  and its `revision` (the default branch is already remembered). A 429 ends the listing and the app keeps what it
+  and its `revision` (the default branch is already remembered; run for real on 3.11.0, the answer is
+  `{"name","revision","defaultBranch","lastCommitDate","lastCommitter","stale","_links"}` with a 40-hex revision equal to the pushed commit,
+  `docs/vendor/scm-manager/real-answers.md`). A 429 ends the listing and the app keeps what it
   remembered; another failure leaves that repository out for the round. The read is not counted as scan cost by the
   conformance suite.
 - **Changed files**: the payload has no file list. For a push to the default branch ripple asks the
@@ -65,7 +67,7 @@ once would skip the checks.
 
 ## Archive
 
-Only GitHub reports archive and unarchive today (ripple pauses the repo on `archived`, resumes on `unarchived`). SCM-Manager: ripple consumes only the events listed here; an archive event was not verified (2026-11-23). The repository list carries an `archived` flag (`docs/vendor/scm-manager/source-excerpts.md`, "repo-list"), so the client implements `platform.ArchivedLister` on it: an archived git repository is paused (index and pending jobs kept) and resumed on unarchive instead of forgotten. Verified against the fake only.
+Only GitHub reports archive and unarchive today (ripple pauses the repo on `archived`, resumes on `unarchived`). SCM-Manager: ripple consumes only the events listed here; an archive event was not verified (2026-11-23). The repository list carries an `archived` flag (`docs/vendor/scm-manager/source-excerpts.md`, "repo-list"), so the client implements `platform.ArchivedLister` on it: an archived git repository is paused (index and pending jobs kept) and resumed on unarchive instead of forgotten. Run for real on 3.11.0 (`TestRealArchivedListing`, `ArchivePausesAndUnarchiveResumes`): an archived repository still appears in `GET repositories` with `archived: true`, `showArchived=true` and the default (which is `true`) list it, `showArchived=false` hides it, `ListArchivedRepos` reports it and `ListRepos` omits it. Not observed: a Gerrit-style event for the change (none is documented), and plugin or core releases other than 3.11.0.
 
 ## Superseded pull requests
 
@@ -79,7 +81,15 @@ nothing reports a title or description edit. Closing on a guess could discard so
 ripple closes nothing here. A source note is in
 `docs/vendor/scm-manager/review-plugin-reject-source-note.md`.
 
-## Unverified
+## Pull request head commit
+
+`platform.PR.HeadSHA` stays empty on this host. A real open pull request (3.11.0, `TestRealPullRequestAndBranchFields`) answers
+`sourceRevision: null` and `targetRevision: null` in the list and on its own resource, before and after a second push to
+the source branch, and no other field carries the source commit (the answer is in
+`docs/vendor/scm-manager/real-answers.md`). The commit is readable from the branch resource
+(`GET repositories/{ns}/{name}/branches/{source}`, `revision`), but ripple does not spend one read per open pull
+request on it: a pull request ripple opened is kept as it was, and one that changed is not noticed until it closes. Not
+observed: whether the revisions are filled for a merged or rejected pull request.
 
 ## Real instance
 

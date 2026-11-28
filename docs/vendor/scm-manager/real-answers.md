@@ -38,6 +38,21 @@ password with any user name (`ripple` tried) on both the REST API and git over H
   (403 `repository is archived`). Leaving the archive takes the `unarchive` link (POST, 204); `archive` is its
   counterpart.
 
+- Branch resource, `GET /api/v2/repositories/{ns}/{name}/branches/{branch}` (`application/vnd.scmm-branch+json;v=2`),
+  200: `{"name":"main","revision":"<40 hex>","defaultBranch":true,"lastCommitDate":"2026-11-28T00:23:30Z",
+  "lastCommitter":{"mail":"scm@example.com","name":"SCM Administrator"},"stale":false,"_links":{...}}`. `revision`
+  equals the commit git pushed; a branch name with a slash is addressed as `ripple%2Ffields`
+  (`TestRealPullRequestAndBranchFields`, 2026-11-28).
+- An open pull request, in the list and on its own resource, has the fields `_embedded _links author closeDate
+  creationDate description emergencyMerged id ignoredMergeObstacles initialTasks labels lastModified
+  lastModifiedDateForSort markedAsReviewed reviewer reviser shouldDeleteSourceBranch source sourceRevision status
+  target targetRevision tasks title` (the list item adds nothing). `sourceRevision` and `targetRevision` are `null`
+  while it is open, and stay `null` after a second push to the source branch; `labels` is `[]`. No field holds the
+  source commit.
+- Archived repository, `GET /api/v2/repositories`: listed with `archived: true` by default and with
+  `showArchived=true`; absent with `showArchived=false` (`TestRealArchivedListing`). `ListArchivedRepos` reports it,
+  `ListRepos` omits it.
+
 ## Webhook plugin
 
 - Global configuration lives at the index link `webHookConfig`. PUT (204):

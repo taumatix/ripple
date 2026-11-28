@@ -54,6 +54,15 @@ delivery. The secret rides in clear unless the webhook URL is https: use https.
   source branch deleted on merge. The Review plugin may already hold a pull request for the same branches:
   that answers 409 and surfaces as an error. ripple lists `IN_PROGRESS` (open and draft) pull requests to
   find its own by branch prefix, so it does not normally try.
+- **`shouldDeleteSourceBranch` is a preselection, not an action** (real 3.11.0, `TestRealMergeDeletesSourceBranch`).
+  A pull request created with the flag `true`, merged through its `merge` link
+  (`POST merge/{ns}/{name}/{id}?strategy=...`, `Content-Type: application/vnd.scmm-mergeCommand+json;v=2`,
+  body `{"commitMessage":...,"overrideMessage":false}`, 204), kept its source branch. The Review plugin's docs say
+  the same: the merge dialog preselects it and the person can change it. Branches ripple pushed therefore stay
+  after a merge unless the merger asked for deletion.
+- **A merge commit's modifications are against its first parent** (`TestRealMergeCommitModifications`): a merge of
+  `feature` (adds `go.mod`) into a `main` that had meanwhile added `other.txt` reports `added: ["go.mod"]` alone,
+  so `PushFiles` over the pushed ids (`other.txt`, `go.mod`) sees `go.mod` and no re-scan is needed.
 - **Labels** are ignored: the Review plugin's labels are chosen per repository, and ripple cannot know them.
 - **Rate limit**: none is documented. A 429 (say from a proxy) holds the host back until `Retry-After`, else a
   minute.
@@ -104,7 +113,6 @@ resource used for head polling, the modifications resource for a push, and archi
 
 Not observed against a real instance (assumed, unverified):
 
-- the modifications of a merge commit (which parent they are against);
-- `shouldDeleteSourceBranch` honoured at merge;
+- how a merge request asks for the source branch to be deleted (the field or query is unobserved, ROADMAP 305);
 - the 429 answer: nothing documents it and no instance throttles; the rate-limit case injects one at a proxy;
 - plugin releases other than the ones 3.11.0 installs.

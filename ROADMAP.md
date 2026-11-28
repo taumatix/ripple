@@ -63,7 +63,7 @@ auth model, rate limits); the notes below are what I expect, **unverified** unti
     through the Webhook plugin's REST resource with `${repository.namespace}` in its URL (see
     [docs/platform-scmmanager.md](docs/platform-scmmanager.md) "Real instance",
     [docs/vendor/scm-manager/real-answers.md](docs/vendor/scm-manager/real-answers.md)). Merge-commit
-    modifications, `shouldDeleteSourceBranch` and a real 429 are ROADMAP 284 to 286.
+    modifications and `shouldDeleteSourceBranch` are answered (ROADMAP 284, 285); a real 429 and older plugins are ROADMAP 286.
 
 Everything else:
 
@@ -499,12 +499,13 @@ Everything else:
 302. **Gitea/Forgejo head polling at scale.** `ListRepoHeads` reads one branch per repository on every discovery with no cache (GitHub keeps its read for `HeadEvery`). Measure it against an instance with a few hundred repositories (a real 429 on the branches endpoint included) and, if it matters, keep the read for an interval as `github.Client.HeadEvery` does.
 303. **Gitea/Forgejo: a head-poll rescan end to end.** `TestRealListRepoHeads` proves the head read and the fake proves the app's reaction; no real run pushes with the push webhook absent and watches discovery rescan. Add it to the real fixture (a created repository without a push hook).
 304. **SCM-Manager: the source revision of a merged or rejected pull request, and noticing a changed one.** An open pull request answers `sourceRevision: null` (ROADMAP 187), so ripple cannot tell that someone pushed to its branch. Observe whether the field is filled once the pull request is merged or rejected, and whether the branch resource's `revision` for the source branch (one read per open ripple pull request) is worth using to keep a touched pull request touched.
-284. **SCM-Manager: modifications of a merge commit.** `PushFiles` asks the modifications resource per changeset;
-    which parent a merge commit's modifications are against is unobserved on a real 3.11.0. Push a merge of a
-    branch that touches `go.mod` and assert the file is reported (or that a re-scan is chosen), in `TestReal*`.
-285. **SCM-Manager: `shouldDeleteSourceBranch` at merge.** The pull request is created with the flag, and the
-    real instance's honouring of it when a person merges is unobserved. Merge through the review plugin's merge
-    resource in `TestReal*` and read the branch list.
+284. ~~**SCM-Manager: modifications of a merge commit.**~~ Shipped: a merge commit's modifications are against its
+    first parent, so `PushFiles` over the pushed ids sees `go.mod` (`TestRealMergeCommitModifications`; [docs/platform-scmmanager.md](docs/platform-scmmanager.md)).
+285. ~~**SCM-Manager: `shouldDeleteSourceBranch` at merge.**~~ Answered: on 3.11.0 the flag is only the merge dialog's
+    preselection; a merge through the `merge` link that does not ask for deletion keeps the branch (`TestRealMergeDeletesSourceBranch`). Left: ROADMAP 305.
+305. **SCM-Manager: asking a merge to delete the source branch.** Find the field or query of the merge request that
+    deletes the source branch (the plugin's REST docs or a merge made in the UI and read back), so a test proves
+    deletion happens when asked and ripple's `ripple/*` branches can be left to a merger who wants them gone.
 286. **SCM-Manager: the 429 a throttling proxy sends, and older plugins.** No instance throttles, so the
     rate-limit case is injected at a proxy and the `Retry-After` form is assumed. Add a matrix leg with an older
     SCM-Manager 3.x and the plugin releases it installs, and record whether the custom-header table and

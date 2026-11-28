@@ -53,6 +53,15 @@ password with any user name (`ripple` tried) on both the REST API and git over H
   `showArchived=true`; absent with `showArchived=false` (`TestRealArchivedListing`). `ListArchivedRepos` reports it,
   `ListRepos` omits it.
 
+- Modifications of a merge commit, `GET .../modifications/{id}`: `{"revision":"<merge id>","added":["go.mod"],
+  "modified":[],"removed":[],"renamed":[]}` for a merge of `feature` (adds `go.mod`) into a `main` that had added
+  `other.txt` since: a diff against the first parent (`TestRealMergeCommitModifications`, 2026-11-28).
+- Merging, the pull request's `merge` link `.../merge/{ns}/{name}/{id}?strategy=FAST_FORWARD_IF_POSSIBLE`
+  (the strategy is in the link): `POST` with `application/vnd.scmm-mergeCommand+json;v=2` and
+  `{"commitMessage":"merge","overrideMessage":false}` answers 204. A guessed `vnd.scmm-mergeCommit+json;v=2`
+  gave 415 "illegal media type"; no other media type was tried. The source branch of a pull request created with `shouldDeleteSourceBranch: true` was
+  still there 0, 2 and 5 seconds after the merge (`TestRealMergeDeletesSourceBranch`).
+
 ## Webhook plugin
 
 - Global configuration lives at the index link `webHookConfig`. PUT (204):
@@ -68,7 +77,6 @@ password with any user name (`ripple` tried) on both the REST API and git over H
 
 ## Still not observed
 
-- Modifications of a merge commit (which parent they are against).
-- `shouldDeleteSourceBranch` honoured at merge.
+- How a merge request asks for the source branch to be deleted.
 - A real 429: no instance behind the job throttles; the rate-limit case injects one at a proxy.
 - Plugins older or newer than the ones 3.11.0 installs.

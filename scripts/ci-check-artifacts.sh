@@ -4,12 +4,14 @@
 #
 #   ci-check-artifacts.sh VAR_NAMES FILE_OR_DIR...
 #
-# VAR_NAMES is a space-separated list of environment variables whose values must not appear. Independently of
+# VAR_NAMES is a space-separated list of environment variables whose values must not appear ("-" when the job
+# has none, so only the generic patterns below are checked). Independently of
 # them it rejects any "::add-mask::" workflow command (it carries the raw value) and any "glrt-" token (the
 # GitLab runner token is not in the environment).
 set -uo pipefail
-vars=${1:?variable names}
+vars=${1:?variable names, or - for none}
 shift
+[ "$vars" = "-" ] && vars=""
 bad=0
 for f in "$@"; do
   [ -e "$f" ] || continue

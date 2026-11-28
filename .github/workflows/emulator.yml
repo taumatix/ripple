@@ -70,6 +70,9 @@ jobs:
       - name: emulator log
         if: always()
         run: tail -n 100 emulator.log
+      - name: no secret in the files about to be uploaded
+        if: always()
+        run: bash scripts/ci-check-artifacts.sh - emulator-test.log emulator.log emulator-version.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -125,6 +128,9 @@ jobs:
       - name: emulator log
         if: always()
         run: tail -n 100 emulator.log
+      - name: no secret in the files about to be uploaded
+        if: always()
+        run: bash scripts/ci-check-artifacts.sh - codecommit-test.log emulator.log emulator-version.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -119,8 +121,22 @@ func (s *scm) newKey(t *testing.T) string {
 	if code != http.StatusCreated || tok == "" {
 		t.Fatalf("creating the API key: %d (body withheld, %d bytes)", code, len(tok))
 	}
-	fmt.Printf("::add-mask::%s\n", tok)
+	maskSecret(tok)
 	return tok
+}
+
+// maskSecret asks the Actions runner to redact v from the rest of the job's log. The command carries the
+// raw value, so it must never reach stdout (the workflow tees stdout into an uploaded log): it goes to the
+// descriptor named by RIPPLE_REAL_MASK_FD, which the workflow opens as the step's real stdout. Unset, as on
+// a developer machine, it does nothing.
+func maskSecret(v string) {
+	n, err := strconv.Atoi(os.Getenv("RIPPLE_REAL_MASK_FD"))
+	if err != nil || n < 3 {
+		return
+	}
+	if f := os.NewFile(uintptr(n), "mask"); f != nil {
+		_, _ = fmt.Fprintf(f, "::add-mask::%s\n", v)
+	}
 }
 
 // TestRealBootstrapAndKeyUse records how an API key is presented: Bearer header, the cookie the docs

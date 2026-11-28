@@ -62,12 +62,14 @@ delivery. The secret rides in clear unless the webhook URL is https: use https.
 - **`shouldDeleteSourceBranch` is a preselection, not an action** (real 3.11.0, `TestRealMergeDeletesSourceBranch`).
   A pull request created with the flag `true`, merged through its `merge` link
   (`POST merge/{ns}/{name}/{id}?strategy=...`, `Content-Type: application/vnd.scmm-mergeCommand+json;v=2`,
-  body `{"commitMessage":...,"overrideMessage":false}`, 204), kept its source branch. The Review plugin's docs say
+  body `{"commitMessage":...,"overrideMessage":false}`, 204; the test then reads the pull request back and requires
+  its status to have left `OPEN`), kept its source branch. The Review plugin's docs say
   the same: the merge dialog preselects it and the person can change it. Branches ripple pushed therefore stay
   after a merge unless the merger asked for deletion.
 - **A merge commit's modifications are against its first parent** (`TestRealMergeCommitModifications`): a merge of
   `feature` (adds `go.mod`) into a `main` that had meanwhile added `other.txt` reports `added: ["go.mod"]` alone,
-  so `PushFiles` over the pushed ids (`other.txt`, `go.mod`) sees `go.mod` and no re-scan is needed.
+  so `PushFiles` over the pushed ids (`other.txt`, `go.mod`) sees `go.mod` and no re-scan is needed. The merge commit
+  alone gives exactly `[go.mod]` (asserted; same on 3.10.3, 3.11.0 and 3.12.3 in CI, 2026-11-28).
 - **Labels** are ignored: the Review plugin's labels are chosen per repository, and ripple cannot know them.
 - **Rate limit**: none is documented. A 429 (say from a proxy) holds the host back until `Retry-After`, else a
   minute.

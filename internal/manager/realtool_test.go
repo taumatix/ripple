@@ -401,6 +401,11 @@ func TestRealtoolComposerConstraintMeaning(t *testing.T) {
 		{"mockery/mockery", "^0.8", "0.8.0"},
 		{"mockery/mockery", "^0.9", "0.9.11"},
 		{"mockery/mockery", "^0", "0.9.11"}, // ">=0.0.0 <1.0.0"
+		// Three segments pin more than two do (ROADMAP 235): ~1.25.1 is >=1.25.1 <1.26.0, ^0.8.0 is
+		// >=0.8.0 <0.9.0, ^1.25.1 is >=1.25.1 <2.0.0.
+		{"monolog/monolog", "~1.25.1", "1.25.5"},
+		{"monolog/monolog", "^1.25.1", "1.27.1"},
+		{"mockery/mockery", "^0.8.0", "0.8.0"},
 	} {
 		t.Run(tc.pkg+"@"+tc.constraint, func(t *testing.T) {
 			dir := t.TempDir()

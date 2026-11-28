@@ -380,7 +380,7 @@ Everything else:
 231. **Helm: the unread forms.** The datasource, manager and docs are written from the vendored helm-www pages
     ([docs/vendor/helm](docs/vendor/helm)). A `-tags live` test reads the real ingress-nginx `index.yaml`
     (`internal/helmrepo`) and `TestRealtoolHelm` runs `helm dependency update` / `lint` on an edited chart; not covered
-    live: a very large index (`charts.helm.sh/stable`), redirects. Still skipped: `oci://` dependencies (OCI tags
+    live: a very large index (`charts.helm.sh/stable`), redirects. `~v3.11.0` is asked of real helm (`TestRealtoolHelmTilde`). Still skipped: `oci://` dependencies (OCI tags
     datasource), `@alias` / `alias:` repositories, version ranges, flow-style entries, and `created` dates for the cooldown.
 232. **Helm: refresh `Chart.lock`.** The lock is reported stale in the PR body, not rewritten. Rewriting it needs
     `helm dependency update` (network, all repositories of the chart) or the digest algorithm reproduced exactly;

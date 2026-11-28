@@ -70,7 +70,7 @@ jobs:
         with:
           go-version-file: go.mod
       - uses: azure/setup-helm@v4
-      - run: scripts/realtool.sh TestRealtoolHelm
+      - run: scripts/realtool.sh TestRealtoolHelm TestRealtoolHelmTilde
   bundler:
     runs-on: ubuntu-latest
     timeout-minutes: 30

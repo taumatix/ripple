@@ -296,6 +296,19 @@ func TestRealtoolHelm(t *testing.T) {
 	}.run(t)
 }
 
+// A `~v3.11.0` dependency is ">=3.11.0 <3.12.0" for helm: it must resolve the untouched chart to
+// a 3.11 release, ripple moves it to `~v3.12.0` for 3.12.0 (keeping the operator and the v), and
+// helm must then resolve a 3.12 release (ROADMAP 231).
+func TestRealtoolHelmTilde(t *testing.T) {
+	realtool{
+		fixture: "helm-tilde", manifest: "Chart.yaml", manager: Helm{Dir: "/"},
+		bumps:  []bump{{"https://kubernetes-sigs.github.io/metrics-server/metrics-server", "3.11.0", "3.12.0"}},
+		steps:  [][]string{{"helm", "dependency", "update"}, {"helm", "lint", "."}},
+		before: func(t *testing.T, dir string) { mustContain(t, dir, "Chart.lock", "version: 3.11.") },
+		after:  func(t *testing.T, dir string) { mustContain(t, dir, "Chart.lock", "version: 3.12.") },
+	}.run(t)
+}
+
 func TestRealtoolBundler(t *testing.T) {
 	realtool{
 		fixture: "bundler", manifest: "Gemfile", manager: Bundler{Dir: "/"},

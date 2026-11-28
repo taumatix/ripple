@@ -64,6 +64,8 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
 
 - DynamoDB: a burst test (ROADMAP 113, 189): 150 repos register one package at once with adaptive shards and 4 counter stripes; every write succeeds, `ListDependents` is complete at once, and `RecountAllDependents` brings the counters back to the index. It found that the counters come out short after such a burst on DynamoDB Local (36 of 150; the fake counted all), which delays shard growth until a recount (ROADMAP 334, not fixed). It runs on the in-process fake and, in CI, DynamoDB Local (not on a real AWS table; Local neither throttles nor lags its index, so throttling retry counts and real index lag stay unverified, ROADMAP 333).
 
+- Live checks of the Go proxy for a module whose highest stable tag retracts itself (`github.com/prometheus/common`: `Latest` skips the retracted v1 line and answers v0.74.0 or later) and a prerelease-only module (`github.com/go-git/go-git/v6`: still answered with its newest prerelease), in `live.yml` (ROADMAP 185). Read-only, run against the real proxy on 2026-11-28; no code change. Not verified: a module whose every version is retracted, on the real proxy (unit-tested only).
+
 ## [0.4.0] - 2026-11-25
 
 Additive release: no public API was removed or changed. Opt-in ecosystems: Helm, Bundler, Composer, NuGet, Maven and Terraform

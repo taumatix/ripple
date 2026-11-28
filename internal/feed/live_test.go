@@ -150,6 +150,68 @@ func TestLiveGoProxyRetractionsAndUnsortedList(t *testing.T) {
 	}
 }
 
+// github.com/prometheus/common tagged v1.20.99 (its highest stable version) only to retract
+// the accidental v1.x tags below it, and retracted v1.20.99 itself; its go.mod at v0.74.0 (the
+// proxy's @latest when this was read, 2026-11-28) carries the retraction list. So the proxy's
+// own @latest skips the retracted v1.x line, and Latest must too. If the module's maintainers
+// move on, the assertions on the v1 versions still hold (retractions are permanent); the
+// floor on the answer is the only thing that can need a bump.
+func TestLiveGoProxyHighestStableVersionRetractsItself(t *testing.T) {
+	g, _ := liveLookup()
+	ctx := context.Background()
+	const pkg = "github.com/prometheus/common"
+	base := "https://proxy.golang.org/" + pkg
+	list, err := g.versions(ctx, base, pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(list, "v1.20.99") || !contains(list, "v1.20.3") {
+		t.Fatalf("the proxy list should still name the retracted v1 tags: %v", list)
+	}
+	rel, ok, err := g.Latest(ctx, pkg)
+	if err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	if semver.Major(rel.Version) != "v0" || semver.Compare(rel.Version, "v0.74.0") < 0 {
+		t.Errorf("Latest = %s, want a v0 version at or above v0.74.0 (every v1 tag is retracted)", rel.Version)
+	}
+	retracted := g.retractions(ctx, base, rel.Version)
+	for _, v := range []string{"v1.20.99", "v1.20.3", "v1.0.0"} {
+		if !retracted(v) {
+			t.Errorf("retracted(%s) = false, want true", v)
+		}
+	}
+	if retracted(rel.Version) {
+		t.Errorf("Latest answered a retracted version %s", rel.Version)
+	}
+}
+
+// github.com/go-git/go-git/v6 had only prerelease tags (alpha and beta) when this was read,
+// 2026-11-28: the proxy's @latest names the newest prerelease, and so must Latest rather than
+// answer "no release". When v6 goes stable this test fails on purpose: pin another
+// prerelease-only module (the check is for the proxy's behaviour, not for go-git).
+func TestLiveGoProxyPrereleaseOnlyModuleIsStillAnswered(t *testing.T) {
+	g, _ := liveLookup()
+	ctx := context.Background()
+	const pkg = "github.com/go-git/go-git/v6"
+	list, err := g.versions(ctx, "https://proxy.golang.org/"+pkg, pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range list {
+		if semver.Prerelease(v) == "" {
+			t.Fatalf("%s now has a stable version %s: pin another prerelease-only module", pkg, v)
+		}
+	}
+	rel, ok, err := g.Latest(ctx, pkg)
+	if err != nil || !ok {
+		t.Fatalf("a prerelease-only module must still be answered: ok=%v err=%v", ok, err)
+	}
+	if semver.Prerelease(rel.Version) == "" || semver.Compare(rel.Version, "v6.0.0-beta.1") < 0 {
+		t.Errorf("Latest = %s, want the newest prerelease, at least v6.0.0-beta.1", rel.Version)
+	}
+}
+
 func contains(l []string, v string) bool {
 	for _, x := range l {
 		if x == v {

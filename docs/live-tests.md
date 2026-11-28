@@ -32,7 +32,7 @@ change a datasource package. That job is not a required check.
 | PyPI (`pypi`) | `requests`, `django` | yanked flag, file-less releases, prereleases |
 | crates.io (`cratesindex`) | `serde`, `log`, `cc` | yanked flag, prereleases, index path of every name length |
 | Container registries (`registry`) | alpine, `ghcr.io/astral-sh/uv`, `quay.io/prometheus/node-exporter` | token challenge, tags, digest stability, creation time |
-| Go proxy and index (`feed`) | `golang.org/x/text` | index paging and inclusive `since`, retractions |
+| Go proxy and index (`feed`) | `golang.org/x/text`, `go.mongodb.org/mongo-driver`, `github.com/prometheus/common` (its highest stable tag retracts itself), `github.com/go-git/go-git/v6` (prerelease-only until it goes stable; the test then fails on purpose) | index paging and inclusive `since`, retractions, `@latest` for a retracted-stable and a prerelease-only module |
 | OSV (`advisory`, `e2e`) | `GO-2021-0113`, `GO-2022-0969` | record parsing, affected ranges |
 | GitHub tags (`platform/github`) | `actions/labeler`, `git/git` | tags, lightweight and annotated tag commits |
 | RubyGems (`rubygems`) | `rack`, `nokogiri` | versions, `prerelease`, `platform`, not-found |

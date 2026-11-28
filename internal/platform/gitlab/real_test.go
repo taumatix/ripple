@@ -645,10 +645,31 @@ func (f *realGitLab) awaitWebhooks(t *testing.T) {
 		Path string `json:"path_with_namespace"`
 	}
 	f.api.mustJSON("POST", "projects", map[string]any{"name": "canary", "path": "canary", "namespace_id": topID, "initialize_with_readme": true}, &p)
-	f.api.must("POST", fmt.Sprintf("projects/%d/hooks", p.ID), map[string]any{
-		"url": "http://" + relayAddr + "/hook", "token": hookSecret, "push_events": true, "enable_ssl_verification": false})
+	var hook struct {
+		ID int `json:"id"`
+	}
+	f.api.mustJSON("POST", fmt.Sprintf("projects/%d/hooks", p.ID), map[string]any{
+		"url": "http://" + relayAddr + "/hook", "token": hookSecret, "push_events": true, "enable_ssl_verification": false}, &hook)
+	// events logs what GitLab says it did with the hook (GET /projects/:id/hooks/:hook_id/events, 17.3+),
+	// so a push that never arrives shows whether it was not fired, blocked, or refused by the relay.
+	events := func() {
+		var evs []struct {
+			ResponseStatus string  `json:"response_status"`
+			ExecutionDur   float64 `json:"execution_duration"`
+			Trigger        string  `json:"trigger"`
+		}
+		st, _, b := f.api.do("GET", fmt.Sprintf("projects/%d/hooks/%d/events", p.ID, hook.ID), nil)
+		if err := json.Unmarshal(b, &evs); st >= 300 || err != nil {
+			t.Logf("hook events unavailable: HTTP %d: %.200s", st, b)
+			return
+		}
+		if len(evs) > 5 {
+			evs = evs[:5]
+		}
+		t.Logf("hook events (newest first, max 5): %+v", evs)
+	}
 	start := time.Now()
-	for i := 0; time.Since(start) < 3*time.Minute; i++ {
+	for i := 0; time.Since(start) < 6*time.Minute; i++ {
 		// A real push, not the hook-test endpoint: pushes are delivered by a background worker that
 		// can lag the setting behind the web process.
 		head := f.pushFiles(t, p.Path, "main", map[string]string{fmt.Sprintf("canary-%d.txt", i): "x\n"})
@@ -661,6 +682,7 @@ func (f *realGitLab) awaitWebhooks(t *testing.T) {
 				return
 			}
 		}
+		events()
 	}
-	t.Fatal("no push webhook reached the relay within 3 minutes")
+	t.Fatal("no push webhook reached the relay within 6 minutes; the hook events above say what GitLab did")
 }

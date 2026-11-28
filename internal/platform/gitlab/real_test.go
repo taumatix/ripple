@@ -64,10 +64,17 @@ type delivered struct {
 	Forwarded           bool
 }
 
+// signedDelivery is a webhook sent to /signed exactly as received, for replaying into a Receiver.
+type signedDelivery struct {
+	Header http.Header
+	Body   []byte
+}
+
 type relay struct {
 	mu     sync.Mutex
 	target string
 	got    []*delivered
+	signed []*signedDelivery
 	n      atomic.Int64
 }
 
@@ -77,6 +84,13 @@ func (r *relay) setTarget(u string) { r.mu.Lock(); r.target = u; r.mu.Unlock() }
 
 func (r *relay) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	body, _ := io.ReadAll(req.Body)
+	if req.URL.Path == "/signed" { // a hook with a signing token carries no secret token; keep the raw delivery
+		r.mu.Lock()
+		r.signed = append(r.signed, &signedDelivery{Header: req.Header.Clone(), Body: body})
+		r.mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+		return
+	}
 	if req.Header.Get("X-Gitlab-Token") != hookSecret {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return

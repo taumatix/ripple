@@ -23,7 +23,8 @@ The host is off until a token is set.
 
 At least one of the two webhook settings is required; ripple refuses to start GitLab with neither, because its
 receiver would refuse every delivery. Prefer the signing token: it authenticates the body, and ripple also
-rejects a timestamp more than five minutes from now.
+rejects a timestamp more than five minutes from now. A real delivery signed this way on GitLab CE 19.6.2 is accepted
+by the receiver, and the same delivery with its body altered is refused (`TestRealSignedWebhook`).
 
 ## Tokens
 
@@ -125,9 +126,9 @@ that records each delivery and forwards it to ripple's receiver. Recorded on Git
 
 ## What is unverified
 
-- the signing-token scheme (`whsec_`, Standard Webhooks): the headers are present, but the vector was computed with
-  openssl, and the CI webhooks use a secret token;
-- discovery by system hook (`project_create`, `project_destroy`), and a group-level webhook (Premium);
+- discovery by system hook (`project_create`, `project_destroy`), and a group-level webhook: `POST groups/:id/hooks`
+  on CE 19.6.2 answers `404 {"error":"404 Not Found"}` (recorded by `TestRealGroupWebhook`), so a group hook with a
+  licence (Premium) was never run;
 - gitlab.com's throttle values and how often it limits these calls (the CI instance was throttled by hand);
 - auto-merge when a pipeline really runs and later fails or passes (the CI project has no runner);
 - older GitLab versions: only 19.6.2 ran;

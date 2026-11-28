@@ -172,7 +172,9 @@ func TestRealMergeDeletesSourceBranch(t *testing.T) {
 		}
 	}
 	t.Logf("FACT source branch still present after a merge with shouldDeleteSourceBranch=%v: %v", pr.ShouldDeleteSourceBranch, exists)
-	if pr.ShouldDeleteSourceBranch && exists {
-		t.Errorf("shouldDeleteSourceBranch was set on the pull request but the source branch survived the merge")
+	// Observed on 3.11.0 (2026-11-28): the flag is the merge dialog's preselection; a merge request
+	// that does not ask for deletion leaves the branch. A change here means the docs are stale.
+	if !exists {
+		t.Errorf("the source branch was deleted by a merge that did not ask for it; update docs/platform-scmmanager.md")
 	}
 }

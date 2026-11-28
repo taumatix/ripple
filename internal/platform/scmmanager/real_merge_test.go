@@ -140,16 +140,20 @@ func TestRealMergeDeletesSourceBranch(t *testing.T) {
 	t.Logf("FACT merge link: %s", merge)
 	base := strings.SplitN(merge, "{", 2)[0]
 	var merged bool
-	for _, attempt := range []struct {
-		url  string
-		body map[string]any
-	}{
-		{base + "?strategy=MERGE_COMMIT", map[string]any{"commitMessage": "merge", "overrideMessage": false, "deleteSourceBranch": pr.ShouldDeleteSourceBranch}},
-		{base + "?strategy=MERGE_COMMIT", map[string]any{"commitMessage": "merge", "deleteSourceBranch": pr.ShouldDeleteSourceBranch}},
+	// The link carries its own ?strategy=. The merge media type is not in the vendored docs, so each
+	// candidate is tried and its answer logged; the accepted one is the fact.
+	body0 := map[string]any{"commitMessage": "merge", "overrideMessage": false}
+	for _, ct := range []string{
+		"application/vnd.scmm-mergeCommand+json;v=2",
+		"application/vnd.scmm-mergeCommit+json;v=2",
+		"application/vnd.scmm-mergeCommitDto+json;v=2",
+		"application/vnd.scmm-merge+json;v=2",
+		"application/json",
 	} {
-		code, _, b := s.call(t, http.MethodPost, attempt.url, "", "application/vnd.scmm-mergeCommit+json;v=2", attempt.body)
-		t.Logf("FACT merge attempt %s body %v: %d %s", attempt.url, attempt.body, code, clip(b))
+		code, _, b := s.call(t, http.MethodPost, base, "", ct, body0)
+		t.Logf("FACT merge attempt %s content-type %s: %d %s", base, ct, code, clip(b))
 		if code/100 == 2 {
+			t.Logf("FACT merge accepted with content-type %s", ct)
 			merged = true
 			break
 		}

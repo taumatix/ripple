@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // GitLabPR is a merge request the fake recorded.
@@ -57,6 +58,9 @@ type GitLab struct {
 	calls    map[string]int
 	prs      map[string][]*GitLabPR
 	limit    map[string]bool  // token -> answer its next merge request creation with 429
+	roles    map[string]int   // token -> access level; absent means Maintainer
+	delay    int              // merge request creations per source branch answered 400 "does not exist" first
+	seen     map[string]int   // project|source branch -> creations attempted so far
 	ids      map[int64]string // project id -> current path (SetProjectID), served at GET /projects/{id}
 	idLookup int
 	// Requests records "METHOD escaped-path" of every API request, in order.
@@ -74,7 +78,8 @@ type GitLab struct {
 func NewGitLab(t *testing.T) *GitLab {
 	t.Helper()
 	g := &GitLab{t: t, root: t.TempDir(), tokens: map[string]string{}, members: map[string]bool{}, archived: map[string]bool{},
-		calls: map[string]int{}, prs: map[string][]*GitLabPR{}, limit: map[string]bool{}}
+		calls: map[string]int{}, prs: map[string][]*GitLabPR{}, limit: map[string]bool{},
+		roles: map[string]int{}, seen: map[string]int{}}
 	srv := httptest.NewServer(g)
 	t.Cleanup(srv.Close)
 	g.APIURL = srv.URL
@@ -88,6 +93,29 @@ func (g *GitLab) Token(token, scope string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.tokens[token] = scope
+}
+
+// Access levels as GitLab numbers them (docs/vendor/gitlab/api_project_access_tokens.md, access_level).
+const (
+	GitLabDeveloper  = 30
+	GitLabMaintainer = 40
+)
+
+// TokenRole sets the access level of token (default GitLabMaintainer). Recorded on GitLab 19.6.2: a Developer
+// opens a merge request but is answered 401 {"message":"401 Unauthorized"} when it asks for auto-merge on the
+// protected default branch, which the fake models by refusing the merge call for any level below Maintainer.
+func (g *GitLab) TokenRole(token string, level int) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.roles[token] = level
+}
+
+// BranchDelay makes the first n merge request creations for each source branch answer the 400 a real GitLab
+// gives for a branch pushed a moment ago: {"message":{"source_branch":["does not exist"]}} (recorded, 1 to 2 s).
+func (g *GitLab) BranchDelay(n int) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.delay = n
 }
 
 // Member makes path appear in the membership listing of every token that reaches it.
@@ -283,14 +311,32 @@ func (g *GitLab) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	g.mu.Unlock()
 	if limited {
-		w.Header().Set("Retry-After", "1")
-		g.fail(w, http.StatusTooManyRequests, "Retry later")
+		// Recorded on GitLab 19.6.2 (throttle_authenticated_api): text/plain "Retry later" with Retry-After in
+		// seconds and the RateLimit-* headers.
+		g.t.Logf("fake gitlab: 429 Retry later")
+		h := w.Header()
+		h.Set("Content-Type", "text/plain")
+		h.Set("Retry-After", "1")
+		h.Set("RateLimit-Limit", "30")
+		h.Set("RateLimit-Name", "throttle_authenticated_api")
+		h.Set("RateLimit-Observed", "31")
+		h.Set("RateLimit-Remaining", "0")
+		h.Set("RateLimit-Reset", strconv.FormatInt(time.Now().Add(time.Second).Unix(), 10))
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte("Retry later"))
 		return
 	}
 	switch {
 	case len(segs) == 5 && segs[4] == "merge_requests":
 		g.mergeRequests(w, r, project)
 	case len(segs) == 7 && segs[4] == "merge_requests" && segs[6] == "merge" && r.Method == http.MethodPut:
+		g.mu.Lock()
+		level, set := g.roles[tok]
+		g.mu.Unlock()
+		if set && level < GitLabMaintainer {
+			g.fail(w, http.StatusUnauthorized, "401 Unauthorized")
+			return
+		}
 		g.merge(w, r, project, segs[5])
 	case len(segs) >= 6 && segs[4] == "merge_requests" && len(segs) <= 7:
 		g.mergeRequest(w, r, project, segs[5], strings.Join(segs[6:], "/"))
@@ -424,6 +470,17 @@ func (g *GitLab) mergeRequests(w http.ResponseWriter, r *http.Request, project s
 		}
 		if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in.SourceBranch == "" || in.TargetBranch == "" || in.Title == "" {
 			g.fail(w, http.StatusBadRequest, "400 Bad request - source_branch, target_branch and title are required")
+			return
+		}
+		g.mu.Lock()
+		g.seen[project+"|"+in.SourceBranch]++
+		lagging := g.seen[project+"|"+in.SourceBranch] <= g.delay
+		g.mu.Unlock()
+		if lagging {
+			g.t.Logf("fake gitlab: 400 source_branch does not exist (branch delay)")
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"message":{"source_branch":["does not exist"]}}`))
 			return
 		}
 		for _, ref := range []string{in.SourceBranch, in.TargetBranch} {

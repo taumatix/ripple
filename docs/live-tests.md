@@ -31,7 +31,7 @@ change a datasource package. That job is not a required check.
 | npm (`npmreg`) | `left-pad`, `@types/ms`, `typescript` | deprecated flag read, scoped names, prereleases, not-found |
 | PyPI (`pypi`) | `requests`, `django` | yanked flag, file-less releases, prereleases |
 | crates.io (`cratesindex`) | `serde`, `log`, `cc` | yanked flag, prereleases, index path of every name length |
-| Container registries (`registry`) | alpine, `ghcr.io/astral-sh/uv`, `quay.io/prometheus/node-exporter` | token challenge, tags, digest stability, creation time |
+| Container registries (`registry`) | alpine, `ghcr.io/astral-sh/uv`, `quay.io/prometheus/node-exporter`, Docker Hub `library/nginx` (tag listing) | token challenge, tags, digest stability, creation time; Hub's `ordering=last_updated` newest first, `page_size` cap of 100, an unknown ordering is HTTP 500, `TagsNewest` end to end |
 | Go proxy and index (`feed`) | `golang.org/x/text`, `go.mongodb.org/mongo-driver`, `github.com/prometheus/common` (its highest stable tag retracts itself), `github.com/go-git/go-git/v6` (prerelease-only until it goes stable; the test then fails on purpose) | index paging and inclusive `since`, retractions, `@latest` for a retracted-stable and a prerelease-only module, the far-major probe over a skipped major (`github.com/Masterminds/semver` v2 absent, v3 present) and its request cost |
 | Go pseudo-version move (`engine`) | `github.com/pkg/errors` at `v0.8.1-0.20180217175701-e1ac100e4667` | the proxy derives that pseudo-version from commit e1ac100e4667; `from-pseudo-versions` accepts v0.8.1 and v0.9.0 and refuses v0.8.0 (v0.8.1 lacks the commit: known limit) |
 | OSV (`advisory`, `e2e`) | `GO-2021-0113`, `GO-2022-0969` | record parsing, affected ranges |

@@ -176,6 +176,11 @@ Everything else:
     github.com module the host's compare endpoint (`commits/<hash>...<tag>`, status `ahead` or `identical`) answers
     it with the installation token; other hosts keep today's rule and the PR's warning. Needs the compare answer
     recorded from the real API before it is trusted.
+336. **Docker Hub newest-first listing: default on?** `RIPPLE_REGISTRY_HUB_NEWEST` now works against the real Hub
+    (215: it had sent the reverse ordering and always fell back) but stays off by default. Before turning it on:
+    measure Hub's anonymous rate limit on `/v2/namespaces/.../tags` for a fleet of images polled in a cycle, and
+    decide how to treat the backport-released-late case the margin page only narrows. ghcr.io has no equivalent
+    listing (OCI tags are lexical only), so `TagFloor` stays its only narrowing.
 113. **DynamoDB: throttling and index lag against a real table.** `ThrottleNext` and `HoldIndex` model the errors and
     the stale reads, not their timing or frequency. DynamoDB Local and the AWS Emulator (verified 2026-11-24, see
     [docs/aws-emulator.md](docs/aws-emulator.md)) both pass the whole store suite but neither throttles nor lags
@@ -341,12 +346,6 @@ Everything else:
     SCM-Manager is done (`TestRealArchivedListing`: an archived repository lists with `archived: true` by default and with `showArchived=true`, and `showArchived=false` hides it). Check on a real Gerrit that a read-only project is absent from the `ACTIVE` listing and present in `READ_ONLY`,
     and whether Gerrit's webhooks plugin or stream events can report the state change so the listing is not the only path.
     Bitbucket Cloud and Azure DevOps document no archive in `docs/vendor`; nothing to build for them.
-215. **Docker Hub newest-first listing: check it against the real Hub.** `RIPPLE_REGISTRY_HUB_NEWEST` was written from the
-    documented endpoint and a fake, and the docs do not say what `ordering` accepts, the default order or the largest
-    `page_size`. A `live.yml` check should ask hub.docker.com for `library/nginx` with `ordering=-last_updated`, assert the
-    results come back non-increasing and that `page_size=100` is honoured, and fail loudly if Hub changes, since ripple
-    then silently falls back to the lexical list. Until it exists the option stays off by default. ghcr.io has no
-    equivalent listing (OCI tags are lexical only), so `TagFloor` stays its only narrowing.
 218. **pip: what is still left unread on purpose.** `setup.cfg` (`install_requires`, `setup_requires`, `tests_require`,
     `extras_require`) and `==1.*`/`==1.2.*` are read now (docs/pip.md). `setup.py` is never read or run, a lone `<`/`<=`,
     `!=`, a bare `*` and Poetry's array-of-constraints form (one entry per Python or platform) have no single floor to

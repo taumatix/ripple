@@ -91,6 +91,8 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
 
 - SCM-Manager: `hosts-scmmanager.yml` now also runs the real-instance tests against 3.10.3 and 3.12.3 (ROADMAP 286), and an SCM-Manager delivery with no changeset ids is documented and pinned as never deduplicated, always re-scanned (ROADMAP 167; `TestDeliveryWithoutChangesetIDsIsNeverDeduplicated`). No behaviour change. Both legs passed the whole real suite (about 90 s each). Not verified: which plugin releases each installed (not logged), a real 429 (ROADMAP 306), and the removal of the legacy tombstone name (still ROADMAP 167).
 
+- CI hygiene, no product change: the SCM-Manager real tests no longer print `::add-mask::<secret>` into the log that `hosts-scmmanager.yml` uploads (it goes to a separate descriptor, `RIPPLE_REAL_MASK_FD`), and `scripts/ci-check-artifacts.sh` now guards the SCM-Manager, Gitea/Forgejo and emulator uploads as it does GitLab and Gerrit (the guard accepts `-` for a job without secrets). `TestRealMergeDeletesSourceBranch` now reads the pull request back and requires that the merge happened; `TestRealMergeCommitModifications` now asserts the merge commit alone reports exactly `go.mod`. The leaked values were throwaway localhost instances' credentials. Not verified: that the masks still reach the runner through the descriptor (the log shows it on the PR's CI run, see the PR).
+
 ## [0.4.0] - 2026-11-25
 
 Additive release: no public API was removed or changed. Opt-in ecosystems: Helm, Bundler, Composer, NuGet, Maven and Terraform

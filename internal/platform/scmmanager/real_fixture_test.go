@@ -8,7 +8,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -237,7 +236,7 @@ func (f *realFixture) Host(t *testing.T, o gitws.Options, now func() time.Time) 
 	f.admin.apiKey(t) // plugins installed once
 	name := "u" + randHex(4)
 	pw := "pw-" + randHex(12)
-	fmt.Printf("::add-mask::%s\n", pw)
+	maskSecret(pw)
 	code, _, body := f.admin.call(t, http.MethodPost, f.admin.base+"/api/v2/users", "", mtUser, map[string]any{
 		"name": name, "displayName": name, "mail": name + "@example.invalid", "password": pw, "active": true, "external": false})
 	t.Logf("FACT create user: %d %s", code, clip(body))

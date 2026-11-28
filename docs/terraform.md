@@ -64,6 +64,6 @@ mirror that the public registry could shadow. The branch prefix is `ripple/terra
 
 See [UPSTREAM.md](../UPSTREAM.md). Verified: the datasource against the real registry (`-tags live`) and the edit by
 `terraform` (`TestRealtoolTerraform`, in CI; it moves a three-segment `~>`, a module and a two-segment `~> 3.1`). The
-constraint semantics are the text of `docs/vendor/terraform/version-constraints.txt` (fetched 2026-11-25); the realtool
-check that `terraform init` records `constraints = "~> 3.2"` in the lock file is assumed, unverified until CI runs it
-(terraform is not installed where this was written).
+constraint semantics are the text of `docs/vendor/terraform/version-constraints.txt` (fetched 2026-11-25). The check
+that `terraform init` records `constraints = "~> 3.2"` in the lock file ran for real and passed on the realtool
+workflow (run 46108545867, 2026-11-28, the `terraform` job: `TestRealtoolTerraform` PASS, its `after` hook asserts it).

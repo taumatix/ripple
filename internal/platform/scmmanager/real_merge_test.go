@@ -74,6 +74,12 @@ func TestRealMergeCommitModifications(t *testing.T) {
 		t.Fatalf("PushFiles with the merge commit alone: %v", err)
 	}
 	t.Logf("FACT modifications of the merge commit %s alone: %v (nil means the client chose to re-scan)", mergeID, alone)
+	// Observed on 3.10.3, 3.11.0 and 3.12.3 (CI, 2026-11-28): the merge commit alone is reported as exactly
+	// go.mod, because its modifications are against the first parent (main, which lacks go.mod); other.txt,
+	// added on main, is not in it. A full re-scan or a changed parent rule would give something else.
+	if len(alone) != 1 || alone[0] != "go.mod" {
+		t.Errorf("PushFiles with the merge commit alone = %v, want exactly [go.mod]", alone)
+	}
 
 	all, err := c.PushFiles(ctx, full, def, []string{mainID, featureID, mergeID})
 	if err != nil {
@@ -160,6 +166,27 @@ func TestRealMergeDeletesSourceBranch(t *testing.T) {
 	}
 	if !merged {
 		t.Fatal("no merge attempt was accepted; see the FACT lines for the answers and adjust the body")
+	}
+	// The 2xx above is only the command being accepted: read the pull request back and require that the
+	// merge happened (its status left OPEN), so the branch question below is about a merged pull request.
+	var status string
+	for _, wait := range []time.Duration{0, time.Second, 3 * time.Second, 10 * time.Second} {
+		time.Sleep(wait)
+		code, _, b := s.call(t, http.MethodGet, pr.Links.href("self"), mtPR, "", nil)
+		var got struct {
+			Status    string `json:"status"`
+			CloseDate any    `json:"closeDate"`
+		}
+		_ = json.Unmarshal(b, &got)
+		status = got.Status
+		t.Logf("FACT pull request after the merge (waited %s): %d status=%q closeDate=%v", wait, code, got.Status, got.CloseDate)
+		if code == http.StatusOK && status != "" && status != "OPEN" {
+			break
+		}
+	}
+	// Observed on 3.10.3, 3.11.0 and 3.12.3 (CI, 2026-11-28): MERGED, at once, with a closeDate.
+	if status != "MERGED" {
+		t.Fatalf("the merge call was accepted but the pull request status is %q, want MERGED", status)
 	}
 	var exists bool
 	for _, wait := range []time.Duration{0, 2 * time.Second, 5 * time.Second} {

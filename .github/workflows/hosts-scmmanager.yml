@@ -7,6 +7,7 @@ on:
   pull_request:
     paths:
       - '.github/workflows/hosts-scmmanager.yml'
+      - 'scripts/ci-check-artifacts.sh'
       - 'internal/platform/**'
   push:
     branches: [main]
@@ -60,9 +61,12 @@ jobs:
           done
           curl -s -o /dev/null -w 'final: %{http_code}\n' "$RIPPLE_REAL_SCM_URL/api/v2/"
       - name: recorded facts against the real instance
+        shell: bash
         run: |
           set -o pipefail
-          go test -tags scmreal -count=1 -v -timeout 30m ./internal/platform/scmmanager -run 'Real' 2>&1 | tee real-test.log
+          # fd 3 is the step's real stdout: the runner reads ::add-mask:: from it, the uploaded log never sees it
+          exec 3>&1
+          RIPPLE_REAL_MASK_FD=3 go test -tags scmreal -count=1 -v -timeout 30m ./internal/platform/scmmanager -run 'Real' 2>&1 | tee real-test.log
       - name: facts the run recorded
         if: always()
         run: grep -E 'FACT|--- (FAIL|PASS|SKIP)' real-test.log || true
@@ -72,6 +76,10 @@ jobs:
       - name: instance log
         if: always()
         run: docker logs --tail 200 instance 2>&1 | sed -E 's/(token|password)=[^ &]+/\1=<redacted>/g' || true
+      - name: no secret in the files about to be uploaded
+        if: always()
+        shell: bash
+        run: bash scripts/ci-check-artifacts.sh "RIPPLE_REAL_SCM_ADMIN_PASSWORD" real-test.log real-record
       - uses: actions/upload-artifact@v4
         if: always()
         with:

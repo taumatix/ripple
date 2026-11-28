@@ -7,6 +7,7 @@ on:
   pull_request:
     paths:
       - '.github/workflows/hosts-gitea.yml'
+      - 'scripts/ci-check-artifacts.sh'
       - 'internal/platform/**'
       - 'internal/testutil/gitea.go'
       - 'internal/app/host_gitea.go'
@@ -86,6 +87,10 @@ jobs:
       - name: instance log
         if: always()
         run: docker logs --tail 150 instance 2>&1 | sed -E 's/(token|password)=[^ &]+/\1=<redacted>/g' || true
+      - name: no secret in the files about to be uploaded
+        if: always()
+        shell: bash
+        run: bash scripts/ci-check-artifacts.sh "RIPPLE_REAL_GITEA_ADMIN_PASSWORD" real-test.log instance-version.json real-record
       - uses: actions/upload-artifact@v4
         if: always()
         with:

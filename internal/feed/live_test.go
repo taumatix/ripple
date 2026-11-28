@@ -220,3 +220,35 @@ func contains(l []string, v string) bool {
 	}
 	return false
 }
+
+// The backfill far-major probe asks the proxy path by path: a skipped major is a clean miss and
+// the next path is a hit. Masterminds/semver went v1 -> v3 and never published v2. Each path
+// costs the proxy requests counted here, which is what a raised RIPPLE_BACKFILL_MAJORS spends.
+func TestLiveGoProxyFarMajorProbeSkipsAnUnpublishedMajor(t *testing.T) {
+	g, tr := liveLookup()
+	ctx := context.Background()
+	const base = "github.com/Masterminds/semver"
+	var perPath []int
+	got := map[string]bool{}
+	for _, p := range []string{base + "/v2", base + "/v3", base + "/v4", base + "/v5"} {
+		n := tr.Requests()
+		rel, ok, err := g.Latest(ctx, p)
+		if err != nil {
+			t.Fatalf("%s: %v", p, err)
+		}
+		got[p] = ok
+		perPath = append(perPath, tr.Requests()-n)
+		if ok && (rel.Package != p || semver.Major(rel.Version) != "v3" || semver.Compare(rel.Version, "v3.3.1") < 0) {
+			t.Errorf("%s: %+v", p, rel)
+		}
+	}
+	if got[base+"/v2"] || !got[base+"/v3"] || got[base+"/v4"] || got[base+"/v5"] {
+		t.Errorf("want only v3 known, got %v", got)
+	}
+	for i, n := range perPath {
+		if n < 1 || n > 3 {
+			t.Errorf("path %d cost %d proxy requests, want 1 to 3 (%v)", i, n, perPath)
+		}
+	}
+	t.Logf("proxy requests per probed path (v2, v3, v4, v5): %v", perPath)
+}

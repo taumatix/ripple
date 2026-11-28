@@ -508,10 +508,9 @@ Everything else:
 305. **SCM-Manager: asking a merge to delete the source branch.** Find the field or query of the merge request that
     deletes the source branch (the plugin's REST docs or a merge made in the UI and read back), so a test proves
     deletion happens when asked and ripple's `ripple/*` branches can be left to a merger who wants them gone.
-286. **SCM-Manager: older and newer 3.x.** `hosts-scmmanager.yml` now also runs 3.10.3 and 3.12.3 beside
-    3.11.0; the answers on each are in the job's FACT lines (plugin releases installed, custom-header table,
-    `branches`). Record them in [docs/platform-scmmanager.md](docs/platform-scmmanager.md) once the legs have run, and
-    fix or narrow what differs.
+286. ~~**SCM-Manager: older and newer 3.x.**~~ Shipped: `hosts-scmmanager.yml` runs 3.10.3 and 3.12.3 beside 3.11.0
+    and the whole real suite (conformance, custom-header webhook, `branches`, modifications, archive) passes on each.
+    Left: the plugin release each installs is not logged; add it to the bootstrap FACT line and record it.
 306. **SCM-Manager: the 429 a throttling proxy sends.** No instance throttles, so the rate-limit case is injected
     at a proxy and the `Retry-After` form is assumed. Put a real throttling proxy (nginx `limit_req`, say) in front
     of the instance in the real job and record the status and header it sends.

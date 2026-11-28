@@ -120,4 +120,4 @@ Not observed against a real instance (assumed, unverified):
 
 - how a merge request asks for the source branch to be deleted (the field or query is unobserved, ROADMAP 305);
 - the 429 answer: nothing documents it and no instance throttles; the rate-limit case injects one at a proxy;
-- plugin releases other than the ones 3.11.0 installs.
+- which plugin releases 3.10.3 and 3.12.3 install (the legs pass the whole real suite, 2026-11-28, but the release is not logged; ROADMAP 286).

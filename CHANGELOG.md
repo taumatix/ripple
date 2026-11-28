@@ -89,7 +89,7 @@ All notable changes are listed here. The format follows Keep a Changelog; versio
 
 - SCM-Manager against the real 3.11.0 instance, merges (ROADMAP 284, 285; `TestRealMergeCommitModifications`, `TestRealMergeDeletesSourceBranch`; no behaviour change): a merge commit's modifications are against its first parent (`go.mod` reported, so `PushFiles` over the pushed ids needs no re-scan), and a pull request created with `shouldDeleteSourceBranch: true` keeps its source branch when merged through its `merge` link, so the flag is a preselection and not an action. Not verified: how a merge asks for deletion (ROADMAP 305), a real 429, and plugin releases other than 3.11.0.
 
-- SCM-Manager: `hosts-scmmanager.yml` now also runs the real-instance tests against 3.10.3 and 3.12.3 (ROADMAP 286), and an SCM-Manager delivery with no changeset ids is documented and pinned as never deduplicated, always re-scanned (ROADMAP 167; `TestDeliveryWithoutChangesetIDsIsNeverDeduplicated`). No behaviour change. Not verified: whether the two new legs pass until CI has run them, a real 429 (ROADMAP 306), and the removal of the legacy tombstone name (still ROADMAP 167).
+- SCM-Manager: `hosts-scmmanager.yml` now also runs the real-instance tests against 3.10.3 and 3.12.3 (ROADMAP 286), and an SCM-Manager delivery with no changeset ids is documented and pinned as never deduplicated, always re-scanned (ROADMAP 167; `TestDeliveryWithoutChangesetIDsIsNeverDeduplicated`). No behaviour change. Both legs passed the whole real suite (about 90 s each). Not verified: which plugin releases each installed (not logged), a real 429 (ROADMAP 306), and the removal of the legacy tombstone name (still ROADMAP 167).
 
 ## [0.4.0] - 2026-11-25
 

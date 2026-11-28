@@ -54,6 +54,27 @@ func checkoutAndPush(t *testing.T, c *gerrit.Client, project, branch, file, cont
 	return ws.CommitAndPush(ctx, branch, "chore(deps): bump example.com/lib")
 }
 
+// ROADMAP 291: Gerrit's refusal names the permission but not the setting that fixes it; the error says both.
+func TestForgeAuthorRefusalNamesTheSettingThatFixesIt(t *testing.T) {
+	f := newFakeGerrit(t)
+	f.AddRepo("acme/app", map[string]string{"go.mod": "module x\n"})
+	f.RequireEmail("acme/app", "registered@example.com")
+	c := newClient(f)
+	_, err := checkoutAndPush(t, c, "acme/app", "ripple/lib-v1", "go.mod", "module x\n\nrequire a v1\n")
+	if err == nil {
+		t.Fatal("push accepted")
+	}
+	for _, want := range []string{"forge committer", "ripple@users.noreply.invalid", "RIPPLE_GERRIT_AUTHOR_EMAIL"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error lacks %q: %v", want, err)
+		}
+	}
+	c.AuthorEmail = "registered@example.com"
+	if ok, err := checkoutAndPush(t, c, "acme/app", "ripple/lib-v1", "go.mod", "module x\n\nrequire a v1\n"); err != nil || !ok {
+		t.Fatalf("a registered email must be accepted: %v %v", ok, err)
+	}
+}
+
 // user-upload.md ("Topic"): HEAD:refs/for/<branch>%topic=<topic>; user-changeid.md:
 // the Change-Id footer; a second push with the same Change-Id is a new patch set.
 func TestProposalPushesToRefsForWithTopicAndChangeID(t *testing.T) {

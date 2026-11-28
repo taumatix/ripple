@@ -4,6 +4,7 @@ package gerrit_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -22,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/taumatix/ripple/internal/model"
 	"github.com/taumatix/ripple/internal/platform"
 	"github.com/taumatix/ripple/internal/platform/gerrit"
 	"github.com/taumatix/ripple/internal/platform/gitws"
@@ -47,6 +49,15 @@ const (
 )
 
 type realEnv struct{ base, user, pass string }
+
+// ripple is the account the host under test runs as: an ordinary one (ROADMAP 290, scripts/ci-gerrit-bootstrap.sh)
+// with read, push to refs/for/* and Forge Author. e.user stays the administrator, which only builds the fixtures.
+func (e realEnv) ripple() (user, pass string) {
+	if u := os.Getenv("RIPPLE_TEST_GERRIT_RIPPLE_USER"); u != "" {
+		return u, os.Getenv("RIPPLE_TEST_GERRIT_RIPPLE_PASSWORD")
+	}
+	return e.user, e.pass
+}
 
 func realConfig(t *testing.T) realEnv {
 	t.Helper()
@@ -240,6 +251,71 @@ func (c *countingTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	return http.DefaultTransport.RoundTrip(r)
 }
 
+// TestRealRippleIsNotAnAdministrator guards ROADMAP 290: the conformance suite below proves the host's
+// permissions only if the account it runs as holds nothing beyond the documented minimum.
+func TestRealRippleIsNotAnAdministrator(t *testing.T) {
+	e := realConfig(t)
+	user, pass := e.ripple()
+	if user == e.user {
+		t.Fatal("RIPPLE_TEST_GERRIT_RIPPLE_USER is not set: the host would run as the administrator, which proves nothing about permissions")
+	}
+	a := restAPI{t: t, e: realEnv{base: e.base, user: user, pass: pass}, hc: &http.Client{Timeout: 60 * time.Second}}
+	var caps map[string]any
+	if err := json.Unmarshal(a.must("GET", "accounts/self/capabilities", nil), &caps); err != nil {
+		t.Fatal(err)
+	}
+	if _, admin := caps["administrateServer"]; admin {
+		t.Fatalf("the ripple account is an administrator: %v", caps)
+	}
+	t.Logf("FACT ordinary account capabilities: %v", caps)
+}
+
+// proposeAs checks out a fresh project as user and proposes one change with the given author email ("" is
+// ripple's default), returning the push error.
+func proposeAs(t *testing.T, e realEnv, user, pass, email string) error {
+	t.Helper()
+	f := &realGerrit{t: t, e: e, api: restAPI{t: t, e: e, hc: &http.Client{Timeout: 60 * time.Second}}}
+	project := fmt.Sprintf("ripple-ci-forge-%d-%d", time.Now().Unix(), projectSeq.Add(1))
+	f.proxy = &countingTransport{n: map[string]int{}}
+	f.AddRepo(t, project, map[string]string{"go.mod": "module x\n"})
+	c := &gerrit.Client{BaseURL: e.base, AuthorName: "ripple", AuthorEmail: email, WorkDir: t.TempDir(),
+		Credentials: platform.StaticCredential{Username: user, Secret: pass}}
+	ws, err := c.Checkout(context.Background(), model.Repo{FullName: project, DefaultBranch: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ws.Close()
+	if err := ws.WriteFile("go.mod", []byte("module x\n\nrequire a v1\n")); err != nil {
+		t.Fatal(err)
+	}
+	_, err = ws.CommitAndPush(context.Background(), "ripple/lib-v1", "chore(deps): bump example.com/lib")
+	return err
+}
+
+// TestRealDefaultAuthorEmail (ROADMAP 291): the default .invalid email is accepted for an account holding Forge
+// Author (what ripple's own CI account has) and refused with a hint naming the fix for one that does not.
+func TestRealDefaultAuthorEmail(t *testing.T) {
+	e := realConfig(t)
+	user, pass := e.ripple()
+	if err := proposeAs(t, e, user, pass, ""); err != nil {
+		t.Fatalf("an account with Forge Author must be able to propose with the default email: %v", err)
+	}
+	bu, bp := os.Getenv("RIPPLE_TEST_GERRIT_BARE_USER"), os.Getenv("RIPPLE_TEST_GERRIT_BARE_PASSWORD")
+	if bu == "" {
+		t.Fatal("RIPPLE_TEST_GERRIT_BARE_USER is not set")
+	}
+	err := proposeAs(t, e, bu, bp, "")
+	if err == nil {
+		t.Fatal("an account without Forge Author and Forge Committer and without the email registered was allowed to push")
+	}
+	t.Logf("FACT refusal: %v", err)
+	for _, want := range []string{"forge committer", "RIPPLE_GERRIT_AUTHOR_EMAIL"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error lacks %q: %v", want, err)
+		}
+	}
+}
+
 func TestRealConformance(t *testing.T) {
 	e := realConfig(t)
 	platformtest.Run(t, &realGerrit{e: e})
@@ -251,9 +327,10 @@ func (f *realGerrit) Host(t *testing.T, g gitws.Options, now func() time.Time) *
 	f.prefix = fmt.Sprintf("ripple-ci-%d-%d", time.Now().Unix(), projectSeq.Add(1))
 	f.proxy = &countingTransport{n: map[string]int{}}
 	theRelay.setTarget("")
+	user, pass := f.e.ripple()
 	c := &gerrit.Client{BaseURL: f.e.base, Now: now, ProjectPrefix: f.prefix + "/", AuthorName: "ripple", AuthorEmail: authorMail,
 		HTTP:        &http.Client{Timeout: 60 * time.Second, Transport: f.proxy},
-		Credentials: platform.StaticCredential{Username: f.e.user, Secret: f.e.pass},
+		Credentials: platform.StaticCredential{Username: user, Secret: pass},
 		WorkDir:     g.WorkDir, GoProxy: g.GoProxy, GoSumDB: g.GoSumDB, GoCacheDir: g.GoCacheDir, Sandbox: g.Sandbox,
 		Log: slog.New(slog.NewTextHandler(os.Stderr, nil))}
 	return gerrit.NewHost(c, []byte(hookSecret), slog.New(slog.NewTextHandler(os.Stderr, nil)))

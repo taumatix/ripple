@@ -592,7 +592,30 @@ func (c *Client) Checkout(ctx context.Context, repo model.Repo) (platform.Worksp
 	o := gitws.Options{GitBase: c.BaseURL, AuthorName: c.AuthorName, AuthorEmail: c.AuthorEmail, WorkDir: c.WorkDir,
 		GoProxy: c.GoProxy, GoSumDB: c.GoSumDB, GoCacheDir: c.GoCacheDir, Sandbox: c.Sandbox, Proposal: proposal}
 	cloneURL := strings.TrimRight(c.BaseURL, "/") + "/a/" + repo.FullName
-	return gitws.Checkout(ctx, o, cloneURL, repo.DefaultBranch, func(ctx context.Context) (platform.Credential, error) {
+	ws, err := gitws.Checkout(ctx, o, cloneURL, repo.DefaultBranch, func(ctx context.Context) (platform.Credential, error) {
 		return c.Credentials.Credential(ctx, repo)
 	})
+	if err != nil {
+		return nil, err
+	}
+	return &forgeHintWorkspace{Workspace: ws, email: c.AuthorEmail}, nil
+}
+
+// forgeHintWorkspace explains Gerrit's author-email refusal: the push error names the missing "forge author"
+// permission but not the settings that fix it (ROADMAP 291).
+type forgeHintWorkspace struct {
+	platform.Workspace
+	email string
+}
+
+func (w *forgeHintWorkspace) CommitAndPush(ctx context.Context, branch, message string) (bool, error) {
+	pushed, err := w.Workspace.CommitAndPush(ctx, branch, message)
+	if err != nil && (strings.Contains(strings.ToLower(err.Error()), "forge author") || strings.Contains(strings.ToLower(err.Error()), "forge committer")) {
+		email := w.email
+		if email == "" {
+			email = gitws.AuthorEmail(gitws.Options{})
+		}
+		err = fmt.Errorf("%w\nhint: Gerrit does not accept the commit email %q for this account: grant it Forge Author and Forge Committer on the branch, or register an address on the account (Settings, Email Addresses) and set RIPPLE_GERRIT_AUTHOR_EMAIL to it (docs/platform-gerrit.md, \"Author email\")", err, email)
+	}
+	return pushed, err
 }

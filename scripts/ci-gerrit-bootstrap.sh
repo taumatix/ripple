@@ -57,7 +57,10 @@ api() { # api METHOD PATH [JSON]: prints the answer, fails (showing the body) on
     code=$(curl -sS -u "$user:$pass" -X "$m" -o "$work/api.out" -w '%{http_code}' "$base/a$p")
   fi
   strip < "$work/api.out"
-  case $code in 2??) ;; *) echo "$m $p: HTTP $code"; return 1 ;; esac
+  case $code in 2??) ;; *)
+    echo "$m $p: HTTP $code" >&2; strip < "$work/api.out" >&2
+    curl -sS -u "$user:$pass" -D - -o /dev/null "$base/a/accounts/self" | grep -i -E '^(HTTP|www-authenticate)' >&2 || true
+    return 1 ;; esac
 }
 
 echo "--- who am I"
@@ -65,6 +68,33 @@ api GET /accounts/self
 
 echo "--- register ripple's commit email so Gerrit accepts its commits"
 api PUT "/accounts/self/emails/$(printf %s "$email" | sed 's/@/%40/')" '{"no_confirmation":true}'
+
+echo "--- an ordinary account for ripple itself (ROADMAP 290): not an administrator, in group ripple-ci"
+rpass=$(head -c 18 /dev/urandom | od -An -tx1 | tr -d ' \n')
+echo "::add-mask::$rpass"
+api GET /accounts/username:ripple-svc > /dev/null 2>&1 || api PUT /accounts/ripple-svc '{"name":"ripple-svc"}' > /dev/null
+# Recorded: Gerrit resolves a bare id like "ripple" by fuzzy match (it hit the admin through its registered
+# ripple@example.com) and the password update silently landed on the administrator. Guard against a repeat.
+api GET /accounts/username:ripple-svc | grep -q '"_account_id": *1000000' && { echo "ripple-svc resolved to the administrator"; exit 1; }
+api PUT /accounts/ripple-svc/password.http "{\"http_password\":\"$rpass\"}" > /dev/null
+api PUT /groups/ripple-ci '{"members":["ripple-svc"]}' > /dev/null
+rgid=$(api GET /groups/ripple-ci | sed -n 's/.*"id": *"\([^"]*\)".*/\1/p' | head -1)
+[ -n "$rgid" ] || { echo "no ripple-ci group id"; exit 1; }
+# The documented minimum (docs/platform-gerrit.md): read, push to refs/for/*, and Forge Author, which Gerrit
+# demands for any author email not registered on the account (the default .invalid one cannot be registered).
+api POST /projects/All-Projects/access "{\"add\":{
+  \"refs/*\":{\"permissions\":{\"read\":{\"rules\":{\"$rgid\":{\"action\":\"ALLOW\"}}}}},
+  \"refs/for/refs/*\":{\"permissions\":{\"push\":{\"rules\":{\"$rgid\":{\"action\":\"ALLOW\"}}}}},
+  \"refs/heads/*\":{\"permissions\":{\"forgeAuthor\":{\"rules\":{\"$rgid\":{\"action\":\"ALLOW\"}}},\"forgeCommitter\":{\"rules\":{\"$rgid\":{\"action\":\"ALLOW\"}}}}}}}" > /dev/null
+# A second ordinary account with NO Forge Author and no registered email: proves the refusal the docs describe
+# and that the error names the fix (ROADMAP 291).
+bpass=$(head -c 18 /dev/urandom | od -An -tx1 | tr -d ' \n')
+echo "::add-mask::$bpass"
+api GET /accounts/username:ripple-bare > /dev/null 2>&1 || api PUT /accounts/ripple-bare '{"name":"ripple-bare"}' > /dev/null
+api PUT /accounts/ripple-bare/password.http "{\"http_password\":\"$bpass\"}" > /dev/null
+echo "--- ripple's capabilities (must not include administrateServer)"
+curl -fsS -u "ripple-svc:$rpass" "$base/a/accounts/self/capabilities" | strip
+curl -fsS -u "ripple-svc:$rpass" "$base/a/accounts/self/groups" | strip | grep -E '"name"' || true
 
 echo "--- plugins"
 api GET "/plugins/?all"
@@ -101,5 +131,9 @@ g push -q "$base/a/All-Projects" HEAD:refs/meta/config
   echo "RIPPLE_TEST_GERRIT_URL=$base"
   echo "RIPPLE_TEST_GERRIT_USER=$user"
   echo "RIPPLE_TEST_GERRIT_PASSWORD=$pass"
+  echo "RIPPLE_TEST_GERRIT_RIPPLE_USER=ripple-svc"
+  echo "RIPPLE_TEST_GERRIT_RIPPLE_PASSWORD=$rpass"
+  echo "RIPPLE_TEST_GERRIT_BARE_USER=ripple-bare"
+  echo "RIPPLE_TEST_GERRIT_BARE_PASSWORD=$bpass"
 } >> "${GITHUB_ENV:-/dev/null}"
 echo "bootstrap done"

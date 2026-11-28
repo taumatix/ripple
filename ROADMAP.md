@@ -268,11 +268,6 @@ Everything else:
     (`RIPPLE_GO_TOOLCHAIN_DOWNLOAD`); left from them: a downloaded release is never pruned, and a pre-release
     (`go1.27rc1`) is not fetched.
 175. **Archive from the listing against real hosts.** Gitea and Forgejo are done (`ArchivePausesAndUnarchiveResumes` on Gitea 1.27.3, Forgejo 17.0.2 and Forgejo 7.0.16). Left: GitLab's `simple=true` listing under `archived=true` answers what the doc says, and a Data Center before 8.0 lists no archived repo (`archived=ARCHIVED` on 8+). Folds into entry 92's real-host run.
-185. **Live: a retracted `@latest` and a prerelease-only module.** The fake and unit tests cover a module whose `@latest`
-    is retracted (it proposes the newest version that is not), all versions retracted (the module is still answered) and
-    prerelease-only; `go.mongodb.org/mongo-driver` is the one real retraction fixture in `live.yml`. Find a real module whose
-    highest stable version retracts itself and a real prerelease-only module and pin them read-only, so the proxy's own
-    `@latest` behaviour for them is observed, not assumed.
 187. **SCM-Manager: head commit on the open-PR listing.** `platform.PR.HeadSHA` is the one host field still empty on
     every host that lists open PRs: the vendored SCM-Manager docs show no source-revision field on an in-progress
     pull request (the Review plugin's history tracks "source branch revision" but its list shape is not documented

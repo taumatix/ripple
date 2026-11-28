@@ -85,9 +85,36 @@ func TestRealPullRequestAndBranchFields(t *testing.T) {
 	t.Logf("FACT source branch head pushed: %s", sourceHead)
 	t.Logf("FACT the list item contains the source head: %v", strings.Contains(string(item), sourceHead))
 	var one struct {
-		Links links `json:"_links"`
+		Links          links           `json:"_links"`
+		SourceRevision json.RawMessage `json:"sourceRevision"`
+		TargetRevision json.RawMessage `json:"targetRevision"`
+		Labels         json.RawMessage `json:"labels"`
 	}
 	_ = json.Unmarshal(item, &one)
+	t.Logf("FACT list item sourceRevision=%s targetRevision=%s labels=%s", one.SourceRevision, one.TargetRevision, one.Labels)
+	// A second commit on the source branch: does the field follow it?
+	if err := os.WriteFile(filepath.Join(dir, "b.txt"), []byte("b\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s.gitReal(t, dir, "add", "-A")
+	s.gitReal(t, dir, "commit", "-q", "-m", "second")
+	s.gitReal(t, dir, "push", "-q", "origin", "ripple/fields")
+	secondHead := strings.TrimSpace(s.gitReal(t, dir, "rev-parse", "HEAD"))
+	for _, wait := range []time.Duration{0, 3 * time.Second} {
+		time.Sleep(wait)
+		_, _, body = s.call(t, http.MethodGet, s.base+"/api/v2/pull-requests/"+ns+"/"+name, mtPRList, "", nil)
+		var after struct {
+			Embedded struct {
+				PRs []struct {
+					SourceRevision json.RawMessage `json:"sourceRevision"`
+				} `json:"pullRequests"`
+			} `json:"_embedded"`
+		}
+		_ = json.Unmarshal(body, &after)
+		if len(after.Embedded.PRs) == 1 {
+			t.Logf("FACT after a second push (head %s, first %s) sourceRevision=%s (waited %s)", secondHead, sourceHead, after.Embedded.PRs[0].SourceRevision, wait)
+		}
+	}
 	if self := one.Links.href("self"); self != "" {
 		code, _, body = s.call(t, http.MethodGet, self, "", "", nil)
 		t.Logf("FACT pull request resource: %d fields %v contains the source head: %v", code, keysOf(body), strings.Contains(string(body), sourceHead))

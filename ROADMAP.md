@@ -182,6 +182,17 @@ Everything else:
     measure Hub's anonymous rate limit on `/v2/namespaces/.../tags` for a fleet of images polled in a cycle, and
     decide how to treat the backport-released-late case the margin page only narrows. ghcr.io has no equivalent
     listing (OCI tags are lexical only), so `TagFloor` stays its only narrowing.
+337. **OSV on real hosts: a conformance scenario for the backfill and the beaten-PR sweep (222, 223).** The suite in
+    `internal/platform/platformtest` already drives the whole engine against each real host (`hosts-*.yml`) but wires no
+    OSV: `newEnv` builds an `Engine` without `Advisories` and an `App` without an `AdvisoryWatcher`. Add an opt-in `osv`
+    to `opts` (a `testutil.OSV`, `Advisories: true`, an `AdvisoryWatcher` over an `advisory.Client` pointed at it), then two
+    scenarios: (a) a security PR for a dependency opens and is the one PR left after a later, lower release, on every
+    host; (b) a repo with a go directive out of support and a vulnerable toolchain line gets the security toolchain PR
+    and the directive PR is closed with a comment where the host can close, left open where it cannot, including after
+    a refused close retried by `sweepBeaten`. The backfill needs a way to drop the `osv-jobs` index entry from a test (the
+    store's index calls are unexported in `engine`), so (a) can assert the pass restores it from `ListOpenPRs`. Each
+    needs a real instance to run; the `hosts-*` legs are the place, and the GitHub App's `viewer { login }` question in
+    222 stays assumed because no public GitHub App can be used for it from CI.
 113. **DynamoDB: throttling and index lag against a real table.** `ThrottleNext` and `HoldIndex` model the errors and
     the stale reads, not their timing or frequency. DynamoDB Local and the AWS Emulator (verified 2026-11-24, see
     [docs/aws-emulator.md](docs/aws-emulator.md)) both pass the whole store suite but neither throttles nor lags
@@ -353,9 +364,11 @@ Everything else:
     raise and stay unread; an array could move each entry whose `python` marker the repo's Python matches. A
     `setup.cfg`'s `python_requires` feeds the Requires-Python guard now. The setup.cfg reader is line-based and was checked against hand-written files, not a sample of
     real projects (see the corpus entry for pip once one is run).
-222. **OSV: reconcile residuals.** The one-time `RIPPLE_OSV_BACKFILL_OPEN_PRS` pass (which finds a done job's open PR from before the `osv-jobs` index) has never run against a real host; a record shared by twin GHSA and GO notes is reconciled per note; the busy-repo retry list holds at most 100 ids. An amended record's line in a PR description is now rewritten (GitHub only, verified against the fake: that the real GraphQL `viewer { login }` of an installation token equals the editor login of the app's own description edit is assumed, and if it does not the PR is just treated as touched and left alone); the other hosts have no `PRBodyEditor` and no way yet to tell ripple's description edit from a person's.
+222. **OSV: reconcile residuals.** The one-time `RIPPLE_OSV_BACKFILL_OPEN_PRS` pass (which finds a done job's open PR from before the `osv-jobs` index) has never run against a real host (it asks the host only for `ListOpenPRs`, and the `j.PRURL == pr.URL` match it relies on is the one the supersede conformance scenario already checks on every real host in `hosts-*.yml`; the pass itself is still fake-only, see 337); a record shared by twin GHSA and GO notes is reconciled per note; the busy-repo retry list holds at most 100 ids. An amended record's line in a PR description is now rewritten (GitHub only, verified against the fake: that the real GraphQL `viewer { login }` of an installation token equals the editor login of the app's own description edit is assumed, and if it does not the PR is just treated as touched and left alone); the other hosts have no `PRBodyEditor` and no way yet to tell ripple's description edit from a person's.
 223. **OSV: the beaten-PR sweep on real hosts.** A beaten directive or toolchain PR is now also closed on a later run of
-    the repo (`sweepBeaten`), covered end to end against the fake GitHub only. A repo whose runs stop having plans never
+    the repo (`sweepBeaten`), covered end to end against the fake GitHub only (the close it ends in, `CloseUntouchedPR`
+    with its comment, runs on real Gitea, Forgejo, GitLab and SCM-Manager through the supersede conformance scenario; the
+    sweep and its pairing of a security toolchain PR with a beaten one do not, see 337). A repo whose runs stop having plans never
     reaches the sweep, so a beaten PR beside a security PR waits for the next plan in that repo; the sweep is not run
     from the advisory reconcile, and it only pairs a security toolchain PR with a PR of the same repo, not across a
     fork or a second base branch.

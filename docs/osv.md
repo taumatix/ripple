@@ -77,7 +77,7 @@ again, fetched fresh, at the start of the next polls until the repo is free. A r
 comment, once the security PR has opened; its job goes back to waiting for that PR and is judged afresh when it is merged
 or closed. A close the host refused, or one that was switched on later, is retried on every later run of the repo that has
 plans, so the beaten PR does not stay open beside the security PR. A PR a person touched, a host that cannot close PRs, and `close-superseded-pull-requests: false` leave both
-open, and then whoever merges second resolves the conflict.
+open, and then whoever merges second resolves the conflict. The close itself (an untouched PR, a comment) runs against real Gitea, Forgejo, GitLab and SCM-Manager in the conformance suite's supersede scenario; the sweep and the backfill of open PRs have been run against the fake hosts only (ROADMAP 337).
 - **No fix at all, or none ripple can propose.** With `dependency-dashboard: true` the dashboard gains a section
   "Advisories without a fix ripple can propose", linking the advisory. Entries disappear when a fix is proposed, the
   record is withdrawn, or the repo stops using that version. At most 100 per repo are kept. Without the dashboard

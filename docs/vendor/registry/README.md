@@ -45,7 +45,10 @@ Fetched 2026-11-25 (summarising fetch) from <https://docs.docker.com/reference/a
   `ordering`. Official images are namespace `library`. A public repository needs no login.
 - 200 -> `{"count": n, "next": url|null, "previous": url|null, "results": [{"name": "<tag>", "last_updated": "<RFC 3339>",
   "tag_last_pushed": "<RFC 3339>", ...}]}`.
-- NOT documented in what was fetched: the default ordering and the values `ordering` accepts. `-last_updated` (newest
-  first) is what Hub's own UI is known to send, but nothing here proves it, so the client checks the returned
-  `last_updated` values are non-increasing and falls back to the registry list when they are not. A maximum `page_size` is
-  not documented either; the client asks for 100.
+- NOT documented in what was fetched: the default ordering and the values `ordering` accepts. The client therefore checks
+  the returned `last_updated` values are non-increasing and falls back to the registry list when they are not.
+- Observed against the real Hub, 2026-11-28 (`library/nginx`, anonymous; not from the docs): `ordering=last_updated`
+  is newest first, `ordering=-last_updated` is oldest first (the first guess here, `-last_updated` for newest, was
+  wrong), `name` and `-name` are accepted, `last_pushed` and `-last_pushed` and any unknown value are HTTP 500 with
+  `{"message":"httperror 400: Invalid ordering value","errinfo":{}}`, `page_size=250` returns 100 results (the cap), and
+  `count` was 1437. No ordering: the first page is nearly newest first, not strictly.

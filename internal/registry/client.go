@@ -445,7 +445,8 @@ const (
 // TagFloor. It reports false, and the caller reads the registry as usual, whenever it cannot
 // vouch for the answer: HubNewest is off, pkg is not a Docker Hub repository, none of current
 // is given, the listing is not in newest-first order (its last_updated values are checked, since the
-// ordering parameter is not documented to be honoured), more than hubMaxPages pages are
+// ordering values are not documented: on 2026-11-28 Hub read ordering=last_updated as newest first and
+// -last_updated as oldest first), more than hubMaxPages pages are
 // needed, or Hub fails. The tags come back in Hub's order, and a tag pushed before the
 // current one yet versioned above it (a backport released late) is the case the margin page
 // only narrows; see docs/docker.md.
@@ -467,7 +468,7 @@ func (c *Client) TagsNewest(ctx context.Context, pkg string, current []string) (
 	foundAt := 0
 	for page := 1; page <= hubMaxPages; page++ {
 		ns, name, _ := strings.Cut(ref.Repo, "/")
-		target := fmt.Sprintf("%s/v2/namespaces/%s/repositories/%s/tags?page=%d&page_size=%d&ordering=-last_updated", base, ns, name, page, hubPageSize)
+		target := fmt.Sprintf("%s/v2/namespaces/%s/repositories/%s/tags?page=%d&page_size=%d&ordering=last_updated", base, ns, name, page, hubPageSize)
 		resp, err := c.do(ctx, http.MethodGet, target, ref, "application/json")
 		if err != nil {
 			var le *httpretry.LimitError

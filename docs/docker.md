@@ -69,16 +69,23 @@ config blob); when the registry cannot say, it counts from when ripple first saw
 The registry API lists tags by name, so for `nginx` at `1.25.3` ripple still reads every page from `1.100` up (see
 `registry.TagFloor`). With `RIPPLE_REGISTRY_HUB_NEWEST=true`, an image on `docker.io` with a `owner/name` repository
 (`library/nginx` for an official image) is read from Docker Hub's own listing instead
-(`hub.docker.com/v2/namespaces/.../tags?ordering=-last_updated`), newest push first, stopping one page (100 tags)
+(`hub.docker.com/v2/namespaces/.../tags?ordering=last_updated`), newest push first, stopping one page (100 tags)
 after the page that holds a tag a dependency is on. An image with a long history costs a page or two per poll.
 
 It is a heuristic and says so: a tag pushed before your current one but versioned above it (a backport released
 late) can lie beyond the margin page and is missed until the current tag moves. Ripple falls back to the registry list,
 silently and with the same result as before, when the repository is not on Docker Hub, none of its tags is known, the
 Hub listing is not strictly newest-first by `last_updated` (the `ordering` values are not documented, so this is
-checked on every read), it needs more than 20 pages, or Hub errors. A rate limit is not fallen back from; it is
+checked on every read; see below for what Hub really answers), it needs more than 20 pages, or Hub errors. A rate limit is not fallen back from; it is
 reported like any other. ghcr.io and other registries have only the lexical list, so nothing changes for them. Default off; Hub's
 own API is read without a login.
+
+Checked against the real Hub on 2026-11-28 (`library/nginx`, `TestLiveHubTagListingOrdering`): `ordering=last_updated` is
+newest first and `ordering=-last_updated` is oldest first, the reverse of what ripple first sent, so until this
+fix the option fell back on every read and saved nothing. `page_size` is capped at 100 (250 returns 100), and an
+unknown `ordering` is HTTP 500 with `httperror 400: Invalid ordering value`. Without `ordering` the first page is
+nearly, not strictly, newest first. The fallback check stayed correct throughout. Not verified: Hub's rate limit on
+this endpoint, authenticated reads, and whether the ordering stays this way.
 
 
 `RIPPLE_REGISTRY_AUTH_FILE` names a Docker `config.json` (what `docker login` writes; a Kubernetes

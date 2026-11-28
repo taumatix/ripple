@@ -296,9 +296,10 @@ func (r *Registry) serve(w http.ResponseWriter, req *http.Request) {
 // serveHubTags answers Docker Hub's tag listing, GET /v2/namespaces/{ns}/repositories/{repo}/tags
 // with page, page_size and ordering (docs/vendor/registry/README.md), anonymously like the
 // real one for a public repository. Each result carries name and last_updated, which is the
-// order the tags were added in (AddTag again moves a tag to the front). ordering=-last_updated
-// lists newest first and ordering=last_updated oldest first; any other value, and none, lists
-// by name, because the real default is not documented and a client must not rely on it.
+// order the tags were added in (AddTag again moves a tag to the front). Like the real Hub on
+// 2026-11-28, ordering=last_updated lists newest first and ordering=-last_updated oldest first,
+// an unknown value is an HTTP 500 "Invalid ordering value", and none lists by name here (the real
+// default is not a sort a client may rely on).
 func (r *Registry) serveHubTags(w http.ResponseWriter, req *http.Request, rest string) {
 	parts := strings.Split(rest, "/")
 	if len(parts) != 4 || parts[1] != "repositories" || parts[3] != "tags" {
@@ -322,10 +323,14 @@ func (r *Registry) serveHubTags(w http.ResponseWriter, req *http.Request, rest s
 	}
 	sort.Strings(names)
 	switch req.URL.Query().Get("ordering") {
-	case "-last_updated":
-		sort.SliceStable(names, func(i, j int) bool { return seq[names[i]] > seq[names[j]] })
 	case "last_updated":
+		sort.SliceStable(names, func(i, j int) bool { return seq[names[i]] > seq[names[j]] })
+	case "-last_updated":
 		sort.SliceStable(names, func(i, j int) bool { return seq[names[i]] < seq[names[j]] })
+	case "":
+	default:
+		http.Error(w, `{"message":"httperror 400: Invalid ordering value","errinfo":{}}`, http.StatusInternalServerError)
+		return
 	}
 	n := 100
 	if q, err := strconv.Atoi(req.URL.Query().Get("page_size")); err == nil && q > 0 && q < n {

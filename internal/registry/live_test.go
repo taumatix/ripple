@@ -4,7 +4,11 @@ package registry
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -67,6 +71,68 @@ func TestLiveTagsDigestAndCreatedThroughTheTokenChallenge(t *testing.T) {
 				t.Errorf("NewestOfShape(%s) = %q, want a newer tag of the same shape", im.tag, n)
 			}
 		})
+	}
+}
+
+type liveHubPage struct {
+	Count   int
+	Results []struct {
+		Name        string
+		LastUpdated time.Time `json:"last_updated"`
+	}
+}
+
+func liveHubGet(t *testing.T, query string) (liveHubPage, int, string) {
+	t.Helper()
+	hc, _ := livetest.Client()
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://hub.docker.com/v2/namespaces/library/repositories/nginx/tags?"+query, nil)
+	req.Header.Set("User-Agent", livetest.UserAgent)
+	resp, err := hc.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	var p liveHubPage
+	if resp.StatusCode == http.StatusOK {
+		if err := json.Unmarshal(b, &p); err != nil {
+			t.Fatalf("%s: %v", query, err)
+		}
+	}
+	return p, resp.StatusCode, string(b)
+}
+
+// ROADMAP 215: what Docker Hub's tag listing really does, since RIPPLE_REGISTRY_HUB_NEWEST was
+// written from a guess. Fails loudly when Hub changes, so the option's fallback is not what
+// silently hides it.
+func TestLiveHubTagListingOrdering(t *testing.T) {
+	newest, code, body := liveHubGet(t, "page=1&page_size=100&ordering=last_updated")
+	if code != http.StatusOK || len(newest.Results) != 100 {
+		t.Fatalf("ordering=last_updated: status %d, %d results, want 200 and page_size 100 honoured: %.200s", code, len(newest.Results), body)
+	}
+	for i := 1; i < len(newest.Results); i++ {
+		if newest.Results[i].LastUpdated.After(newest.Results[i-1].LastUpdated) {
+			t.Fatalf("ordering=last_updated is not newest first at %d: %s then %s", i, newest.Results[i-1].LastUpdated, newest.Results[i].LastUpdated)
+		}
+	}
+	// The reverse spelling is the OLDEST first: sending -last_updated for newest was the bug.
+	oldest, code, _ := liveHubGet(t, "page=1&page_size=100&ordering=-last_updated")
+	if code != http.StatusOK || len(oldest.Results) == 0 || !oldest.Results[0].LastUpdated.Before(newest.Results[0].LastUpdated) {
+		t.Errorf("ordering=-last_updated: status %d, want oldest first (first older than the newest page's first)", code)
+	}
+	if capped, code, _ := liveHubGet(t, "page=1&page_size=250&ordering=last_updated"); code != http.StatusOK || len(capped.Results) != 100 {
+		t.Errorf("page_size=250: status %d, %d results, want the cap of 100", code, len(capped.Results))
+	}
+	if _, code, body := liveHubGet(t, "page=1&page_size=100&ordering=bogus"); code != http.StatusInternalServerError || !strings.Contains(body, "Invalid ordering value") {
+		t.Errorf("an unknown ordering answered %d %.120s, want 500 Invalid ordering value", code, body)
+	}
+
+	// The client end to end: from a tag near the top, it reads the current page and the margin page.
+	c := liveClient()
+	c.HubNewest = true
+	tags, ok, err := c.TagsNewest(context.Background(), "docker.io/library/nginx", []string{newest.Results[0].Name})
+	if err != nil || !ok || len(tags) != 2*hubPageSize || tags[0] != newest.Results[0].Name {
+		t.Fatalf("TagsNewest: ok=%v err=%v, %d tags, want 200 from the real Hub starting at %s", ok, err, len(tags), newest.Results[0].Name)
 	}
 }
 

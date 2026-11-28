@@ -3,6 +3,7 @@ package advisory
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -96,6 +97,10 @@ type Client struct {
 	// Retry bounds the waiting on a 429 or a 503 with Retry-After; the zero value is
 	// three attempts, none of them waited on longer than 30s.
 	Retry httpretry.Policy
+
+	// ecosystem overrides Ecosystem in QueryBatch; a test seam so a live test can page through an
+	// ecosystem whose packages have more than 1000 records (no Go package does).
+	ecosystem string
 }
 
 func (c *Client) httpc() *http.Client {
@@ -264,7 +269,7 @@ func (c *Client) queryChunk(ctx context.Context, qs []Query, out [][]string) err
 	index := make([]int, len(qs))
 	for i, q := range qs {
 		pending[i].Package.Name = q.Name
-		pending[i].Package.Ecosystem = Ecosystem
+		pending[i].Package.Ecosystem = cmp.Or(c.ecosystem, Ecosystem)
 		pending[i].Version = strings.TrimPrefix(q.Version, "v")
 		index[i] = i
 	}

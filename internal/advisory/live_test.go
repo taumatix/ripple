@@ -149,6 +149,87 @@ func TestLiveQueryBatchStdlibIsOneUnpagedResult(t *testing.T) {
 	}
 }
 
+// No Go package has more than 1000 records, so pagination is exercised through the ecosystem seam
+// on Debian:12, whose packages do (ROADMAP 52). querybatch returned 1000 ids and a
+// next_page_token; the token goes back in the query's page_token and the next page shares no id
+// with the first (checked 2026-11-28). The client follows up to maxBatchPageRound pages.
+func TestLiveQueryBatchFollowsNextPageTokenToTheEnd(t *testing.T) {
+	c, tr := liveClient()
+	c.ecosystem = "Debian:12"
+	out, err := c.QueryBatch(context.Background(), []Query{{Name: "firefox-esr"}}) // 1562 ids, 2 pages, on 2026-11-28
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out[0]) < 1500 || tr.Requests() != 2 {
+		t.Fatalf("%d ids in %d requests, want about 1562 ids in 2 (firefox-esr, Debian:12)", len(out[0]), tr.Requests())
+	}
+	seen := map[string]bool{}
+	for _, id := range out[0] {
+		if seen[id] {
+			t.Fatalf("duplicate id %s across pages", id)
+		}
+		seen[id] = true
+	}
+}
+
+// A query whose pages outlast the bound returns the ids it got and no error: chromium on Debian:12
+// had 6279 ids over 7 pages, the client stops after 5 rounds with exactly 5000. Silent, by design
+// (docs/osv.md); no Go package comes near it.
+func TestLiveQueryBatchStopsAtItsPageBound(t *testing.T) {
+	c, tr := liveClient()
+	c.ecosystem = "Debian:12"
+	out, err := c.QueryBatch(context.Background(), []Query{{Name: "chromium"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out[0]) != maxBatchPageRound*1000 || tr.Requests() != maxBatchPageRound {
+		t.Fatalf("%d ids in %d requests, want %d in %d (the bound)", len(out[0]), tr.Requests(), maxBatchPageRound*1000, maxBatchPageRound)
+	}
+}
+
+// A withdrawn record read from the real API: GO-2026-4505 was withdrawn on 2026-11-10 and the
+// record is kept with its `withdrawn` time. Such a record proposes nothing.
+func TestLiveWithdrawnRecordIsReadAsWithdrawn(t *testing.T) {
+	c, _ := liveClient()
+	v, err := c.Vuln(context.Background(), "GO-2026-4505")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !v.Withdrawn() || v.WithdrawnAt != "2026-11-10T18:46:52Z" {
+		t.Fatalf("withdrawn = %q, want the 2026-11-10 time", v.WithdrawnAt)
+	}
+}
+
+// The delay between an id appearing in modified_id.csv and its record being readable from the
+// API: every id the CSV listed at least 30 minutes ago resolves. Younger ones are not asserted
+// (one run cannot show a delay, only that old entries have none); the youngest age checked is
+// logged so the daily runs build a record of it.
+func TestLiveRecentCSVIdsHaveRecords(t *testing.T) {
+	hc, _ := livetest.Client()
+	c := &Client{HTTP: hc}
+	all, _, err := c.Modified(context.Background(), Position{})
+	if err != nil || len(all) < 20 {
+		t.Fatalf("%d entries, %v", len(all), err)
+	}
+	checked := 0
+	youngest := time.Duration(1 << 62)
+	for i := len(all) - 1; i >= 0 && checked < 8; i-- {
+		age := time.Since(all[i].Time)
+		if age < 30*time.Minute {
+			continue
+		}
+		if _, err := c.Vuln(context.Background(), all[i].ID); err != nil {
+			t.Errorf("%s was listed %s ago and is not readable: %v", all[i].ID, age.Round(time.Second), err)
+		}
+		youngest = min(youngest, age)
+		checked++
+	}
+	if checked < 8 {
+		t.Fatalf("only %d entries older than 30 minutes", checked)
+	}
+	t.Logf("8 newest ids older than 30 minutes all readable; youngest checked was %s old", youngest.Round(time.Second))
+}
+
 // modified_id.csv: newest first with nanosecond timestamps, the property Modified relies on to
 // stop early; and Modified returns the entries after a position oldest first.
 func TestLiveModifiedCSVOrderAndEarlyStop(t *testing.T) {
